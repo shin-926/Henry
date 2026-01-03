@@ -18,6 +18,8 @@
 // @connect      script.googleusercontent.com
 // @connect      storage.googleapis.com
 // @run-at       document-start
+// @updateURL    https://raw.githubusercontent.com/shin-926/Henry/main/henry_google_bridge.user.js
+// @downloadURL  https://raw.githubusercontent.com/shin-926/Henry/main/henry_google_bridge.user.js
 // ==/UserScript==
 
 (function() {

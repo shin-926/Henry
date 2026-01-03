@@ -6,6 +6,8 @@
 // @author       Henry UI Lab
 // @match        https://henry-app.jp/*
 // @grant        none
+// @updateURL    https://raw.githubusercontent.com/shin-926/Henry/main/henry_rad_filter.user.js
+// @downloadURL  https://raw.githubusercontent.com/shin-926/Henry/main/henry_rad_filter.user.js
 // ==/UserScript==
 
 (function() {

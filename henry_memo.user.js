@@ -6,8 +6,8 @@
 // @match        https://henry-app.jp/*
 // @grant        none
 // @run-at       document-idle
-// @downloadURL  https://gist.githubusercontent.com/shin-926/ed472fd38bd3558cc5e56b9dd7bbe073/raw/henry_memo.user.js
-// @updateURL    https://gist.githubusercontent.com/shin-926/ed472fd38bd3558cc5e56b9dd7bbe073/raw/henry_memo.user.js
+// @updateURL    https://raw.githubusercontent.com/shin-926/Henry/main/henry_memo.user.js
+// @downloadURL  https://raw.githubusercontent.com/shin-926/Henry/main/henry_memo.user.js
 // ==/UserScript==
 
 (function () {

@@ -11,6 +11,8 @@
 // @grant        GM_openInTab
 // @grant        unsafeWindow
 // @connect      henry-app.jp
+// @updateURL    https://raw.githubusercontent.com/shin-926/Henry/main/reserve_to_henry.user.js
+// @downloadURL  https://raw.githubusercontent.com/shin-926/Henry/main/reserve_to_henry.user.js
 // ==/UserScript==
 
 (function() {

@@ -5,6 +5,8 @@
 // @description  承認待ちオーダーを自動で一括承認する
 // @match        https://henry-app.jp/*
 // @grant        none
+// @updateURL    https://raw.githubusercontent.com/shin-926/Henry/main/henry_auto_approver.user.js
+// @downloadURL  https://raw.githubusercontent.com/shin-926/Henry/main/henry_auto_approver.user.js
 // ==/UserScript==
 
 (function() {

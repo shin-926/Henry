@@ -9,8 +9,8 @@
 // @grant        GM_getValue
 // @grant        unsafeWindow
 // @run-at       document-idle
-// @downloadURL  https://gist.githubusercontent.com/shin-926/ef462d428796deaf0fdb1680c3b20e29/raw/henry_reserve.user.js
-// @updateURL    https://gist.githubusercontent.com/shin-926/ef462d428796deaf0fdb1680c3b20e29/raw/henry_reserve.user.js
+// @updateURL    https://raw.githubusercontent.com/shin-926/Henry/main/henry_to_reserve.user.js
+// @downloadURL  https://raw.githubusercontent.com/shin-926/Henry/main/henry_to_reserve.user.js
 // ==/UserScript==
 
 (function () {

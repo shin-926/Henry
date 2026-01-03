@@ -7,6 +7,8 @@
 // @match        https://*.henry-app.jp/*
 // @grant        none
 // @run-at       document-start
+// @updateURL    https://raw.githubusercontent.com/shin-926/Henry/main/henry_api_collector.user.js
+// @downloadURL  https://raw.githubusercontent.com/shin-926/Henry/main/henry_api_collector.user.js
 // ==/UserScript==
 
 (function() {

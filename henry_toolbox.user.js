@@ -10,6 +10,8 @@
 // @grant        GM_addStyle
 // @grant        unsafeWindow
 // @run-at       document-idle
+// @updateURL    https://raw.githubusercontent.com/shin-926/Henry/main/henry_toolbox.user.js
+// @downloadURL  https://raw.githubusercontent.com/shin-926/Henry/main/henry_toolbox.user.js
 // ==/UserScript==
 
 (function () {

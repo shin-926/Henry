@@ -7,8 +7,8 @@
 // @match        https://manage-maokahp.reserve.ne.jp/manage/calendar.php*
 // @grant        none
 // @run-at       document-idle
-// @downloadURL  https://gist.githubusercontent.com/shin-926/46c188b30cc1c3e37f1d037212787c6e/raw/reserve_custom.user.js
-// @updateURL    https://gist.githubusercontent.com/shin-926/46c188b30cc1c3e37f1d037212787c6e/raw/reserve_custom.user.js
+// @updateURL    https://raw.githubusercontent.com/shin-926/Henry/main/reserve_calendar_ui.user.js
+// @downloadURL  https://raw.githubusercontent.com/shin-926/Henry/main/reserve_calendar_ui.user.js
 // ==/UserScript==
 
 (function() {
