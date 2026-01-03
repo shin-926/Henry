@@ -4,6 +4,8 @@
 // @version      2.6.9
 // @description  Henry スクリプト実行基盤 (v3.20準拠 / 単一施設運用)
 // @match        https://henry-app.jp/*
+// @updateURL    https://raw.githubusercontent.com/shin-926/Henry/main/henry_core.user.js
+// @downloadURL  https://raw.githubusercontent.com/shin-926/Henry/main/henry_core.user.js
 // @grant        none
 // @run-at       document-start
 // ==/UserScript==
