@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry API Collector
 // @namespace    https://henry-app.jp/
-// @version      2.7.0
+// @version      2.8.0
 // @description  Henry の GraphQL API 仕様を自動収集（Henry Core v2.3+ 連携）
 // @match        https://henry-app.jp/*
 // @match        https://*.henry-app.jp/*
@@ -391,9 +391,20 @@
         '',
         `> 生成日時: ${new Date().toLocaleString('ja-JP')}`,
         `> 収集済み API: ${specs.length} 件`,
+        '',
+        '## 目次 (Table of Contents)',
         ''
       ];
 
+      // 目次生成
+      for (const spec of sorted) {
+        lines.push(`- [${spec.operationName}](#${spec.operationName.toLowerCase()})`);
+      }
+      lines.push('');
+      lines.push('---');
+      lines.push('');
+
+      // API詳細
       for (const spec of sorted) {
         lines.push(`## ${spec.operationName}`);
         lines.push('');
