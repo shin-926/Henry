@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: 💬 質問・相談
+    url: https://github.com/shin-926/Henry/discussions
+    about: 技術的な質問やアイデアの相談はDiscussionsへ
