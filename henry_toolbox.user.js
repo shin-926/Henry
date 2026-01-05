@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Henry：ツールボックス（プラグイン対応）
 // @namespace    https://haru-chan.example
-// @version      5.0.1
-// @description  プラグイン方式。シンプルUI、Noto Sans JP、ドラッグ＆ドロップ並び替え対応。
+// @version      5.1.0
+// @description  プラグイン方式。シンプルUI、Noto Sans JP、ドラッグ＆ドロップ並び替え対応。HenryCore v2.7.0 対応。
 // @match        https://henry-app.jp/*
 // @match        https://*.henry-app.jp/*
 // @grant        GM_setValue
@@ -110,7 +110,16 @@
   toolbox.register = function(item) {
     const exists = this.items.some(i => i.event === item.event);
     if (exists) return;
-    this.items.push(item);
+
+    // onClick を保持
+    const itemWithCallback = {
+      event: item.event,
+      label: item.label,
+      order: item.order ?? 99,
+      onClick: item.onClick  // HenryCore plugin の場合に使用
+    };
+
+    this.items.push(itemWithCallback);
     sortItems();
     if (typeof this.rebuild === 'function') this.rebuild();
   };
@@ -164,9 +173,15 @@
       btn.appendChild(labelSpan);
 
       btn.addEventListener('click', (e) => {
-        window.dispatchEvent(new CustomEvent(item.event, {
-            detail: { triggerElement: btn }
-        }));
+        // HenryCore plugin の場合は onClick を直接実行
+        if (item.event.startsWith('henrycore:plugin:') && item.onClick) {
+          item.onClick();
+        } else {
+          // 通常の event dispatch
+          window.dispatchEvent(new CustomEvent(item.event, {
+              detail: { triggerElement: btn }
+          }));
+        }
         closePanel();
       });
 
@@ -335,5 +350,5 @@
   observer.observe(document.body, { childList: true, subtree: true });
   init();
 
-  console.log('[Toolbox] UIコントローラー v5.0.1 (Simple/ToolboxIcon) 起動');
+  console.log('[Toolbox] UIコントローラー v5.1.0 (Simple/ToolboxIcon) 起動');
 })();

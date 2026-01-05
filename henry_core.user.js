@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Henry Core
 // @namespace    https://henry-app.jp/
-// @version      2.6.9
-// @description  Henry スクリプト実行基盤 (v3.20準拠 / 単一施設運用)
+// @version      2.7.1
+// @description  Henry スクリプト実行基盤 (v3.20準拠 / 単一施設運用 / プラグインレジストリ対応 / onClick転送修正)
 // @match        https://henry-app.jp/*
 // @updateURL    https://raw.githubusercontent.com/shin-926/Henry/main/henry_core.user.js
 // @downloadURL  https://raw.githubusercontent.com/shin-926/Henry/main/henry_core.user.js
@@ -25,7 +25,7 @@
     BASE_URL: 'https://henry-app.jp'
   };
 
-  console.log('[Henry Core] Initializing v2.6.9...');
+  console.log('[Henry Core] Initializing v2.7.1...');
 
   // ==========================================
   // 1. IndexedDB Manager (ハッシュ + エンドポイント管理)
@@ -108,18 +108,15 @@
   // 2. Hash Cache (メモリキャッシュ)
   // ==========================================
   const hashCache = new Map();
-  let cacheReady = false;
 
   // 起動時にIndexedDBから全ハッシュを読み込む
   DB.getAll().then(all => {
     Object.entries(all).forEach(([opName, data]) => {
       hashCache.set(opName, { hash: data.hash, endpoint: data.endpoint });
     });
-    cacheReady = true;
     console.log(`[Henry Core] Loaded ${hashCache.size} hashes into memory`);
   }).catch(e => {
     console.warn('[Henry Core] Failed to load hashes into memory', e);
-    cacheReady = true;  // エラーでも続行
   });
 
   // ==========================================
@@ -622,9 +619,16 @@
   };
 
   // ==========================================
-  // 9. Public API
+  // 9. Plugin Registry
+  // ==========================================
+  const pluginRegistry = [];
+
+  // ==========================================
+  // 10. Public API
   // ==========================================
   window.HenryCore = {
+    plugins: pluginRegistry,
+
     call: async (operationName, variables) => {
       // メモリキャッシュを優先、なければIndexedDB
       let entry = hashCache.get(operationName);
@@ -678,13 +682,43 @@
     getMyUuid: Context.getMyUuid,
 
     registerPlugin: async (options) => {
-      const toolbox = await Utils.waitForToolbox();
-      if (!toolbox) {
-        console.error('[Henry Core] HenryToolbox が見つかりません');
+      // プラグインをレジストリに追加
+      const plugin = {
+        id: options.id,
+        name: options.name,
+        icon: options.icon || '',
+        description: options.description || '',
+        version: options.version || '1.0.0',
+        order: options.order || 100,
+        onClick: options.onClick
+      };
+
+      // 重複チェック
+      const exists = pluginRegistry.find(p => p.id === plugin.id);
+      if (exists) {
+        console.warn(`[Henry Core] Plugin "${plugin.id}" is already registered`);
         return false;
       }
 
-      toolbox.register(options);
+      pluginRegistry.push(plugin);
+      console.log(`[Henry Core] Plugin registered: ${plugin.name} (${plugin.id})`);
+
+      // イベント発火（Toolbox が受け取る）
+      window.dispatchEvent(new CustomEvent('henrycore:plugin-registered', {
+        detail: plugin
+      }));
+
+      // 後方互換性: Toolbox がある場合は直接登録も行う
+      const toolbox = await Utils.waitForToolbox(1000);
+      if (toolbox && typeof toolbox.register === 'function') {
+        toolbox.register({
+          event: `henrycore:plugin:${plugin.id}`,
+          label: `${plugin.icon} ${plugin.name}`.trim(),
+          order: plugin.order,
+          onClick: plugin.onClick  // Toolbox v5.1.0 対応
+        });
+      }
+
       return true;
     },
 
@@ -720,5 +754,5 @@
     UI.init();
   }
 
-  console.log('[Henry Core] Ready v2.6.9');
+  console.log('[Henry Core] Ready v2.7.1');
 })();

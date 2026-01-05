@@ -1,6 +1,7 @@
-# Henry EMR 開発ガイドライン (Core Rules v4.0)
+# Henry EMR 開発ガイドライン (Core Rules v4.1)
 
 <!-- 📝 UPDATED: タイトルを簡潔に。v4.0から「Core Rules」として分離 -->
+<!-- 📝 UPDATED: v4.1 - HenryCore v2.7.0 プラグインレジストリ対応 -->
 
 > **🆕 NEW**: このドキュメントはAIアシスタントとの協働開発における必須ルール集です。簡潔性を重視し、詳細な技術仕様は `HENRY-API-REFERENCE.md` を参照してください。
 
@@ -207,7 +208,8 @@ if (!patient) return null; // 静かに終了
 | `call(operationName, variables)` | GraphQL API呼び出し | `HENRY-API-REFERENCE.md` 参照 |
 | `getPatientUuid()` | 現在表示中の患者UUID取得 | - |
 | `getMyUuid()` | ログイン中のユーザーUUID取得 | 初回はAPI呼び出し、以降キャッシュ |
-| `registerPlugin(options)` | HenryToolboxにプラグイン登録 | v2.6.0以降 |
+| `plugins` | 登録済みプラグインの配列 | v2.7.0以降。読み取り専用 |
+| `registerPlugin(options)` | プラグイン登録 | v2.7.0以降。自動的にToolboxに表示 |
 | `utils.createCleaner()` | クリーンアップ管理 | 上記参照 |
 | `utils.waitForElement(selector, timeout)` | 要素の出現待機 | - |
 | `utils.createLogger(name)` | ログ出力ユーティリティ | - |
@@ -216,6 +218,26 @@ if (!patient) return null; // 静かに終了
 | `ui.showModal(props)` | モーダル表示 | `HENRY-API-REFERENCE.md` 参照 |
 
 > **📝 UPDATED**: 完全な型定義（60行のTypeScriptインターフェース）は `HENRY-API-REFERENCE.md` に移動しました。
+
+#### プラグイン登録
+
+**YOU MUST**: HenryCore v2.7.0以降は、`HenryCore.registerPlugin()` を使用してプラグインを登録すること。自動的にHenryToolboxに表示される。
+
+```javascript
+await HenryCore.registerPlugin({
+  id: 'my-plugin',           // 必須: ユニークなID
+  name: 'マイプラグイン',      // 必須: 表示名
+  icon: '🔧',                // オプション: アイコン
+  description: '説明文',      // オプション: 説明
+  version: '1.0.0',          // オプション: バージョン
+  order: 100,                // オプション: 表示順序（小さいほど上）
+  onClick: () => {           // 必須: クリック時の処理
+    // ここに処理を書く
+  }
+});
+```
+
+**NEVER**: `HenryToolbox.register()` を直接呼び出さないこと。HenryCore が自動的に転送する。
 
 ### エラーハンドリング
 
@@ -322,6 +344,7 @@ try {
 
 | Version | Date | Changes |
 |---------|------|---------|
+| **v4.1** | **2026-01-05** | **🆕 HenryCore v2.7.0 プラグインレジストリ対応。`HenryCore.plugins` 配列追加、`registerPlugin()` の仕様変更（自動的にToolboxへ表示）、プラグイン登録の例を追加** |
 | **v4.0** | **2026-01-04** | **🆕 コアルールとリファレンスを分離。プロンプト階層（NEVER/YOU MUST/IMPORTANT）導入。推奨ワークフロー追加。Anthropic公式ベストプラクティス反映。740行→330行に圧縮** |
 | v3.21 | 2026-01-02 | §11「クロスドメイン連携」拡張 |
 | v3.20 | 2026-01-01 | §11-13 追加 |
