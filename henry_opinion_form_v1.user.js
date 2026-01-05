@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         主治医意見書フォーム（Google Docs連携版）
 // @namespace    https://henry-app.jp/
-// @version      1.4.1
+// @version      1.4.3
 // @description  主治医意見書の入力フォームとGoogle Docs出力（バリデーション機能付き）
 // @author       Henry Team
 // @match        https://henry-app.jp/*
@@ -13,7 +13,7 @@
   'use strict';
 
   const SCRIPT_NAME = 'OpinionForm';
-  const VERSION = '1.4.1';
+  const VERSION = '1.4.3';
 
   // 医療機関情報（ハードコード）
   const INSTITUTION_INFO = {
@@ -49,6 +49,16 @@
       }
     }
     return true;
+  }
+
+  /**
+   * カタカナ→ひらがな変換
+   */
+  function katakanaToHiragana(str) {
+    if (!str) return '';
+    return str.replace(/[\u30A1-\u30F6]/g, char =>
+      String.fromCharCode(char.charCodeAt(0) - 0x60)
+    );
   }
 
   /**
@@ -222,6 +232,7 @@
   async function fetchPatientInfo(pageWindow) {
     try {
       const patientUuid = pageWindow.HenryCore.getPatientUuid();
+      console.log('[OpinionForm] patientUuid:', patientUuid);
       if (!patientUuid) {
         log?.error('患者UUIDが取得できません');
         return null;
@@ -230,8 +241,11 @@
       const result = await pageWindow.HenryCore.call('GetPatient', {
         input: { uuid: patientUuid }
       });
+      console.log('[OpinionForm] API result:', result);
 
       const patient = result.data?.getPatient;
+      console.log('[OpinionForm] patient:', patient);
+      console.log('[OpinionForm] patient全体:', JSON.stringify(patient, null, 2));
       if (!patient) {
         log?.error('患者情報が取得できません');
         return null;
@@ -240,19 +254,23 @@
       const today = getTodayString();
       const todayFormatted = formatDate(today);
 
+      // birthDateをYYYY-MM-DD形式に変換
+      const bd = patient.detail?.birthDate;
+      const birthDateStr = bd ? `${bd.year}-${String(bd.month).padStart(2,'0')}-${String(bd.day).padStart(2,'0')}` : '';
+
       return {
         patient_uuid: patientUuid,
         date_of_writing: today,
         date_of_writing_wareki: toWareki(todayFormatted),
-        patient_name_kana: patient.nameKana || '',
-        patient_name: patient.name || '',
-        birth_date: patient.birthDate?.replace(/-/g, '') || '',
-        birth_date_wareki: toWareki(patient.birthDate),
-        age: calculateAge(patient.birthDate, todayFormatted),
-        sex: patient.sex === 'MALE' ? '1' : patient.sex === 'FEMALE' ? '2' : '0',
-        postal_code: patient.postalCode || '',
-        address: patient.address || '',
-        phone: patient.phone || ''
+        patient_name_kana: katakanaToHiragana(patient.fullNamePhonetic) || '',
+        patient_name: patient.fullName || '',
+        birth_date: birthDateStr?.replace(/-/g, '') || '',
+        birth_date_wareki: toWareki(birthDateStr),
+        age: calculateAge(birthDateStr, todayFormatted),
+        sex: patient.detail?.sexType === 'SEX_TYPE_MALE' ? '1' : patient.detail?.sexType === 'SEX_TYPE_FEMALE' ? '2' : '0',
+        postal_code: patient.detail?.postalCode || '',
+        address: patient.detail?.addressLine_1 || '',
+        phone: patient.detail?.phoneNumber || ''
       };
     } catch (e) {
       log?.error('患者情報取得エラー:', e.message);
@@ -261,18 +279,30 @@
   }
 
   /**
-   * 医師情報を取得（将来のAPI）
+   * 医師情報を取得
    */
   async function fetchPhysicianInfo(pageWindow) {
     try {
       const myUuid = await pageWindow.HenryCore.getMyUuid();
+      if (!myUuid) {
+        log?.error('医師UUIDが取得できません');
+        return '';
+      }
 
-      // TODO: 将来のAPI実装
-      // const result = await pageWindow.HenryCore.call('GetUser', { input: { uuid: myUuid } });
-      // return result.data?.getUser?.name || '';
+      // ListUsers APIで医師一覧を取得
+      const result = await pageWindow.HenryCore.call('ListUsers', {
+        input: { role: 'DOCTOR', onlyNarcoticPractitioner: false }
+      });
 
-      // 一時的に空文字列を返す
-      return '';
+      const users = result.data?.listUsers?.users || [];
+      const me = users.find(u => u.uuid === myUuid);
+
+      if (!me) {
+        log?.error('医師一覧に該当ユーザーが見つかりませんでした');
+        return '';
+      }
+
+      return me.name || '';
     } catch (e) {
       log?.error('医師情報取得エラー:', e.message);
       return '';
@@ -417,6 +447,21 @@
 
       // データの準備
       const formData = savedDraft || createInitialFormData(patientInfo, physicianName);
+
+      // 基本情報は常に最新の患者情報で上書き（下書きがあっても患者情報は最新を使用）
+      formData.basic_info.patient_uuid = patientInfo.patient_uuid;
+      formData.basic_info.date_of_writing = patientInfo.date_of_writing;
+      formData.basic_info.date_of_writing_wareki = patientInfo.date_of_writing_wareki;
+      formData.basic_info.patient_name_kana = patientInfo.patient_name_kana;
+      formData.basic_info.patient_name = patientInfo.patient_name;
+      formData.basic_info.birth_date = patientInfo.birth_date;
+      formData.basic_info.birth_date_wareki = patientInfo.birth_date_wareki;
+      formData.basic_info.age = patientInfo.age;
+      formData.basic_info.sex = patientInfo.sex;
+      formData.basic_info.postal_code = patientInfo.postal_code;
+      formData.basic_info.address = patientInfo.address;
+      formData.basic_info.phone = patientInfo.phone;
+      formData.basic_info.physician_name = physicianName;
 
       // フォームHTML生成（次のステップで実装）
       const formHTML = createFormHTML(formData);
