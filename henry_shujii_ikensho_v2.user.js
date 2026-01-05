@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry 主治医意見書作成支援 v2 (PDF版)
 // @namespace    https://henry-app.jp/
-// @version      2.0.2
+// @version      2.0.3
 // @description  主治医意見書のPDF生成機能（テスト版）
 // @match        https://henry-app.jp/*
 // @require      https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js
@@ -163,13 +163,13 @@
     const startY = 52;
 
     doc.setFontSize(8);
-    doc.text('Joki no shinseisha ni kansuru iken wa ika no tori desu.', 15, startY);
-    doc.text('Shujii toshite, hon ikensho ga kaigo service keikaku sakusei nado ni riyosareru koto ni', 15, startY + 4);
+    doc.text('上記の申請者に関する意見は以下のとおりです。', 15, startY);
+    doc.text('主治医として、本意見書が介護サービス計画作成等に利用されることに', 15, startY + 4);
 
     drawCheckbox(doc, 120, startY + 4, data.consentAgree);
-    doc.text('Doisuru', 125, startY + 4);
+    doc.text('同意する', 125, startY + 4);
     drawCheckbox(doc, 145, startY + 4, data.consentDisagree);
-    doc.text('Doishinai', 150, startY + 4);
+    doc.text('同意しない', 150, startY + 4);
 
     const tableY = startY + 8;
     drawRect(doc, 15, tableY, 180, 20);
@@ -180,13 +180,13 @@
     drawLine(doc, 150, tableY + 7, 150, tableY + 20);
 
     doc.setFontSize(9);
-    doc.text('Shujii shimei', 17, tableY + 5);
+    doc.text('主治医氏名', 17, tableY + 5);
     doc.text(data.doctorName || '', 55, tableY + 5);
-    doc.text('Iryokikan mei', 17, tableY + 11);
+    doc.text('医療機関名', 17, tableY + 11);
     doc.text(data.facilityName || '', 55, tableY + 11);
-    doc.text('Denwa', 125, tableY + 11);
+    doc.text('電話', 125, tableY + 11);
     doc.text(data.facilityPhone || '', 155, tableY + 11);
-    doc.text('Iryokikan jusho', 17, tableY + 18);
+    doc.text('医療機関住所', 17, tableY + 18);
     doc.text(data.facilityAddress || '', 55, tableY + 18);
     doc.text('FAX', 125, tableY + 18);
     doc.text(data.facilityFax || '', 155, tableY + 18);
@@ -203,20 +203,20 @@
     drawLine(doc, 120, startY + 7, 120, startY + 14);
 
     doc.setFontSize(9);
-    doc.text('(1) Saishu shinsatsu bi', 17, startY + 5);
-    doc.text(data.lastExamDate || 'Reiwa ○nen ○gatsu ○nichi', 55, startY + 5);
+    doc.text('(1) 最終診察日', 17, startY + 5);
+    doc.text(data.lastExamDate || '令和　年　月　日', 55, startY + 5);
 
-    doc.text('(2) Ikensho sakusei kaisuu', 17, startY + 11);
+    doc.text('(2) 意見書作成回数', 17, startY + 11);
     drawCheckbox(doc, 55, startY + 11, data.opinionCount === 'first');
-    doc.text('Shokai', 60, startY + 11);
+    doc.text('初回', 60, startY + 11);
     drawCheckbox(doc, 75, startY + 11, data.opinionCount === 'second');
-    doc.text('2kaime ijo', 80, startY + 11);
+    doc.text('2回目以降', 80, startY + 11);
 
-    doc.text('(3) Taka jushin no umu', 17, startY + 18);
+    doc.text('(3) 他科受診の有無', 17, startY + 18);
     drawCheckbox(doc, 55, startY + 18, data.otherDepartmentYes);
-    doc.text('Ari', 60, startY + 18);
+    doc.text('あり', 60, startY + 18);
     drawCheckbox(doc, 70, startY + 18, data.otherDepartmentNo);
-    doc.text('Nashi', 75, startY + 18);
+    doc.text('なし', 75, startY + 18);
   }
 
   function drawPage1Section1(doc, data) {
@@ -278,7 +278,7 @@
     const startY = 204;
 
     doc.setFontSize(10);
-    doc.text('2. Tokubetsuna iryo', 15, startY);
+    doc.text('2. 特別な医療', 15, startY);
 
     const boxY = startY + 3;
     drawRect(doc, 15, boxY, 180, 18);
@@ -287,20 +287,20 @@
     drawLine(doc, 35, boxY, 35, boxY + 18);
 
     doc.setFontSize(8);
-    doc.text('Shochi naiyo', 17, boxY + 4);
+    doc.text('処置内容', 17, boxY + 4);
   }
 
   function drawPage1Section3(doc, data) {
     const startY = 226;
 
     doc.setFontSize(10);
-    doc.text('3. Shinshin no jotai ni kansuru iken', 15, startY);
+    doc.text('3. 心身の状態に関する意見', 15, startY);
 
     const adlY = startY + 4;
     drawRect(doc, 15, adlY, 180, 14);
 
     doc.setFontSize(9);
-    doc.text('(1) Nichijo seikatsu no jiritsu do', 17, adlY + 4);
+    doc.text('(1) 日常生活の自立度', 17, adlY + 4);
     drawLine(doc, 15, adlY + 5, 195, adlY + 5);
   }
 
@@ -396,7 +396,7 @@
     };
 
     const doc = generateOpinionPDF(pdfData);
-    const fileName = `Shujii_Ikensho_${patientInfo.name}_${getTodayString().replace(/-/g, '')}.pdf`;
+    const fileName = `主治医意見書_${patientInfo.name}_${getTodayString().replace(/-/g, '')}.pdf`;
     doc.save(fileName);
 
     alert('PDFをダウンロードしました');
