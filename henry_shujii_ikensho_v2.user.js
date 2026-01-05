@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Henry 主治医意見書作成支援 v2 (PDF版)
 // @namespace    https://henry-app.jp/
-// @version      2.0.3
-// @description  主治医意見書のPDF生成機能（テスト版）
+// @version      2.1.0
+// @description  主治医意見書のPDF生成・下書き保存機能
 // @match        https://henry-app.jp/*
 // @require      https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js
 // @require      https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.31/jspdf.plugin.autotable.min.js
@@ -80,6 +80,112 @@
     } catch (e) {
       log?.error('患者情報取得失敗', e.message);
       return null;
+    }
+  }
+
+  // ==========================================
+  // localStorage管理
+  // ==========================================
+
+  const STORAGE_KEY_PREFIX = 'henry_opinion_draft_';
+  const MAX_DRAFT_AGE_DAYS = 30;
+
+  function saveDraft(patientUuid, formData) {
+    try {
+      const key = `${STORAGE_KEY_PREFIX}${patientUuid}`;
+      const draft = {
+        data: formData,
+        savedAt: new Date().toISOString(),
+        patientName: formData.patient_name
+      };
+      localStorage.setItem(key, JSON.stringify(draft));
+      log?.info('下書き保存完了:', key);
+      return true;
+    } catch (e) {
+      log?.error('下書き保存失敗:', e.message);
+      return false;
+    }
+  }
+
+  function loadDraft(patientUuid) {
+    try {
+      const key = `${STORAGE_KEY_PREFIX}${patientUuid}`;
+      const stored = localStorage.getItem(key);
+      if (!stored) return null;
+
+      const draft = JSON.parse(stored);
+      log?.info('下書き読み込み成功:', key);
+      return draft.data;
+    } catch (e) {
+      log?.error('下書き読み込み失敗:', e.message);
+      return null;
+    }
+  }
+
+  function getAllDrafts() {
+    const drafts = [];
+    try {
+      for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i);
+        if (key && key.startsWith(STORAGE_KEY_PREFIX)) {
+          const stored = localStorage.getItem(key);
+          if (stored) {
+            const draft = JSON.parse(stored);
+            const patientUuid = key.replace(STORAGE_KEY_PREFIX, '');
+            drafts.push({
+              patientUuid,
+              patientName: draft.patientName,
+              savedAt: draft.savedAt,
+              data: draft.data
+            });
+          }
+        }
+      }
+    } catch (e) {
+      log?.error('下書きリスト取得失敗:', e.message);
+    }
+    return drafts.sort((a, b) => new Date(b.savedAt) - new Date(a.savedAt));
+  }
+
+  function deleteDraft(patientUuid) {
+    try {
+      const key = `${STORAGE_KEY_PREFIX}${patientUuid}`;
+      localStorage.removeItem(key);
+      log?.info('下書き削除完了:', key);
+      return true;
+    } catch (e) {
+      log?.error('下書き削除失敗:', e.message);
+      return false;
+    }
+  }
+
+  function cleanupOldDrafts() {
+    try {
+      const now = new Date();
+      let deletedCount = 0;
+
+      for (let i = localStorage.length - 1; i >= 0; i--) {
+        const key = localStorage.key(i);
+        if (key && key.startsWith(STORAGE_KEY_PREFIX)) {
+          const stored = localStorage.getItem(key);
+          if (stored) {
+            const draft = JSON.parse(stored);
+            const savedDate = new Date(draft.savedAt);
+            const ageInDays = (now - savedDate) / (1000 * 60 * 60 * 24);
+
+            if (ageInDays > MAX_DRAFT_AGE_DAYS) {
+              localStorage.removeItem(key);
+              deletedCount++;
+            }
+          }
+        }
+      }
+
+      if (deletedCount > 0) {
+        log?.info(`古い下書きを${deletedCount}件削除しました`);
+      }
+    } catch (e) {
+      log?.error('下書きクリーンアップ失敗:', e.message);
     }
   }
 
@@ -421,7 +527,10 @@
       return;
     }
 
-    const data = {
+    // 下書きを読み込む
+    const savedDraft = loadDraft(patientUuid);
+
+    const data = savedDraft || {
       patient_uuid: patientUuid,
       date_of_opinion_letter_creation: getTodayString(),
       patient_name: patientInfo.name,
@@ -441,7 +550,19 @@
     const inputStyle = 'width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px; box-sizing: border-box;';
     const rowStyle = 'margin-bottom: 16px;';
 
+    // 下書き情報を表示
+    let draftInfoHTML = '';
+    if (savedDraft) {
+      draftInfoHTML = `
+        <div style="background: #e8f4fd; border-left: 4px solid #2196F3; padding: 12px; margin-bottom: 16px; border-radius: 4px;">
+          <div style="font-weight: 500; color: #1976D2; margin-bottom: 4px;">💾 保存済みの下書きを読み込みました</div>
+          <div style="font-size: 12px; color: #666;">このまま編集を続けるか、新規作成してください</div>
+        </div>
+      `;
+    }
+
     formContainer.innerHTML = `
+      ${draftInfoHTML}
       <div style="${rowStyle}">
         <label style="${labelStyle}">作成日</label>
         <input type="date" id="opinion-date" value="${data.date_of_opinion_letter_creation}" style="${inputStyle}" readonly />
@@ -497,7 +618,7 @@
     `;
 
     const modal = pageWindow.HenryCore.ui.showModal({
-      title: '📋 主治医意見書（PDF版テスト）',
+      title: '📋 主治医意見書',
       content: formContainer,
       actions: [
         {
@@ -506,7 +627,23 @@
           onClick: () => modal.close()
         },
         {
-          label: 'PDF作成',
+          label: '💾 一時保存',
+          onClick: () => {
+            try {
+              const formData = collectFormData(data.patient_uuid, data.patient_name, data.date_of_opinion_letter_creation);
+              if (saveDraft(data.patient_uuid, formData)) {
+                alert('下書きを保存しました（30日間保存されます）');
+              } else {
+                alert('保存に失敗しました');
+              }
+            } catch (e) {
+              log?.error('一時保存失敗', e.message);
+              alert(`保存に失敗しました: ${e.message}`);
+            }
+          }
+        },
+        {
+          label: '📄 PDF作成',
           onClick: async () => {
             try {
               const formData = collectFormData(data.patient_uuid, data.patient_name, data.date_of_opinion_letter_creation);
@@ -553,8 +690,11 @@
 
     log = pageWindow.HenryCore.utils.createLogger('OpinionDocument');
 
+    // 起動時に古い下書きをクリーンアップ（30日以上前のものを削除）
+    cleanupOldDrafts();
+
     const registered = await pageWindow.HenryCore.registerPlugin({
-      label: '📋 主治医意見書(PDF)',
+      label: '📋 主治医意見書',
       event: 'henry:opinion-document-pdf',
       order: 30
     });
@@ -568,7 +708,7 @@
       createOpinionForm();
     });
 
-    log.info('Ready (v2.0.0 - PDF Test)');
+    log.info('Ready (v2.1.0 - with localStorage)');
   }
 
   init();
