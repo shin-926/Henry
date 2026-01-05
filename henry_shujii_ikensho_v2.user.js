@@ -6,7 +6,7 @@
 // @match        https://henry-app.jp/*
 // @require      https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js
 // @require      https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.31/jspdf.plugin.autotable.min.js
-// @require      file:///Users/shinichiro/Documents/Henry/NotoSansJP-Base64.js
+// @require      file:///Users/shinichiro/Documents/Henry/NotoSansJP-Base64.js?v=4
 // @grant        unsafeWindow
 // @run-at       document-start
 // ==/UserScript==
@@ -89,7 +89,8 @@
 
   function setupFont(doc) {
     try {
-      const fontBase64 = pageWindow.NOTO_SANS_JP_BASE64;
+      // @require ファイルは Tampermonkey の window に読み込まれる
+      const fontBase64 = window.NOTO_SANS_JP_BASE64;
       if (!fontBase64) {
         console.warn('[OpinionDocument] Noto Sans JPフォントが読み込まれていません。デフォルトフォントを使用します。');
         doc.setFont('helvetica');
@@ -97,7 +98,7 @@
       }
 
       doc.addFileToVFS('NotoSansJP-Subset.ttf', fontBase64);
-      doc.addFont('NotoSansJP-Subset.ttf', 'NotoSansJP', 'normal');
+      doc.addFont('NotoSansJP-Subset.ttf', 'NotoSansJP', 'normal', 'Identity-H');
       doc.setFont('NotoSansJP');
 
       console.log('[OpinionDocument] Noto Sans JPフォント読み込み成功');
