@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         主治医意見書フォーム（Google Docs連携版）
 // @namespace    https://henry-app.jp/
-// @version      1.4.0
+// @version      1.4.1
 // @description  主治医意見書の入力フォームとGoogle Docs出力（バリデーション機能付き）
 // @author       Henry Team
 // @match        https://henry-app.jp/*
@@ -13,7 +13,7 @@
   'use strict';
 
   const SCRIPT_NAME = 'OpinionForm';
-  const VERSION = '1.4.0';
+  const VERSION = '1.4.1';
 
   // 医療機関情報（ハードコード）
   const INSTITUTION_INFO = {
@@ -728,31 +728,7 @@
     const unstableDetailsField = createTextField('症状不安定時の具体的状況', 'symptom_unstable_details', 'diagnosis', data.symptom_unstable_details, false, '不安定な場合の具体的な状況を記入');
     unstableDetailsField.style.marginLeft = '24px';
     section.appendChild(unstableDetailsField);
-
-    // ラジオボタンとテキストフィールドを連動させる
-    const stabilityRadios = stabilityField.querySelectorAll('input[type="radio"]');
-    const unstableInput = unstableDetailsField.querySelector('input[type="text"]');
-
-    // 初期状態の設定
-    const updateUnstableDetailsState = () => {
-      const isUnstable = Array.from(stabilityRadios).find(r => r.checked)?.value === '2';
-      unstableInput.disabled = !isUnstable;
-      if (unstableInput.disabled) {
-        unstableInput.style.backgroundColor = '#f1f5f9';
-        unstableInput.style.color = '#94a3b8';
-      } else {
-        unstableInput.style.backgroundColor = '';
-        unstableInput.style.color = '';
-      }
-    };
-
-    // イベントリスナーを追加
-    stabilityRadios.forEach(radio => {
-      radio.addEventListener('change', updateUnstableDetailsState);
-    });
-
-    // 初期状態を適用
-    updateUnstableDetailsState();
+    setupConditionalField(stabilityField, unstableDetailsField, '2');
 
     // 経過及び治療内容（必須、560文字/5行）
     section.appendChild(createTextareaField('経過及び治療内容', 'course_and_treatment', 'diagnosis', data.course_and_treatment, true, 560, 5));
@@ -943,28 +919,7 @@
     const psychiatricSymptomNameField = createTextField('症状名', 'psychiatric_symptom_name', 'mental_physical_state', data.psychiatric_symptom_name, false);
     psychiatricSymptomNameField.style.marginLeft = '24px';
     section.appendChild(psychiatricSymptomNameField);
-
-    // ラジオボタンとテキストフィールドを連動させる
-    const psychiatricSymptomsRadios = psychiatricSymptomsField.querySelectorAll('input[type="radio"]');
-    const psychiatricSymptomNameInput = psychiatricSymptomNameField.querySelector('input[type="text"]');
-
-    const updatePsychiatricSymptomNameState = () => {
-      const isPsychiatricSymptomsYes = Array.from(psychiatricSymptomsRadios).find(r => r.checked)?.value === '1';
-      psychiatricSymptomNameInput.disabled = !isPsychiatricSymptomsYes;
-      if (psychiatricSymptomNameInput.disabled) {
-        psychiatricSymptomNameInput.style.backgroundColor = '#f1f5f9';
-        psychiatricSymptomNameInput.style.color = '#94a3b8';
-      } else {
-        psychiatricSymptomNameInput.style.backgroundColor = '';
-        psychiatricSymptomNameInput.style.color = '';
-      }
-    };
-
-    psychiatricSymptomsRadios.forEach(radio => {
-      radio.addEventListener('change', updatePsychiatricSymptomNameState);
-    });
-
-    updatePsychiatricSymptomNameState(); // 初期状態を設定
+    setupConditionalField(psychiatricSymptomsField, psychiatricSymptomNameField, '1');
 
     // 専門医受診の有無（必須）
     const specialistVisitField = createRadioField(
@@ -984,28 +939,7 @@
     const specialistDepartmentField = createTextField('受診科名', 'specialist_department', 'mental_physical_state', data.specialist_department, false);
     specialistDepartmentField.style.marginLeft = '24px';
     section.appendChild(specialistDepartmentField);
-
-    // ラジオボタンとテキストフィールドを連動させる
-    const specialistVisitRadios = specialistVisitField.querySelectorAll('input[type="radio"]');
-    const specialistDepartmentInput = specialistDepartmentField.querySelector('input[type="text"]');
-
-    const updateSpecialistDepartmentState = () => {
-      const isSpecialistVisitYes = Array.from(specialistVisitRadios).find(r => r.checked)?.value === '1';
-      specialistDepartmentInput.disabled = !isSpecialistVisitYes;
-      if (specialistDepartmentInput.disabled) {
-        specialistDepartmentInput.style.backgroundColor = '#f1f5f9';
-        specialistDepartmentInput.style.color = '#94a3b8';
-      } else {
-        specialistDepartmentInput.style.backgroundColor = '';
-        specialistDepartmentInput.style.color = '';
-      }
-    };
-
-    specialistVisitRadios.forEach(radio => {
-      radio.addEventListener('change', updateSpecialistDepartmentState);
-    });
-
-    updateSpecialistDepartmentState(); // 初期状態を設定
+    setupConditionalField(specialistVisitField, specialistDepartmentField, '1');
 
     // (5) 身体の状態
     section.appendChild(createSubsectionTitle('(5) 身体の状態'));
@@ -1061,28 +995,7 @@
     const limbLossLocationField = createTextField('部位', 'limb_loss_location', 'mental_physical_state', data.limb_loss_location, false, '例：右下肢');
     limbLossLocationField.style.marginLeft = '24px';
     section.appendChild(limbLossLocationField);
-
-    // ラジオボタンとテキストフィールドを連動させる
-    const limbLossRadios = limbLossField.querySelectorAll('input[type="radio"]');
-    const limbLossLocationInput = limbLossLocationField.querySelector('input[type="text"]');
-
-    const updateLimbLossLocationState = () => {
-      const isLimbLossYes = Array.from(limbLossRadios).find(r => r.checked)?.value === '1';
-      limbLossLocationInput.disabled = !isLimbLossYes;
-      if (limbLossLocationInput.disabled) {
-        limbLossLocationInput.style.backgroundColor = '#f1f5f9';
-        limbLossLocationInput.style.color = '#94a3b8';
-      } else {
-        limbLossLocationInput.style.backgroundColor = '';
-        limbLossLocationInput.style.color = '';
-      }
-    };
-
-    limbLossRadios.forEach(radio => {
-      radio.addEventListener('change', updateLimbLossLocationState);
-    });
-
-    updateLimbLossLocationState(); // 初期状態を設定
+    setupConditionalField(limbLossField, limbLossLocationField, '1');
 
     // 麻痺
     const paralysisField = createRadioField(
@@ -1402,166 +1315,19 @@
     updateParalysisState();
 
     // 筋力低下
-    const muscleWeaknessField = createRadioField(
-      '筋力低下',
-      'muscle_weakness',
-      'mental_physical_state',
-      [
-        { label: 'なし', value: '0' },
-        { label: 'あり', value: '1' }
-      ],
-      data.muscle_weakness,
-      false
-    );
-    section.appendChild(muscleWeaknessField);
-
-    const muscleWeaknessLocationField = createTextField('部位', 'muscle_weakness_location', 'mental_physical_state', data.muscle_weakness_location, false);
-    muscleWeaknessLocationField.style.marginLeft = '24px';
-    section.appendChild(muscleWeaknessLocationField);
-
-    const muscleWeaknessSeverityField = createRadioField(
-      '程度',
-      'muscle_weakness_severity',
-      'mental_physical_state',
-      [
-        { label: '軽', value: '1' },
-        { label: '中', value: '2' },
-        { label: '重', value: '3' }
-      ],
-      data.muscle_weakness_severity,
-      false
-    );
-    muscleWeaknessSeverityField.style.marginLeft = '24px';
-    section.appendChild(muscleWeaknessSeverityField);
-
-    // 筋力低下の連動ロジック
-    const muscleWeaknessRadios = muscleWeaknessField.querySelectorAll('input[type="radio"]');
-
-    const updateMuscleWeaknessDetailsState = () => {
-      const hasMuscleWeakness = Array.from(muscleWeaknessRadios).find(r => r.checked)?.value === '1';
-
-      if (hasMuscleWeakness) {
-        enableField(muscleWeaknessLocationField);
-        enableField(muscleWeaknessSeverityField);
-      } else {
-        disableField(muscleWeaknessLocationField);
-        disableField(muscleWeaknessSeverityField);
-      }
-    };
-
-    muscleWeaknessRadios.forEach(radio => {
-      radio.addEventListener('change', updateMuscleWeaknessDetailsState);
+    createBodyConditionFields('筋力低下', 'muscle_weakness', 'mental_physical_state', data).forEach(field => {
+      section.appendChild(field);
     });
-
-    updateMuscleWeaknessDetailsState(); // 初期状態を設定
 
     // 関節拘縮
-    const jointContractureField = createRadioField(
-      '関節拘縮',
-      'joint_contracture',
-      'mental_physical_state',
-      [
-        { label: 'なし', value: '0' },
-        { label: 'あり', value: '1' }
-      ],
-      data.joint_contracture,
-      false
-    );
-    section.appendChild(jointContractureField);
-
-    const jointContractureLocationField = createTextField('部位', 'joint_contracture_location', 'mental_physical_state', data.joint_contracture_location, false);
-    jointContractureLocationField.style.marginLeft = '24px';
-    section.appendChild(jointContractureLocationField);
-
-    const jointContractionSeverityField = createRadioField(
-      '程度',
-      'joint_contracture_severity',
-      'mental_physical_state',
-      [
-        { label: '軽', value: '1' },
-        { label: '中', value: '2' },
-        { label: '重', value: '3' }
-      ],
-      data.joint_contracture_severity,
-      false
-    );
-    jointContractionSeverityField.style.marginLeft = '24px';
-    section.appendChild(jointContractionSeverityField);
-
-    // 関節拘縮の連動ロジック
-    const jointContractureRadios = jointContractureField.querySelectorAll('input[type="radio"]');
-
-    const updateJointContractureDetailsState = () => {
-      const hasJointContracture = Array.from(jointContractureRadios).find(r => r.checked)?.value === '1';
-
-      if (hasJointContracture) {
-        enableField(jointContractureLocationField);
-        enableField(jointContractionSeverityField);
-      } else {
-        disableField(jointContractureLocationField);
-        disableField(jointContractionSeverityField);
-      }
-    };
-
-    jointContractureRadios.forEach(radio => {
-      radio.addEventListener('change', updateJointContractureDetailsState);
+    createBodyConditionFields('関節拘縮', 'joint_contracture', 'mental_physical_state', data).forEach(field => {
+      section.appendChild(field);
     });
-
-    updateJointContractureDetailsState(); // 初期状態を設定
 
     // 関節痛み
-    const jointPainField = createRadioField(
-      '関節痛み',
-      'joint_pain',
-      'mental_physical_state',
-      [
-        { label: 'なし', value: '0' },
-        { label: 'あり', value: '1' }
-      ],
-      data.joint_pain,
-      false
-    );
-    section.appendChild(jointPainField);
-
-    const jointPainLocationField = createTextField('部位', 'joint_pain_location', 'mental_physical_state', data.joint_pain_location, false);
-    jointPainLocationField.style.marginLeft = '24px';
-    section.appendChild(jointPainLocationField);
-
-    const jointPainSeverityField = createRadioField(
-      '程度',
-      'joint_pain_severity',
-      'mental_physical_state',
-      [
-        { label: '軽', value: '1' },
-        { label: '中', value: '2' },
-        { label: '重', value: '3' }
-      ],
-      data.joint_pain_severity,
-      false
-    );
-    jointPainSeverityField.style.marginLeft = '24px';
-    section.appendChild(jointPainSeverityField);
-
-    // 関節痛みの連動ロジック
-    const jointPainRadios = jointPainField.querySelectorAll('input[type="radio"]');
-
-    const updateJointPainDetailsState = () => {
-      const hasJointPain = Array.from(jointPainRadios).find(r => r.checked)?.value === '1';
-
-      if (hasJointPain) {
-        enableField(jointPainLocationField);
-        enableField(jointPainSeverityField);
-      } else {
-        disableField(jointPainLocationField);
-        disableField(jointPainSeverityField);
-      }
-    };
-
-    jointPainRadios.forEach(radio => {
-      radio.addEventListener('change', updateJointPainDetailsState);
+    createBodyConditionFields('関節痛み', 'joint_pain', 'mental_physical_state', data).forEach(field => {
+      section.appendChild(field);
     });
-
-    updateJointPainDetailsState(); // 初期状態を設定
 
     // 失調不随意運動
     const ataxiaField = createRadioField(
@@ -1631,112 +1397,14 @@
     updateAtaxiaDetailsState(); // 初期状態を設定
 
     // 褥瘡
-    const pressureUlcerField = createRadioField(
-      '褥瘡',
-      'pressure_ulcer',
-      'mental_physical_state',
-      [
-        { label: 'なし', value: '0' },
-        { label: 'あり', value: '1' }
-      ],
-      data.pressure_ulcer,
-      false
-    );
-    section.appendChild(pressureUlcerField);
-
-    const pressureUlcerLocationField = createTextField('部位', 'pressure_ulcer_location', 'mental_physical_state', data.pressure_ulcer_location, false);
-    pressureUlcerLocationField.style.marginLeft = '24px';
-    section.appendChild(pressureUlcerLocationField);
-
-    const pressureUlcerSeverityField = createRadioField(
-      '程度',
-      'pressure_ulcer_severity',
-      'mental_physical_state',
-      [
-        { label: '軽', value: '1' },
-        { label: '中', value: '2' },
-        { label: '重', value: '3' }
-      ],
-      data.pressure_ulcer_severity,
-      false
-    );
-    pressureUlcerSeverityField.style.marginLeft = '24px';
-    section.appendChild(pressureUlcerSeverityField);
-
-    // 褥瘡の連動ロジック
-    const pressureUlcerRadios = pressureUlcerField.querySelectorAll('input[type="radio"]');
-
-    const updatePressureUlcerDetailsState = () => {
-      const hasPressureUlcer = Array.from(pressureUlcerRadios).find(r => r.checked)?.value === '1';
-
-      if (hasPressureUlcer) {
-        enableField(pressureUlcerLocationField);
-        enableField(pressureUlcerSeverityField);
-      } else {
-        disableField(pressureUlcerLocationField);
-        disableField(pressureUlcerSeverityField);
-      }
-    };
-
-    pressureUlcerRadios.forEach(radio => {
-      radio.addEventListener('change', updatePressureUlcerDetailsState);
+    createBodyConditionFields('褥瘡', 'pressure_ulcer', 'mental_physical_state', data).forEach(field => {
+      section.appendChild(field);
     });
-
-    updatePressureUlcerDetailsState(); // 初期状態を設定
 
     // その他皮膚疾患
-    const otherSkinDiseaseField = createRadioField(
-      'その他皮膚疾患',
-      'other_skin_disease',
-      'mental_physical_state',
-      [
-        { label: 'なし', value: '0' },
-        { label: 'あり', value: '1' }
-      ],
-      data.other_skin_disease,
-      false
-    );
-    section.appendChild(otherSkinDiseaseField);
-
-    const otherSkinDiseaseLocationField = createTextField('部位', 'other_skin_disease_location', 'mental_physical_state', data.other_skin_disease_location, false);
-    otherSkinDiseaseLocationField.style.marginLeft = '24px';
-    section.appendChild(otherSkinDiseaseLocationField);
-
-    const otherSkinDiseaseSeverityField = createRadioField(
-      '程度',
-      'other_skin_disease_severity',
-      'mental_physical_state',
-      [
-        { label: '軽', value: '1' },
-        { label: '中', value: '2' },
-        { label: '重', value: '3' }
-      ],
-      data.other_skin_disease_severity,
-      false
-    );
-    otherSkinDiseaseSeverityField.style.marginLeft = '24px';
-    section.appendChild(otherSkinDiseaseSeverityField);
-
-    // その他皮膚疾患の連動ロジック
-    const otherSkinDiseaseRadios = otherSkinDiseaseField.querySelectorAll('input[type="radio"]');
-
-    const updateOtherSkinDiseaseDetailsState = () => {
-      const hasOtherSkinDisease = Array.from(otherSkinDiseaseRadios).find(r => r.checked)?.value === '1';
-
-      if (hasOtherSkinDisease) {
-        enableField(otherSkinDiseaseLocationField);
-        enableField(otherSkinDiseaseSeverityField);
-      } else {
-        disableField(otherSkinDiseaseLocationField);
-        disableField(otherSkinDiseaseSeverityField);
-      }
-    };
-
-    otherSkinDiseaseRadios.forEach(radio => {
-      radio.addEventListener('change', updateOtherSkinDiseaseDetailsState);
+    createBodyConditionFields('その他皮膚疾患', 'other_skin_disease', 'mental_physical_state', data).forEach(field => {
+      section.appendChild(field);
     });
-
-    updateOtherSkinDiseaseDetailsState(); // 初期状態を設定
 
     return section;
   }
@@ -1832,7 +1500,7 @@
 
     // 現在あるかまたは今後発生の可能性の高い状態（チェックボックス、14桁）
     section.appendChild(createCheckboxFieldWithOtherInput(
-      '現在あるかまたは今後発生の可能性の高い状態',
+      '',
       'possible_conditions',
       'life_function',
       ['尿失禁', '転倒・骨折', '痛み', '褥瘡', '徘徊', 'うつ状態', '意欲低下', '閉じこもり', 'リハビリテーションの必要性', '嚥下障害', '口腔衛生管理の必要性', '栄養管理の必要性', '服薬管理の必要性', 'その他'],
@@ -1844,12 +1512,12 @@
     // 対処方針内容（任意）
     section.appendChild(createTextField('対処方針内容', 'response_policy', 'life_function', data.response_policy, false));
 
-    // (4) サービス利用
-    section.appendChild(createSubsectionTitle('(4) サービス利用'));
+    // (4) サービス利用による生活機能の維持・改善の見通し
+    section.appendChild(createSubsectionTitle('(4) サービス利用による生活機能の維持・改善の見通し', true));
 
     // 生活機能改善見通し（必須）
     section.appendChild(createRadioField(
-      'サービス利用による生活機能の維持・改善の見通し',
+      '',
       'life_function_improvement_outlook',
       'life_function',
       [
@@ -1858,7 +1526,7 @@
         { label: '不明', value: '3' }
       ],
       data.life_function_improvement_outlook,
-      true
+      false
     ));
 
     // (5) 医学管理の必要性
@@ -1866,7 +1534,7 @@
 
     // 医学的管理の必要性（チェックボックス、11桁）
     section.appendChild(createCheckboxFieldWithOtherInput(
-      '医学的管理の必要性',
+      '',
       'medical_management_necessity',
       'life_function',
       ['血圧', '心疾患', '誤嚥', '呼吸障害', '嚥下障害', '移動', '運動', '栄養・食生活', '摂食・嚥下機能', '口腔衛生管理', 'その他'],
@@ -1879,7 +1547,7 @@
     section.appendChild(createSubsectionTitle('(6) サービス提供時における医学的観点からの留意事項'));
 
     // サービス提供時の血圧
-    const serviceBloodPressureField = createRadioField(
+    const serviceBloodPressureField = createInlineRadioField(
       '血圧',
       'service_blood_pressure',
       'life_function',
@@ -1887,39 +1555,17 @@
         { label: '特になし', value: '1' },
         { label: 'あり', value: '2' }
       ],
-      data.service_blood_pressure,
-      false
+      data.service_blood_pressure
     );
     section.appendChild(serviceBloodPressureField);
 
     const serviceBloodPressureNotesField = createTextField('留意事項', 'service_blood_pressure_notes', 'life_function', data.service_blood_pressure_notes, false);
     serviceBloodPressureNotesField.style.marginLeft = '24px';
     section.appendChild(serviceBloodPressureNotesField);
-
-    // ラジオボタンとテキストフィールドを連動させる
-    const serviceBloodPressureRadios = serviceBloodPressureField.querySelectorAll('input[type="radio"]');
-    const serviceBloodPressureNotesInput = serviceBloodPressureNotesField.querySelector('input[type="text"]');
-
-    const updateServiceBloodPressureNotesState = () => {
-      const isServiceBloodPressureYes = Array.from(serviceBloodPressureRadios).find(r => r.checked)?.value === '2';
-      serviceBloodPressureNotesInput.disabled = !isServiceBloodPressureYes;
-      if (serviceBloodPressureNotesInput.disabled) {
-        serviceBloodPressureNotesInput.style.backgroundColor = '#f1f5f9';
-        serviceBloodPressureNotesInput.style.color = '#94a3b8';
-      } else {
-        serviceBloodPressureNotesInput.style.backgroundColor = '';
-        serviceBloodPressureNotesInput.style.color = '';
-      }
-    };
-
-    serviceBloodPressureRadios.forEach(radio => {
-      radio.addEventListener('change', updateServiceBloodPressureNotesState);
-    });
-
-    updateServiceBloodPressureNotesState(); // 初期状態を設定
+    setupConditionalField(serviceBloodPressureField, serviceBloodPressureNotesField, '2');
 
     // サービス提供時の摂食
-    const serviceEatingField = createRadioField(
+    const serviceEatingField = createInlineRadioField(
       '摂食',
       'service_eating',
       'life_function',
@@ -1927,39 +1573,17 @@
         { label: '特になし', value: '1' },
         { label: 'あり', value: '2' }
       ],
-      data.service_eating,
-      false
+      data.service_eating
     );
     section.appendChild(serviceEatingField);
 
     const serviceEatingNotesField = createTextField('留意事項', 'service_eating_notes', 'life_function', data.service_eating_notes, false);
     serviceEatingNotesField.style.marginLeft = '24px';
     section.appendChild(serviceEatingNotesField);
-
-    // ラジオボタンとテキストフィールドを連動させる
-    const serviceEatingRadios = serviceEatingField.querySelectorAll('input[type="radio"]');
-    const serviceEatingNotesInput = serviceEatingNotesField.querySelector('input[type="text"]');
-
-    const updateServiceEatingNotesState = () => {
-      const isServiceEatingYes = Array.from(serviceEatingRadios).find(r => r.checked)?.value === '2';
-      serviceEatingNotesInput.disabled = !isServiceEatingYes;
-      if (serviceEatingNotesInput.disabled) {
-        serviceEatingNotesInput.style.backgroundColor = '#f1f5f9';
-        serviceEatingNotesInput.style.color = '#94a3b8';
-      } else {
-        serviceEatingNotesInput.style.backgroundColor = '';
-        serviceEatingNotesInput.style.color = '';
-      }
-    };
-
-    serviceEatingRadios.forEach(radio => {
-      radio.addEventListener('change', updateServiceEatingNotesState);
-    });
-
-    updateServiceEatingNotesState(); // 初期状態を設定
+    setupConditionalField(serviceEatingField, serviceEatingNotesField, '2');
 
     // サービス提供時の嚥下
-    const serviceSwallowingField = createRadioField(
+    const serviceSwallowingField = createInlineRadioField(
       '嚥下',
       'service_swallowing',
       'life_function',
@@ -1967,39 +1591,17 @@
         { label: '特になし', value: '1' },
         { label: 'あり', value: '2' }
       ],
-      data.service_swallowing,
-      false
+      data.service_swallowing
     );
     section.appendChild(serviceSwallowingField);
 
     const serviceSwallowingNotesField = createTextField('留意事項', 'service_swallowing_notes', 'life_function', data.service_swallowing_notes, false);
     serviceSwallowingNotesField.style.marginLeft = '24px';
     section.appendChild(serviceSwallowingNotesField);
-
-    // ラジオボタンとテキストフィールドを連動させる
-    const serviceSwallowingRadios = serviceSwallowingField.querySelectorAll('input[type="radio"]');
-    const serviceSwallowingNotesInput = serviceSwallowingNotesField.querySelector('input[type="text"]');
-
-    const updateServiceSwallowingNotesState = () => {
-      const isServiceSwallowingYes = Array.from(serviceSwallowingRadios).find(r => r.checked)?.value === '2';
-      serviceSwallowingNotesInput.disabled = !isServiceSwallowingYes;
-      if (serviceSwallowingNotesInput.disabled) {
-        serviceSwallowingNotesInput.style.backgroundColor = '#f1f5f9';
-        serviceSwallowingNotesInput.style.color = '#94a3b8';
-      } else {
-        serviceSwallowingNotesInput.style.backgroundColor = '';
-        serviceSwallowingNotesInput.style.color = '';
-      }
-    };
-
-    serviceSwallowingRadios.forEach(radio => {
-      radio.addEventListener('change', updateServiceSwallowingNotesState);
-    });
-
-    updateServiceSwallowingNotesState(); // 初期状態を設定
+    setupConditionalField(serviceSwallowingField, serviceSwallowingNotesField, '2');
 
     // サービス提供時の移動
-    const serviceMobilityField = createRadioField(
+    const serviceMobilityField = createInlineRadioField(
       '移動',
       'service_mobility',
       'life_function',
@@ -2007,39 +1609,17 @@
         { label: '特になし', value: '1' },
         { label: 'あり', value: '2' }
       ],
-      data.service_mobility,
-      false
+      data.service_mobility
     );
     section.appendChild(serviceMobilityField);
 
     const serviceMobilityNotesField = createTextField('留意事項', 'service_mobility_notes', 'life_function', data.service_mobility_notes, false);
     serviceMobilityNotesField.style.marginLeft = '24px';
     section.appendChild(serviceMobilityNotesField);
-
-    // ラジオボタンとテキストフィールドを連動させる
-    const serviceMobilityRadios = serviceMobilityField.querySelectorAll('input[type="radio"]');
-    const serviceMobilityNotesInput = serviceMobilityNotesField.querySelector('input[type="text"]');
-
-    const updateServiceMobilityNotesState = () => {
-      const isServiceMobilityYes = Array.from(serviceMobilityRadios).find(r => r.checked)?.value === '2';
-      serviceMobilityNotesInput.disabled = !isServiceMobilityYes;
-      if (serviceMobilityNotesInput.disabled) {
-        serviceMobilityNotesInput.style.backgroundColor = '#f1f5f9';
-        serviceMobilityNotesInput.style.color = '#94a3b8';
-      } else {
-        serviceMobilityNotesInput.style.backgroundColor = '';
-        serviceMobilityNotesInput.style.color = '';
-      }
-    };
-
-    serviceMobilityRadios.forEach(radio => {
-      radio.addEventListener('change', updateServiceMobilityNotesState);
-    });
-
-    updateServiceMobilityNotesState(); // 初期状態を設定
+    setupConditionalField(serviceMobilityField, serviceMobilityNotesField, '2');
 
     // サービス提供時の運動
-    const serviceExerciseField = createRadioField(
+    const serviceExerciseField = createInlineRadioField(
       '運動',
       'service_exercise',
       'life_function',
@@ -2047,36 +1627,14 @@
         { label: '特になし', value: '1' },
         { label: 'あり', value: '2' }
       ],
-      data.service_exercise,
-      false
+      data.service_exercise
     );
     section.appendChild(serviceExerciseField);
 
     const serviceExerciseNotesField = createTextField('留意事項', 'service_exercise_notes', 'life_function', data.service_exercise_notes, false);
     serviceExerciseNotesField.style.marginLeft = '24px';
     section.appendChild(serviceExerciseNotesField);
-
-    // ラジオボタンとテキストフィールドを連動させる
-    const serviceExerciseRadios = serviceExerciseField.querySelectorAll('input[type="radio"]');
-    const serviceExerciseNotesInput = serviceExerciseNotesField.querySelector('input[type="text"]');
-
-    const updateServiceExerciseNotesState = () => {
-      const isServiceExerciseYes = Array.from(serviceExerciseRadios).find(r => r.checked)?.value === '2';
-      serviceExerciseNotesInput.disabled = !isServiceExerciseYes;
-      if (serviceExerciseNotesInput.disabled) {
-        serviceExerciseNotesInput.style.backgroundColor = '#f1f5f9';
-        serviceExerciseNotesInput.style.color = '#94a3b8';
-      } else {
-        serviceExerciseNotesInput.style.backgroundColor = '';
-        serviceExerciseNotesInput.style.color = '';
-      }
-    };
-
-    serviceExerciseRadios.forEach(radio => {
-      radio.addEventListener('change', updateServiceExerciseNotesState);
-    });
-
-    updateServiceExerciseNotesState(); // 初期状態を設定
+    setupConditionalField(serviceExerciseField, serviceExerciseNotesField, '2');
 
     // その他の留意事項
     section.appendChild(createTextField('その他の留意事項', 'service_other_notes', 'life_function', data.service_other_notes, false));
@@ -2103,28 +1661,7 @@
   const infectionNameField = createTextField('感染症名', 'infection_name', 'life_function', data.infection_name, false);
   infectionNameField.style.marginLeft = '24px';
   section.appendChild(infectionNameField);
-
-  // ラジオボタンとテキストフィールドを連動させる
-  const infectionRadios = infectionField.querySelectorAll('input[type="radio"]');
-  const infectionNameInput = infectionNameField.querySelector('input[type="text"]');
-
-  const updateInfectionNameState = () => {
-    const isInfectionYes = Array.from(infectionRadios).find(r => r.checked)?.value === '1';
-    infectionNameInput.disabled = !isInfectionYes;
-    if (infectionNameInput.disabled) {
-      infectionNameInput.style.backgroundColor = '#f1f5f9';
-      infectionNameInput.style.color = '#94a3b8';
-    } else {
-      infectionNameInput.style.backgroundColor = '';
-      infectionNameInput.style.color = '';
-    }
-  };
-
-  infectionRadios.forEach(radio => {
-    radio.addEventListener('change', updateInfectionNameState);
-  });
-
-  updateInfectionNameState(); // 初期状態を設定
+  setupConditionalField(infectionField, infectionNameField, '1');
 
   return section;
 }
@@ -2152,11 +1689,139 @@
   /**
    * サブセクションタイトル
    */
-  function createSubsectionTitle(text) {
+  function createSubsectionTitle(text, required = false) {
     const title = document.createElement('h4');
-    title.textContent = text;
+    title.innerHTML = `${text}${required ? ' <span style="color: #ef4444;">*</span>' : ''}`;
     title.style.cssText = 'margin: 20px 0 12px 0; font-size: 15px; font-weight: 600; color: #475569; padding-left: 8px; border-left: 3px solid #3b82f6;';
     return title;
+  }
+
+  /**
+   * インラインラジオボタンフィールド（ラベルとラジオボタンが横並び）
+   */
+  function createInlineRadioField(label, name, section, options, currentValue) {
+    const field = document.createElement('div');
+    field.style.cssText = 'margin-bottom: 16px; display: flex; align-items: center; gap: 16px;';
+
+    const labelEl = document.createElement('span');
+    labelEl.textContent = label;
+    labelEl.style.cssText = 'font-size: 14px; font-weight: 500; color: #1e293b; min-width: 40px;';
+    field.appendChild(labelEl);
+
+    options.forEach(option => {
+      const optionLabel = document.createElement('label');
+      optionLabel.style.cssText = 'display: flex; align-items: center; gap: 6px; cursor: pointer;';
+
+      const radio = document.createElement('input');
+      radio.type = 'radio';
+      radio.name = `radio_${name}`;
+      radio.value = option.value;
+      radio.checked = currentValue === option.value;
+      radio.dataset.fieldName = name;
+      radio.dataset.section = section;
+
+      const optionText = document.createElement('span');
+      optionText.textContent = option.label;
+      optionText.style.cssText = 'font-size: 14px; color: #475569;';
+
+      optionLabel.appendChild(radio);
+      optionLabel.appendChild(optionText);
+      field.appendChild(optionLabel);
+    });
+
+    return field;
+  }
+
+  /**
+   * 条件付きフィールドの連動設定（汎用ヘルパー）
+   * ラジオボタンの選択に応じてテキストフィールドを有効化/無効化する
+   */
+  function setupConditionalField(radioField, textField, enableValue) {
+    const radios = radioField.querySelectorAll('input[type="radio"]');
+    const input = textField.querySelector('input[type="text"]');
+
+    const updateState = () => {
+      const isEnabled = Array.from(radios).find(r => r.checked)?.value === enableValue;
+      input.disabled = !isEnabled;
+      if (input.disabled) {
+        input.style.backgroundColor = '#f1f5f9';
+        input.style.color = '#94a3b8';
+      } else {
+        input.style.backgroundColor = '';
+        input.style.color = '';
+      }
+    };
+
+    radios.forEach(radio => {
+      radio.addEventListener('change', updateState);
+    });
+
+    updateState(); // 初期状態を設定
+  }
+
+  /**
+   * 身体状態フィールドセット生成（汎用ヘルパー）
+   * 「あり/なし」→「部位」→「程度」の3段階フィールドを生成
+   */
+  function createBodyConditionFields(label, namePrefix, section, data) {
+    const fields = [];
+
+    // 親フィールド（あり/なし）
+    const mainField = createRadioField(
+      label,
+      namePrefix,
+      section,
+      [
+        { label: 'なし', value: '0' },
+        { label: 'あり', value: '1' }
+      ],
+      data[namePrefix],
+      false
+    );
+    fields.push(mainField);
+
+    // 部位フィールド
+    const locationField = createTextField('部位', `${namePrefix}_location`, section, data[`${namePrefix}_location`], false);
+    locationField.style.marginLeft = '24px';
+    fields.push(locationField);
+
+    // 程度フィールド
+    const severityField = createRadioField(
+      '程度',
+      `${namePrefix}_severity`,
+      section,
+      [
+        { label: '軽', value: '1' },
+        { label: '中', value: '2' },
+        { label: '重', value: '3' }
+      ],
+      data[`${namePrefix}_severity`],
+      false
+    );
+    severityField.style.marginLeft = '24px';
+    fields.push(severityField);
+
+    // 連動ロジック設定
+    const radios = mainField.querySelectorAll('input[type="radio"]');
+    const updateDetailsState = () => {
+      const hasCondition = Array.from(radios).find(r => r.checked)?.value === '1';
+      [locationField, severityField].forEach(field => {
+        const inputs = field.querySelectorAll('input');
+        inputs.forEach(input => {
+          input.disabled = !hasCondition;
+          input.style.cursor = hasCondition ? '' : 'not-allowed';
+        });
+        field.style.opacity = hasCondition ? '' : '0.5';
+      });
+    };
+
+    radios.forEach(radio => {
+      radio.addEventListener('change', updateDetailsState);
+    });
+
+    updateDetailsState(); // 初期状態を設定
+
+    return fields;
   }
 
   /**
@@ -2196,7 +1861,7 @@
 
     options.forEach(option => {
       const optionLabel = document.createElement('label');
-      optionLabel.style.cssText = 'display: flex; align-items: center; gap: 6px; cursor: pointer;';
+      optionLabel.style.cssText = 'display: flex; align-items: center; gap: 6px; cursor: pointer; flex: 0 0 auto;';
 
       const radio = document.createElement('input');
       radio.type = 'radio';
@@ -2236,7 +1901,7 @@
     input.value = currentValue ? formatDate(currentValue) : '';
     input.dataset.fieldName = name;
     input.dataset.section = section;
-    input.style.cssText = 'padding: 8px 12px; border: 1px solid #cbd5e1; border-radius: 4px; font-size: 14px; width: 200px;';
+    input.style.cssText = 'padding: 8px 12px; border: 1px solid #cbd5e1; border-radius: 4px; font-size: 14px; width: 100%;';
 
     const warekiDisplay = document.createElement('div');
     warekiDisplay.style.cssText = 'margin-top: 4px; font-size: 13px; color: #64748b;';
@@ -2269,7 +1934,7 @@
     input.placeholder = placeholder;
     input.dataset.fieldName = name;
     input.dataset.section = section;
-    input.style.cssText = 'padding: 8px 12px; border: 1px solid #cbd5e1; border-radius: 4px; font-size: 14px; width: 100%; max-width: 500px;';
+    input.style.cssText = 'padding: 8px 12px; border: 1px solid #cbd5e1; border-radius: 4px; font-size: 14px; width: 100%;';
 
     field.appendChild(input);
     return field;
@@ -2334,14 +1999,14 @@
     field.appendChild(labelEl);
 
     const optionsContainer = document.createElement('div');
-    optionsContainer.style.cssText = 'display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px;';
+    optionsContainer.style.cssText = 'display: flex; flex-wrap: wrap; gap: 8px 24px;';
 
     // ビットフラグを配列に変換（左から順）
     const bitArray = (currentValue || '').split('');
 
     options.forEach((option, index) => {
       const optionLabel = document.createElement('label');
-      optionLabel.style.cssText = 'display: flex; align-items: center; gap: 6px; cursor: pointer;';
+      optionLabel.style.cssText = 'display: flex; align-items: center; gap: 6px; cursor: pointer; flex: 0 0 auto;';
 
       const checkbox = document.createElement('input');
       checkbox.type = 'checkbox';
@@ -2378,7 +2043,7 @@
     field.appendChild(labelEl);
 
     const optionsContainer = document.createElement('div');
-    optionsContainer.style.cssText = 'display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px;';
+    optionsContainer.style.cssText = 'display: flex; flex-wrap: wrap; gap: 8px 24px;';
 
     // ビットフラグを配列に変換（左から順）
     const bitArray = (currentValue || '').split('');
@@ -2388,7 +2053,7 @@
 
     options.forEach((option, index) => {
       const optionLabel = document.createElement('label');
-      optionLabel.style.cssText = 'display: flex; align-items: center; gap: 6px; cursor: pointer;';
+      optionLabel.style.cssText = 'display: flex; align-items: center; gap: 6px; cursor: pointer; flex: 0 0 auto;';
 
       const checkbox = document.createElement('input');
       checkbox.type = 'checkbox';
@@ -2404,10 +2069,10 @@
       optionLabel.appendChild(checkbox);
       optionLabel.appendChild(optionText);
 
-      // 最後のオプション（「その他」）の場合、右側にテキスト入力を追加
+      // 最後のオプション（「その他」）の場合、インラインでテキスト入力を追加
       if (index === options.length - 1) {
-        // 「その他」の行を全幅にする（横書き表示のため）
-        optionLabel.style.gridColumn = '1 / -1';
+        // 「その他」の行を全幅にして、Flexboxで横並び
+        optionLabel.style.cssText = 'display: flex; align-items: center; gap: 8px; grid-column: 1 / -1; cursor: pointer;';
 
         otherCheckbox = checkbox;
 
@@ -2417,8 +2082,8 @@
         otherInput.placeholder = '科名を入力';
         otherInput.dataset.fieldName = otherFieldName;
         otherInput.dataset.section = section;
-        otherInput.style.cssText = 'padding: 4px 8px; border: 1px solid #cbd5e1; border-radius: 4px; font-size: 13px; width: 200px; margin-left: 8px;';
-        otherInput.disabled = !checkbox.checked;
+        otherInput.style.cssText = 'padding: 8px 12px; border: 1px solid #cbd5e1; border-radius: 4px; font-size: 14px; flex: 1;';
+        otherInput.disabled = !otherCheckbox.checked;
         if (otherInput.disabled) {
           otherInput.style.backgroundColor = '#f1f5f9';
           otherInput.style.color = '#94a3b8';
@@ -2427,8 +2092,8 @@
         optionLabel.appendChild(otherInput);
 
         // チェックボックスの状態に応じてテキスト入力を有効/無効化
-        checkbox.addEventListener('change', () => {
-          otherInput.disabled = !checkbox.checked;
+        otherCheckbox.addEventListener('change', () => {
+          otherInput.disabled = !otherCheckbox.checked;
           if (otherInput.disabled) {
             otherInput.style.backgroundColor = '#f1f5f9';
             otherInput.style.color = '#94a3b8';
@@ -2450,7 +2115,7 @@
   /**
    * フォームからデータを収集
    */
-  function collectFormData(container, patientUuid) {
+  function collectFormData(container) {
     const formData = {
       basic_info: {},
       diagnosis: {},
@@ -2525,7 +2190,7 @@
     const modal = pageWindow.HenryCore.ui.showModal({
       title: '📋 主治医意見書入力フォーム',
       content: formHTML,
-      width: '900px',
+      width: '700px',
       actions: [
         {
           label: 'キャンセル',
@@ -2536,7 +2201,7 @@
           label: '💾 一時保存',
           onClick: () => {
             try {
-              const collected = collectFormData(formHTML, formData.basic_info.patient_uuid);
+              const collected = collectFormData(formHTML);
               // 自動入力項目をマージ
               Object.assign(collected.basic_info, formData.basic_info);
 
@@ -2555,7 +2220,7 @@
           label: '📄 Googleドキュメント作成',
           onClick: async () => {
             try {
-              const collected = collectFormData(formHTML, formData.basic_info.patient_uuid);
+              const collected = collectFormData(formHTML);
               Object.assign(collected.basic_info, formData.basic_info);
 
               // バリデーション

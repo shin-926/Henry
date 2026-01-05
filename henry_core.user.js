@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Henry Core
 // @namespace    https://henry-app.jp/
-// @version      2.7.1
-// @description  Henry スクリプト実行基盤 (v3.20準拠 / 単一施設運用 / プラグインレジストリ対応 / onClick転送修正)
+// @version      2.7.3
+// @description  Henry スクリプト実行基盤 (v3.20準拠 / 単一施設運用 / プラグインレジストリ対応 / showModal width対応)
 // @match        https://henry-app.jp/*
 // @updateURL    https://raw.githubusercontent.com/shin-926/Henry/main/henry_core.user.js
 // @downloadURL  https://raw.githubusercontent.com/shin-926/Henry/main/henry_core.user.js
@@ -25,7 +25,7 @@
     BASE_URL: 'https://henry-app.jp'
   };
 
-  console.log('[Henry Core] Initializing v2.7.1...');
+  console.log('[Henry Core] Initializing v2.7.3...');
 
   // ==========================================
   // 1. IndexedDB Manager (ハッシュ + エンドポイント管理)
@@ -442,7 +442,7 @@
       return btn;
     },
 
-    showModal: ({ title, content, actions = [] }) => {
+    showModal: ({ title, content, actions = [], width }) => {
       UI.init();
 
       if (!document.body) {
@@ -450,7 +450,7 @@
           UI._waitingForBody = true;
           window.addEventListener('DOMContentLoaded', () => {
             UI._waitingForBody = false;
-            UI.showModal({ title, content, actions });
+            UI.showModal({ title, content, actions, width });
           });
         }
         return { close: () => {} };
@@ -461,6 +461,9 @@
 
       const modal = document.createElement('div');
       modal.className = 'henry-modal-content';
+      if (width) {
+        modal.style.width = width;
+      }
 
       const h2 = document.createElement('div');
       h2.className = 'henry-modal-title';
@@ -754,5 +757,5 @@
     UI.init();
   }
 
-  console.log('[Henry Core] Ready v2.7.1');
+  console.log('[Henry Core] Ready v2.7.3');
 })();
