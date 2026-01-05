@@ -6,8 +6,8 @@
 // @match        https://henry-app.jp/*
 // @run-at       document-idle
 // @grant        none
-// @downloadURL  https://gist.githubusercontent.com/shin-926/6c1bef55bb24a6f5ef321ddbef2a65a0/raw/henry_focus_search_box.user.js
-// @updateURL    https://gist.githubusercontent.com/shin-926/6c1bef55bb24a6f5ef321ddbef2a65a0/raw/henry_focus_search_box.user.js
+// @downloadURL  https://raw.githubusercontent.com/shin-926/Henry/main/henry_search_focus.user.js
+// @updateURL    https://raw.githubusercontent.com/shin-926/Henry/main/henry_search_focus.user.js
 // ==/UserScript==
 
 (function () {

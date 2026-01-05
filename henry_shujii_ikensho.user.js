@@ -7,6 +7,8 @@
 // @require      https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js
 // @grant        none
 // @run-at       document-start
+// @updateURL    https://raw.githubusercontent.com/shin-926/Henry/main/henry_shujii_ikensho.user.js
+// @downloadURL  https://raw.githubusercontent.com/shin-926/Henry/main/henry_shujii_ikensho.user.js
 // ==/UserScript==
 
 (async function() {

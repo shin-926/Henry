@@ -9,6 +9,8 @@
 // @grant        GM_setValue
 // @grant        GM_getValue
 // @grant        GM_registerMenuCommand
+// @updateURL    https://raw.githubusercontent.com/shin-926/Henry/main/henry_rad_order_auto_printer.user.js
+// @downloadURL  https://raw.githubusercontent.com/shin-926/Henry/main/henry_rad_order_auto_printer.user.js
 // ==/UserScript==
 
 (function () {

@@ -9,6 +9,8 @@
 // @grant        GM_getValue
 // @grant        GM_addStyle
 // @run-at       document-idle
+// @updateURL    https://raw.githubusercontent.com/shin-926/Henry/main/henry_login_helper.user.js
+// @downloadURL  https://raw.githubusercontent.com/shin-926/Henry/main/henry_login_helper.user.js
 // ==/UserScript==
 
 /*

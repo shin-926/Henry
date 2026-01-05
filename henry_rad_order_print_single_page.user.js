@@ -7,8 +7,8 @@
 // @match        https://henry-app.jp/*
 // @grant        none
 // @icon         https://henry-app.jp/apple-touch-icon.png
-// @downloadURL  https://gist.githubusercontent.com/shin-926/78b40b49e8700283affa1f7c7b22ceba/raw/henry_adjust_print.user.js
-// @updateURL    https://gist.githubusercontent.com/shin-926/78b40b49e8700283affa1f7c7b22ceba/raw/henry_adjust_print.user.js
+// @downloadURL  https://raw.githubusercontent.com/shin-926/Henry/main/henry_rad_order_print_single_page.user.js
+// @updateURL    https://raw.githubusercontent.com/shin-926/Henry/main/henry_rad_order_print_single_page.user.js
 // ==/UserScript==
 
 (function() {
