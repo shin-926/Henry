@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         照射オーダー印刷を1枚にまとめる
 // @namespace    http://tampermonkey.net/
-// @version      11.0
+// @version      11.0.1
 // @description  照射オーダーの印刷が2枚になるのを防ぐ（mac環境で必要だと思われる）
 // @author       You
 // @match        https://henry-app.jp/*

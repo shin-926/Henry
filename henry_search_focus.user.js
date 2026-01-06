@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         検索パネル→検索ボックスにフォーカス＋☆入力
 // @namespace    http://tampermonkey.net/
-// @version      1.5.0
+// @version      1.5.1
 // @description  「/」で検索パネルを開き、検索ボックスにフォーカス＋☆を入力する（Reactの状態も更新）
 // @match        https://henry-app.jp/*
 // @run-at       document-idle

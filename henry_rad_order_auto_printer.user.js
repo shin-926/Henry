@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         照射オーダー自動印刷
 // @namespace    https://henry-app.jp/
-// @version      3.2.0
+// @version      3.2.1
 // @description  「外来 照射オーダー」の完了時、入力内容と一致するオーダーを特定して印刷ダイアログを開き、印刷ボタンを自動クリック
 // @author       Henry UI Lab
 // @match        https://henry-app.jp/*

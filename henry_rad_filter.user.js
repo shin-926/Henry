@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         照射オーダーセット検索支援
 // @namespace    https://henry-app.jp/
-// @version      5.12
+// @version      5.12.1
 // @description  入院照射オーダーのセット挿入モーダルにモダリティ・部位フィルタを追加 (HenryCore v2.3+ 対応 / Refactored)
 // @author       Henry UI Lab
 // @match        https://henry-app.jp/*
