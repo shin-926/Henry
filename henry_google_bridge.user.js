@@ -598,7 +598,7 @@
       });
 
       const overwriteItem = document.createElement('div');
-      overwriteItem.textContent = '📤 上書き保存';
+      overwriteItem.textContent = '上書き保存';
       Object.assign(overwriteItem.style, {
         padding: '12px 16px',
         cursor: 'pointer',
@@ -613,7 +613,7 @@
       };
 
       const newItem = document.createElement('div');
-      newItem.textContent = '📄 新規保存';
+      newItem.textContent = '新規保存';
       Object.assign(newItem.style, {
         padding: '12px 16px',
         cursor: 'pointer',
