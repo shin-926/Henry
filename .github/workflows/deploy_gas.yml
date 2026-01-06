@@ -30,6 +30,6 @@ jobs:
 
     - name: Deploy to Google Apps Script
       run: |
-        cd GAS # GASプロジェクトのディレクトリに移動
+        cd opinion_form_gas_project # GASプロジェクトのディレクトリに移動
         clasp push # コードをGoogle Apps Scriptにプッシュ
         # clasp deploy --version "Deploy from GitHub Actions ${{ github.sha }}" # 必要に応じてバージョンをデプロイ
