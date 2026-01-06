@@ -1,0 +1,35 @@
+name: Deploy Google Apps Script
+
+on:
+  push:
+    branches:
+      - main # mainブランチへのプッシュで実行
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '20' # またはGASがサポートする任意のバージョン
+
+    - name: Install clasp
+      run: npm install -g @google/clasp
+
+    - name: Authenticate clasp
+      env:
+        GAS_CLASPRC_JSON: ${{ secrets.GAS_CLASPRC_JSON }}
+      run: |
+        echo "$GAS_CLASPRC_JSON" > ~/.clasprc.json
+        cat ~/.clasprc.json # デバッグ用。シークレットが正しく書き込まれたか確認
+
+    - name: Deploy to Google Apps Script
+      run: |
+        cd GAS # GASプロジェクトのディレクトリに移動
+        clasp push # コードをGoogle Apps Scriptにプッシュ
+        # clasp deploy --version "Deploy from GitHub Actions ${{ github.sha }}" # 必要に応じてバージョンをデプロイ
