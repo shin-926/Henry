@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Google Docs連携
 // @namespace    https://henry-app.jp/
-// @version      2.10.2
+// @version      2.10.3
 // @description  HenryのファイルをGoogle形式で開き、編集後にHenryへ書き戻すための統合スクリプト。これ1つで両方のサイトで動作。
 // @match        https://henry-app.jp/*
 // @match        https://docs.google.com/document/d/*
@@ -468,16 +468,22 @@
           if (!Array.isArray(patientFiles)) return response;
 
           // フォルダごとにキャッシュを管理
+          // APIレスポンスにはparentFileFolderUuidが含まれないため、リクエストから付与
           const folderKey = requestFolderUuid ?? '__root__';
+          const filesWithFolder = patientFiles.map(f => ({
+            ...f,
+            parentFileFolderUuid: requestFolderUuid // リクエストのフォルダUUIDを付与
+          }));
+
           if (pageToken === '') {
             // 最初のページ: 新規キャッシュ
-            cachedFilesByFolder.set(folderKey, patientFiles);
-            debugLog('Henry', 'キャッシュ更新:', folderKey, patientFiles.length, '件');
+            cachedFilesByFolder.set(folderKey, filesWithFolder);
+            debugLog('Henry', 'キャッシュ更新:', folderKey, filesWithFolder.length, '件');
           } else {
             // ページネーション: 追加
             const existing = cachedFilesByFolder.get(folderKey) || [];
-            cachedFilesByFolder.set(folderKey, [...existing, ...patientFiles]);
-            debugLog('Henry', 'キャッシュ追加:', folderKey, patientFiles.length, '件, 合計:', cachedFilesByFolder.get(folderKey).length, '件');
+            cachedFilesByFolder.set(folderKey, [...existing, ...filesWithFolder]);
+            debugLog('Henry', 'キャッシュ追加:', folderKey, filesWithFolder.length, '件, 合計:', cachedFilesByFolder.get(folderKey).length, '件');
           }
         } catch (e) { debugError('Henry', 'Fetch Hook Error:', e.message); }
         return response;

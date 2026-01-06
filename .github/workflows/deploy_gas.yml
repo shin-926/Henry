@@ -43,6 +43,11 @@ jobs:
         GAS_CLASPRC_JSON: ${{ secrets.GAS_CLASPRC_JSON }}
       run: echo "$GAS_CLASPRC_JSON" > ~/.clasprc.json
     - name: Deploy Office Converter Project
+      env:
+        DEPLOYMENT_ID: ${{ secrets.OFFICE_CONVERTER_DEPLOYMENT_ID }}
       run: |
         cd office_converter_project
         clasp push
+        if [ -n "$DEPLOYMENT_ID" ]; then
+          clasp deploy -i "$DEPLOYMENT_ID" --description "Auto deploy from GitHub"
+        fi
