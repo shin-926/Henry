@@ -1,11 +1,13 @@
 // ==UserScript==
 // @name         主治医意見書フォーム（Google Docs連携版）
 // @namespace    https://henry-app.jp/
-// @version      1.4.3
+// @version      1.5.7
 // @description  主治医意見書の入力フォームとGoogle Docs出力（バリデーション機能付き）
 // @author       Henry Team
 // @match        https://henry-app.jp/*
-// @grant        none
+// @grant        GM_xmlhttpRequest
+// @connect      script.google.com
+// @connect      script.googleusercontent.com
 // @run-at       document-idle
 // ==/UserScript==
 
@@ -13,7 +15,7 @@
   'use strict';
 
   const SCRIPT_NAME = 'OpinionForm';
-  const VERSION = '1.4.3';
+  const VERSION = '1.5.7';
 
   // 医療機関情報（ハードコード）
   const INSTITUTION_INFO = {
@@ -27,6 +29,9 @@
   // localStorage設定
   const STORAGE_KEY_PREFIX = 'henry_opinion_draft_';
   const MAX_DRAFT_AGE_DAYS = 30;
+
+  // Google Apps Script WebアプリURL（デプロイ後に設定）
+  const GAS_WEB_APP_URL = 'https://script.google.com/a/macros/maokahp.net/s/AKfycbzjHbXAqcLv-uW4EGIS15R1P81Jt6pB03eNjxPCvJPiV5IY8Ba29bx2v7NgXw9vTMidjg/exec';
 
   let log = null;
 
@@ -223,6 +228,91 @@
   }
 
   // =============================================================================
+  // Google Docs生成
+  // =============================================================================
+
+  /**
+   * Google Apps Scriptを呼び出してドキュメントを生成
+   * @param {Object} formData - フォームデータ
+   * @param {string} fileName - ファイル名
+   * @returns {Promise<Object>} 結果
+   */
+  function createGoogleDoc(formData, fileName) {
+    return new Promise((resolve, reject) => {
+      if (!GAS_WEB_APP_URL) {
+        reject(new Error('GAS_WEB_APP_URLが設定されていません。スクリプトの設定を確認してください。'));
+        return;
+      }
+
+      const payload = JSON.stringify({
+        formData: formData,
+        fileName: fileName
+      });
+
+      // GM_xmlhttpRequestが利用可能な場合（Tampermonkey）
+      if (typeof GM_xmlhttpRequest !== 'undefined') {
+        GM_xmlhttpRequest({
+          method: 'POST',
+          url: GAS_WEB_APP_URL,
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          data: payload,
+          onload: function(response) {
+            try {
+              const result = JSON.parse(response.responseText);
+              if (result.success) {
+                resolve(result);
+              } else {
+                reject(new Error(result.error || 'ドキュメント生成に失敗しました'));
+              }
+            } catch (e) {
+              reject(new Error('レスポンスの解析に失敗しました: ' + e.message));
+            }
+          },
+          onerror: function(error) {
+            reject(new Error('通信エラー: ' + (error.statusText || 'ネットワークエラー')));
+          }
+        });
+      } else {
+        // fetch fallback（CORSの制限あり）
+        fetch(GAS_WEB_APP_URL, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: payload,
+          mode: 'cors'
+        })
+        .then(res => res.json())
+        .then(result => {
+          if (result.success) {
+            resolve(result);
+          } else {
+            reject(new Error(result.error || 'ドキュメント生成に失敗しました'));
+          }
+        })
+        .catch(e => reject(new Error('通信エラー: ' + e.message)));
+      }
+    });
+  }
+
+  /**
+   * ファイル名を生成
+   * @param {Object} formData - フォームデータ
+   * @returns {string} ファイル名
+   */
+  function generateFileName(formData) {
+    const dateStr = formData.basic_info?.date_of_writing || getTodayString();
+    const patientName = formData.basic_info?.patient_name || '不明';
+    // YYYYMMDD形式をYYYY-MM-DD形式に変換
+    const formattedDate = dateStr.length === 8
+      ? `${dateStr.slice(0, 4)}-${dateStr.slice(4, 6)}-${dateStr.slice(6, 8)}`
+      : dateStr;
+    return `${formattedDate}_${patientName}`;
+  }
+
+  // =============================================================================
   // 患者情報取得
   // =============================================================================
 
@@ -302,11 +392,145 @@
         return '';
       }
 
-      return me.name || '';
+      return (me.name || '').replace(/　/g, ' ');
     } catch (e) {
       log?.error('医師情報取得エラー:', e.message);
       return '';
     }
+  }
+
+  // =============================================================================
+  // メッセージ表示
+  // =============================================================================
+
+  /**
+   * フォーム内にメッセージを表示
+   * @param {string} message - 表示するメッセージ
+   * @param {'error'|'success'|'info'} type - メッセージタイプ
+   */
+  function showFormMessage(message, type = 'info') {
+    const area = document.getElementById('form-message-area');
+    if (!area) return;
+
+    const colors = {
+      error: { bg: '#fef2f2', border: '#fca5a5', text: '#991b1b' },
+      success: { bg: '#f0fdf4', border: '#86efac', text: '#166534' },
+      info: { bg: '#eff6ff', border: '#93c5fd', text: '#1e40af' }
+    };
+    const c = colors[type] || colors.info;
+
+    area.style.display = 'block';
+    area.style.backgroundColor = c.bg;
+    area.style.border = `1px solid ${c.border}`;
+    area.style.color = c.text;
+    area.style.whiteSpace = 'pre-wrap';
+    area.textContent = message;
+
+    // エラー時はスクロールして表示
+    if (type === 'error') {
+      area.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+
+    // 成功メッセージは3秒後に非表示
+    if (type === 'success') {
+      setTimeout(() => {
+        area.style.display = 'none';
+      }, 3000);
+    }
+  }
+
+  /**
+   * メッセージを非表示
+   */
+  function hideFormMessage() {
+    const area = document.getElementById('form-message-area');
+    if (area) {
+      area.style.display = 'none';
+    }
+  }
+
+  /**
+   * テストデータをフォームに入力（開発用）
+   * 記述フィールドは固定値、選択フィールドはランダム
+   * @param {HTMLElement} container - フォームコンテナ要素
+   */
+  function fillTestData(container) {
+    // 固定の記述データ（section.fieldName形式）
+    const fixedTextData = {
+      'basic_info.last_examination_date': new Date().toISOString().split('T')[0],
+      'diagnosis.diagnosis_1_name': '脳梗塞後遺症',
+      'diagnosis.diagnosis_1_onset': '令和4年3月15日',
+      'diagnosis.diagnosis_2_name': '高血圧症',
+      'diagnosis.diagnosis_2_onset': '令和2年5月頃',
+      'diagnosis.course_and_treatment': '令和4年3月に脳梗塞を発症し、急性期病院にて加療。その後リハビリテーション病院を経て自宅退院。現在は外来にて経過観察中。降圧剤、抗血小板薬を継続処方中。',
+      'diagnosis.symptom_unstable_details': '血圧変動が大きい',
+      'diagnosis.other_department_names': '循環器内科',
+      'mental_physical_state.height': '165',
+      'mental_physical_state.weight': '58',
+      'mental_physical_state.psychiatric_symptom_name': 'うつ状態',
+      'mental_physical_state.specialist_department': '精神科',
+      'mental_physical_state.limb_loss_location': '左下肢',
+      'mental_physical_state.paralysis_other_location': '顔面',
+      'mental_physical_state.muscle_weakness_location': '左上下肢',
+      'mental_physical_state.joint_contracture_location': '左肩関節',
+      'mental_physical_state.joint_pain_location': '左膝関節',
+      'mental_physical_state.pressure_ulcer_location': '仙骨部',
+      'mental_physical_state.other_skin_disease_location': '両下腿',
+      'mental_physical_state.other_peripheral_symptoms': '介護拒否',
+      'life_function.nutrition_diet_notes': '塩分制限あり',
+      'life_function.other_condition_name': '脱水',
+      'life_function.response_policy': '水分摂取を促す',
+      'life_function.other_medical_management': '訪問入浴',
+      'life_function.service_blood_pressure_notes': '収縮期180以上で中止',
+      'life_function.service_eating_notes': '嚥下状態を確認',
+      'life_function.service_swallowing_notes': 'とろみ付与',
+      'life_function.service_mobility_notes': '歩行時はふらつきあり、見守り必要',
+      'life_function.service_exercise_notes': '過負荷に注意',
+      'life_function.service_other_notes': '特になし',
+      'life_function.infection_name': 'MRSA',
+      'special_notes.other_notes': '左片麻痺があるが、日常生活は概ね自立。歩行時の転倒リスクに注意が必要。'
+    };
+
+    // 記述フィールドに固定値を入力
+    Object.entries(fixedTextData).forEach(([key, value]) => {
+      const [section, fieldName] = key.split('.');
+      // テキスト入力
+      const textInput = container.querySelector(`input[type="text"][data-section="${section}"][data-field-name="${fieldName}"], textarea[data-section="${section}"][data-field-name="${fieldName}"]`);
+      if (textInput) {
+        textInput.value = value;
+        textInput.dispatchEvent(new Event('input', { bubbles: true }));
+        return;
+      }
+      // 日付入力
+      const dateInput = container.querySelector(`input[type="date"][data-section="${section}"][data-field-name="${fieldName}"]`);
+      if (dateInput) {
+        dateInput.value = value;
+        dateInput.dispatchEvent(new Event('change', { bubbles: true }));
+      }
+    });
+
+    // ラジオボタンをランダムに選択
+    const radioGroups = new Map();
+    container.querySelectorAll('input[type="radio"][data-section][data-field-name]').forEach(radio => {
+      const key = `${radio.dataset.section}.${radio.dataset.fieldName}`;
+      if (!radioGroups.has(key)) {
+        radioGroups.set(key, []);
+      }
+      radioGroups.get(key).push(radio);
+    });
+    radioGroups.forEach(radios => {
+      const randomRadio = radios[Math.floor(Math.random() * radios.length)];
+      randomRadio.checked = true;
+      randomRadio.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+
+    // チェックボックスをランダムに選択
+    container.querySelectorAll('input[type="checkbox"][data-section][data-field-name]').forEach(cb => {
+      cb.checked = Math.random() > 0.7; // 30%の確率でチェック
+      cb.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+
+    showFormMessage('テストデータを入力しました（選択項目はランダム）', 'success');
   }
 
   // =============================================================================
@@ -348,15 +572,12 @@
       'mental_physical_state.weight': '体重',
       'mental_physical_state.weight_change': '体重の変化',
 
-      // ADL
-      'adl.outdoor_walking': '屋外歩行',
-      'adl.wheelchair_use': '車いすの使用',
-      'adl.walking_aids_use': '歩行補助具・装具の使用',
-      'adl.eating': '食事行為',
-      'adl.current_nutrition_status': '現在の栄養状態',
-
-      // サービス
-      'service_provision.functional_improvement_outlook': '生活機能改善見通し'
+      // 生活機能
+      'life_function.outdoor_walking': '屋外歩行',
+      'life_function.wheelchair_use': '車いすの使用',
+      'life_function.eating_behavior': '食事行為',
+      'life_function.current_nutrition_status': '現在の栄養状態',
+      'life_function.life_function_improvement_outlook': '生活機能改善見通し'
     };
 
     Object.entries(requiredFields).forEach(([path, label]) => {
@@ -612,6 +833,12 @@
   function createFormHTML(formData) {
     const container = document.createElement('div');
     container.style.cssText = 'max-height: 70vh; overflow-y: auto; padding: 20px;';
+
+    // メッセージ表示領域
+    const messageArea = document.createElement('div');
+    messageArea.id = 'form-message-area';
+    messageArea.style.cssText = 'display: none; padding: 12px 16px; margin-bottom: 16px; border-radius: 6px; font-size: 14px;';
+    container.appendChild(messageArea);
 
     // セクション1: 基本情報
     container.appendChild(createSection1(formData));
@@ -2232,58 +2459,112 @@
    * フォームモーダル表示
    */
   function showFormModal(pageWindow, formHTML, formData) {
+    // 変更追跡フラグ
+    let isDirty = false;
+
+    // フォーム変更を監視
+    formHTML.addEventListener('input', () => { isDirty = true; });
+    formHTML.addEventListener('change', () => { isDirty = true; });
+
     const modal = pageWindow.HenryCore.ui.showModal({
-      title: '📋 主治医意見書入力フォーム',
+      title: '主治医意見書入力フォーム',
       content: formHTML,
       width: '700px',
+      closeOnOverlayClick: false,
       actions: [
+        {
+          label: 'テストデータ',
+          variant: 'secondary',
+          autoClose: false,
+          onClick: () => fillTestData(formHTML)
+        },
         {
           label: 'キャンセル',
           variant: 'secondary',
-          onClick: () => modal.close()
-        },
-        {
-          label: '💾 一時保存',
+          autoClose: false,
           onClick: () => {
-            try {
-              const collected = collectFormData(formHTML);
-              // 自動入力項目をマージ
-              Object.assign(collected.basic_info, formData.basic_info);
-
-              if (saveDraft(formData.basic_info.patient_uuid, collected)) {
-                alert('下書きを保存しました（30日間保存されます）');
-              } else {
-                alert('保存に失敗しました');
-              }
-            } catch (e) {
-              log?.error('一時保存失敗', e.message);
-              alert(`保存に失敗しました: ${e.message}`);
+            if (!isDirty || confirm('入力内容が破棄されます。本当に閉じますか？')) {
+              modal.close();
             }
           }
         },
         {
-          label: '📄 Googleドキュメント作成',
-          onClick: async () => {
+          label: '一時保存',
+          autoClose: false,
+          onClick: (e, button) => {
             try {
               const collected = collectFormData(formHTML);
-              Object.assign(collected.basic_info, formData.basic_info);
+              // 自動入力項目をマージ（収集値を優先）
+              collected.basic_info = { ...formData.basic_info, ...collected.basic_info };
+
+              if (saveDraft(formData.basic_info.patient_uuid, collected)) {
+                isDirty = false;
+                // ボタンテキストを一時的に変更（目立たない通知）
+                if (button) {
+                  const originalText = button.textContent;
+                  button.textContent = '✓ 保存しました';
+                  setTimeout(() => { button.textContent = originalText; }, 1500);
+                }
+              } else {
+                showFormMessage('保存に失敗しました', 'error');
+              }
+            } catch (e) {
+              log?.error('一時保存失敗', e.message);
+              showFormMessage(`保存に失敗しました: ${e.message}`, 'error');
+            }
+          }
+        },
+        {
+          label: 'Googleドキュメント作成',
+          autoClose: false,
+          onClick: async (e, button) => {
+            const originalText = button.textContent;
+            try {
+              const collected = collectFormData(formHTML);
+              // 自動入力項目をマージ（収集値を優先）
+              collected.basic_info = { ...formData.basic_info, ...collected.basic_info };
 
               // バリデーション
               const errors = validateFormData(collected);
               if (errors.length > 0) {
                 const errorMessage = '以下の項目に入力エラーがあります：\n\n' + errors.join('\n');
-                alert(errorMessage);
+                showFormMessage(errorMessage, 'error');
                 log?.warn('バリデーションエラー:', errors);
-                return;  // 保存を中止
+                return;
               }
+              hideFormMessage(); // エラーがなければメッセージをクリア
 
-              // TODO: Googleドキュメント作成
-              alert('Googleドキュメント作成機能は次のステップで実装します');
+              // ファイル名生成
+              const fileName = generateFileName(collected);
 
-              // modal.close();
+              // 処理中表示
+              button.textContent = 'ドキュメント作成中...';
+              button.disabled = true;
+
+              try {
+                // Google Docs生成
+                const result = await createGoogleDoc(collected, fileName);
+
+                // 成功時：ドキュメントを新しいタブで開く
+                if (result.documentUrl) {
+                  window.open(result.documentUrl, '_blank');
+
+                  // 下書きを削除（任意）
+                  // localStorage.removeItem(`${STORAGE_KEY_PREFIX}${formData.basic_info.patient_uuid}`);
+
+                  modal.close();
+                }
+              } catch (apiError) {
+                showFormMessage(`ドキュメント作成エラー：\n${apiError.message}`, 'error');
+                log?.error('GAS API エラー:', apiError.message);
+              } finally {
+                // ボタンを元に戻す
+                button.textContent = originalText;
+                button.disabled = false;
+              }
             } catch (e) {
               log?.error('ドキュメント作成失敗', e.message);
-              alert(`エラーが発生しました: ${e.message}`);
+              showFormMessage(`エラーが発生しました: ${e.message}`, 'error');
             }
           }
         }

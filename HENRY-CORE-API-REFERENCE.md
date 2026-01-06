@@ -1,6 +1,6 @@
-# Henry API リファレンス (v2.6.9)
+# Henry API リファレンス (v2.7.4)
 
-> **対象**: Henry Core v2.6.0 以降を使用するスクリプト開発者向けの詳細仕様書
+> **対象**: Henry Core v2.7.0 以降を使用するスクリプト開発者向けの詳細仕様書
 
 このドキュメントは、Henry Core が提供するAPIの詳細な仕様を記載しています。基本的な開発ルールは `CLAUDE.md` を参照してください。
 
@@ -531,10 +531,13 @@ document.body.appendChild(saveBtn);
 showModal(props: {
   title: string;
   content: string | HTMLElement;
+  width?: string;
+  closeOnOverlayClick?: boolean;
   actions?: Array<{
     label: string;
     variant?: 'primary' | 'secondary';
-    onClick?: () => void;
+    autoClose?: boolean;
+    onClick?: (event: Event, button: HTMLElement) => void;
   }>;
 }): { close: () => void }
 ```
@@ -544,7 +547,10 @@ showModal(props: {
 |------|-----|-----------|------|
 | `title` | string | - | モーダルのタイトル |
 | `content` | string \| HTMLElement | - | 本文（HTML文字列またはDOM要素） |
+| `width` | string | - | モーダルの幅（例: `'700px'`） |
+| `closeOnOverlayClick` | boolean | `true` | `false`でオーバーレイクリックによる閉じを無効化 |
 | `actions` | array | `[]` | ボタンの配列 |
+| `actions[].autoClose` | boolean | `true` | `false`でボタンクリック後の自動closeを無効化 |
 
 **戻り値**: `{ close: () => void }` - モーダルを閉じるための関数
 
@@ -586,6 +592,36 @@ const modal = HenryCore.ui.showModal({
   title: 'エクスポート確認',
   content: contentEl,
   actions: [{ label: 'OK' }]
+});
+```
+
+**閉じにくいモーダルの例** (v2.7.4+):
+```javascript
+const modal = HenryCore.ui.showModal({
+  title: '入力フォーム',
+  content: formElement,
+  width: '700px',
+  closeOnOverlayClick: false,  // オーバーレイクリックで閉じない
+  actions: [
+    {
+      label: 'キャンセル',
+      variant: 'secondary',
+      autoClose: false,  // 自動で閉じない
+      onClick: () => {
+        if (confirm('入力内容が破棄されます。本当に閉じますか？')) {
+          modal.close();
+        }
+      }
+    },
+    {
+      label: '保存',
+      autoClose: false,  // 自動で閉じない（成功時のみ手動で閉じる）
+      onClick: async () => {
+        const success = await saveData();
+        if (success) modal.close();
+      }
+    }
+  ]
 });
 ```
 
@@ -772,4 +808,5 @@ if (!hashes['GetPatient']) {
 
 | Version | Date | Changes |
 |---------|------|---------|
+| v2.7.4 | 2026-01-05 | `showModal`に`closeOnOverlayClick`、`width`、`action.autoClose`オプションを追加 |
 | v2.6.9 | 2026-01-04 | 初版作成。Henry Core v2.6.9 の仕様を文書化。デバッグメソッド（dumpHashes, clearHashes）を追加 |

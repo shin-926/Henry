@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Henry Core
 // @namespace    https://henry-app.jp/
-// @version      2.7.3
-// @description  Henry スクリプト実行基盤 (v3.20準拠 / 単一施設運用 / プラグインレジストリ対応 / showModal width対応)
+// @version      2.7.5
+// @description  Henry スクリプト実行基盤 (v3.20準拠 / 単一施設運用 / プラグインレジストリ対応 / showModal onClick引数追加)
 // @match        https://henry-app.jp/*
 // @updateURL    https://raw.githubusercontent.com/shin-926/Henry/main/henry_core.user.js
 // @downloadURL  https://raw.githubusercontent.com/shin-926/Henry/main/henry_core.user.js
@@ -25,7 +25,7 @@
     BASE_URL: 'https://henry-app.jp'
   };
 
-  console.log('[Henry Core] Initializing v2.7.3...');
+  console.log('[Henry Core] Initializing v2.7.4...');
 
   // ==========================================
   // 1. IndexedDB Manager (ハッシュ + エンドポイント管理)
@@ -442,7 +442,7 @@
       return btn;
     },
 
-    showModal: ({ title, content, actions = [], width }) => {
+    showModal: ({ title, content, actions = [], width, closeOnOverlayClick = true }) => {
       UI.init();
 
       if (!document.body) {
@@ -450,7 +450,7 @@
           UI._waitingForBody = true;
           window.addEventListener('DOMContentLoaded', () => {
             UI._waitingForBody = false;
-            UI.showModal({ title, content, actions, width });
+            UI.showModal({ title, content, actions, width, closeOnOverlayClick });
           });
         }
         return { close: () => {} };
@@ -497,9 +497,10 @@
         const btn = UI.createButton({
           label: action.label,
           variant: action.variant || 'primary',
-          onClick: () => {
-            if (action.onClick) action.onClick();
-            close();
+          onClick: (e) => {
+            if (action.onClick) action.onClick(e, btn);
+            // autoClose: false の場合は自動で閉じない
+            if (action.autoClose !== false) close();
           }
         });
         footer.appendChild(btn);
@@ -509,9 +510,12 @@
       overlay.appendChild(modal);
       document.body.appendChild(overlay);
 
-      overlay.addEventListener('click', (e) => {
-        if (e.target === overlay) close();
-      });
+      // closeOnOverlayClick: false の場合はオーバーレイクリックで閉じない
+      if (closeOnOverlayClick) {
+        overlay.addEventListener('click', (e) => {
+          if (e.target === overlay) close();
+        });
+      }
 
       return { close };
     }
