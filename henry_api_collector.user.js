@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry API Collector
 // @namespace    https://henry-app.jp/
-// @version      2.8.0
+// @version      2.9.0
 // @description  Henry の GraphQL API 仕様を自動収集（Henry Core v2.3+ 連携）
 // @match        https://henry-app.jp/*
 // @match        https://*.henry-app.jp/*
@@ -22,7 +22,7 @@
   function main() {
     const CONFIG = {
       DB_NAME: 'HenryAPICollector',
-      DB_VERSION: 5,
+      DB_VERSION: 6,
       STORE_NAME: 'apiSpecs',
       META_STORE: 'meta',
       MAX_ARRAY_SAMPLES: 1,
@@ -111,6 +111,15 @@
         return originalFetch(input, init);
       }
 
+      // エンドポイントを抽出（/graphql or /graphql-v2）
+      let endpoint = '/graphql';
+      try {
+        const urlObj = new URL(url);
+        endpoint = urlObj.pathname; // e.g., '/graphql' or '/graphql-v2'
+      } catch {
+        // URL解析失敗時はデフォルト値を使用
+      }
+
       let operationName, sha256Hash, variables;
 
       try {
@@ -147,6 +156,7 @@
           const spec = {
             operationName,
             sha256Hash,
+            endpoint,
             variables: extractVariablesStructure(variables),
             schema: extractSchema(data),
             collectedAt: new Date().toISOString()
@@ -409,6 +419,7 @@
         lines.push(`## ${spec.operationName}`);
         lines.push('');
         lines.push(`**Hash**: \`${spec.sha256Hash}\``);
+        lines.push(`**Endpoint**: \`${spec.endpoint || '/graphql'}\``);
         lines.push('');
         lines.push('### Variables');
         lines.push('');
