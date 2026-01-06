@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Google Docs連携
 // @namespace    https://henry-app.jp/
-// @version      2.8.6
+// @version      2.8.7
 // @description  HenryのファイルをGoogle形式で開き、編集後にHenryへ書き戻すための統合スクリプト。これ1つで両方のサイトで動作。
 // @match        https://henry-app.jp/*
 // @match        https://docs.google.com/document/d/*
@@ -620,12 +620,12 @@
         display: 'none',
         position: 'absolute',
         top: '40px',
+        left: '0',
         right: '0',
         backgroundColor: '#fff',
         border: '1px solid #ddd',
         borderRadius: '8px',
         boxShadow: '0 2px 10px rgba(0,0,0,0.2)',
-        minWidth: '150px',
         zIndex: '1001'
       });
 
