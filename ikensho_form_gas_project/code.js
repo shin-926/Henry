@@ -470,7 +470,7 @@ function toWareki(dateStr) {
  * 正規表現の特殊文字をエスケープ
  */
 function escapeRegExp(string) {
-  return string.replace(/[.*+?^${}()|[\]/g, '\$&');
+  return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
 /**
