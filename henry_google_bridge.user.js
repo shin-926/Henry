@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Google Docs連携
 // @namespace    https://henry-app.jp/
-// @version      2.8.3
+// @version      2.8.4
 // @description  HenryのファイルをGoogle形式で開き、編集後にHenryへ書き戻すための統合スクリプト。これ1つで両方のサイトで動作。
 // @match        https://henry-app.jp/*
 // @match        https://docs.google.com/document/d/*
@@ -48,6 +48,33 @@
 
   function debugError(context, ...args) {
     console.error(`[HenryBridge:${context}]`, ...args);
+  }
+
+  function showToast(message, isError = false, duration = 3000) {
+    const toast = document.createElement('div');
+    toast.textContent = message;
+    Object.assign(toast.style, {
+      position: 'fixed',
+      bottom: '24px',
+      left: '50%',
+      transform: 'translateX(-50%)',
+      padding: '12px 24px',
+      borderRadius: '8px',
+      backgroundColor: isError ? '#d93025' : '#1a73e8',
+      color: '#fff',
+      fontSize: '14px',
+      fontWeight: '500',
+      zIndex: '10000',
+      boxShadow: '0 4px 12px rgba(0,0,0,0.3)',
+      opacity: '0',
+      transition: 'opacity 0.3s ease'
+    });
+    document.body.appendChild(toast);
+    requestAnimationFrame(() => { toast.style.opacity = '1'; });
+    setTimeout(() => {
+      toast.style.opacity = '0';
+      setTimeout(() => toast.remove(), 300);
+    }, duration);
   }
 
   function decodeJWT(token) {
@@ -769,11 +796,7 @@
 
       const { uploadUrl, fileUrl } = uploadUrlResult.getFileUploadUrl;
 
-      let fileName = data.fileName;
-      const extension = mimeType.includes('spreadsheet') ? 'xlsx' : 'docx';
-      if (!fileName.endsWith(`.${extension}`)) {
-        fileName = `${fileName}.${extension}`;
-      }
+      const fileName = data.fileName;
 
       debugLog('Docs', 'Step 2: GCSアップロード...');
       await uploadToGCS(uploadUrl, data.blobBase64, mimeType, fileName);
@@ -919,12 +942,12 @@
         notifyHenryToRefresh(fileData.patientId);
 
         const actionText = mode === 'overwrite' ? '上書き保存' : '新規保存';
-        alert(`✅ Henryへ${actionText}しました\nファイル名: ${fileData.fileName}.${exportFormat}`);
+        showToast(`✅ Henryへ${actionText}しました: ${fileData.fileName}`);
 
       } catch (e) {
         debugError('Docs', '=== エラー発生 ===');
         debugError('Docs', '  Message:', e.message);
-        alert(`❌ エラー: ${e.message}`);
+        showToast(`❌ エラー: ${e.message}`, true, 5000);
       } finally {
         while (btn.firstChild) {
           btn.removeChild(btn.firstChild);
