@@ -141,6 +141,8 @@ getToken(): Promise<string | null>
 
 **戻り値**: `Promise<string | null>` - Firebaseトークン、または取得失敗時は `null`
 
+**注意**: このメソッドはFirebaseから有効期限内のトークンのみを取得する。Firebaseが自動的にトークンをリフレッシュするため、Henryにログインしている限りトークン期限切れを心配する必要はない。
+
 **使用例**:
 ```javascript
 const token = await HenryCore.getToken();
