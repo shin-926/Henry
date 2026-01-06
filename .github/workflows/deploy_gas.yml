@@ -6,7 +6,7 @@ on:
       - main # mainブランチへのプッシュで実行
 
 jobs:
-  deploy-opinion-form:
+  deploy-ikensho-form:
     runs-on: ubuntu-latest
     steps:
     - name: Checkout code
@@ -21,9 +21,9 @@ jobs:
       env:
         GAS_CLASPRC_JSON: ${{ secrets.GAS_CLASPRC_JSON }}
       run: echo "$GAS_CLASPRC_JSON" > ~/.clasprc.json
-    - name: Deploy Opinion Form Project
+    - name: Deploy Ikensho Form Project
       run: |
-        cd opinion_form_gas_project
+        cd ikensho_form_gas_project
         clasp push
 
   deploy-office-converter:
