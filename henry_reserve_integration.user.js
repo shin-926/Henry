@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry ⇔ 予約システム統合連携
 // @namespace    https://github.com/shin-926/Tampermonkey
-// @version      1.1.1
+// @version      1.2.0
 // @description  Henryカルテと予約システム間の双方向連携（再診予約・患者プレビュー・ページ遷移）
 // @match        https://henry-app.jp/*
 // @match        https://manage-maokahp.reserve.ne.jp/*
@@ -260,6 +260,54 @@
   // ==========================================
   if (isReserve) {
     log.info('予約システムモード起動');
+
+    // --------------------------------------------
+    // セットアップ状態チェック
+    // --------------------------------------------
+    function checkSetupStatus() {
+      const token = GM_getValue('henry-token', null);
+      const listPatientsHash = GM_getValue('henry-list-patients-hash', null);
+      const encountersHash = GM_getValue('henry-encounters-hash', null);
+
+      if (!token) {
+        return {
+          ok: false,
+          message: '【初回セットアップが必要です】\n\n' +
+            'Henryにログインしてください。\n\n' +
+            '【手順】\n' +
+            '1. Henry（https://henry-app.jp）を開く\n' +
+            '2. ログインする\n' +
+            '3. この画面に戻って再度お試しください'
+        };
+      }
+
+      if (!listPatientsHash) {
+        return {
+          ok: false,
+          message: '【初回セットアップが必要です】\n\n' +
+            'Henryで患者一覧を表示してください。\n\n' +
+            '【手順】\n' +
+            '1. Henry（https://henry-app.jp）を開く\n' +
+            '2. 画面左上の「患者」メニューから患者一覧を表示する\n' +
+            '3. この画面に戻って再度お試しください'
+        };
+      }
+
+      if (!encountersHash) {
+        return {
+          ok: false,
+          needEncountersHash: true,
+          message: '【初回セットアップが必要です】\n\n' +
+            'Henryで患者の外来記録を表示してください。\n\n' +
+            '【手順】\n' +
+            '1. Henry（https://henry-app.jp）を開く\n' +
+            '2. 任意の患者ページを開き、外来記録タブを表示する\n' +
+            '3. この画面に戻って再度お試しください'
+        };
+      }
+
+      return { ok: true };
+    }
 
     // --------------------------------------------
     // UUIDキャッシュ管理
@@ -617,6 +665,16 @@
         const patientNumber = target.textContent.trim();
         if (!patientNumber) return;
 
+        // セットアップ状態チェック
+        const setup = checkSetupStatus();
+        if (!setup.ok) {
+          const shortMsg = setup.needEncountersHash
+            ? '外来記録プレビューを使用するには初回セットアップが必要です。<br>患者番号をクリックすると詳細が表示されます。'
+            : '初回セットアップが必要です。<br>患者番号をクリックすると詳細が表示されます。';
+          showPreview(target, `<div style="color:#c00;">${shortMsg}</div>`);
+          return;
+        }
+
         const uuid = await getPatientUuid(patientNumber);
         if (!uuid) {
           showPreview(target, '<div style="color:#c00;">患者が見つかりません</div>');
@@ -647,6 +705,34 @@
 
       const patientNumber = target.textContent.trim();
       if (!patientNumber) return;
+
+      // セットアップ状態チェック（患者ページ遷移にはencountersHashは不要）
+      const token = GM_getValue('henry-token', null);
+      const listPatientsHash = GM_getValue('henry-list-patients-hash', null);
+
+      if (!token) {
+        alert(
+          '【初回セットアップが必要です】\n\n' +
+          'Henryにログインしてください。\n\n' +
+          '【手順】\n' +
+          '1. Henry（https://henry-app.jp）を開く\n' +
+          '2. ログインする\n' +
+          '3. この画面に戻って再度お試しください'
+        );
+        return;
+      }
+
+      if (!listPatientsHash) {
+        alert(
+          '【初回セットアップが必要です】\n\n' +
+          'Henryで患者一覧を表示してください。\n\n' +
+          '【手順】\n' +
+          '1. Henry（https://henry-app.jp）を開く\n' +
+          '2. 画面左上の「患者」メニューから患者一覧を表示する\n' +
+          '3. この画面に戻って再度お試しください'
+        );
+        return;
+      }
 
       const uuid = await getPatientUuid(patientNumber);
       if (!uuid) {
