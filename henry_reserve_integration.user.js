@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry ⇔ 予約システム統合連携
 // @namespace    https://github.com/shin-926/Tampermonkey
-// @version      1.2.0
+// @version      1.3.0
 // @description  Henryカルテと予約システム間の双方向連携（再診予約・患者プレビュー・ページ遷移）
 // @match        https://henry-app.jp/*
 // @match        https://manage-maokahp.reserve.ne.jp/*
@@ -89,16 +89,31 @@
     // --------------------------------------------
     // HenryCore待機
     // --------------------------------------------
+    const HENRY_CORE_URL = 'https://raw.githubusercontent.com/shin-926/Henry/main/henry_core.user.js';
+
     async function waitForHenryCore(timeout = 5000) {
       let waited = 0;
       while (!unsafeWindow.HenryCore) {
         await new Promise(r => setTimeout(r, 100));
         waited += 100;
         if (waited > timeout) {
-          throw new Error('HenryCoreが見つかりません。「Henry Core」スクリプトが有効か確認してください。');
+          return null;
         }
       }
       return unsafeWindow.HenryCore;
+    }
+
+    function showHenryCoreRequiredMessage() {
+      alert(
+        '【Henry Coreが必要です】\n\n' +
+        'このスクリプトを使用するには「Henry Core」が必要です。\n\n' +
+        '【インストール手順】\n' +
+        '1. 以下のURLをコピーしてブラウザで開く\n' +
+        '2. Tampermonkeyのインストール画面で「インストール」をクリック\n' +
+        '3. このページを再読み込み\n\n' +
+        '【URL】\n' +
+        HENRY_CORE_URL
+      );
     }
 
     // --------------------------------------------
@@ -107,6 +122,10 @@
     async function syncToGMStorage() {
       try {
         const HenryCore = await waitForHenryCore();
+        if (!HenryCore) {
+          log.warn('HenryCoreが見つかりません');
+          return;
+        }
 
         // トークン同期
         const token = await HenryCore.getToken();
@@ -173,6 +192,10 @@
       }
 
       const HenryCore = await waitForHenryCore();
+      if (!HenryCore) {
+        showHenryCoreRequiredMessage();
+        throw new Error('HenryCoreが必要です');
+      }
 
       const result = await HenryCore.call('GetPatient', {
         input: { uuid }
@@ -237,13 +260,17 @@
     (async function registerPlugin() {
       try {
         const HenryCore = await waitForHenryCore();
+        if (!HenryCore) {
+          showHenryCoreRequiredMessage();
+          return;
+        }
 
         await HenryCore.registerPlugin({
           id: 'reserve-integration',
           name: '再診予約',
           icon: '📅',
           description: '予約システムを開いて患者情報を自動入力',
-          version: '1.1.0',
+          version: '1.3.0',
           order: 30,
           onClick: openReserve
         });
