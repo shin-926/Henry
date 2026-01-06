@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         主治医意見書フォーム（Google Docs連携版）
 // @namespace    https://henry-app.jp/
-// @version      1.5.7
+// @version      1.5.8
 // @description  主治医意見書の入力フォームとGoogle Docs出力（バリデーション機能付き）
 // @author       Henry Team
 // @match        https://henry-app.jp/*
@@ -29,6 +29,7 @@
   // localStorage設定
   const STORAGE_KEY_PREFIX = 'henry_opinion_draft_';
   const MAX_DRAFT_AGE_DAYS = 30;
+  const DRAFT_SCHEMA_VERSION = 1;  // 下書きの構造バージョン（構造変更時にインクリメント）
 
   // Google Apps Script WebアプリURL（デプロイ後に設定）
   const GAS_WEB_APP_URL = 'https://script.google.com/a/macros/maokahp.net/s/AKfycbzjHbXAqcLv-uW4EGIS15R1P81Jt6pB03eNjxPCvJPiV5IY8Ba29bx2v7NgXw9vTMidjg/exec';
@@ -153,6 +154,7 @@
     try {
       const key = `${STORAGE_KEY_PREFIX}${patientUuid}`;
       const draft = {
+        schemaVersion: DRAFT_SCHEMA_VERSION,
         data: formData,
         savedAt: new Date().toISOString(),
         patientName: formData.basic_info.patient_name
@@ -176,6 +178,21 @@
       if (!stored) return null;
 
       const draft = JSON.parse(stored);
+
+      // スキーマバージョンチェック（古い形式や不正な形式は無視）
+      if (!draft.schemaVersion || draft.schemaVersion !== DRAFT_SCHEMA_VERSION) {
+        localStorage.removeItem(key);
+        log?.info('互換性のない下書きを削除（バージョン不一致）:', key);
+        return null;
+      }
+
+      // データ構造の検証（必須プロパティのチェック）
+      if (!draft.data?.basic_info) {
+        localStorage.removeItem(key);
+        log?.info('不正な構造の下書きを削除:', key);
+        return null;
+      }
+
       const savedDate = new Date(draft.savedAt);
       const now = new Date();
       const ageInDays = (now - savedDate) / (1000 * 60 * 60 * 24);
