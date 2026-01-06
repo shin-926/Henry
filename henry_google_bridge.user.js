@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Google Docs連携
 // @namespace    https://henry-app.jp/
-// @version      2.9.2
+// @version      2.9.5
 // @description  HenryのファイルをGoogle形式で開き、編集後にHenryへ書き戻すための統合スクリプト。これ1つで両方のサイトで動作。
 // @match        https://henry-app.jp/*
 // @match        https://docs.google.com/document/d/*
@@ -258,11 +258,12 @@
   // ==========================================
   function runHenryMode() {
     const pageWindow = typeof unsafeWindow !== 'undefined' ? unsafeWindow : window;
-    let currentFolderUuid = null;
+    const cachedFilesByFolder = new Map(); // フォルダUUID → ファイル配列
     let log = null;
     const inflight = new Map();
     let activeIndicators = [];
     let lastRefreshCheck = Date.now();
+    const CONVERTIBLE_TYPES = new Set(['FILE_TYPE_DOCX', 'FILE_TYPE_XLSX']);
 
     // トークンリクエストに応答
     function setupTokenRequestListener() {
@@ -458,7 +459,7 @@
       pageWindow.fetch = async function(url, options) {
         const response = await originalFetch.apply(this, arguments);
 
-        // ListPatientFiles のリクエストから currentFolderUuid を更新
+        // ListPatientFiles のレスポンスをキャッシュ（トークン/ハッシュ共有は削除）
         if (!url.includes('/graphql') || !options?.body) return response;
         try {
           const bodyStr = typeof options.body === 'string' ? options.body : null;
@@ -468,8 +469,27 @@
 
           if (requestJson.operationName !== 'ListPatientFiles') return response;
 
-          const requestFolderUuid = requestJson.variables?.input?.parentFileFolderUuid ?? null;
-          currentFolderUuid = requestFolderUuid;
+          debugLog('Henry', 'ListPatientFiles をキャッチ');
+          const requestFolderUuid = requestJson.variables?.input?.parentFileFolderUuid?.value ?? null;
+          const pageToken = requestJson.variables?.input?.pageToken ?? '';
+          const clone = response.clone();
+          const json = await clone.json();
+          const patientFiles = json.data?.listPatientFiles?.patientFiles;
+
+          if (!Array.isArray(patientFiles)) return response;
+
+          // フォルダごとにキャッシュを管理
+          const folderKey = requestFolderUuid ?? '__root__';
+          if (pageToken === '') {
+            // 最初のページ: 新規キャッシュ
+            cachedFilesByFolder.set(folderKey, patientFiles);
+            debugLog('Henry', 'キャッシュ更新:', folderKey, patientFiles.length, '件');
+          } else {
+            // ページネーション: 追加
+            const existing = cachedFilesByFolder.get(folderKey) || [];
+            cachedFilesByFolder.set(folderKey, [...existing, ...patientFiles]);
+            debugLog('Henry', 'キャッシュ追加:', folderKey, patientFiles.length, '件, 合計:', cachedFilesByFolder.get(folderKey).length, '件');
+          }
         } catch (e) { debugError('Henry', 'Fetch Hook Error:', e.message); }
         return response;
       };
@@ -508,51 +528,64 @@
       const row = event.target.closest('li[role="button"][aria-roledescription="draggable"]');
       if (!row) return;
 
-      // DOMからファイル名を取得（最小限の依存）
+      // DOMからファイル名と日時を取得
       const spans = row.querySelectorAll('span');
       const fileName = spans[0]?.textContent?.trim();
+      const dateStr = spans[1]?.textContent?.trim(); // "2025.05.31 10:00" 形式
       if (!fileName) return;
 
-      // .docx/.xlsxの場合はデフォルトのダウンロード動作を阻止（同期的に実行）
-      const ext = fileName.split('.').pop()?.toLowerCase();
-      if (ext === 'docx' || ext === 'xlsx') {
-        event.preventDefault();
-        event.stopPropagation();
-        event.stopImmediatePropagation();
-      } else {
-        return; // 変換対象外はデフォルト動作に任せる
-      }
-
-      if (!pageWindow.HenryCore) return;
-      const patientUuid = pageWindow.HenryCore.getPatientUuid();
-      if (!patientUuid) return;
-
-      // APIで最新のファイルリストを取得して検索
-      let fileData;
-      try {
-        const result = await pageWindow.HenryCore.call('ListPatientFiles', {
-          input: {
-            patientUuid,
-            parentFileFolderUuid: currentFolderUuid
+      // 全フォルダのキャッシュからファイル名で検索
+      const findFileByNameAndDate = (fileName, dateStr) => {
+        const candidates = [];
+        for (const files of cachedFilesByFolder.values()) {
+          for (const f of files) {
+            if (f.file?.title === fileName) {
+              candidates.push(f);
+            }
           }
-        });
-        const files = result.data?.listPatientFiles?.patientFiles || [];
-        fileData = files.find(f => f.file?.title === fileName);
-      } catch (e) {
-        debugError('Henry', 'ListPatientFiles取得失敗:', e.message);
-        return;
-      }
+        }
 
+        if (candidates.length === 0) return null;
+        if (candidates.length === 1) return candidates[0];
+
+        // 同名ファイルが複数ある場合は日時で絞り込み
+        if (dateStr) {
+          const matched = candidates.find(f => {
+            const ts = f.createTime?.seconds;
+            if (!ts) return false;
+            const date = new Date(ts * 1000);
+            const formatted = `${date.getFullYear()}.${String(date.getMonth() + 1).padStart(2, '0')}.${String(date.getDate()).padStart(2, '0')} ${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
+            return formatted === dateStr;
+          });
+          if (matched) return matched;
+        }
+
+        // 日時で一致しなければ最初の候補を返す
+        return candidates[0];
+      };
+
+      const fileData = findFileByNameAndDate(fileName, dateStr);
       if (!fileData || !fileData.file) return;
 
       const file = fileData.file;
       const fileUrl = file.redirectUrl;
       if (!fileUrl || !fileUrl.includes('storage.googleapis.com')) return;
 
+      if (!CONVERTIBLE_TYPES.has(file.fileType)) return;
+
+      // .docx/.xlsxの場合はデフォルトのダウンロード動作を阻止
+      event.preventDefault();
+      event.stopPropagation();
+      event.stopImmediatePropagation();
+
       const patientFileUuid = fileData.uuid;
-      const folderUuid = fileData.parentFileFolderUuid || currentFolderUuid;
+      const folderUuid = fileData.parentFileFolderUuid || null;
 
       if (inflight.has(patientFileUuid)) return;
+
+      if (!pageWindow.HenryCore) return;
+      const patientUuid = pageWindow.HenryCore.getPatientUuid();
+      if (!patientUuid) return;
 
       try {
         await pageWindow.HenryCore.utils.withLock(inflight, patientFileUuid, async () => {
@@ -604,7 +637,7 @@
 
       const cleaner = pageWindow.HenryCore.utils.createCleaner();
       pageWindow.HenryCore.utils.subscribeNavigation(cleaner, () => {
-        currentFolderUuid = null;
+        cachedFilesByFolder.clear();
         activeIndicators.forEach(el => {
           if (el.parentNode) el.remove();
         });
@@ -612,7 +645,7 @@
         const handler = (e) => handleDoubleClick(e);
         document.addEventListener('dblclick', handler, true);
         cleaner.add(() => document.removeEventListener('dblclick', handler, true));
-        log.info('Ready (v2.9.2)');
+        log.info('Ready (v2.9.5)');
       });
     }
 
