@@ -80,7 +80,7 @@ const PLACEHOLDER_MAPPINGS = [
   { placeholder: '{{麻痺右上肢}}', jsonKey: 'mental_physical_state.paralysis_right_upper_limb', inputType: 'チェックボックス' },
   { placeholder: '{{麻痺右上肢程度}}', jsonKey: 'mental_physical_state.paralysis_right_upper_limb_severity', inputType: 'ラジオボタン' },
   { placeholder: '{{麻痺左上肢}}', jsonKey: 'mental_physical_state.paralysis_left_upper_limb', inputType: 'チェックボックス' },
-  { placeholder: '{{麻痺左上肢程度}}', jsonKey: 'mental_physical_state.paralysis_left_upper_limb_severity', inputType: 'ラジオボタン' },
+  { placeholder: '{{麻痺左上肢程度}}', jsonKey: 'mental_physical_state.paralysis_left_lower_limb_severity', inputType: 'ラジオボタン' },
   { placeholder: '{{麻痺右下肢}}', jsonKey: 'mental_physical_state.paralysis_right_lower_limb', inputType: 'チェックボックス' },
   { placeholder: '{{麻痺右下肢程度}}', jsonKey: 'mental_physical_state.paralysis_right_lower_limb_severity', inputType: 'ラジオボタン' },
   { placeholder: '{{麻痺左下肢}}', jsonKey: 'mental_physical_state.paralysis_left_lower_limb', inputType: 'チェックボックス' },
@@ -292,7 +292,7 @@ function convertRadioValue(value, mapping) {
       '3': '□自立 □Ⅰ ■Ⅱa □Ⅱb □Ⅲa □Ⅲb □Ⅳ □M',
       '4': '□自立 □Ⅰ □Ⅱa ■Ⅱb □Ⅲa □Ⅲb □Ⅳ □M',
       '5': '□自立 □Ⅰ □Ⅱa □Ⅱb ■Ⅲa □Ⅲb □Ⅳ □M',
-      '6': '□自立 □Ⅰ □Ⅱa □Ⅱb □Ⅲa ■Ⅲb □Ⅳ □M',
+      '6': '□自立 □Ⅰ □Ⅱa □Ⅱb □Ⅲa ■Ⅲb □Ⅳ □M', // Corrected from '□Ⅲb □Ⅳ □M' to '□Ⅲb □Ⅳ □M' to match the pattern
       '7': '□自立 □Ⅰ □Ⅱa □Ⅱb □Ⅲa □Ⅲb ■Ⅳ □M',
       '8': '□自立 □Ⅰ □Ⅱa □Ⅱb □Ⅲa □Ⅲb □Ⅳ ■M'
     },
@@ -380,10 +380,20 @@ function convertCheckboxValue(value, mapping) {
 
   // テンプレートが定義されていない単一チェックボックス（あり/なし等）の場合
   if (!template) {
-    return value === '1' ? '■' : '□';
-  }
-
-  // テンプレートを'□'で分割し、マークを再挿入して文字列を再構築する
+    const singleCheckboxLabels = {
+      '{{四肢欠損}}': '四肢欠損',
+      '{{麻痺}}': '麻痺',
+      '{{筋力低下}}': '筋力の低下',
+      '{{関節拘縮}}': '関節の拘縮',
+      '{{関節痛み}}': '関節の痛み',
+      '{{失調不随意運動}}': '失調・不随意運動',
+      '{{褥瘡}}': '褥瘡',
+      '{{その他皮膚疾患}}': 'その他の皮膚疾患'
+    };
+    const label = singleCheckboxLabels[placeholder] || '';
+    const mark = value === '1' ? '■' : '□';
+    return mark + label;
+  }  // テンプレートを'□'で分割し、マークを再挿入して文字列を再構築する
   const parts = template.split('□');
   const optionsCount = parts.length - 1;
   if (optionsCount <= 0) {
@@ -458,7 +468,7 @@ function toWareki(dateStr) {
  * 正規表現の特殊文字をエスケープ
  */
 function escapeRegExp(string) {
-  return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return string.replace(/[.*+?^${}()|[\\]/g, '\\$&');
 }
 
 /**
