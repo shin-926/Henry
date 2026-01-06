@@ -1,12 +1,14 @@
 // ==UserScript==
 // @name         予約システム連携
 // @namespace    https://github.com/shin-926/Tampermonkey
-// @version      1.4.0
+// @version      1.5.0
 // @description  Henryカルテと予約システム間の双方向連携（再診予約・患者プレビュー・ページ遷移）
 // @match        https://henry-app.jp/*
 // @match        https://manage-maokahp.reserve.ne.jp/*
 // @grant        GM_setValue
 // @grant        GM_getValue
+// @grant        GM_addValueChangeListener
+// @grant        GM_removeValueChangeListener
 // @grant        GM_xmlhttpRequest
 // @grant        GM_openInTab
 // @grant        unsafeWindow
@@ -168,6 +170,28 @@
     window.addEventListener('henry:navigation', syncToGMStorage);
 
     // --------------------------------------------
+    // トークンリクエスト監視（Reserve側からの要求に応答）
+    // --------------------------------------------
+    GM_addValueChangeListener('token-request', async (name, oldValue, newValue, remote) => {
+      if (!remote) return; // 自分の変更は無視
+
+      log.info('トークンリクエスト受信');
+      const HenryCore = await waitForHenryCore();
+      if (!HenryCore) {
+        log.warn('HenryCoreが見つかりません');
+        return;
+      }
+
+      const token = await HenryCore.getToken();
+      if (token) {
+        GM_setValue('henry-token', token);
+        log.info('トークンを更新しました');
+      } else {
+        log.warn('トークンを取得できませんでした');
+      }
+    });
+
+    // --------------------------------------------
     // 外来タブ切り替え（URLパラメータから）
     // --------------------------------------------
     if (location.search.includes('tab=outpatient')) {
@@ -300,6 +324,31 @@
   // ==========================================
   if (isReserve) {
     log.info('予約システムモード起動');
+
+    // --------------------------------------------
+    // トークンリクエスト（Henry側に依頼して最新トークンを取得）
+    // --------------------------------------------
+    function requestToken(timeout = 3000) {
+      return new Promise((resolve, reject) => {
+        const timeoutId = setTimeout(() => {
+          log.warn('トークンリクエストタイムアウト - GM_storageのトークンを使用');
+          resolve(GM_getValue('henry-token', null));
+        }, timeout);
+
+        const listenerId = GM_addValueChangeListener('henry-token', (name, oldValue, newValue, remote) => {
+          if (remote && newValue) {
+            clearTimeout(timeoutId);
+            GM_removeValueChangeListener(listenerId);
+            log.info('トークンを受信しました');
+            resolve(newValue);
+          }
+        });
+
+        // リクエスト送信
+        GM_setValue('token-request', Date.now());
+        log.info('トークンをリクエストしました');
+      });
+    }
 
     // --------------------------------------------
     // セットアップ状態チェック
@@ -583,16 +632,18 @@
     async function fetchAndShowEncounter(target, patientUuid) {
       showPreview(target, '<div style="color:#666;">読み込み中...</div>');
 
-      const token = GM_getValue('henry-token', null);
       const hash = GM_getValue('henry-encounters-hash', null);
       const endpoint = GM_getValue('henry-encounters-endpoint', '/graphql-v2');
 
-      if (!token) {
-        showPreview(target, '<div style="color:#c00;">トークンがありません。<br>Henryにログインしてください。</div>');
-        return;
-      }
       if (!hash) {
         showPreview(target, '<div style="color:#c00;">ハッシュ未取得。<br>Henryで外来記録を一度開いてください。</div>');
+        return;
+      }
+
+      // Henry側から最新トークンを取得
+      const token = await requestToken();
+      if (!token) {
+        showPreview(target, '<div style="color:#c00;">トークンがありません。<br>Henryを開いてログインしてください。</div>');
         return;
       }
 
@@ -647,15 +698,18 @@
         return cachedUuid;
       }
 
-      // APIで取得
-      const token = GM_getValue('henry-token', null);
-      if (!token) return null;
-
       const hash = GM_getValue('henry-list-patients-hash', null);
       const endpoint = GM_getValue('henry-list-patients-endpoint', '/graphql');
 
       if (!hash) {
         log.warn('ListPatientsV2 ハッシュ未取得');
+        return null;
+      }
+
+      // Henry側から最新トークンを取得
+      const token = await requestToken();
+      if (!token) {
+        log.warn('トークンを取得できませんでした');
         return null;
       }
 

@@ -356,6 +356,7 @@ try {
 - **IMPORTANT**: GraphQL APIの構造がわからないときは `HENRY-GRAPHQL-API-REFERENCE.md` を参照すること。
 - **IMPORTANT**: コードベースの探索や広範な検索を行う場合は、Taskツール（Exploreエージェント等）を使用してメインのコンテキストウィンドウを節約すること。
 - **IMPORTANT**: コード固有の課題やTODOは、該当コード内にTODOコメントとして残すこと（例: `// TODO: 動作確認後にこのログを削除`）。
+- **YOU MUST**: スクリプトに機能追加や修正を行う際は、その変更に必要な部分のみを編集すること。関係ない部分を変更しない。
 
 ---
 
@@ -404,7 +405,6 @@ try {
 > **AI向け指示**: セッション開始時にこのセクションを確認し、未完了のタスクがあればユーザーにリマインドすること。タスク完了後はこのセクションから削除すること。
 
 ### 2026-01-06 追加
-- [ ] **GitHub Secrets設定**: `OFFICE_CONVERTER_DEPLOYMENT_ID` を追加（GAS自動デプロイ用）。値は現在のデプロイID: `AKfycbw677b3kgD1T3MInBdP6SvtNQo7hRZGsq1U_lKpYYZW8-0XBesQQjTQdzwXvIY4CkkO`
 - [ ] **デバッグログ削除**: `henry_google_bridge.user.js` のデバッグログを削除（動作が安定したら）
 - [ ] **動作確認**: フルクエリ方式に移行した他のスクリプトのテスト
   - henry_ikensho_form.user.js
