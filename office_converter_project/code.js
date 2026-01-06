@@ -2,7 +2,7 @@ function doPost(e) {
   // ==========================================
   // 設定 (環境に合わせて変更してください)
   // ==========================================
-  const SECRET_KEY = "maoka-henry-gas-2024";
+  const SECRET_KEY = "maoka-henry-gas-8888";
   const FOLDER_ID = "1NAoLtEfppzC2BnXtk8Dk5O5nehgVzcYl"; // 保存先フォルダID
 
   try {

@@ -39,6 +39,27 @@ query GetPatient($input: GetPatientRequestInput!) {
 }
 ```
 
+### 返り値の型に関する注意
+
+**返り値がスカラー型（`Boolean!`, `String!` など）の場合、サブフィールドを選択できない。**
+
+```graphql
+# ❌ NG: Boolean! にサブフィールドは取れない
+mutation DeletePatientFile($input: DeletePatientFileRequestInput!) {
+  deletePatientFile(input: $input) {
+    __typename
+  }
+}
+
+# ✅ OK
+mutation DeletePatientFile($input: DeletePatientFileRequestInput!) {
+  deletePatientFile(input: $input)
+}
+```
+
+**確認済みのスカラー返り値API**:
+- `deletePatientFile` → `Boolean!`
+
 ---
 
 ## 目次 (Table of Contents)

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Google Docs連携
 // @namespace    https://henry-app.jp/
-// @version      2.10.0
+// @version      2.10.2
 // @description  HenryのファイルをGoogle形式で開き、編集後にHenryへ書き戻すための統合スクリプト。これ1つで両方のサイトで動作。
 // @match        https://henry-app.jp/*
 // @match        https://docs.google.com/document/d/*
@@ -59,9 +59,7 @@
     `,
     DeletePatientFile: `
       mutation DeletePatientFile($input: DeletePatientFileRequestInput!) {
-        deletePatientFile(input: $input) {
-          __typename
-        }
+        deletePatientFile(input: $input)
       }
     `
   };
@@ -571,6 +569,7 @@
 
       const patientFileUuid = fileData.uuid;
       const folderUuid = fileData.parentFileFolderUuid || null;
+      debugLog('Henry', 'ファイル情報:', { patientFileUuid, folderUuid, fileName });
 
       if (inflight.has(patientFileUuid)) return;
 
@@ -898,6 +897,8 @@
     async function uploadToHenry(token, data, mimeType, mode = 'overwrite') {
       debugLog('Docs', '=== Henryアップロード開始 ===');
       debugLog('Docs', '  モード:', mode);
+      debugLog('Docs', '  fileUuid:', data.fileUuid || '(なし)');
+      debugLog('Docs', '  folderUuid:', data.folderUuid || '(なし)');
 
       if (mode === 'overwrite' && data.fileUuid) {
         debugLog('Docs', 'Step 0: 既存ファイル削除...');
@@ -927,7 +928,7 @@
       const createResult = await callHenryAPI(token, 'CreatePatientFile', {
         input: {
           patientUuid: data.patientId,
-          parentFileFolderUuid: data.folderUuid || null,
+          parentFileFolderUuid: data.folderUuid ? { value: data.folderUuid } : null,
           title: fileName,
           description: '',
           fileUrl: fileUrl
