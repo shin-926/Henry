@@ -25,7 +25,7 @@
     BASE_URL: 'https://henry-app.jp'
   };
 
-  console.log('[Henry Core] Initializing v2.7.4...');
+  console.log('[Henry Core] Initializing v2.7.5...');
 
   // ==========================================
   // 1. IndexedDB Manager (ハッシュ + エンドポイント管理)
@@ -761,5 +761,5 @@
     UI.init();
   }
 
-  console.log('[Henry Core] Ready v2.7.3');
+  console.log('[Henry Core] Ready v2.7.5');
 })();
