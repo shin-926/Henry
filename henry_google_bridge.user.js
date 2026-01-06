@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Google Docs連携
 // @namespace    https://henry-app.jp/
-// @version      2.9.1
+// @version      2.9.2
 // @description  HenryのファイルをGoogle形式で開き、編集後にHenryへ書き戻すための統合スクリプト。これ1つで両方のサイトで動作。
 // @match        https://henry-app.jp/*
 // @match        https://docs.google.com/document/d/*
@@ -263,7 +263,6 @@
     const inflight = new Map();
     let activeIndicators = [];
     let lastRefreshCheck = Date.now();
-    const CONVERTIBLE_TYPES = new Set(['FILE_TYPE_DOCX', 'FILE_TYPE_XLSX']);
 
     // トークンリクエストに応答
     function setupTokenRequestListener() {
@@ -514,6 +513,16 @@
       const fileName = spans[0]?.textContent?.trim();
       if (!fileName) return;
 
+      // .docx/.xlsxの場合はデフォルトのダウンロード動作を阻止（同期的に実行）
+      const ext = fileName.split('.').pop()?.toLowerCase();
+      if (ext === 'docx' || ext === 'xlsx') {
+        event.preventDefault();
+        event.stopPropagation();
+        event.stopImmediatePropagation();
+      } else {
+        return; // 変換対象外はデフォルト動作に任せる
+      }
+
       if (!pageWindow.HenryCore) return;
       const patientUuid = pageWindow.HenryCore.getPatientUuid();
       if (!patientUuid) return;
@@ -539,13 +548,6 @@
       const file = fileData.file;
       const fileUrl = file.redirectUrl;
       if (!fileUrl || !fileUrl.includes('storage.googleapis.com')) return;
-
-      if (!CONVERTIBLE_TYPES.has(file.fileType)) return;
-
-      // .docx/.xlsxの場合はデフォルトのダウンロード動作を阻止
-      event.preventDefault();
-      event.stopPropagation();
-      event.stopImmediatePropagation();
 
       const patientFileUuid = fileData.uuid;
       const folderUuid = fileData.parentFileFolderUuid || currentFolderUuid;
@@ -610,7 +612,7 @@
         const handler = (e) => handleDoubleClick(e);
         document.addEventListener('dblclick', handler, true);
         cleaner.add(() => document.removeEventListener('dblclick', handler, true));
-        log.info('Ready (v2.9.1)');
+        log.info('Ready (v2.9.2)');
       });
     }
 
