@@ -292,7 +292,7 @@ function convertRadioValue(value, mapping) {
       '3': '□自立 □Ⅰ ■Ⅱa □Ⅱb □Ⅲa □Ⅲb □Ⅳ □M',
       '4': '□自立 □Ⅰ □Ⅱa ■Ⅱb □Ⅲa □Ⅲb □Ⅳ □M',
       '5': '□自立 □Ⅰ □Ⅱa □Ⅱb ■Ⅲa □Ⅲb □Ⅳ □M',
-      '6': '□自立 □Ⅰ □Ⅱa □Ⅱb □Ⅲa ■Ⅲb □Ⅳ □M', // Corrected from '□Ⅲb □Ⅳ □M' to '□Ⅲb □Ⅳ □M' to match the pattern
+      '6': '□自立 □Ⅰ □Ⅱa □Ⅱb □Ⅲa ■Ⅲb □Ⅳ □M',
       '7': '□自立 □Ⅰ □Ⅱa □Ⅱb □Ⅲa □Ⅲb ■Ⅳ □M',
       '8': '□自立 □Ⅰ □Ⅱa □Ⅱb □Ⅲa □Ⅲb □Ⅳ ■M'
     },
@@ -468,7 +468,7 @@ function toWareki(dateStr) {
  * 正規表現の特殊文字をエスケープ
  */
 function escapeRegExp(string) {
-  return string.replace(/[.*+?^${}()|[\\]/g, '\\$&');
+  return string.replace(/[.*+?^${}()|[\]/g, '\$&');
 }
 
 /**
