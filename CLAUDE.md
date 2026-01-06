@@ -336,6 +336,7 @@ try {
 
 ### 追加ルール
 
+- **YOU MUST**: 複雑な指示や意図が曖昧な指示を受けた場合は、質問するか、指示をどのように理解したかを説明してから作業に入ること。
 - **YOU MUST**: コードを修正する前に、まず修正内容をユーザーに確認すること。確認なしに直接編集しない。
 - **YOU MUST**: HenryCoreのAPIを変更・追加した場合は、`CLAUDE.md`と`HENRY-CORE-API-REFERENCE.md`の該当箇所も更新すること。
 - **YOU MUST**: 新しいTampermonkeyスクリプトを作成する際は、`@updateURL` と `@downloadURL` にGitHubのraw URLを設定すること。形式: `https://raw.githubusercontent.com/shin-926/Henry/main/<filename>.user.js`
