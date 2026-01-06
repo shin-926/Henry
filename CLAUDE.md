@@ -396,3 +396,17 @@ try {
 - セクション構成を5章に再編成（元は13章）
 - 740行 → 330行（-55%）
 - コード例は基本パターンのみに絞り込み
+
+---
+
+## 🔔 保留中のタスク (Pending Tasks)
+
+> **AI向け指示**: セッション開始時にこのセクションを確認し、未完了のタスクがあればユーザーにリマインドすること。タスク完了後はこのセクションから削除すること。
+
+### 2026-01-06 追加
+- [ ] **GitHub Secrets設定**: `OFFICE_CONVERTER_DEPLOYMENT_ID` を追加（GAS自動デプロイ用）。値は現在のデプロイID: `AKfycbw677b3kgD1T3MInBdP6SvtNQo7hRZGsq1U_lKpYYZW8-0XBesQQjTQdzwXvIY4CkkO`
+- [ ] **デバッグログ削除**: `henry_google_bridge.user.js` のデバッグログを削除（動作が安定したら）
+- [ ] **動作確認**: フルクエリ方式に移行した他のスクリプトのテスト
+  - henry_ikensho_form.user.js
+  - henry_reserve_integration.user.js
+  - henry_auto_approver.user.js
