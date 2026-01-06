@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Google Docs連携
 // @namespace    https://henry-app.jp/
-// @version      2.8.5
+// @version      2.8.6
 // @description  HenryのファイルをGoogle形式で開き、編集後にHenryへ書き戻すための統合スクリプト。これ1つで両方のサイトで動作。
 // @match        https://henry-app.jp/*
 // @match        https://docs.google.com/document/d/*
@@ -635,6 +635,7 @@
         padding: '12px 16px',
         cursor: 'pointer',
         fontSize: '14px',
+        textAlign: 'center',
         borderBottom: '1px solid #eee'
       });
       overwriteItem.onmouseover = () => overwriteItem.style.backgroundColor = '#f5f5f5';
@@ -649,7 +650,8 @@
       Object.assign(newItem.style, {
         padding: '12px 16px',
         cursor: 'pointer',
-        fontSize: '14px'
+        fontSize: '14px',
+        textAlign: 'center'
       });
       newItem.onmouseover = () => newItem.style.backgroundColor = '#f5f5f5';
       newItem.onmouseout = () => newItem.style.backgroundColor = '#fff';
