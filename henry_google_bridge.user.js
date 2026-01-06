@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Google Docs連携
 // @namespace    https://henry-app.jp/
-// @version      2.9.0
+// @version      2.9.1
 // @description  HenryのファイルをGoogle形式で開き、編集後にHenryへ書き戻すための統合スクリプト。これ1つで両方のサイトで動作。
 // @match        https://henry-app.jp/*
 // @match        https://docs.google.com/document/d/*
@@ -258,7 +258,6 @@
   // ==========================================
   function runHenryMode() {
     const pageWindow = typeof unsafeWindow !== 'undefined' ? unsafeWindow : window;
-    let cachedFiles = [];
     let currentFolderUuid = null;
     let log = null;
     const inflight = new Map();
@@ -460,7 +459,7 @@
       pageWindow.fetch = async function(url, options) {
         const response = await originalFetch.apply(this, arguments);
 
-        // ListPatientFiles のレスポンスをキャッシュ（トークン/ハッシュ共有は削除）
+        // ListPatientFiles のリクエストから currentFolderUuid を更新
         if (!url.includes('/graphql') || !options?.body) return response;
         try {
           const bodyStr = typeof options.body === 'string' ? options.body : null;
@@ -471,19 +470,7 @@
           if (requestJson.operationName !== 'ListPatientFiles') return response;
 
           const requestFolderUuid = requestJson.variables?.input?.parentFileFolderUuid ?? null;
-          const pageToken = requestJson.variables?.input?.pageToken ?? '';
-          const clone = response.clone();
-          const json = await clone.json();
-          const patientFiles = json.data?.listPatientFiles?.patientFiles;
-
-          if (!Array.isArray(patientFiles)) return response;
-
-          if (requestFolderUuid !== currentFolderUuid || pageToken === '') {
-            cachedFiles = patientFiles;
-            currentFolderUuid = requestFolderUuid;
-          } else {
-            cachedFiles = [...cachedFiles, ...patientFiles];
-          }
+          currentFolderUuid = requestFolderUuid;
         } catch (e) { debugError('Henry', 'Fetch Hook Error:', e.message); }
         return response;
       };
@@ -522,16 +509,31 @@
       const row = event.target.closest('li[role="button"][aria-roledescription="draggable"]');
       if (!row) return;
 
-      const getFileFromCacheSync = (r) => {
-        if (!cachedFiles.length) return null;
-        const parent = r.parentElement;
-        if (!parent) return null;
-        const rows = Array.from(parent.querySelectorAll(':scope > li'));
-        const idx = rows.indexOf(r);
-        return (idx !== -1 && idx < cachedFiles.length) ? cachedFiles[idx] : null;
-      };
+      // DOMからファイル名を取得（最小限の依存）
+      const spans = row.querySelectorAll('span');
+      const fileName = spans[0]?.textContent?.trim();
+      if (!fileName) return;
 
-      const fileData = getFileFromCacheSync(row);
+      if (!pageWindow.HenryCore) return;
+      const patientUuid = pageWindow.HenryCore.getPatientUuid();
+      if (!patientUuid) return;
+
+      // APIで最新のファイルリストを取得して検索
+      let fileData;
+      try {
+        const result = await pageWindow.HenryCore.call('ListPatientFiles', {
+          input: {
+            patientUuid,
+            parentFileFolderUuid: currentFolderUuid
+          }
+        });
+        const files = result.data?.listPatientFiles?.patientFiles || [];
+        fileData = files.find(f => f.file?.title === fileName);
+      } catch (e) {
+        debugError('Henry', 'ListPatientFiles取得失敗:', e.message);
+        return;
+      }
+
       if (!fileData || !fileData.file) return;
 
       const file = fileData.file;
@@ -549,10 +551,6 @@
       const folderUuid = fileData.parentFileFolderUuid || currentFolderUuid;
 
       if (inflight.has(patientFileUuid)) return;
-
-      if (!pageWindow.HenryCore) return;
-      const patientUuid = pageWindow.HenryCore.getPatientUuid();
-      if (!patientUuid) return;
 
       try {
         await pageWindow.HenryCore.utils.withLock(inflight, patientFileUuid, async () => {
@@ -604,7 +602,6 @@
 
       const cleaner = pageWindow.HenryCore.utils.createCleaner();
       pageWindow.HenryCore.utils.subscribeNavigation(cleaner, () => {
-        cachedFiles = [];
         currentFolderUuid = null;
         activeIndicators.forEach(el => {
           if (el.parentNode) el.remove();
@@ -613,7 +610,7 @@
         const handler = (e) => handleDoubleClick(e);
         document.addEventListener('dblclick', handler, true);
         cleaner.add(() => document.removeEventListener('dblclick', handler, true));
-        log.info('Ready (v2.8.2)');
+        log.info('Ready (v2.9.1)');
       });
     }
 
