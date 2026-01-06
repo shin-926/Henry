@@ -1,5 +1,5 @@
 // ==UserScript==
-// @name         Henry 自動承認アシスタント
+// @name         自動承認アシスタント
 // @namespace    http://tampermonkey.net/
 // @version      3.3.0
 // @description  承認待ちオーダーを自動で一括承認する

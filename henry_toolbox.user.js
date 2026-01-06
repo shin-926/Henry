@@ -1,5 +1,5 @@
 // ==UserScript==
-// @name         Henry：ツールボックス（プラグイン対応）
+// @name         ツールボックス
 // @namespace    https://haru-chan.example
 // @version      5.1.0
 // @description  プラグイン方式。シンプルUI、Noto Sans JP、ドラッグ＆ドロップ並び替え対応。HenryCore v2.7.0 対応。

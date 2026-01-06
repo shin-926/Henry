@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name         Henry: Radiation Order Print 1 page
+// @name         照射オーダー印刷を1枚にまとめる
 // @namespace    http://tampermonkey.net/
 // @version      11.0
-// @description  照射オーダーの印刷が2枚になるのを防ぐ
+// @description  照射オーダーの印刷が2枚になるのを防ぐ（mac環境で必要だと思われる）
 // @author       You
 // @match        https://henry-app.jp/*
 // @grant        none

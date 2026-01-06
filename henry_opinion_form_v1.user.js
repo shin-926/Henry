@@ -1,5 +1,5 @@
 // ==UserScript==
-// @name         主治医意見書フォーム（Google Docs連携版）
+// @name         主治医意見書作成フォーム
 // @namespace    https://henry-app.jp/
 // @version      1.5.8
 // @description  主治医意見書の入力フォームとGoogle Docs出力（バリデーション機能付き）

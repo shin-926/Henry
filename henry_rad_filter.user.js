@@ -1,5 +1,5 @@
 // ==UserScript==
-// @name         Henry：セット検索支援（照射オーダー専用）
+// @name         照射オーダーセット検索支援
 // @namespace    https://henry-app.jp/
 // @version      5.12
 // @description  入院照射オーダーのセット挿入モーダルにモダリティ・部位フィルタを追加 (HenryCore v2.3+ 対応 / Refactored)

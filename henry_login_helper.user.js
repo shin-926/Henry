@@ -1,5 +1,5 @@
 // ==UserScript==
-// @name         Henry ログインヘルパー
+// @name         ログインヘルパー
 // @namespace    http://tampermonkey.net/
 // @version      6.9
 // @description  Henry電子カルテのログイン入力補助（React完全対応 + フィルタリング機能）

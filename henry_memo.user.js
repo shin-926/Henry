@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name         Henry：メモ帳（プラグイン対応版）
+// @name         Henry：メモ帳
 // @namespace    https://haru-chan.example
 // @version      4.0.6
-// @description  Henry UIから呼び出されるメモ帳機能。タブ管理・保存機能を搭載。
+// @description  ツールボックスから呼び出されるメモ帳機能。タブ管理・保存機能を搭載。
 // @match        https://henry-app.jp/*
 // @grant        none
 // @run-at       document-idle
