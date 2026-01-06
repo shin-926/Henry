@@ -393,22 +393,24 @@ function convertCheckboxValue(value, mapping) {
     const label = singleCheckboxLabels[placeholder] || '';
     const mark = value === '1' ? '■' : '□';
     return mark + label;
-  }  // テンプレートを'□'で分割し、マークを再挿入して文字列を再構築する
-  const parts = template.split('□');
-  const optionsCount = parts.length - 1;
-  if (optionsCount <= 0) {
-    return template; // テンプレートに'□'がなければそのまま返す
+  } else {
+    // テンプレートを'□'で分割し、マークを再挿入して文字列を再構築する
+    const parts = template.split('□');
+    const optionsCount = parts.length - 1;
+    if (optionsCount <= 0) {
+      return template; // テンプレートに'□'がなければそのまま返す
+    }
+
+    const bitString = String(value).padStart(optionsCount, '0');
+    let newString = parts[0];
+
+    for (let i = 0; i < optionsCount; i++) {
+      const mark = bitString[i] === '1' ? '■' : '□';
+      newString += mark + parts[i + 1];
+    }
+
+    return newString;
   }
-
-  const bitString = String(value).padStart(optionsCount, '0');
-  let newString = parts[0];
-
-  for (let i = 0; i < optionsCount; i++) {
-    const mark = bitString[i] === '1' ? '■' : '□';
-    newString += mark + parts[i + 1];
-  }
-
-  return newString;
 }
 
 /**
