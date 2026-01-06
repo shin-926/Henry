@@ -3,6 +3,44 @@
 > 生成日時: 2026/1/4 15:31:45
 > 収集済み API: 155 件
 
+## 共通規則
+
+### エンドポイント
+
+| エンドポイント | 用途 |
+|---------------|------|
+| `/graphql` | 標準API（大半のAPIはこちら） |
+| `/graphql-v2` | 一部の新しいAPI |
+
+**確認済み `/graphql` 使用API**:
+- GetFileUploadUrl, CreatePatientFile, DeletePatientFile
+- GetPatient, ListUsers
+- ListNotifiableOrders, 各種承認mutation
+
+### 入力型の命名規則
+
+```
+操作名 + RequestInput
+```
+
+例:
+- `GetPatient` → `GetPatientRequestInput`
+- `CreatePatientFile` → `CreatePatientFileRequestInput`
+- `ListUsers` → `ListUsersRequestInput`
+
+### フルクエリの書き方
+
+```graphql
+query GetPatient($input: GetPatientRequestInput!) {
+  getPatient(input: $input) {
+    fullName
+    detail { birthDate { year month day } }
+  }
+}
+```
+
+---
+
 ## 目次 (Table of Contents)
 
 - [AccountingSetFolders](#accountingsetfolders)

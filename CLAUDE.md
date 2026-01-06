@@ -353,7 +353,7 @@ try {
 - **YOU MUST**: HenryCoreのAPIを変更・追加した場合は、`CLAUDE.md`と`HENRY-CORE-API-REFERENCE.md`の該当箇所も更新すること。
 - **YOU MUST**: 新しいTampermonkeyスクリプトを作成する際は、`@updateURL` と `@downloadURL` にGitHubのraw URLを設定すること。形式: `https://raw.githubusercontent.com/shin-926/Henry/main/<filename>.user.js`
 - **YOU MUST**: スクリプトに修正を加えてコミットする際は、`@version` をセマンティックバージョニングに従って上げること（バグ修正: パッチ、機能追加: マイナー、破壊的変更: メジャー）
-- **IMPORTANT**: GraphQL APIの構造がわからないときは `HENRY-GRAPHQL-API_REFERENCE.md` を参照すること。
+- **IMPORTANT**: GraphQL APIの構造がわからないときは `HENRY-GRAPHQL-API-REFERENCE.md` を参照すること。
 - **IMPORTANT**: コードベースの探索や広範な検索を行う場合は、Taskツール（Exploreエージェント等）を使用してメインのコンテキストウィンドウを節約すること。
 - **IMPORTANT**: コード固有の課題やTODOは、該当コード内にTODOコメントとして残すこと（例: `// TODO: 動作確認後にこのログを削除`）。
 
