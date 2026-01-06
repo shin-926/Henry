@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Google Docs連携
 // @namespace    https://henry-app.jp/
-// @version      2.8.7
+// @version      2.9.0
 // @description  HenryのファイルをGoogle形式で開き、編集後にHenryへ書き戻すための統合スクリプト。これ1つで両方のサイトで動作。
 // @match        https://henry-app.jp/*
 // @match        https://docs.google.com/document/d/*
@@ -75,6 +75,134 @@
       toast.style.opacity = '0';
       setTimeout(() => toast.remove(), 300);
     }, duration);
+  }
+
+  // エラー種別ごとのヘルプ情報
+  const HELP_INFO = {
+    HENRYCORE_NOT_FOUND: {
+      title: 'Henry Core が見つかりません',
+      steps: [
+        '「Henry Core」スクリプトがインストールされているか確認してください',
+        'Tampermonkey の管理画面で Henry Core が有効になっているか確認してください',
+        'ページを再読み込みしてください'
+      ]
+    },
+    TOKEN_NOT_FOUND: {
+      title: '認証トークンを取得できません',
+      steps: [
+        'Henryにログインしているか確認してください',
+        'Henryのタブが開いているか確認してください',
+        'Henryのタブを再読み込みしてから、もう一度お試しください'
+      ]
+    },
+    HASH_NOT_FOUND: {
+      title: 'APIハッシュを取得できません',
+      steps: [
+        'Henryで患者のファイル一覧を一度表示してください',
+        'その後、このページを再読み込みしてお試しください'
+      ],
+      note: '※ 初回利用時やHenryのアップデート後に必要な場合があります'
+    }
+  };
+
+  function showHelpModal(errorType) {
+    const info = HELP_INFO[errorType];
+    if (!info) return;
+
+    // 既存のモーダルがあれば削除
+    const existing = document.getElementById('henry-help-modal');
+    if (existing) existing.remove();
+
+    const overlay = document.createElement('div');
+    overlay.id = 'henry-help-modal';
+    Object.assign(overlay.style, {
+      position: 'fixed',
+      top: '0',
+      left: '0',
+      right: '0',
+      bottom: '0',
+      backgroundColor: 'rgba(0,0,0,0.5)',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      zIndex: '100000'
+    });
+
+    const modal = document.createElement('div');
+    Object.assign(modal.style, {
+      backgroundColor: '#fff',
+      borderRadius: '12px',
+      padding: '24px',
+      maxWidth: '400px',
+      width: '90%',
+      boxShadow: '0 4px 20px rgba(0,0,0,0.3)'
+    });
+
+    const title = document.createElement('h3');
+    title.textContent = '⚠️ ' + info.title;
+    Object.assign(title.style, {
+      margin: '0 0 16px 0',
+      fontSize: '18px',
+      color: '#d93025'
+    });
+
+    const subtitle = document.createElement('p');
+    subtitle.textContent = '以下をお試しください:';
+    Object.assign(subtitle.style, {
+      margin: '0 0 12px 0',
+      fontSize: '14px',
+      color: '#666'
+    });
+
+    const list = document.createElement('ol');
+    Object.assign(list.style, {
+      margin: '0 0 16px 0',
+      paddingLeft: '20px',
+      fontSize: '14px',
+      lineHeight: '1.8'
+    });
+
+    info.steps.forEach(step => {
+      const li = document.createElement('li');
+      li.textContent = step;
+      list.appendChild(li);
+    });
+
+    const closeBtn = document.createElement('button');
+    closeBtn.textContent = '閉じる';
+    Object.assign(closeBtn.style, {
+      display: 'block',
+      width: '100%',
+      padding: '12px',
+      backgroundColor: '#1a73e8',
+      color: '#fff',
+      border: 'none',
+      borderRadius: '8px',
+      fontSize: '14px',
+      fontWeight: '500',
+      cursor: 'pointer'
+    });
+    closeBtn.onclick = () => overlay.remove();
+
+    modal.appendChild(title);
+    modal.appendChild(subtitle);
+    modal.appendChild(list);
+
+    if (info.note) {
+      const note = document.createElement('p');
+      note.textContent = info.note;
+      Object.assign(note.style, {
+        margin: '0 0 16px 0',
+        fontSize: '12px',
+        color: '#999'
+      });
+      modal.appendChild(note);
+    }
+
+    modal.appendChild(closeBtn);
+    overlay.appendChild(modal);
+    overlay.onclick = (e) => { if (e.target === overlay) overlay.remove(); };
+    document.body.appendChild(overlay);
   }
 
   function decodeJWT(token) {
@@ -465,6 +593,7 @@
         waited += 100;
         if (waited > CONFIG.HENRYCORE_TIMEOUT) {
           debugError('Henry', 'HenryCore が見つかりません (タイムアウト)');
+          showHelpModal('HENRYCORE_NOT_FOUND');
           return;
         }
       }
@@ -911,17 +1040,20 @@
         ]);
 
         if (!token) {
-          throw new Error('トークンを取得できません。\n\n【解決策】\nHenryのタブを開いた状態で再試行してください。');
+          showHelpModal('TOKEN_NOT_FOUND');
+          throw new Error('認証トークンを取得できません');
         }
 
         const expiryInfo = checkTokenExpiry(token);
         debugLog('Docs', 'トークン有効期限:', expiryInfo.message);
         if (expiryInfo.isExpired) {
-          throw new Error(`トークンが期限切れです (${expiryInfo.expDate})\n\nHenryを開いてリロードしてください。`);
+          showHelpModal('TOKEN_NOT_FOUND');
+          throw new Error('トークンが期限切れです');
         }
 
         if (!hashes || Object.keys(hashes).length === 0) {
-          throw new Error('APIハッシュを取得できません。\n\n【解決策】\nHenryでファイル一覧を表示してから再試行してください。');
+          showHelpModal('HASH_NOT_FOUND');
+          throw new Error('APIハッシュを取得できません');
         }
 
         const docId = window.location.pathname.split('/')[3];
