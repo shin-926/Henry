@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         主治医意見書作成フォーム
 // @namespace    https://henry-app.jp/
-// @version      1.5.9
+// @version      1.6.0
 // @description  主治医意見書の入力フォームとGoogle Docs出力（バリデーション機能付き）
 // @author       Henry Team
 // @match        https://henry-app.jp/*
@@ -9,6 +9,8 @@
 // @connect      script.google.com
 // @connect      script.googleusercontent.com
 // @run-at       document-idle
+// @updateURL    https://raw.githubusercontent.com/shin-926/Henry/main/henry_ikensho_form.user.js
+// @downloadURL  https://raw.githubusercontent.com/shin-926/Henry/main/henry_ikensho_form.user.js
 // ==/UserScript==
 
 (function() {
