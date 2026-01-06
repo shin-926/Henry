@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         予約システム連携
 // @namespace    https://github.com/shin-926/Tampermonkey
-// @version      1.5.0
+// @version      1.5.1
 // @description  Henryカルテと予約システム間の双方向連携（再診予約・患者プレビュー・ページ遷移）
 // @match        https://henry-app.jp/*
 // @match        https://manage-maokahp.reserve.ne.jp/*
@@ -329,25 +329,48 @@
     // トークンリクエスト（Henry側に依頼して最新トークンを取得）
     // --------------------------------------------
     function requestToken(timeout = 3000) {
-      return new Promise((resolve, reject) => {
+      return new Promise((resolve) => {
         const timeoutId = setTimeout(() => {
-          log.warn('トークンリクエストタイムアウト - GM_storageのトークンを使用');
-          resolve(GM_getValue('henry-token', null));
+          log.warn('トークンリクエストタイムアウト');
+          resolve(null);
         }, timeout);
 
         const listenerId = GM_addValueChangeListener('henry-token', (name, oldValue, newValue, remote) => {
           if (remote && newValue) {
             clearTimeout(timeoutId);
             GM_removeValueChangeListener(listenerId);
-            log.info('トークンを受信しました');
+            log.info('新しいトークンを受信しました');
             resolve(newValue);
           }
         });
 
         // リクエスト送信
         GM_setValue('token-request', Date.now());
-        log.info('トークンをリクエストしました');
       });
+    }
+
+    // --------------------------------------------
+    // API呼び出し（401エラー時に自動リトライ）
+    // --------------------------------------------
+    async function callHenryAPIWithRetry(hash, operationName, variables, endpoint) {
+      const token = GM_getValue('henry-token', null);
+      if (!token) {
+        throw new Error('トークンがありません');
+      }
+
+      try {
+        return await callHenryAPI(token, hash, operationName, variables, endpoint);
+      } catch (e) {
+        // 401エラーの場合、新しいトークンを取得して再試行
+        if (e.message.includes('401')) {
+          log.info('401エラー - 新しいトークンをリクエスト');
+          const newToken = await requestToken();
+          if (newToken) {
+            return await callHenryAPI(newToken, hash, operationName, variables, endpoint);
+          }
+        }
+        throw e;
+      }
     }
 
     // --------------------------------------------
@@ -640,15 +663,8 @@
         return;
       }
 
-      // Henry側から最新トークンを取得
-      const token = await requestToken();
-      if (!token) {
-        showPreview(target, '<div style="color:#c00;">トークンがありません。<br>Henryを開いてログインしてください。</div>');
-        return;
-      }
-
       try {
-        const result = await callHenryAPI(token, hash, 'EncountersInPatient', {
+        const result = await callHenryAPIWithRetry(hash, 'EncountersInPatient', {
           patientId: patientUuid,
           startDate: null,
           endDate: null,
@@ -706,15 +722,8 @@
         return null;
       }
 
-      // Henry側から最新トークンを取得
-      const token = await requestToken();
-      if (!token) {
-        log.warn('トークンを取得できませんでした');
-        return null;
-      }
-
       try {
-        const result = await callHenryAPI(token, hash, 'ListPatientsV2', {
+        const result = await callHenryAPIWithRetry(hash, 'ListPatientsV2', {
           input: {
             generalFilter: { query: patientNumber, patientCareType: 'PATIENT_CARE_TYPE_ANY' },
             hospitalizationFilter: { doctorUuid: null, roomUuids: [], wardUuids: [], states: [], onlyLatest: true },
