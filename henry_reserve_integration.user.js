@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         予約システム連携
 // @namespace    https://github.com/shin-926/Tampermonkey
-// @version      1.3.1
+// @version      1.4.0
 // @description  Henryカルテと予約システム間の双方向連携（再診予約・患者プレビュー・ページ遷移）
 // @match        https://henry-app.jp/*
 // @match        https://manage-maokahp.reserve.ne.jp/*
@@ -28,6 +28,19 @@
     HOVER_DELAY: 0,
     CLOSE_DELAY: 300,
     PREVIEW_COUNT: 3
+  };
+
+  // GraphQL クエリ定義（フルクエリ方式）
+  const QUERIES = {
+    GetPatient: `
+      query GetPatient($input: GetPatientRequestInput!) {
+        getPatient(input: $input) {
+          serialNumber
+          fullName
+          fullNamePhonetic
+        }
+      }
+    `
   };
 
   const log = {
@@ -197,7 +210,7 @@
         throw new Error('HenryCoreが必要です');
       }
 
-      const result = await HenryCore.call('GetPatient', {
+      const result = await HenryCore.query(QUERIES.GetPatient, {
         input: { uuid }
       });
 

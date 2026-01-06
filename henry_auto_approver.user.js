@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         自動承認アシスタント
 // @namespace    http://tampermonkey.net/
-// @version      3.3.1
+// @version      3.4.0
 // @description  承認待ちオーダーを自動で一括承認する
 // @match        https://henry-app.jp/*
 // @grant        none
@@ -16,6 +16,56 @@
   const PAGE_SIZE = 10;
   const BASE_DELAY = 150;
   const MAX_DELAY = 5000;
+
+  // GraphQL クエリ定義（フルクエリ方式）
+  const QUERIES = {
+    ListUsers: `
+      query ListUsers($input: ListUsersRequestInput!) {
+        listUsers(input: $input) {
+          users {
+            uuid
+            name
+          }
+        }
+      }
+    `,
+    ListNotifiableOrders: `
+      query ListNotifiableOrders($input: ListNotifiableOrdersRequestInput!) {
+        listNotifiableOrders(input: $input) {
+          patientOrders {
+            orders {
+              uuid
+              orderType
+              order {
+                prescriptionOrderV2 { orderStatus }
+                imagingOrder { orderStatus }
+                accountingOrder { orderStatus }
+                biopsyInspectionOrder { orderStatus }
+                specimenInspectionOrder { orderStatus }
+                rehabilitationOrder { orderStatus }
+                nutritionOrder { orderStatus }
+                injectionOrderV2 { orderStatus }
+              }
+            }
+          }
+          nextPageToken
+        }
+      }
+    `
+  };
+
+  // 承認mutation を動的に生成
+  function generateApprovalMutation(operationName) {
+    const fieldName = operationName.charAt(0).toLowerCase() + operationName.slice(1);
+    const inputType = `${operationName}RequestInput`;
+    return `
+      mutation ${operationName}($input: ${inputType}!) {
+        ${fieldName}(input: $input) {
+          __typename
+        }
+      }
+    `;
+  }
 
   // 自分の医師UUID（HenryCore.getMyUuid() でキャッシュされる）
   let myDoctorUuid = null;
@@ -68,7 +118,7 @@
 
   // 医師一覧を取得
   async function getDoctorList() {
-    const result = await HenryCore.call('ListUsers', {
+    const result = await HenryCore.query(QUERIES.ListUsers, {
       input: { role: 'DOCTOR', onlyNarcoticPractitioner: false }
     });
     return result.data?.listUsers?.users || [];
@@ -110,7 +160,7 @@
 
   // 1ページ分の承認待ちオーダーを取得
   async function fetchPage(doctorUuid, pageToken = '') {
-    const result = await HenryCore.call('ListNotifiableOrders', {
+    const result = await HenryCore.query(QUERIES.ListNotifiableOrders, {
       input: {
         filterOrderTypes: [],
         accountingOrderExtendedShinryoShikibetsus: [],
@@ -167,7 +217,8 @@
       input.revokeDescription = '';
     }
 
-    const result = await HenryCore.call(operationName, { input });
+    const mutation = generateApprovalMutation(operationName);
+    const result = await HenryCore.query(mutation, { input });
 
     if (result.errors) {
       return { success: false, error: result.errors[0]?.message };

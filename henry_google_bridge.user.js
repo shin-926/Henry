@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Google Docs連携
 // @namespace    https://henry-app.jp/
-// @version      2.9.5
+// @version      2.10.0
 // @description  HenryのファイルをGoogle形式で開き、編集後にHenryへ書き戻すための統合スクリプト。これ1つで両方のサイトで動作。
 // @match        https://henry-app.jp/*
 // @match        https://docs.google.com/document/d/*
@@ -22,6 +22,9 @@
 // @downloadURL  https://raw.githubusercontent.com/shin-926/Henry/main/henry_google_bridge.user.js
 // ==/UserScript==
 
+// TODO: 動作が完全に確認できたら、callHenryAPI 内のレスポンスログを削除する
+//       debugLog('Docs', '  Response:', res.responseText) の行
+
 (function() {
   'use strict';
 
@@ -34,7 +37,33 @@
     HENRYCORE_TIMEOUT: 5000,
     REQUEST_TIMEOUT: 3000,
     ORG_UUID: 'ce6b556b-2a8d-4fce-b8dd-89ba638fc825',
-    REQUIRED_OPERATIONS: ['GetFileUploadUrl', 'CreatePatientFile', 'DeletePatientFile']
+    GRAPHQL_ENDPOINT: '/graphql'
+  };
+
+  // GraphQL クエリ定義（APQ不要、常にフルクエリを送信）
+  const QUERIES = {
+    GetFileUploadUrl: `
+      query GetFileUploadUrl($input: GetFileUploadUrlRequestInput!) {
+        getFileUploadUrl(input: $input) {
+          uploadUrl
+          fileUrl
+        }
+      }
+    `,
+    CreatePatientFile: `
+      mutation CreatePatientFile($input: CreatePatientFileRequestInput!) {
+        createPatientFile(input: $input) {
+          uuid
+        }
+      }
+    `,
+    DeletePatientFile: `
+      mutation DeletePatientFile($input: DeletePatientFileRequestInput!) {
+        deletePatientFile(input: $input) {
+          __typename
+        }
+      }
+    `
   };
 
   const isHenry = location.host === 'henry-app.jp';
@@ -94,14 +123,6 @@
         'Henryのタブが開いているか確認してください',
         'Henryのタブを再読み込みしてから、もう一度お試しください'
       ]
-    },
-    HASH_NOT_FOUND: {
-      title: 'APIハッシュを取得できません',
-      steps: [
-        'Henryで患者のファイル一覧を一度表示してください',
-        'その後、このページを再読み込みしてお試しください'
-      ],
-      note: '※ 初回利用時やHenryのアップデート後に必要な場合があります'
     }
   };
 
@@ -290,36 +311,6 @@
       debugLog('Henry', 'トークンリクエスト監視開始');
     }
 
-    // ハッシュリクエストに応答
-    function setupHashRequestListener() {
-      GM_addValueChangeListener('hash_request', async (name, oldVal, newVal, remote) => {
-        if (!remote || !newVal?.requestId) return;
-
-        debugLog('Henry', 'ハッシュリクエスト受信:', newVal.requestId);
-
-        if (!pageWindow.HenryCore) {
-          debugLog('Henry', 'HenryCore未初期化、リクエスト無視');
-          return;
-        }
-
-        const allHashes = await pageWindow.HenryCore.getHashes();
-        const requiredHashes = {};
-
-        CONFIG.REQUIRED_OPERATIONS.forEach(opName => {
-          if (allHashes[opName]) {
-            requiredHashes[opName] = allHashes[opName];
-          }
-        });
-
-        GM_setValue('henry_api_hashes', {
-          hashes: requiredHashes,
-          requestId: newVal.requestId,
-          savedAt: Date.now()
-        });
-        debugLog('Henry', 'ハッシュ応答完了:', Object.keys(requiredHashes).length, '件');
-      });
-      debugLog('Henry', 'ハッシュリクエスト監視開始');
-    }
 
     function recalculateIndicatorPositions() {
       const baseBottom = 24;
@@ -617,7 +608,6 @@
 
       // リクエスト監視を先に開始（HenryCore 待機前でも受け付けられるように準備）
       setupTokenRequestListener();
-      setupHashRequestListener();
       setupRefreshListener();
 
       let waited = 0;
@@ -645,7 +635,7 @@
         const handler = (e) => handleDoubleClick(e);
         document.addEventListener('dblclick', handler, true);
         cleaner.add(() => document.removeEventListener('dblclick', handler, true));
-        log.info('Ready (v2.9.5)');
+        log.info('Ready (v2.10.0)');
       });
     }
 
@@ -690,37 +680,6 @@
       });
     }
 
-    // オンデマンドでハッシュを取得
-    function requestFreshHashes(timeout = CONFIG.REQUEST_TIMEOUT) {
-      return new Promise((resolve) => {
-        const requestId = Date.now() + Math.random();
-        let resolved = false;
-
-        debugLog('Docs', 'ハッシュリクエスト送信:', requestId);
-
-        const listenerId = GM_addValueChangeListener('henry_api_hashes', (name, oldVal, newVal, remote) => {
-          if (resolved) return;
-          if (remote && newVal?.requestId === requestId) {
-            resolved = true;
-            GM_removeValueChangeListener(listenerId);
-            debugLog('Docs', 'ハッシュ受信（新鮮）:', Object.keys(newVal.hashes || {}).length, '件');
-            resolve(newVal.hashes);
-          }
-        });
-
-        // タイムアウト時はキャッシュを使用
-        setTimeout(() => {
-          if (resolved) return;
-          resolved = true;
-          GM_removeValueChangeListener(listenerId);
-          const cached = GM_getValue('henry_api_hashes');
-          debugLog('Docs', 'ハッシュ取得タイムアウト、キャッシュ使用');
-          resolve(cached?.hashes || null);
-        }, timeout);
-
-        GM_setValue('hash_request', { requestId });
-      });
-    }
 
     function createHenryButton() {
       if (document.getElementById('henry-save-container')) return;
@@ -848,29 +807,23 @@
       }
     }
 
-    function callHenryAPI(token, hashes, operationName, variables) {
+    function callHenryAPI(token, operationName, variables) {
       return new Promise((resolve, reject) => {
-        const hashEntry = hashes[operationName];
-        if (!hashEntry) {
-          reject(new Error(`${operationName} のハッシュがありません。Henryでファイルアップロード操作を行ってください。`));
+        const query = QUERIES[operationName];
+        if (!query) {
+          reject(new Error(`${operationName} のクエリが定義されていません`));
           return;
         }
 
         debugLog('Docs', '=== Henry API 呼び出し ===');
         debugLog('Docs', '  Operation:', operationName);
-        debugLog('Docs', '  Endpoint:', hashEntry.endpoint);
 
-        const apiUrl = `https://henry-app.jp${hashEntry.endpoint}`;
+        const apiUrl = `https://henry-app.jp${CONFIG.GRAPHQL_ENDPOINT}`;
 
         const requestBody = {
           operationName,
           variables,
-          extensions: {
-            persistedQuery: {
-              version: 1,
-              sha256Hash: hashEntry.hash
-            }
-          }
+          query
         };
 
         GM_xmlhttpRequest({
@@ -884,6 +837,7 @@
           data: JSON.stringify(requestBody),
           onload: (res) => {
             debugLog('Docs', '  Status:', res.status);
+            debugLog('Docs', '  Response:', res.responseText);
 
             if (res.status === 200) {
               const body = JSON.parse(res.responseText);
@@ -894,7 +848,7 @@
                 resolve(body.data);
               }
             } else {
-              debugError('Docs', '  HTTP Error:', res.status);
+              debugError('Docs', '  HTTP Error:', res.status, res.responseText);
               reject(new Error(`Henry API Error: ${res.status}`));
             }
           },
@@ -941,14 +895,14 @@
       });
     }
 
-    async function uploadToHenry(token, hashes, data, mimeType, mode = 'overwrite') {
+    async function uploadToHenry(token, data, mimeType, mode = 'overwrite') {
       debugLog('Docs', '=== Henryアップロード開始 ===');
       debugLog('Docs', '  モード:', mode);
 
       if (mode === 'overwrite' && data.fileUuid) {
         debugLog('Docs', 'Step 0: 既存ファイル削除...');
         try {
-          await callHenryAPI(token, hashes, 'DeletePatientFile', {
+          await callHenryAPI(token, 'DeletePatientFile', {
             input: { uuid: data.fileUuid }
           });
           debugLog('Docs', '  既存ファイル削除完了');
@@ -958,7 +912,7 @@
       }
 
       debugLog('Docs', 'Step 1: 署名付きURL取得...');
-      const uploadUrlResult = await callHenryAPI(token, hashes, 'GetFileUploadUrl', {
+      const uploadUrlResult = await callHenryAPI(token, 'GetFileUploadUrl', {
         input: { pathType: 'PATIENT_FILE' }
       });
 
@@ -970,7 +924,7 @@
       await uploadToGCS(uploadUrl, data.blobBase64, mimeType, fileName);
 
       debugLog('Docs', 'Step 3: メタデータ登録...');
-      const createResult = await callHenryAPI(token, hashes, 'CreatePatientFile', {
+      const createResult = await callHenryAPI(token, 'CreatePatientFile', {
         input: {
           patientUuid: data.patientId,
           parentFileFolderUuid: data.folderUuid || null,
@@ -1064,12 +1018,9 @@
       btn.appendChild(textSpan);
 
       try {
-        // オンデマンドでトークンとハッシュを取得
-        debugLog('Docs', 'トークン・ハッシュを取得中...');
-        const [token, hashes] = await Promise.all([
-          requestFreshToken(),
-          requestFreshHashes()
-        ]);
+        // オンデマンドでトークンを取得
+        debugLog('Docs', 'トークンを取得中...');
+        const token = await requestFreshToken();
 
         if (!token) {
           showHelpModal('TOKEN_NOT_FOUND');
@@ -1081,11 +1032,6 @@
         if (expiryInfo.isExpired) {
           showHelpModal('TOKEN_NOT_FOUND');
           throw new Error('トークンが期限切れです');
-        }
-
-        if (!hashes || Object.keys(hashes).length === 0) {
-          showHelpModal('HASH_NOT_FOUND');
-          throw new Error('APIハッシュを取得できません');
         }
 
         const docId = window.location.pathname.split('/')[3];
@@ -1104,7 +1050,7 @@
           throw new Error('メタデータ(患者ID)がありません。Henryから開いたファイルですか？');
         }
 
-        const { newFileUuid } = await uploadToHenry(token, hashes, fileData, mimeType, mode);
+        const { newFileUuid } = await uploadToHenry(token, fileData, mimeType, mode);
 
         if (newFileUuid) {
           await updateGASContext(docId, { fileUuid: newFileUuid });

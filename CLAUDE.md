@@ -190,10 +190,15 @@ async function waitForHenryCore(timeout = 5000) {
   return true;
 }
 
-// API呼び出し
-const result = await HenryCore.call('GetPatient', {
-  input: { uuid: patientUuid }
-});
+// API呼び出し（フルクエリ方式）
+const result = await HenryCore.query(`
+  query GetPatient($input: GetPatientRequestInput!) {
+    getPatient(input: $input) {
+      fullName
+      detail { birthDate { year month day } }
+    }
+  }
+`, { input: { uuid: patientUuid } });
 
 const patient = result.data?.getPatient;
 if (!patient) return null; // 静かに終了
@@ -205,7 +210,8 @@ if (!patient) return null; // 静かに終了
 
 | メソッド | 用途 | 詳細 |
 |---------|------|------|
-| `call(operationName, variables)` | GraphQL API呼び出し | `HENRY-API-REFERENCE.md` 参照 |
+| `query(queryString, variables)` | GraphQL API呼び出し（推奨） | v2.8.0以降。フルクエリ方式 |
+| `call(operationName, variables)` | GraphQL API呼び出し（非推奨） | ハッシュ方式。後方互換性のため残存 |
 | `getPatientUuid()` | 現在表示中の患者UUID取得 | - |
 | `getMyUuid()` | ログイン中のユーザーUUID取得 | 初回はAPI呼び出し、以降キャッシュ |
 | `plugins` | 登録済みプラグインの配列 | v2.7.0以降。読み取り専用 |
@@ -241,11 +247,17 @@ await HenryCore.registerPlugin({
 
 ### エラーハンドリング
 
-**YOU MUST**: `HenryCore.call()` は失敗時に例外を投げるため、try-catchで処理すること。
+**YOU MUST**: `HenryCore.query()` は失敗時に例外を投げるため、try-catchで処理すること。
 
 ```javascript
+const QUERY = `
+  query GetPatient($input: GetPatientRequestInput!) {
+    getPatient(input: $input) { fullName }
+  }
+`;
+
 try {
-  const result = await HenryCore.call('GetPatient', { input: { uuid } });
+  const result = await HenryCore.query(QUERY, { input: { uuid } });
   if (!result.data?.getPatient) return null;
   // 正常処理
 } catch (e) {
@@ -343,6 +355,7 @@ try {
 - **YOU MUST**: スクリプトに修正を加えてコミットする際は、`@version` をセマンティックバージョニングに従って上げること（バグ修正: パッチ、機能追加: マイナー、破壊的変更: メジャー）
 - **IMPORTANT**: GraphQL APIの構造がわからないときは `HENRY-GRAPHQL-API_REFERENCE.md` を参照すること。
 - **IMPORTANT**: コードベースの探索や広範な検索を行う場合は、Taskツール（Exploreエージェント等）を使用してメインのコンテキストウィンドウを節約すること。
+- **IMPORTANT**: コード固有の課題やTODOは、該当コード内にTODOコメントとして残すこと（例: `// TODO: 動作確認後にこのログを削除`）。
 
 ---
 
@@ -350,7 +363,8 @@ try {
 
 | Version | Date | Changes |
 |---------|------|---------|
-| **v4.2** | **2026-01-05** | **🆕 HenryCore v2.7.4 showModalオプション追加。`closeOnOverlayClick: false` でオーバーレイクリック無効化、`action.autoClose: false` でボタンクリック後の自動close無効化** |
+| **v4.3** | **2026-01-06** | **🆕 HenryCore v2.8.0 フルクエリ方式追加。`query()` メソッド追加、`call()` は非推奨に。ハッシュ事前収集が不要になり、初回でもAPIが即座に呼び出し可能** |
+| v4.2 | 2026-01-05 | HenryCore v2.7.4 showModalオプション追加。`closeOnOverlayClick: false` でオーバーレイクリック無効化、`action.autoClose: false` でボタンクリック後の自動close無効化 |
 | v4.1 | 2026-01-05 | HenryCore v2.7.0 プラグインレジストリ対応。`HenryCore.plugins` 配列追加、`registerPlugin()` の仕様変更（自動的にToolboxへ表示）、プラグイン登録の例を追加 |
 | **v4.0** | **2026-01-04** | **🆕 コアルールとリファレンスを分離。プロンプト階層（NEVER/YOU MUST/IMPORTANT）導入。推奨ワークフロー追加。Anthropic公式ベストプラクティス反映。740行→330行に圧縮** |
 | v3.21 | 2026-01-02 | §11「クロスドメイン連携」拡張 |

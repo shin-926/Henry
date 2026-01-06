@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Henry Core
 // @namespace    https://henry-app.jp/
-// @version      2.7.5
-// @description  Henry スクリプト実行基盤 (v3.20準拠 / 単一施設運用 / プラグインレジストリ対応 / showModal onClick引数追加)
+// @version      2.8.0
+// @description  Henry スクリプト実行基盤 (v3.20準拠 / 単一施設運用 / プラグインレジストリ対応 / query()メソッド追加)
 // @match        https://henry-app.jp/*
 // @updateURL    https://raw.githubusercontent.com/shin-926/Henry/main/henry_core.user.js
 // @downloadURL  https://raw.githubusercontent.com/shin-926/Henry/main/henry_core.user.js
@@ -25,10 +25,11 @@
     BASE_URL: 'https://henry-app.jp'
   };
 
-  console.log('[Henry Core] Initializing v2.7.5...');
+  console.log('[Henry Core] Initializing v2.8.0...');
 
   // ==========================================
   // 1. IndexedDB Manager (ハッシュ + エンドポイント管理)
+  // TODO: フルクエリ方式 (query()) への移行完了後、このセクションは削除予定
   // ==========================================
   const DB = {
     open: () => new Promise((resolve, reject) => {
@@ -106,6 +107,7 @@
 
   // ==========================================
   // 2. Hash Cache (メモリキャッシュ)
+  // TODO: フルクエリ方式 (query()) への移行完了後、このセクションは削除予定
   // ==========================================
   const hashCache = new Map();
 
@@ -248,6 +250,8 @@
 
   // ==========================================
   // 5. Fetch Hook (デュアルエンドポイント対応)
+  // TODO: ハッシュ収集機能はフルクエリ方式 (query()) への移行完了後に削除予定
+  //       ただし patientUuid のキャッチは残す
   // ==========================================
   const originalFetch = window.fetch;
   window.fetch = function(url, options) {
@@ -636,6 +640,7 @@
   window.HenryCore = {
     plugins: pluginRegistry,
 
+    // @deprecated: query() メソッドを使用してください。call() は後方互換性のために残されています。
     call: async (operationName, variables) => {
       // メモリキャッシュを優先、なければIndexedDB
       let entry = hashCache.get(operationName);
@@ -670,6 +675,41 @@
           operationName,
           variables,
           extensions: { persistedQuery: { version: 1, sha256Hash: entry.hash } }
+        })
+      });
+
+      if (!res.ok) {
+        throw new Error(`API Error: ${res.status}`);
+      }
+
+      const json = await res.json();
+
+      if (json.errors && json.errors.length > 0) {
+        throw new Error(json.errors[0].message || 'GraphQL Error');
+      }
+
+      return json;
+    },
+
+    // フルクエリ方式（APQ不要、ハッシュ事前収集不要）
+    query: async (queryString, variables = {}) => {
+      const token = await Auth.getToken();
+      if (!token) {
+        throw new Error('有効なトークンがありません。再ログインしてください。');
+      }
+
+      const url = CONFIG.BASE_URL + '/graphql';
+
+      const res = await originalFetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+          'x-auth-organization-uuid': CONFIG.ORG_UUID
+        },
+        body: JSON.stringify({
+          query: queryString,
+          variables
         })
       });
 
@@ -761,5 +801,5 @@
     UI.init();
   }
 
-  console.log('[Henry Core] Ready v2.7.5');
+  console.log('[Henry Core] Ready v2.8.0');
 })();

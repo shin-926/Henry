@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         主治医意見書作成フォーム
 // @namespace    https://henry-app.jp/
-// @version      1.5.11
+// @version      1.6.0
 // @description  主治医意見書の入力フォームとGoogle Docs出力（バリデーション機能付き）
 // @author       Henry Team
 // @match        https://henry-app.jp/*
@@ -26,6 +26,35 @@
     address: '香川県高松市瓦町１丁目12-45',
     phone: '087-862-8888',
     fax: '087-863-0880'
+  };
+
+  // GraphQL クエリ定義（フルクエリ方式）
+  const QUERIES = {
+    GetPatient: `
+      query GetPatient($input: GetPatientRequestInput!) {
+        getPatient(input: $input) {
+          fullName
+          fullNamePhonetic
+          detail {
+            birthDate { year month day }
+            sexType
+            postalCode
+            addressLine_1
+            phoneNumber
+          }
+        }
+      }
+    `,
+    ListUsers: `
+      query ListUsers($input: ListUsersRequestInput!) {
+        listUsers(input: $input) {
+          users {
+            uuid
+            name
+          }
+        }
+      }
+    `
   };
 
   // localStorage設定
@@ -347,7 +376,7 @@
         return null;
       }
 
-      const result = await pageWindow.HenryCore.call('GetPatient', {
+      const result = await pageWindow.HenryCore.query(QUERIES.GetPatient, {
         input: { uuid: patientUuid }
       });
       console.log('[OpinionForm] API result:', result);
@@ -399,7 +428,7 @@
       }
 
       // ListUsers APIで医師一覧を取得
-      const result = await pageWindow.HenryCore.call('ListUsers', {
+      const result = await pageWindow.HenryCore.query(QUERIES.ListUsers, {
         input: { role: 'DOCTOR', onlyNarcoticPractitioner: false }
       });
 
