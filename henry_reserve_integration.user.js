@@ -640,6 +640,8 @@
       const target = e.target.closest('span.num[id="reserve_tooltip_cus_record_no"]');
       if (!target) return;
 
+      log.info('クリックイベント発火');
+
       e.preventDefault();
       e.stopPropagation();
 
@@ -653,7 +655,8 @@
       }
 
       const url = CONFIG.HENRY_PATIENT_URL + uuid + '?tab=outpatient';
-      GM_openInTab(url, { active: true });
+      log.info('Henryページを開きます: ' + url);
+      window.open(url, '_blank');
     }, true);
   }
 })();
