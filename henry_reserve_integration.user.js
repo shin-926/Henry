@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         予約システム連携
 // @namespace    https://github.com/shin-926/Tampermonkey
-// @version      1.7.1
+// @version      1.7.2
 // @description  Henryカルテと予約システム間の双方向連携（再診予約・患者プレビュー・ページ遷移）
 // @match        https://henry-app.jp/*
 // @match        https://manage-maokahp.reserve.ne.jp/*
@@ -119,7 +119,6 @@
         }),
         onload: (res) => {
           if (res.status !== 200) {
-            log.error(`API Error: ${res.status}, Response: ${res.responseText}`);
             reject(new Error(`API Error: ${res.status}`));
             return;
           }
