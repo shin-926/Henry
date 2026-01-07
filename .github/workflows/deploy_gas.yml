@@ -26,28 +26,3 @@ jobs:
       run: |
         cd ikensho_form_gas_project
         clasp push
-
-  deploy-office-converter:
-    runs-on: ubuntu-latest
-    steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-    - name: Setup Node.js
-      uses: actions/setup-node@v4
-      with:
-        node-version: '20'
-    - name: Install clasp
-      run: npm install -g @google/clasp
-    - name: Authenticate clasp
-      env:
-        GAS_CLASPRC_JSON: ${{ secrets.GAS_CLASPRC_JSON }}
-      run: echo "$GAS_CLASPRC_JSON" > ~/.clasprc.json
-    - name: Deploy Office Converter Project
-      env:
-        DEPLOYMENT_ID: ${{ secrets.OFFICE_CONVERTER_DEPLOYMENT_ID }}
-      run: |
-        cd office_converter_project
-        clasp push
-        if [ -n "$DEPLOYMENT_ID" ]; then
-          clasp deploy -i "$DEPLOYMENT_ID" --description "Auto deploy from GitHub"
-        fi
