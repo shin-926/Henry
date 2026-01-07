@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         予約システム連携
 // @namespace    https://github.com/shin-926/Tampermonkey
-// @version      1.6.0
+// @version      1.6.1
 // @description  Henryカルテと予約システム間の双方向連携（再診予約・患者プレビュー・ページ遷移）
 // @match        https://henry-app.jp/*
 // @match        https://manage-maokahp.reserve.ne.jp/*
@@ -436,7 +436,13 @@
     // --------------------------------------------
     // Henry→Reserve連携：バナー表示・自動入力
     // --------------------------------------------
-    const pendingPatient = GM_getValue('pendingPatient', null);
+    // ログインページでは処理しない（ログイン後のページで処理する）
+    const isLoginPage = location.pathname.includes('login');
+    if (isLoginPage) {
+      log.info('ログインページのためHenry連携スキップ');
+    }
+
+    const pendingPatient = !isLoginPage ? GM_getValue('pendingPatient', null) : null;
 
     if (pendingPatient && pendingPatient.id) {
       // 使用後にクリア（ログイン後の再読み込みでも重複しない）
