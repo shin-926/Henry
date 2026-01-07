@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         自動承認アシスタント
 // @namespace    http://tampermonkey.net/
-// @version      3.5.0
+// @version      3.6.0
 // @description  承認待ちオーダーを自動で一括承認する
 // @match        https://henry-app.jp/*
 // @grant        none
@@ -177,7 +177,7 @@
   }
 
   // 全件数をカウント
-  async function countAllOrders(doctorUuid) {
+  async function countAllOrders(doctorUuid, onProgress) {
     const startTime = Date.now();
     let totalOrders = 0;
     let totalPatients = 0;
@@ -192,6 +192,11 @@
       for (const po of patientOrders) {
         totalPatients++;
         totalOrders += po.orders?.length || 0;
+      }
+
+      // 進捗コールバック
+      if (onProgress) {
+        onProgress(totalOrders);
       }
 
       pageToken = result.nextPageToken || '';
@@ -478,17 +483,30 @@
       if (!doctor) return;
 
       // カウント中モーダル
+      const countingContent = document.createElement('div');
+      countingContent.innerHTML = `
+        <p style="margin: 0 0 8px 0; color: #374151;">
+          ${doctor.name} の承認待ちオーダーを集計しています...
+        </p>
+        <p id="henry-count-progress" style="margin: 0; font-size: 20px; font-weight: bold; color: #2563EB;">
+          0 件
+        </p>
+      `;
+
       const countingModal = HenryCore.ui.showModal({
         title: '🔄 カウント中...',
-        content: `${doctor.name} の承認待ちオーダーを集計しています...`,
+        content: countingContent,
         actions: []
       });
 
       activeCleaner.add(() => countingModal.close());
 
       try {
-        // 全件カウント
-        const { totalOrders, elapsed } = await countAllOrders(doctor.uuid);
+        // 全件カウント（進捗表示付き）
+        const { totalOrders, elapsed } = await countAllOrders(doctor.uuid, (count) => {
+          const el = document.getElementById('henry-count-progress');
+          if (el) el.textContent = `${count.toLocaleString()} 件`;
+        });
         countingModal.close();
 
         // 確認モーダル
@@ -539,12 +557,12 @@
       name: '一括承認',
       icon: '⚡',
       description: '承認待ちオーダーを自動で一括承認',
-      version: '3.5.0',
+      version: '3.6.0',
       order: 20,
       onClick: main
     });
 
-    console.log(`[${SCRIPT_NAME}] v3.5.0 起動しました`);
+    console.log(`[${SCRIPT_NAME}] v3.6.0 起動しました`);
   }
 
   if (document.readyState === 'loading') {
