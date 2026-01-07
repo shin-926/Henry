@@ -408,6 +408,7 @@ try {
 
 ### 2026-01-07 更新
 - [x] ~~**デバッグログ削除**: 配布用スクリプトのデバッグログを整理~~ → google_bridge v2.10.4, reserve_integration v1.6.2
+- [x] ~~**reserve-integration確認**: フルクエリ方式に移行完了~~ → v1.7.2
 - [ ] **動作確認**: フルクエリ方式に移行した他のスクリプトのテスト
   - henry_ikensho_form.user.js
   - henry_auto_approver.user.js
