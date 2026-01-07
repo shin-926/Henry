@@ -410,5 +410,5 @@ try {
 - [x] ~~**デバッグログ削除**: 配布用スクリプトのデバッグログを整理~~ → google_bridge v2.10.4, reserve_integration v1.6.2
 - [x] ~~**reserve-integration確認**: フルクエリ方式に移行完了~~ → v1.7.2
 - [ ] **動作確認**: フルクエリ方式に移行した他のスクリプトのテスト
-  - henry_ikensho_form.user.js
+  - [x] ~~henry_ikensho_form.user.js~~ → v1.6.1（すでにフルクエリ方式、一時保存修正追加）
   - henry_auto_approver.user.js → v3.5.0に更新済み、動作確認待ち（プラグイン登録を新形式に変更）
