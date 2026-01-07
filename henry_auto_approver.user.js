@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         自動承認アシスタント
 // @namespace    http://tampermonkey.net/
-// @version      3.6.0
+// @version      3.6.1
 // @description  承認待ちオーダーを自動で一括承認する
 // @match        https://henry-app.jp/*
 // @grant        none
@@ -485,11 +485,9 @@
       // カウント中モーダル
       const countingContent = document.createElement('div');
       countingContent.innerHTML = `
-        <p style="margin: 0 0 8px 0; color: #374151;">
-          ${doctor.name} の承認待ちオーダーを集計しています...
-        </p>
-        <p id="henry-count-progress" style="margin: 0; font-size: 20px; font-weight: bold; color: #2563EB;">
-          0 件
+        <p style="margin: 0; display: flex; justify-content: space-between; color: #374151;">
+          <span>${doctor.name} の承認待ちオーダーを集計しています...</span>
+          <span id="henry-count-progress">0 件</span>
         </p>
       `;
 
@@ -557,12 +555,12 @@
       name: '一括承認',
       icon: '⚡',
       description: '承認待ちオーダーを自動で一括承認',
-      version: '3.6.0',
+      version: '3.6.1',
       order: 20,
       onClick: main
     });
 
-    console.log(`[${SCRIPT_NAME}] v3.6.0 起動しました`);
+    console.log(`[${SCRIPT_NAME}] v3.6.1 起動しました`);
   }
 
   if (document.readyState === 'loading') {
