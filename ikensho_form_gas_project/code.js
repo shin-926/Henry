@@ -13,7 +13,7 @@
 // 設定
 const CONFIG = {
   TEMPLATE_ID: '1z1kJZ9wVUDotM1kPmvA5-S2mlq4CmfShnB9CzbfWtwU',
-  OUTPUT_FOLDER_ID: '' // 空の場合はマイドライブ直下
+  OUTPUT_FOLDER_NAME: '文書'  // マイドライブ直下に作成されるフォルダ名
 };
 
 // プレースホルダーマッピング（ハードコード）
@@ -177,14 +177,27 @@ function doGet(e) {
 }
 
 /**
+ * 出力先フォルダを取得（なければマイドライブ直下に作成）
+ */
+function getOrCreateOutputFolder() {
+  const folderName = CONFIG.OUTPUT_FOLDER_NAME;
+  const folders = DriveApp.getFoldersByName(folderName);
+
+  if (folders.hasNext()) {
+    return folders.next();
+  }
+
+  // フォルダがなければ作成
+  return DriveApp.createFolder(folderName);
+}
+
+/**
  * ドキュメント生成メイン処理
  */
 function generateDocument(formData, fileName) {
   // 1. テンプレートをコピー
   const template = DriveApp.getFileById(CONFIG.TEMPLATE_ID);
-  const folder = CONFIG.OUTPUT_FOLDER_ID
-    ? DriveApp.getFolderById(CONFIG.OUTPUT_FOLDER_ID)
-    : DriveApp.getRootFolder();
+  const folder = getOrCreateOutputFolder();
 
   const newFile = template.makeCopy(fileName, folder);
   const newDoc = DocumentApp.openById(newFile.getId());
