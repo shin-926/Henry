@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Google Docs連携
 // @namespace    https://henry-app.jp/
-// @version      2.10.4
+// @version      2.10.5
 // @description  HenryのファイルをGoogle形式で開き、編集後にHenryへ書き戻すための統合スクリプト。これ1つで両方のサイトで動作。
 // @match        https://henry-app.jp/*
 // @match        https://docs.google.com/document/d/*
@@ -582,6 +582,7 @@
 
       try {
         await pageWindow.HenryCore.utils.withLock(inflight, patientFileUuid, async () => {
+          const totalStart = performance.now();
           const token = await pageWindow.HenryCore.getToken();
 
           const hide = showProcessingIndicator(`書類を開いています... (${file.title || '文書'})`);
@@ -591,9 +592,11 @@
               patientUuid, patientFileUuid, folderUuid
             );
             if (result.openUrl) {
+              const totalTime = performance.now() - totalStart;
+              console.log(`%c[HenryBridge/GAS] ファイルを開く 合計時間: ${totalTime.toFixed(0)}ms`, 'color: #FF9800; font-weight: bold; font-size: 14px;');
               log?.info('GAS変換成功:', result.name);
               GM_openInTab(result.openUrl, { active: true });
-              showProcessingIndicator('ファイルを開きました', 'success');
+              showProcessingIndicator(`ファイルを開きました (${(totalTime/1000).toFixed(1)}秒)`, 'success');
             }
           } finally {
             hide();
@@ -1019,6 +1022,8 @@
       btn.appendChild(textSpan);
 
       try {
+        const totalStart = performance.now();
+
         // オンデマンドでトークンを取得
         debugLog('Docs', 'トークンを取得中...');
         const token = await requestFreshToken();
@@ -1059,8 +1064,11 @@
 
         notifyHenryToRefresh(fileData.patientId);
 
+        const totalTime = performance.now() - totalStart;
+        console.log(`%c[HenryBridge/GAS] 保存 合計時間: ${totalTime.toFixed(0)}ms`, 'color: #FF9800; font-weight: bold; font-size: 14px;');
+
         const actionText = mode === 'overwrite' ? '上書き保存' : '新規保存';
-        showToast(`✅ Henryへ${actionText}しました: ${fileData.fileName}`);
+        showToast(`✅ Henryへ${actionText}しました (${(totalTime/1000).toFixed(1)}秒)`);
 
       } catch (e) {
         debugError('Docs', '=== エラー発生 ===');
