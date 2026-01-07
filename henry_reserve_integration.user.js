@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         予約システム連携
 // @namespace    https://github.com/shin-926/Tampermonkey
-// @version      1.6.2
+// @version      1.7.0
 // @description  Henryカルテと予約システム間の双方向連携（再診予約・患者プレビュー・ページ遷移）
 // @match        https://henry-app.jp/*
 // @match        https://manage-maokahp.reserve.ne.jp/*
@@ -42,6 +42,37 @@
           fullNamePhonetic
         }
       }
+    `,
+    ListPatientsV2: `
+      query ListPatientsV2($input: ListPatientsV2RequestInput!) {
+        listPatientsV2(input: $input) {
+          entries {
+            patient {
+              uuid
+            }
+          }
+        }
+      }
+    `,
+    EncountersInPatient: `
+      query EncountersInPatient($patientId: ID!, $startDate: Date, $endDate: Date, $pageSize: Int, $pageToken: String) {
+        encountersInPatient(patientId: $patientId, startDate: $startDate, endDate: $endDate, pageSize: $pageSize, pageToken: $pageToken) {
+          encounters {
+            basedOn {
+              scheduleTime
+              doctor {
+                name
+              }
+            }
+            records {
+              __typename
+              ... on ProgressNote {
+                editorData
+              }
+            }
+          }
+        }
+      }
     `
   };
 
@@ -64,7 +95,12 @@
     return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
   }
 
-  function callHenryAPI(token, hash, operationName, variables, endpoint) {
+  function callHenryAPI(token, operationName, variables, endpoint) {
+    const query = QUERIES[operationName];
+    if (!query) {
+      return Promise.reject(new Error(`Unknown operation: ${operationName}`));
+    }
+
     return new Promise((resolve, reject) => {
       GM_xmlhttpRequest({
         method: 'POST',
@@ -77,7 +113,7 @@
         data: JSON.stringify({
           operationName,
           variables,
-          extensions: { persistedQuery: { version: 1, sha256Hash: hash } }
+          query
         }),
         onload: (res) => {
           if (res.status !== 200) {
@@ -132,9 +168,9 @@
     }
 
     // --------------------------------------------
-    // トークン・ハッシュをGM_storageに同期（Reserve側で使用）
+    // トークンをGM_storageに同期（Reserve側で使用）
     // --------------------------------------------
-    async function syncToGMStorage() {
+    async function syncTokenToGMStorage() {
       try {
         const HenryCore = await waitForHenryCore();
         if (!HenryCore) {
@@ -142,32 +178,19 @@
           return;
         }
 
-        // トークン同期
         const token = await HenryCore.getToken();
         if (token) {
           GM_setValue('henry-token', token);
+          log.info('トークンをGM_storageに同期完了');
         }
-
-        // ハッシュ同期
-        const hashes = await HenryCore.getHashes();
-        if (hashes.EncountersInPatient) {
-          GM_setValue('henry-encounters-hash', hashes.EncountersInPatient.hash);
-          GM_setValue('henry-encounters-endpoint', hashes.EncountersInPatient.endpoint);
-        }
-        if (hashes.ListPatientsV2) {
-          GM_setValue('henry-list-patients-hash', hashes.ListPatientsV2.hash);
-          GM_setValue('henry-list-patients-endpoint', hashes.ListPatientsV2.endpoint);
-        }
-
-        log.info('トークン・ハッシュをGM_storageに同期完了');
       } catch (e) {
-        log.warn('GM_storage同期失敗: ' + e.message);
+        log.warn('トークン同期失敗: ' + e.message);
       }
     }
 
     // 初回同期 + ナビゲーション時に再同期
-    syncToGMStorage();
-    window.addEventListener('henry:navigation', syncToGMStorage);
+    syncTokenToGMStorage();
+    window.addEventListener('henry:navigation', syncTokenToGMStorage);
 
     // --------------------------------------------
     // トークンリクエスト監視（Reserve側からの要求に応答）
@@ -349,21 +372,26 @@
     // --------------------------------------------
     // API呼び出し（401エラー時に自動リトライ）
     // --------------------------------------------
-    async function callHenryAPIWithRetry(hash, operationName, variables, endpoint) {
+    async function callHenryAPIWithRetry(operationName, variables) {
       const token = GM_getValue('henry-token', null);
       if (!token) {
         throw new Error('トークンがありません');
       }
 
+      // エンドポイントはオペレーションに応じて決定
+      const endpoint = operationName === 'EncountersInPatient'
+        ? CONFIG.HENRY_GRAPHQL_V2
+        : CONFIG.HENRY_GRAPHQL;
+
       try {
-        return await callHenryAPI(token, hash, operationName, variables, endpoint);
+        return await callHenryAPI(token, operationName, variables, endpoint);
       } catch (e) {
         // 401エラーの場合、新しいトークンを取得して再試行
         if (e.message.includes('401')) {
           log.info('401エラー - 新しいトークンをリクエスト');
           const newToken = await requestToken();
           if (newToken) {
-            return await callHenryAPI(newToken, hash, operationName, variables, endpoint);
+            return await callHenryAPI(newToken, operationName, variables, endpoint);
           }
         }
         throw e;
@@ -371,46 +399,19 @@
     }
 
     // --------------------------------------------
-    // セットアップ状態チェック
+    // セットアップ状態チェック（トークンのみ）
     // --------------------------------------------
     function checkSetupStatus() {
       const token = GM_getValue('henry-token', null);
-      const listPatientsHash = GM_getValue('henry-list-patients-hash', null);
-      const encountersHash = GM_getValue('henry-encounters-hash', null);
 
       if (!token) {
         return {
           ok: false,
-          message: '【初回セットアップが必要です】\n\n' +
-            'Henryにログインしてください。\n\n' +
+          message: '【Henryにログインしてください】\n\n' +
+            'この機能を使用するにはHenryへのログインが必要です。\n\n' +
             '【手順】\n' +
             '1. Henry（https://henry-app.jp）を開く\n' +
             '2. ログインする\n' +
-            '3. この画面に戻って再度お試しください'
-        };
-      }
-
-      if (!listPatientsHash) {
-        return {
-          ok: false,
-          message: '【初回セットアップが必要です】\n\n' +
-            'Henryで患者一覧を表示してください。\n\n' +
-            '【手順】\n' +
-            '1. Henry（https://henry-app.jp）を開く\n' +
-            '2. 画面左上の「患者」メニューから患者一覧を表示する\n' +
-            '3. この画面に戻って再度お試しください'
-        };
-      }
-
-      if (!encountersHash) {
-        return {
-          ok: false,
-          needEncountersHash: true,
-          message: '【初回セットアップが必要です】\n\n' +
-            'Henryで患者の外来記録を表示してください。\n\n' +
-            '【手順】\n' +
-            '1. Henry（https://henry-app.jp）を開く\n' +
-            '2. 任意の患者ページを開き、外来記録タブを表示する\n' +
             '3. この画面に戻って再度お試しください'
         };
       }
@@ -439,6 +440,38 @@
     const isLoginPage = location.pathname.includes('login');
     if (isLoginPage) {
       log.info('ログインページのためHenry連携スキップ');
+    }
+
+    // トークン未取得時の通知（ログインページ以外で、初回のみ）
+    if (!isLoginPage && !GM_getValue('henry-token', null)) {
+      // 画面上部にバナーで通知
+      const noticeBanner = document.createElement('div');
+      noticeBanner.id = 'henry-login-notice';
+      noticeBanner.innerHTML = `
+        <span style="margin-right: 8px;">⚠️</span>
+        <span>Henry連携を使用するには<a href="https://henry-app.jp" target="_blank" style="color:#1a73e8; text-decoration:underline;">Henry</a>にログインしてください</span>
+        <button id="henry-notice-close" style="margin-left: auto; background: none; border: none; font-size: 18px; cursor: pointer; color: #666;">×</button>
+      `;
+      Object.assign(noticeBanner.style, {
+        position: 'fixed',
+        top: '0',
+        left: '0',
+        right: '0',
+        backgroundColor: '#FFF3CD',
+        color: '#856404',
+        padding: '10px 20px',
+        fontSize: '14px',
+        fontFamily: 'sans-serif',
+        zIndex: '99998',
+        display: 'flex',
+        alignItems: 'center',
+        boxShadow: '0 2px 4px rgba(0,0,0,0.1)'
+      });
+      document.body.appendChild(noticeBanner);
+      document.getElementById('henry-notice-close').addEventListener('click', () => {
+        noticeBanner.remove();
+      });
+      log.info('ログイン通知バナーを表示');
     }
 
     const pendingPatient = !isLoginPage ? GM_getValue('pendingPatient', null) : null;
@@ -656,22 +689,14 @@
     async function fetchAndShowEncounter(target, patientUuid) {
       showPreview(target, '<div style="color:#666;">読み込み中...</div>');
 
-      const hash = GM_getValue('henry-encounters-hash', null);
-      const endpoint = GM_getValue('henry-encounters-endpoint', '/graphql-v2');
-
-      if (!hash) {
-        showPreview(target, '<div style="color:#c00;">ハッシュ未取得。<br>Henryで外来記録を一度開いてください。</div>');
-        return;
-      }
-
       try {
-        const result = await callHenryAPIWithRetry(hash, 'EncountersInPatient', {
+        const result = await callHenryAPIWithRetry('EncountersInPatient', {
           patientId: patientUuid,
           startDate: null,
           endDate: null,
           pageSize: CONFIG.PREVIEW_COUNT,
           pageToken: null
-        }, 'https://henry-app.jp' + endpoint);
+        });
 
         const encounters = result.data?.encountersInPatient?.encounters ?? [];
         if (encounters.length === 0) {
@@ -714,16 +739,8 @@
         return cachedUuid;
       }
 
-      const hash = GM_getValue('henry-list-patients-hash', null);
-      const endpoint = GM_getValue('henry-list-patients-endpoint', '/graphql');
-
-      if (!hash) {
-        log.warn('ListPatientsV2 ハッシュ未取得');
-        return null;
-      }
-
       try {
-        const result = await callHenryAPIWithRetry(hash, 'ListPatientsV2', {
+        const result = await callHenryAPIWithRetry('ListPatientsV2', {
           input: {
             generalFilter: { query: patientNumber, patientCareType: 'PATIENT_CARE_TYPE_ANY' },
             hospitalizationFilter: { doctorUuid: null, roomUuids: [], wardUuids: [], states: [], onlyLatest: true },
@@ -731,7 +748,7 @@
             pageSize: 1,
             pageToken: ''
           }
-        }, 'https://henry-app.jp' + endpoint);
+        });
 
         const entries = result.data?.listPatientsV2?.entries ?? [];
         const uuid = entries[0]?.patient?.uuid || null;
@@ -770,10 +787,7 @@
         // セットアップ状態チェック
         const setup = checkSetupStatus();
         if (!setup.ok) {
-          const shortMsg = setup.needEncountersHash
-            ? '外来記録プレビューを使用するには初回セットアップが必要です。<br>患者番号をクリックすると詳細が表示されます。'
-            : '初回セットアップが必要です。<br>患者番号をクリックすると詳細が表示されます。';
-          showPreview(target, `<div style="color:#c00;">${shortMsg}</div>`);
+          showPreview(target, '<div style="color:#c00;">Henryにログインしてください。<br>患者番号をクリックすると詳細が表示されます。</div>');
           return;
         }
 
@@ -806,31 +820,10 @@
       const patientNumber = target.textContent.trim();
       if (!patientNumber) return;
 
-      // セットアップ状態チェック（患者ページ遷移にはencountersHashは不要）
-      const token = GM_getValue('henry-token', null);
-      const listPatientsHash = GM_getValue('henry-list-patients-hash', null);
-
-      if (!token) {
-        alert(
-          '【初回セットアップが必要です】\n\n' +
-          'Henryにログインしてください。\n\n' +
-          '【手順】\n' +
-          '1. Henry（https://henry-app.jp）を開く\n' +
-          '2. ログインする\n' +
-          '3. この画面に戻って再度お試しください'
-        );
-        return;
-      }
-
-      if (!listPatientsHash) {
-        alert(
-          '【初回セットアップが必要です】\n\n' +
-          'Henryで患者一覧を表示してください。\n\n' +
-          '【手順】\n' +
-          '1. Henry（https://henry-app.jp）を開く\n' +
-          '2. 画面左上の「患者」メニューから患者一覧を表示する\n' +
-          '3. この画面に戻って再度お試しください'
-        );
+      // セットアップ状態チェック
+      const setup = checkSetupStatus();
+      if (!setup.ok) {
+        alert(setup.message);
         return;
       }
 
