@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         主治医意見書作成フォーム
 // @namespace    https://henry-app.jp/
-// @version      1.6.1
+// @version      1.7.0
 // @description  主治医意見書の入力フォームとGoogle Docs出力（バリデーション機能付き）
 // @author       Henry Team
 // @match        https://henry-app.jp/*
@@ -17,7 +17,7 @@
   'use strict';
 
   const SCRIPT_NAME = 'OpinionForm';
-  const VERSION = '1.6.1';
+  const VERSION = '1.7.0';
 
   // 医療機関情報（ハードコード）
   const INSTITUTION_INFO = {
@@ -923,22 +923,32 @@
 
     const data = formData.basic_info;
 
-    // 自動入力項目（読み取り専用）
-    section.appendChild(createReadOnlyField('記入日', data.date_of_writing_wareki || ''));
-    section.appendChild(createReadOnlyField('患者名かな', data.patient_name_kana || ''));
-    section.appendChild(createReadOnlyField('患者名', data.patient_name || ''));
-    section.appendChild(createReadOnlyField('生年月日', data.birth_date_wareki || ''));
-    section.appendChild(createReadOnlyField('年齢', data.age ? `${data.age}歳` : ''));
-    section.appendChild(createReadOnlyField('性別', data.sex === '1' ? '男' : data.sex === '2' ? '女' : ''));
-    section.appendChild(createReadOnlyField('郵便番号', data.postal_code || ''));
-    section.appendChild(createReadOnlyField('住所', data.address || ''));
-    section.appendChild(createReadOnlyField('連絡先電話番号', data.phone || ''));
-    section.appendChild(createReadOnlyField('医師氏名', data.physician_name || '（未取得）'));
-    section.appendChild(createReadOnlyField('医療機関名', data.institution_name || ''));
-    section.appendChild(createReadOnlyField('医療機関郵便番号', data.institution_postal_code || ''));
-    section.appendChild(createReadOnlyField('医療機関所在地', data.institution_address || ''));
-    section.appendChild(createReadOnlyField('医療機関電話番号', data.institution_phone || ''));
-    section.appendChild(createReadOnlyField('医療機関FAX番号', data.institution_fax || ''));
+    // 自動入力項目（編集可能）
+    section.appendChild(createTextField('記入日', 'date_of_writing_wareki', 'basic_info', data.date_of_writing_wareki || '', false));
+    section.appendChild(createTextField('患者名かな', 'patient_name_kana', 'basic_info', data.patient_name_kana || '', false));
+    section.appendChild(createTextField('患者名', 'patient_name', 'basic_info', data.patient_name || '', false));
+    section.appendChild(createTextField('生年月日', 'birth_date_wareki', 'basic_info', data.birth_date_wareki || '', false));
+    section.appendChild(createTextField('年齢', 'age', 'basic_info', data.age ? `${data.age}歳` : '', false));
+    section.appendChild(createRadioField(
+      '性別',
+      'sex',
+      'basic_info',
+      [
+        { label: '男', value: '1' },
+        { label: '女', value: '2' }
+      ],
+      data.sex,
+      false
+    ));
+    section.appendChild(createTextField('郵便番号', 'postal_code', 'basic_info', data.postal_code || '', false));
+    section.appendChild(createTextField('住所', 'address', 'basic_info', data.address || '', false));
+    section.appendChild(createTextField('連絡先電話番号', 'phone', 'basic_info', data.phone || '', false));
+    section.appendChild(createTextField('医師氏名', 'physician_name', 'basic_info', data.physician_name || '', false));
+    section.appendChild(createTextField('医療機関名', 'institution_name', 'basic_info', data.institution_name || '', false));
+    section.appendChild(createTextField('医療機関郵便番号', 'institution_postal_code', 'basic_info', data.institution_postal_code || '', false));
+    section.appendChild(createTextField('医療機関所在地', 'institution_address', 'basic_info', data.institution_address || '', false));
+    section.appendChild(createTextField('医療機関電話番号', 'institution_phone', 'basic_info', data.institution_phone || '', false));
+    section.appendChild(createTextField('医療機関FAX番号', 'institution_fax', 'basic_info', data.institution_fax || '', false));
 
     // 同意の有無（必須）
     section.appendChild(createRadioField(
@@ -2145,26 +2155,6 @@
   }
 
   /**
-   * 読み取り専用フィールド
-   */
-  function createReadOnlyField(label, value) {
-    const field = document.createElement('div');
-    field.style.cssText = 'margin-bottom: 12px;';
-
-    const labelEl = document.createElement('div');
-    labelEl.textContent = label;
-    labelEl.style.cssText = 'font-size: 13px; color: #64748b; margin-bottom: 4px;';
-    field.appendChild(labelEl);
-
-    const valueEl = document.createElement('div');
-    valueEl.textContent = value || '（未入力）';
-    valueEl.style.cssText = 'font-size: 14px; color: #1e293b; padding: 8px 12px; background: #f1f5f9; border-radius: 4px;';
-    field.appendChild(valueEl);
-
-    return field;
-  }
-
-  /**
    * ラジオボタンフィールド
    */
   function createRadioField(label, name, section, options, currentValue, required = false) {
@@ -2433,6 +2423,69 @@
   }
 
   /**
+   * フォームデータをクリア
+   */
+  function clearFormData(container) {
+    // テキスト入力をクリア
+    container.querySelectorAll('input[type="text"], textarea').forEach(input => {
+      input.value = '';
+    });
+
+    // 日付入力をクリア
+    container.querySelectorAll('input[type="date"]').forEach(input => {
+      input.value = '';
+    });
+
+    // ラジオボタンをクリア
+    container.querySelectorAll('input[type="radio"]').forEach(radio => {
+      radio.checked = false;
+    });
+
+    // チェックボックスをクリア
+    container.querySelectorAll('input[type="checkbox"]').forEach(cb => {
+      cb.checked = false;
+    });
+  }
+
+  /**
+   * 自動入力フィールドをセット
+   */
+  function setAutoFillFields(container, basicInfo) {
+    const autoFillFields = {
+      'date_of_writing_wareki': basicInfo.date_of_writing_wareki || '',
+      'patient_name_kana': basicInfo.patient_name_kana || '',
+      'patient_name': basicInfo.patient_name || '',
+      'birth_date_wareki': basicInfo.birth_date_wareki || '',
+      'age': basicInfo.age ? `${basicInfo.age}歳` : '',
+      'postal_code': basicInfo.postal_code || '',
+      'address': basicInfo.address || '',
+      'phone': basicInfo.phone || '',
+      'physician_name': basicInfo.physician_name || '',
+      'institution_name': basicInfo.institution_name || '',
+      'institution_postal_code': basicInfo.institution_postal_code || '',
+      'institution_address': basicInfo.institution_address || '',
+      'institution_phone': basicInfo.institution_phone || '',
+      'institution_fax': basicInfo.institution_fax || ''
+    };
+
+    // テキストフィールドをセット
+    Object.entries(autoFillFields).forEach(([fieldName, value]) => {
+      const input = container.querySelector(`input[data-field-name="${fieldName}"][data-section="basic_info"]`);
+      if (input) {
+        input.value = value;
+      }
+    });
+
+    // 性別のラジオボタンをセット
+    if (basicInfo.sex) {
+      const sexRadio = container.querySelector(`input[type="radio"][data-field-name="sex"][data-section="basic_info"][value="${basicInfo.sex}"]`);
+      if (sexRadio) {
+        sexRadio.checked = true;
+      }
+    }
+  }
+
+  /**
    * フォームからデータを収集
    */
   function collectFormData(container) {
@@ -2525,6 +2578,23 @@
           variant: 'secondary',
           autoClose: false,
           onClick: () => fillTestData(formHTML)
+        },
+        {
+          label: 'クリア',
+          variant: 'secondary',
+          autoClose: false,
+          onClick: () => {
+            if (!confirm('入力内容をクリアしますか？\n（自動入力項目は再セットされます）')) return;
+
+            // フォームをクリア
+            clearFormData(formHTML);
+
+            // 自動入力項目を再セット
+            setAutoFillFields(formHTML, formData.basic_info);
+
+            isDirty = false;
+            showFormMessage('入力内容をクリアしました', 'success');
+          }
         },
         {
           label: 'キャンセル',
