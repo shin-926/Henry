@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Google Drive連携
 // @namespace    https://henry-app.jp/
-// @version      1.0.3
+// @version      1.0.4
 // @description  HenryのファイルをGoogle Drive APIで直接変換・編集。GAS不要版。
 // @match        https://henry-app.jp/*
 // @match        https://docs.google.com/document/d/*
@@ -798,24 +798,17 @@
       const hide = showProcessingIndicator(`書類を開いています... (${file.title})`);
 
       try {
-        const totalStart = performance.now();
         const henryToken = await pageWindow.HenryCore.getToken();
 
         // 1. GCSからダウンロード
-        const step1Start = performance.now();
-        debugLog('Henry', '[PERF] Step 1: GCSからダウンロード開始...');
         const fileBuffer = await downloadFromGCS(fileUrl, henryToken);
         const blob = new Blob([fileBuffer]);
-        const step1Time = performance.now() - step1Start;
-        debugLog('Henry', `[PERF] Step 1: GCSダウンロード完了 - ${step1Time.toFixed(0)}ms`);
 
         // 2. ファイルタイプ判定
         const isDocx = file.fileType === 'FILE_TYPE_DOCX';
         const mimeInfo = isDocx ? MIME_TYPES.docx : MIME_TYPES.xlsx;
 
         // 3. Google Driveにアップロード（変換付き）
-        const step3Start = performance.now();
-        debugLog('Henry', '[PERF] Step 3: Google Driveアップロード開始...');
         const driveFile = await DriveAPI.uploadWithConversion(
           file.title,
           blob,
@@ -828,20 +821,14 @@
             henrySource: 'drive-direct'
           }
         );
-        const step3Time = performance.now() - step3Start;
-        debugLog('Henry', `[PERF] Step 3: Driveアップロード完了 - ${step3Time.toFixed(0)}ms`);
 
         // 4. Google Docsで開く
         const docType = isDocx ? 'document' : 'spreadsheets';
         const openUrl = `https://docs.google.com/${docType}/d/${driveFile.id}/edit`;
 
-        const totalTime = performance.now() - totalStart;
-        console.log(`%c[DriveDirect] ファイルを開く 合計時間: ${totalTime.toFixed(0)}ms (GCS: ${step1Time.toFixed(0)}ms, Drive: ${step3Time.toFixed(0)}ms)`, 'color: #4CAF50; font-weight: bold; font-size: 14px;');
-
-        debugLog('Henry', 'ファイルを開きます:', openUrl);
         GM_openInTab(openUrl, { active: true });
 
-        showToast(`ファイルを開きました (${(totalTime/1000).toFixed(1)}秒)`);
+        showToast('ファイルを開きました');
 
       } catch (e) {
         debugError('Henry', '処理失敗:', e.message);
@@ -1104,10 +1091,7 @@
         const docId = window.location.pathname.split('/')[3];
         if (!docId) throw new Error('ドキュメントIDが取得できません');
 
-        const totalStart = performance.now();
-
         // メタデータ取得
-        debugLog('Docs', '[PERF] メタデータ取得中...');
         const metadata = await DriveAPI.getFileMetadata(docId, 'id,name,properties');
         const props = metadata.properties || {};
 
@@ -1131,12 +1115,8 @@
           : `${metadata.name}.${extension}`;
 
         // エクスポート
-        const exportStart = performance.now();
-        debugLog('Docs', '[PERF] エクスポート開始...');
         const fileBuffer = await DriveAPI.exportFile(docId, mimeInfo.source);
         const blob = new Blob([fileBuffer], { type: mimeInfo.source });
-        const exportTime = performance.now() - exportStart;
-        debugLog('Docs', `[PERF] エクスポート完了 - ${exportTime.toFixed(0)}ms`);
 
         // 上書きモードの場合、既存ファイル削除
         if (mode === 'overwrite' && props.henryFileUuid) {
@@ -1151,8 +1131,6 @@
         }
 
         // Henryにアップロード
-        const uploadStart = performance.now();
-        debugLog('Docs', '[PERF] Henryアップロード開始...');
         const uploadUrlResult = await HenryAPI.call(henryToken, 'GetFileUploadUrl', {
           input: { pathType: 'PATIENT_FILE' }
         });
@@ -1169,8 +1147,6 @@
             fileUrl: fileUrl
           }
         });
-        const uploadTime = performance.now() - uploadStart;
-        debugLog('Docs', `[PERF] Henryアップロード完了 - ${uploadTime.toFixed(0)}ms`);
 
         const newFileUuid = createResult?.createPatientFile?.uuid;
 
@@ -1186,11 +1162,8 @@
         // Henryへリフレッシュ通知
         notifyHenryToRefresh(props.henryPatientId);
 
-        const totalTime = performance.now() - totalStart;
-        console.log(`%c[DriveDirect] 保存 合計時間: ${totalTime.toFixed(0)}ms (Export: ${exportTime.toFixed(0)}ms, Upload: ${uploadTime.toFixed(0)}ms)`, 'color: #2196F3; font-weight: bold; font-size: 14px;');
-
         const actionText = mode === 'overwrite' ? '上書き保存' : '新規保存';
-        showToast(`Henryへ${actionText}しました (${(totalTime/1000).toFixed(1)}秒)`);
+        showToast(`Henryへ${actionText}しました`);
 
       } catch (e) {
         debugError('Docs', 'エラー:', e.message);
