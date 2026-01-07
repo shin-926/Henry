@@ -404,9 +404,8 @@ try {
 
 > **AI向け指示**: セッション開始時にこのセクションを確認し、未完了のタスクがあればユーザーにリマインドすること。タスク完了後はこのセクションから削除すること。
 
-### 2026-01-06 追加
+### 2026-01-07 更新
 - [ ] **デバッグログ削除**: `henry_google_bridge.user.js` のデバッグログを削除（動作が安定したら）
 - [ ] **動作確認**: フルクエリ方式に移行した他のスクリプトのテスト
   - henry_ikensho_form.user.js
-  - henry_reserve_integration.user.js
   - henry_auto_approver.user.js
