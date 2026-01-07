@@ -21,8 +21,8 @@
 // @connect      storage.googleapis.com
 // @connect      henry-app.jp
 // @run-at       document-start
-// @updateURL    https://raw.githubusercontent.com/shin-926/Henry/main/henry_google_drive_direct.user.js
-// @downloadURL  https://raw.githubusercontent.com/shin-926/Henry/main/henry_google_drive_direct.user.js
+// @updateURL    https://raw.githubusercontent.com/shin-926/Henry/main/henry_google_drive_bridge.user.js
+// @downloadURL  https://raw.githubusercontent.com/shin-926/Henry/main/henry_google_drive_bridge.user.js
 // ==/UserScript==
 
 (function() {
