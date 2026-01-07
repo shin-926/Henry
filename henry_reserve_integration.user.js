@@ -55,7 +55,7 @@
       }
     `,
     EncountersInPatient: `
-      query EncountersInPatient($patientId: ID!, $startDate: Date, $endDate: Date, $pageSize: Int, $pageToken: String) {
+      query EncountersInPatient($patientId: String!, $startDate: Date, $endDate: Date, $pageSize: Int, $pageToken: String) {
         encountersInPatient(patientId: $patientId, startDate: $startDate, endDate: $endDate, pageSize: $pageSize, pageToken: $pageToken) {
           encounters {
             basedOn {
