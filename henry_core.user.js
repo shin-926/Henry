@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry Core
 // @namespace    https://henry-app.jp/
-// @version      2.8.0
+// @version      2.8.1
 // @description  Henry スクリプト実行基盤 (v3.20準拠 / 単一施設運用 / プラグインレジストリ対応 / query()メソッド追加)
 // @match        https://henry-app.jp/*
 // @updateURL    https://raw.githubusercontent.com/shin-926/Henry/main/henry_core.user.js
@@ -25,7 +25,7 @@
     BASE_URL: 'https://henry-app.jp'
   };
 
-  console.log('[Henry Core] Initializing v2.8.0...');
+  console.log('[Henry Core] Initializing v2.8.1...');
 
   // ==========================================
   // 1. IndexedDB Manager (ハッシュ + エンドポイント管理)
@@ -212,12 +212,6 @@
     getMyUuid: async () => {
       if (Context._myUuid) return Context._myUuid;
 
-      const hashEntry = hashCache.get('ListUsers') || await DB.get('ListUsers');
-      if (!hashEntry) {
-        console.error('[Henry Core] getMyUuid failed: "ListUsers" APIのハッシュが見つかりません。Henry画面で「設定 > メンバー」などを開き、医師一覧を表示してください。');
-        return null;
-      }
-
       const myName = await Auth.getMyNameFromToken();
       if (!myName) {
         console.error('[Henry Core] Firebase から名前を取得できませんでした');
@@ -225,9 +219,13 @@
       }
 
       try {
-        const result = await window.HenryCore.call('ListUsers', {
-          input: { role: 'DOCTOR', onlyNarcoticPractitioner: false }
-        });
+        const result = await window.HenryCore.query(`
+          query ListUsers($input: ListUsersRequestInput!) {
+            listUsers(input: $input) {
+              users { uuid name }
+            }
+          }
+        `, { input: { role: 'DOCTOR', onlyNarcoticPractitioner: false } });
 
         const users = result.data?.listUsers?.users || [];
         const normalize = (s) => s.replace(/\s+/g, '');
