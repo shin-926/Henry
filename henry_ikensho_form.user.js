@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         主治医意見書作成フォーム
 // @namespace    https://henry-app.jp/
-// @version      1.7.0
+// @version      1.8.0
 // @description  主治医意見書の入力フォームとGoogle Docs出力（バリデーション機能付き）
 // @author       Henry Team
 // @match        https://henry-app.jp/*
@@ -33,6 +33,7 @@
     GetPatient: `
       query GetPatient($input: GetPatientRequestInput!) {
         getPatient(input: $input) {
+          serialNumber
           fullName
           fullNamePhonetic
           detail {
@@ -347,17 +348,15 @@
 
   /**
    * ファイル名を生成
+   * 形式: YYYYMMDD_患者ID_患者名_主治医意見書
    * @param {Object} formData - フォームデータ
    * @returns {string} ファイル名
    */
   function generateFileName(formData) {
     const dateStr = formData.basic_info?.date_of_writing || getTodayString();
+    const patientId = formData.basic_info?.patient_id || '00000';
     const patientName = formData.basic_info?.patient_name || '不明';
-    // YYYYMMDD形式をYYYY-MM-DD形式に変換
-    const formattedDate = dateStr.length === 8
-      ? `${dateStr.slice(0, 4)}-${dateStr.slice(4, 6)}-${dateStr.slice(6, 8)}`
-      : dateStr;
-    return `${formattedDate}_${patientName}`;
+    return `${dateStr}_${patientId}_${patientName}_主治医意見書`;
   }
 
   // =============================================================================
@@ -398,6 +397,7 @@
 
       return {
         patient_uuid: patientUuid,
+        patient_id: patient.serialNumber || '',
         date_of_writing: today,
         date_of_writing_wareki: toWareki(todayFormatted),
         patient_name_kana: katakanaToHiragana(patient.fullNamePhonetic) || '',
@@ -719,6 +719,7 @@
 
       // 基本情報は常に最新の患者情報で上書き（下書きがあっても患者情報は最新を使用）
       formData.basic_info.patient_uuid = patientInfo.patient_uuid;
+      formData.basic_info.patient_id = patientInfo.patient_id;
       formData.basic_info.date_of_writing = patientInfo.date_of_writing;
       formData.basic_info.date_of_writing_wareki = patientInfo.date_of_writing_wareki;
       formData.basic_info.patient_name_kana = patientInfo.patient_name_kana;
@@ -751,6 +752,7 @@
     return {
       basic_info: {
         patient_uuid: patientInfo.patient_uuid,
+        patient_id: patientInfo.patient_id,
         date_of_writing: patientInfo.date_of_writing,
         date_of_writing_wareki: patientInfo.date_of_writing_wareki,
         patient_name_kana: patientInfo.patient_name_kana,
