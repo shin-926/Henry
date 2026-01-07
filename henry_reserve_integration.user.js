@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         予約システム連携
 // @namespace    https://github.com/shin-926/Tampermonkey
-// @version      1.5.1
+// @version      1.6.0
 // @description  Henryカルテと予約システム間の双方向連携（再診予約・患者プレビュー・ページ遷移）
 // @match        https://henry-app.jp/*
 // @match        https://manage-maokahp.reserve.ne.jp/*
@@ -265,9 +265,7 @@
           return;
         }
 
-        GM_setValue('currentPatientId', patientId);
-        GM_setValue('currentPatientName', patientData.name || '');
-        GM_setValue('openedFromHenry', Date.now());
+        GM_setValue('pendingPatient', { id: patientId, name: patientData.name || '' });
         log.info('保存した患者番号:', patientId, '患者名:', patientData.name);
 
         const width = window.screen.availWidth;
@@ -438,27 +436,25 @@
     // --------------------------------------------
     // Henry→Reserve連携：バナー表示・自動入力
     // --------------------------------------------
-    const currentPatientId = GM_getValue('currentPatientId', '');
-    const currentPatientName = GM_getValue('currentPatientName', '');
-    const openedAt = GM_getValue('openedFromHenry', 0);
-    const isFromHenry = (Date.now() - openedAt) < 5000;
+    const pendingPatient = GM_getValue('pendingPatient', null);
 
-    if (isFromHenry && currentPatientId) {
-      GM_setValue('openedFromHenry', 0);
-      log.info('Henryから遷移 - カルテID:', currentPatientId, '患者名:', currentPatientName);
+    if (pendingPatient && pendingPatient.id) {
+      // 使用後にクリア（ログイン後の再読み込みでも重複しない）
+      GM_setValue('pendingPatient', null);
+      log.info('Henryから遷移 - カルテID:', pendingPatient.id, '患者名:', pendingPatient.name);
 
       // 患者バナー表示
-      showPatientBanner(currentPatientId, currentPatientName);
+      showPatientBanner(pendingPatient.id, pendingPatient.name);
 
       // ダイアログ自動入力の監視
       const dialogObserver = new MutationObserver(() => {
-        tryFillDialog(currentPatientId);
+        tryFillDialog(pendingPatient.id);
       });
       dialogObserver.observe(document.body, { childList: true, subtree: true });
-      tryFillDialog(currentPatientId);
+      tryFillDialog(pendingPatient.id);
 
-    } else if (!isFromHenry) {
-      log.info('ブックマーク等から開かれたためHenry連携スキップ');
+    } else {
+      log.info('pendingPatientなし - Henry連携スキップ');
     }
 
     function showPatientBanner(patientId, patientName) {
