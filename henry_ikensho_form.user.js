@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         主治医意見書作成フォーム
 // @namespace    https://henry-app.jp/
-// @version      1.6.0
+// @version      1.6.1
 // @description  主治医意見書の入力フォームとGoogle Docs出力（バリデーション機能付き）
 // @author       Henry Team
 // @match        https://henry-app.jp/*
@@ -17,7 +17,7 @@
   'use strict';
 
   const SCRIPT_NAME = 'OpinionForm';
-  const VERSION = '1.5.7';
+  const VERSION = '1.6.1';
 
   // 医療機関情報（ハードコード）
   const INSTITUTION_INFO = {
@@ -2588,6 +2588,10 @@
               // 処理中表示
               button.textContent = 'ドキュメント作成中...';
               button.disabled = true;
+
+              // 一時保存（Googleドキュメントを閉じても編集内容が残るように）
+              saveDraft(formData.basic_info.patient_uuid, collected);
+              isDirty = false;
 
               try {
                 // Google Docs生成
