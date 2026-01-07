@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         予約システム連携
 // @namespace    https://github.com/shin-926/Tampermonkey
-// @version      1.6.1
+// @version      1.6.2
 // @description  Henryカルテと予約システム間の双方向連携（再診予約・患者プレビュー・ページ遷移）
 // @match        https://henry-app.jp/*
 // @match        https://manage-maokahp.reserve.ne.jp/*
@@ -266,7 +266,6 @@
         }
 
         GM_setValue('pendingPatient', { id: patientId, name: patientData.name || '' });
-        log.info('保存した患者番号:', patientId, '患者名:', patientData.name);
 
         const width = window.screen.availWidth;
         const height = window.screen.availHeight;
@@ -712,7 +711,6 @@
       // キャッシュを確認
       const cachedUuid = getUuidFromCache(patientNumber);
       if (cachedUuid) {
-        log.info(`キャッシュヒット: ${patientNumber} -> ${cachedUuid}`);
         return cachedUuid;
       }
 
@@ -740,7 +738,6 @@
 
         if (uuid) {
           saveUuidToCache(patientNumber, uuid);
-          log.info(`新規取得・キャッシュ保存: ${patientNumber} -> ${uuid}`);
         }
         return uuid;
 
@@ -803,8 +800,6 @@
       const target = e.target.closest('span.num[id="reserve_tooltip_cus_record_no"]');
       if (!target) return;
 
-      log.info('クリックイベント発火');
-
       e.preventDefault();
       e.stopPropagation();
 
@@ -846,7 +841,6 @@
       }
 
       const url = CONFIG.HENRY_PATIENT_URL + uuid + '?tab=outpatient';
-      log.info('Henryページを開きます: ' + url);
       window.open(url, '_blank');
     }, true);
   }

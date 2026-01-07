@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Google Docs連携
 // @namespace    https://henry-app.jp/
-// @version      2.10.3
+// @version      2.10.4
 // @description  HenryのファイルをGoogle形式で開き、編集後にHenryへ書き戻すための統合スクリプト。これ1つで両方のサイトで動作。
 // @match        https://henry-app.jp/*
 // @match        https://docs.google.com/document/d/*
@@ -21,9 +21,6 @@
 // @updateURL    https://raw.githubusercontent.com/shin-926/Henry/main/henry_google_bridge.user.js
 // @downloadURL  https://raw.githubusercontent.com/shin-926/Henry/main/henry_google_bridge.user.js
 // ==/UserScript==
-
-// TODO: 動作が完全に確認できたら、callHenryAPI 内のレスポンスログを削除する
-//       debugLog('Docs', '  Response:', res.responseText) の行
 
 (function() {
   'use strict';
@@ -841,9 +838,6 @@
           },
           data: JSON.stringify(requestBody),
           onload: (res) => {
-            debugLog('Docs', '  Status:', res.status);
-            debugLog('Docs', '  Response:', res.responseText);
-
             if (res.status === 200) {
               const body = JSON.parse(res.responseText);
               if (body.errors) {
