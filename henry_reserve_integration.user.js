@@ -117,6 +117,7 @@
         }),
         onload: (res) => {
           if (res.status !== 200) {
+            log.error(`API Error: ${res.status}, Response: ${res.responseText}`);
             reject(new Error(`API Error: ${res.status}`));
             return;
           }
