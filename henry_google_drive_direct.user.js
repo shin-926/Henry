@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Google Drive直接連携
 // @namespace    https://henry-app.jp/
-// @version      1.0.2
+// @version      1.0.3
 // @description  HenryのファイルをGoogle Drive APIで直接変換・編集。GAS不要版。
 // @match        https://henry-app.jp/*
 // @match        https://docs.google.com/document/d/*
@@ -1061,6 +1061,14 @@
       const originalText = btn.textContent;
       btn.style.pointerEvents = 'none';
       btn.style.opacity = '0.7';
+
+      // スピナー用スタイル追加
+      if (!document.getElementById('drive-direct-spin-style')) {
+        const style = document.createElement('style');
+        style.id = 'drive-direct-spin-style';
+        style.textContent = `@keyframes drive-direct-spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }`;
+        document.head.appendChild(style);
+      }
 
       // スピナー付きボタンに変更
       while (btn.firstChild) {
