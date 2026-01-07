@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Google Drive直接連携
 // @namespace    https://henry-app.jp/
-// @version      1.0.1
+// @version      1.0.2
 // @description  HenryのファイルをGoogle Drive APIで直接変換・編集。GAS不要版。
 // @match        https://henry-app.jp/*
 // @match        https://docs.google.com/document/d/*
@@ -1061,7 +1061,25 @@
       const originalText = btn.textContent;
       btn.style.pointerEvents = 'none';
       btn.style.opacity = '0.7';
-      btn.textContent = '処理中...';
+
+      // スピナー付きボタンに変更
+      while (btn.firstChild) {
+        btn.removeChild(btn.firstChild);
+      }
+      const spinner = document.createElement('div');
+      Object.assign(spinner.style, {
+        width: '14px',
+        height: '14px',
+        border: '2px solid rgba(255,255,255,0.3)',
+        borderTop: '2px solid #ffffff',
+        borderRadius: '50%',
+        animation: 'drive-direct-spin 1s linear infinite',
+        flexShrink: '0'
+      });
+      btn.appendChild(spinner);
+      const textSpan = document.createElement('span');
+      textSpan.textContent = '処理中...';
+      btn.appendChild(textSpan);
 
       try {
         // 設定チェック
@@ -1170,6 +1188,9 @@
         debugError('Docs', 'エラー:', e.message);
         showToast(`エラー: ${e.message}`, true, 5000);
       } finally {
+        while (btn.firstChild) {
+          btn.removeChild(btn.firstChild);
+        }
         btn.textContent = originalText;
         btn.style.pointerEvents = 'auto';
         btn.style.opacity = '1';
