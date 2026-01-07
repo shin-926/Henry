@@ -4,3 +4,6 @@
 *.txt
 *.bak
 .mcp.json
+
+# ローカル認証情報（GitHubにアップロードしない）
+*.local.js
