@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         自動承認アシスタント
 // @namespace    http://tampermonkey.net/
-// @version      3.4.0
+// @version      3.5.0
 // @description  承認待ちオーダーを自動で一括承認する
 // @match        https://henry-app.jp/*
 // @grant        none
@@ -533,22 +533,18 @@
       await new Promise(r => setTimeout(r, 100));
     }
 
-    // プラグイン登録（HenryCore v2.6.0）
-    const registered = await HenryCore.registerPlugin({
-      label: '⚡ 一括承認',
-      event: 'henry:auto-approve-all',
-      order: 20
+    // プラグイン登録（HenryCore v2.7.0以降）
+    await HenryCore.registerPlugin({
+      id: 'auto-approver',
+      name: '一括承認',
+      icon: '⚡',
+      description: '承認待ちオーダーを自動で一括承認',
+      version: '3.5.0',
+      order: 20,
+      onClick: main
     });
 
-    if (!registered) {
-      console.error(`[${SCRIPT_NAME}] プラグイン登録に失敗しました`);
-      return;
-    }
-
-    // イベントリスナー
-    window.addEventListener('henry:auto-approve-all', main);
-
-    console.log(`[${SCRIPT_NAME}] v3.3.0 起動しました`);
+    console.log(`[${SCRIPT_NAME}] v3.5.0 起動しました`);
   }
 
   if (document.readyState === 'loading') {

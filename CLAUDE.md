@@ -411,4 +411,4 @@ try {
 - [x] ~~**reserve-integration確認**: フルクエリ方式に移行完了~~ → v1.7.2
 - [ ] **動作確認**: フルクエリ方式に移行した他のスクリプトのテスト
   - henry_ikensho_form.user.js
-  - henry_auto_approver.user.js
+  - henry_auto_approver.user.js → v3.5.0に更新済み、動作確認待ち（プラグイン登録を新形式に変更）
