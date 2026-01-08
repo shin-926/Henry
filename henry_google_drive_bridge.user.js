@@ -1,11 +1,10 @@
 // ==UserScript==
 // @name         Google Drive連携
 // @namespace    https://henry-app.jp/
-// @version      1.0.4
+// @version      1.0.5
 // @description  HenryのファイルをGoogle Drive APIで直接変換・編集。GAS不要版。
 // @match        https://henry-app.jp/*
-// @match        https://docs.google.com/document/d/*
-// @match        https://docs.google.com/spreadsheets/d/*
+// @match        https://docs.google.com/*
 // @grant        GM_xmlhttpRequest
 // @grant        GM_setValue
 // @grant        GM_getValue
