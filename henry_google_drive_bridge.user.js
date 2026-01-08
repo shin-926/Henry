@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Google Drive連携
 // @namespace    https://henry-app.jp/
-// @version      1.0.5
+// @version      1.0.6
 // @description  HenryのファイルをGoogle Drive APIで直接変換・編集。GAS不要版。
 // @match        https://henry-app.jp/*
 // @match        https://docs.google.com/*
@@ -1108,10 +1108,7 @@
         // ファイルタイプ判定
         const isSpreadsheet = window.location.href.includes('/spreadsheets/');
         const mimeInfo = isSpreadsheet ? MIME_TYPES.xlsx : MIME_TYPES.docx;
-        const extension = isSpreadsheet ? 'xlsx' : 'docx';
-        const fileName = metadata.name.endsWith(`.${extension}`)
-          ? metadata.name
-          : `${metadata.name}.${extension}`;
+        const fileName = metadata.name;
 
         // エクスポート
         const fileBuffer = await DriveAPI.exportFile(docId, mimeInfo.source);
