@@ -1,20 +1,35 @@
 // ==UserScript==
 // @name         Henry Core
 // @namespace    https://henry-app.jp/
-// @version      2.8.1
-// @description  Henry スクリプト実行基盤 (v3.20準拠 / 単一施設運用 / プラグインレジストリ対応 / query()メソッド追加)
+// @version      2.9.0
+// @description  Henry スクリプト実行基盤 (GoogleAuth統合 / Google Docs対応)
 // @match        https://henry-app.jp/*
+// @match        https://docs.google.com/*
+// @grant        GM_setValue
+// @grant        GM_getValue
+// @grant        GM_deleteValue
+// @grant        GM_openInTab
+// @grant        GM_xmlhttpRequest
+// @grant        unsafeWindow
+// @connect      accounts.google.com
+// @connect      oauth2.googleapis.com
 // @updateURL    https://raw.githubusercontent.com/shin-926/Henry/main/henry_core.user.js
 // @downloadURL  https://raw.githubusercontent.com/shin-926/Henry/main/henry_core.user.js
-// @grant        none
 // @run-at       document-start
 // ==/UserScript==
 
 (function() {
   'use strict';
 
+  // ページのwindowを取得（サンドボックス対応）
+  const pageWindow = typeof unsafeWindow !== 'undefined' ? unsafeWindow : window;
+
   // 二重起動防止
-  if (window.HenryCore) return;
+  if (pageWindow.HenryCore) return;
+
+  // ドメイン判定
+  const isHenry = location.host === 'henry-app.jp';
+  const isGoogleDocs = location.host === 'docs.google.com';
 
   const CONFIG = {
     // 単一施設運用を前提としたハードコード（複数施設対応は想定しない）
@@ -22,10 +37,21 @@
     DB_NAME: 'HenryAPIHashes',
     DB_VERSION: 2,
     STORE_NAME: 'hashes',
-    BASE_URL: 'https://henry-app.jp'
+    BASE_URL: 'https://henry-app.jp',
+
+    // GoogleAuth設定（ユーザーが設定）
+    GOOGLE_CLIENT_ID: '',      // GCPコンソールで取得
+    GOOGLE_CLIENT_SECRET: '',  // GCPコンソールで取得
+
+    // GoogleAuth固定設定
+    GOOGLE_SCOPES: 'https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/documents',
+    GOOGLE_REDIRECT_URI: 'https://henry-app.jp/',
+    GOOGLE_AUTH_ENDPOINT: 'https://accounts.google.com/o/oauth2/v2/auth',
+    GOOGLE_TOKEN_ENDPOINT: 'https://oauth2.googleapis.com/token',
+    GOOGLE_TOKENS_KEY: 'google_drive_tokens'
   };
 
-  console.log('[Henry Core] Initializing v2.8.1...');
+  console.log('[Henry Core] Initializing v2.9.0...');
 
   // ==========================================
   // 1. IndexedDB Manager (ハッシュ + エンドポイント管理)
@@ -219,7 +245,7 @@
       }
 
       try {
-        const result = await window.HenryCore.query(`
+        const result = await pageWindow.HenryCore.query(`
           query ListUsers($input: ListUsersRequestInput!) {
             listUsers(input: $input) {
               users { uuid name }
@@ -628,14 +654,179 @@
   };
 
   // ==========================================
-  // 9. Plugin Registry
+  // 9. GoogleAuth Module (Google OAuth認証)
+  // ==========================================
+  const GoogleAuth = {
+    // 設定チェック
+    isConfigured() {
+      return CONFIG.GOOGLE_CLIENT_ID && CONFIG.GOOGLE_CLIENT_SECRET;
+    },
+
+    // トークン取得
+    getTokens() {
+      return GM_getValue(CONFIG.GOOGLE_TOKENS_KEY, null);
+    },
+
+    // トークン保存
+    saveTokens(tokens) {
+      const data = {
+        access_token: tokens.access_token,
+        refresh_token: tokens.refresh_token || this.getTokens()?.refresh_token,
+        expires_at: Date.now() + (tokens.expires_in * 1000) - 60000
+      };
+      GM_setValue(CONFIG.GOOGLE_TOKENS_KEY, data);
+      console.log('[Henry Core] GoogleAuth: トークン保存完了');
+      return data;
+    },
+
+    // トークン削除
+    clearTokens() {
+      GM_deleteValue(CONFIG.GOOGLE_TOKENS_KEY);
+      console.log('[Henry Core] GoogleAuth: トークン削除完了');
+    },
+
+    // 認証済みかどうか
+    isAuthenticated() {
+      const tokens = this.getTokens();
+      return tokens && tokens.refresh_token;
+    },
+
+    // アクセストークンが有効かどうか
+    isAccessTokenValid() {
+      const tokens = this.getTokens();
+      return tokens && tokens.access_token && Date.now() < tokens.expires_at;
+    },
+
+    // 有効なアクセストークンを取得（必要に応じてリフレッシュ）
+    async getValidAccessToken() {
+      if (!this.isAuthenticated()) {
+        throw new Error('未認証です。Google認証を行ってください。');
+      }
+
+      if (this.isAccessTokenValid()) {
+        return this.getTokens().access_token;
+      }
+
+      console.log('[Henry Core] GoogleAuth: アクセストークンをリフレッシュ中...');
+      return await this.refreshAccessToken();
+    },
+
+    // アクセストークンをリフレッシュ
+    async refreshAccessToken() {
+      const tokens = this.getTokens();
+      if (!tokens?.refresh_token) {
+        throw new Error('リフレッシュトークンがありません');
+      }
+
+      if (!this.isConfigured()) {
+        throw new Error('Google認証の設定が未完了です。CLIENT_IDとCLIENT_SECRETを設定してください。');
+      }
+
+      return new Promise((resolve, reject) => {
+        GM_xmlhttpRequest({
+          method: 'POST',
+          url: CONFIG.GOOGLE_TOKEN_ENDPOINT,
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          data: new URLSearchParams({
+            client_id: CONFIG.GOOGLE_CLIENT_ID,
+            client_secret: CONFIG.GOOGLE_CLIENT_SECRET,
+            refresh_token: tokens.refresh_token,
+            grant_type: 'refresh_token'
+          }).toString(),
+          onload: (response) => {
+            if (response.status === 200) {
+              const data = JSON.parse(response.responseText);
+              const saved = this.saveTokens(data);
+              console.log('[Henry Core] GoogleAuth: トークンリフレッシュ成功');
+              resolve(saved.access_token);
+            } else {
+              console.error('[Henry Core] GoogleAuth: リフレッシュ失敗:', response.responseText);
+              if (response.status === 400 || response.status === 401) {
+                this.clearTokens();
+              }
+              reject(new Error('トークンリフレッシュに失敗しました'));
+            }
+          },
+          onerror: (err) => {
+            console.error('[Henry Core] GoogleAuth: リフレッシュエラー:', err);
+            reject(new Error('トークンリフレッシュ通信エラー'));
+          }
+        });
+      });
+    },
+
+    // 認証URLを生成
+    getAuthUrl() {
+      const params = new URLSearchParams({
+        client_id: CONFIG.GOOGLE_CLIENT_ID,
+        redirect_uri: CONFIG.GOOGLE_REDIRECT_URI,
+        scope: CONFIG.GOOGLE_SCOPES,
+        response_type: 'code',
+        access_type: 'offline',
+        prompt: 'consent'
+      });
+      return `${CONFIG.GOOGLE_AUTH_ENDPOINT}?${params.toString()}`;
+    },
+
+    // 認証コードをトークンに交換
+    async exchangeCodeForTokens(code) {
+      return new Promise((resolve, reject) => {
+        GM_xmlhttpRequest({
+          method: 'POST',
+          url: CONFIG.GOOGLE_TOKEN_ENDPOINT,
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          data: new URLSearchParams({
+            client_id: CONFIG.GOOGLE_CLIENT_ID,
+            client_secret: CONFIG.GOOGLE_CLIENT_SECRET,
+            code: code,
+            redirect_uri: CONFIG.GOOGLE_REDIRECT_URI,
+            grant_type: 'authorization_code'
+          }).toString(),
+          onload: (response) => {
+            if (response.status === 200) {
+              const data = JSON.parse(response.responseText);
+              const saved = this.saveTokens(data);
+              console.log('[Henry Core] GoogleAuth: 認証コード交換成功');
+              resolve(saved);
+            } else {
+              console.error('[Henry Core] GoogleAuth: コード交換失敗:', response.responseText);
+              reject(new Error('認証に失敗しました'));
+            }
+          },
+          onerror: (err) => {
+            console.error('[Henry Core] GoogleAuth: コード交換エラー:', err);
+            reject(new Error('認証通信エラー'));
+          }
+        });
+      });
+    },
+
+    // 認証開始
+    startAuth() {
+      if (!this.isConfigured()) {
+        alert('Google認証の設定が未完了です。\n\nhenry_core.user.jsのCLIENT_IDとCLIENT_SECRETを設定してください。');
+        return;
+      }
+      const authUrl = this.getAuthUrl();
+      console.log('[Henry Core] GoogleAuth: 認証開始:', authUrl);
+      GM_openInTab(authUrl, { active: true });
+    }
+  };
+
+  // ==========================================
+  // 10. Plugin Registry
   // ==========================================
   const pluginRegistry = [];
 
   // ==========================================
-  // 10. Public API
+  // 11. Public API
   // ==========================================
-  window.HenryCore = {
+  pageWindow.HenryCore = {
+    // モジュール（GoogleAuth等）
+    modules: {
+      GoogleAuth: GoogleAuth
+    },
+
     plugins: pluginRegistry,
 
     // @deprecated: query() メソッドを使用してください。call() は後方互換性のために残されています。
@@ -749,7 +940,7 @@
       console.log(`[Henry Core] Plugin registered: ${plugin.name} (${plugin.id})`);
 
       // イベント発火（Toolbox が受け取る）
-      window.dispatchEvent(new CustomEvent('henrycore:plugin-registered', {
+      pageWindow.dispatchEvent(new CustomEvent('henrycore:plugin-registered', {
         detail: plugin
       }));
 
@@ -793,11 +984,69 @@
     ui: UI
   };
 
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', () => UI.init());
-  } else {
-    UI.init();
+  // ==========================================
+  // 12. 初期化
+  // ==========================================
+
+  // 認証コールバック処理（Henryドメインのみ）
+  function checkForAuthCode() {
+    const urlParams = new URLSearchParams(window.location.search);
+    const code = urlParams.get('code');
+
+    if (code) {
+      console.log('[Henry Core] GoogleAuth: 認証コードを検出');
+
+      // URLからcodeパラメータを削除
+      const newUrl = window.location.origin + window.location.pathname;
+      window.history.replaceState({}, '', newUrl);
+
+      // トークン交換
+      GoogleAuth.exchangeCodeForTokens(code)
+        .then(() => {
+          showToast('Google認証が完了しました');
+        })
+        .catch((err) => {
+          showToast('認証に失敗しました: ' + err.message, true);
+        });
+    }
   }
 
-  console.log('[Henry Core] Ready v2.8.0');
+  // トースト通知（簡易版）
+  function showToast(message, isError = false) {
+    const toast = document.createElement('div');
+    toast.textContent = message;
+    toast.style.cssText = `
+      position: fixed;
+      bottom: 20px;
+      right: 20px;
+      padding: 12px 24px;
+      background: ${isError ? '#dc3545' : '#28a745'};
+      color: white;
+      border-radius: 8px;
+      z-index: 999999;
+      font-size: 14px;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+    `;
+    document.body.appendChild(toast);
+    setTimeout(() => toast.remove(), 3000);
+  }
+
+  // ドメイン別初期化
+  if (isHenry) {
+    // Henryドメイン：フル機能
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', () => {
+        UI.init();
+        checkForAuthCode();
+      });
+    } else {
+      UI.init();
+      checkForAuthCode();
+    }
+    console.log('[Henry Core] Ready v2.9.0 (Henry mode)');
+
+  } else if (isGoogleDocs) {
+    // Google Docsドメイン：GoogleAuthのみ
+    console.log('[Henry Core] Ready v2.9.0 (Google Docs mode - GoogleAuth only)');
+  }
 })();

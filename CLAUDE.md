@@ -1,6 +1,6 @@
-# Henry EMR 開発ガイドライン (Core Rules v4.4)
+# Henry EMR 開発ガイドライン (Core Rules v4.5)
 
-<!-- 📝 UPDATED: v4.4 - コミュニケーション方針を詳細化 -->
+<!-- 📝 UPDATED: v4.5 - HenryCore v2.9.0対応（GoogleAuth統合、Google Docs対応） -->
 
 > **🆕 NEW**: このドキュメントはAIアシスタントとの協働開発における必須ルール集です。簡潔性を重視し、詳細な技術仕様は `HENRY-API-REFERENCE.md` を参照してください。
 
@@ -249,12 +249,12 @@ if (!patient) return null; // 静かに終了
 
 | メソッド | 用途 | 詳細 |
 |---------|------|------|
-| `query(queryString, variables)` | GraphQL API呼び出し（推奨） | v2.8.0以降。フルクエリ方式 |
-| `call(operationName, variables)` | GraphQL API呼び出し（非推奨） | ハッシュ方式。後方互換性のため残存 |
+| `query(queryString, variables)` | GraphQL API呼び出し | v2.8.0以降。フルクエリ方式 |
 | `getPatientUuid()` | 現在表示中の患者UUID取得 | - |
 | `getMyUuid()` | ログイン中のユーザーUUID取得 | 初回はAPI呼び出し、以降キャッシュ |
 | `plugins` | 登録済みプラグインの配列 | v2.7.0以降。読み取り専用 |
 | `registerPlugin(options)` | プラグイン登録 | v2.7.0以降。自動的にToolboxに表示 |
+| `modules.GoogleAuth` | Google OAuth認証モジュール | v2.9.0以降。`isAuthenticated()`, `getValidAccessToken()`, `startAuth()` 等 |
 | `utils.createCleaner()` | クリーンアップ管理 | 上記参照 |
 | `utils.waitForElement(selector, timeout)` | 要素の出現待機 | - |
 | `utils.createLogger(name)` | ログ出力ユーティリティ | - |
@@ -411,7 +411,8 @@ try {
 
 | Version | Date | Changes |
 |---------|------|---------|
-| **v4.4** | **2026-01-08** | **🆕 コミュニケーション方針を詳細化。質問すべき観点・タイミング、作業前確認テンプレート追加** |
+| **v4.5** | **2026-01-08** | **HenryCore v2.9.0対応。GoogleAuth統合（`modules.GoogleAuth`追加）、Google Docs対応** |
+| v4.4 | 2026-01-08 | コミュニケーション方針を詳細化。質問すべき観点・タイミング、作業前確認テンプレート追加 |
 | v4.3 | 2026-01-06 | HenryCore v2.8.0 フルクエリ方式追加。`query()` メソッド追加、`call()` は非推奨に。ハッシュ事前収集が不要になり、初回でもAPIが即座に呼び出し可能 |
 | v4.2 | 2026-01-05 | HenryCore v2.7.4 showModalオプション追加。`closeOnOverlayClick: false` でオーバーレイクリック無効化、`action.autoClose: false` でボタンクリック後の自動close無効化 |
 | v4.1 | 2026-01-05 | HenryCore v2.7.0 プラグインレジストリ対応。`HenryCore.plugins` 配列追加、`registerPlugin()` の仕様変更（自動的にToolboxへ表示）、プラグイン登録の例を追加 |

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Google Drive連携
 // @namespace    https://henry-app.jp/
-// @version      1.0.17
+// @version      2.2.0
 // @description  HenryのファイルをGoogle Drive APIで直接変換・編集。GAS不要版。
 // @match        https://henry-app.jp/*
 // @match        https://docs.google.com/*
@@ -27,19 +27,11 @@
 (function() {
   'use strict';
 
-  // ==========================================
-  // 設定（GCPコンソールで取得した値を設定）
-  // ==========================================
+  // ========================================== 
+  // 設定
+  // ========================================== 
   const CONFIG = {
-    // OAuth設定（ユーザーが設定）
-    CLIENT_ID: '',      // GCPコンソールで取得した値をここに設定
-    CLIENT_SECRET: '',  // GCPコンソールで取得した値をここに設定
-
-    // 固定設定
-    SCOPES: 'https://www.googleapis.com/auth/drive.file',
-    REDIRECT_URI: 'https://henry-app.jp/',
-    AUTH_ENDPOINT: 'https://accounts.google.com/o/oauth2/v2/auth',
-    TOKEN_ENDPOINT: 'https://oauth2.googleapis.com/token',
+    // Google API設定
     DRIVE_API_BASE: 'https://www.googleapis.com/drive/v3',
     DRIVE_UPLOAD_BASE: 'https://www.googleapis.com/upload/drive/v3',
 
@@ -66,9 +58,9 @@
   const isHenry = location.host === 'henry-app.jp';
   const isGoogleDocs = location.host === 'docs.google.com';
 
-  // ==========================================
+  // ========================================== 
   // ユーティリティ
-  // ==========================================
+  // ========================================== 
   function debugLog(context, ...args) {
     console.log(`[DriveDirect:${context}]`, ...args);
   }
@@ -78,163 +70,34 @@
   }
 
   // ==========================================
-  // OAuth認証モジュール
+  // GoogleAuth取得ヘルパー（HenryCore.modules.GoogleAuth経由）
   // ==========================================
-  const OAuth = {
-    STORAGE_KEY: 'google_drive_tokens',
+  const pageWindow = typeof unsafeWindow !== 'undefined' ? unsafeWindow : window;
 
-    // トークン取得
-    getTokens() {
-      return GM_getValue(this.STORAGE_KEY, null);
-    },
+  function getGoogleAuth() {
+    return pageWindow.HenryCore?.modules?.GoogleAuth;
+  }
 
-    // トークン保存
-    saveTokens(tokens) {
-      const data = {
-        access_token: tokens.access_token,
-        refresh_token: tokens.refresh_token || this.getTokens()?.refresh_token,
-        expires_at: Date.now() + (tokens.expires_in * 1000) - 60000 // 1分前に期限切れとみなす
-      };
-      GM_setValue(this.STORAGE_KEY, data);
-      debugLog('OAuth', 'トークン保存完了');
-      return data;
-    },
-
-    // トークン削除（ログアウト）
-    clearTokens() {
-      GM_deleteValue(this.STORAGE_KEY);
-      debugLog('OAuth', 'トークン削除完了');
-    },
-
-    // 認証済みかどうか
-    isAuthenticated() {
-      const tokens = this.getTokens();
-      return tokens && tokens.refresh_token;
-    },
-
-    // アクセストークンが有効かどうか
-    isAccessTokenValid() {
-      const tokens = this.getTokens();
-      return tokens && tokens.access_token && Date.now() < tokens.expires_at;
-    },
-
-    // 有効なアクセストークンを取得（必要に応じてリフレッシュ）
-    async getValidAccessToken() {
-      if (!this.isAuthenticated()) {
-        throw new Error('未認証です。Google認証を行ってください。');
+  async function waitForGoogleAuth(timeout = 5000) {
+    let waited = 0;
+    while (!getGoogleAuth()) {
+      await new Promise(r => setTimeout(r, 100));
+      waited += 100;
+      if (waited > timeout) {
+        debugError('Init', 'HenryCore.modules.GoogleAuth が見つかりません');
+        return null;
       }
-
-      if (this.isAccessTokenValid()) {
-        return this.getTokens().access_token;
-      }
-
-      // リフレッシュが必要
-      debugLog('OAuth', 'アクセストークンをリフレッシュ中...');
-      return await this.refreshAccessToken();
-    },
-
-    // アクセストークンをリフレッシュ
-    async refreshAccessToken() {
-      const tokens = this.getTokens();
-      if (!tokens?.refresh_token) {
-        throw new Error('リフレッシュトークンがありません');
-      }
-
-      return new Promise((resolve, reject) => {
-        GM_xmlhttpRequest({
-          method: 'POST',
-          url: CONFIG.TOKEN_ENDPOINT,
-          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-          data: new URLSearchParams({
-            client_id: CONFIG.CLIENT_ID,
-            client_secret: CONFIG.CLIENT_SECRET,
-            refresh_token: tokens.refresh_token,
-            grant_type: 'refresh_token'
-          }).toString(),
-          onload: (response) => {
-            if (response.status === 200) {
-              const data = JSON.parse(response.responseText);
-              const saved = this.saveTokens(data);
-              debugLog('OAuth', 'トークンリフレッシュ成功');
-              resolve(saved.access_token);
-            } else {
-              debugError('OAuth', 'リフレッシュ失敗:', response.responseText);
-              // リフレッシュトークンが無効になった場合はクリア
-              if (response.status === 400 || response.status === 401) {
-                this.clearTokens();
-              }
-              reject(new Error('トークンリフレッシュに失敗しました'));
-            }
-          },
-          onerror: (err) => {
-            debugError('OAuth', 'リフレッシュエラー:', err);
-            reject(new Error('トークンリフレッシュ通信エラー'));
-          }
-        });
-      });
-    },
-
-    // 認証URLを生成
-    getAuthUrl() {
-      const params = new URLSearchParams({
-        client_id: CONFIG.CLIENT_ID,
-        redirect_uri: CONFIG.REDIRECT_URI,
-        scope: CONFIG.SCOPES,
-        response_type: 'code',
-        access_type: 'offline',
-        prompt: 'consent'
-      });
-      return `${CONFIG.AUTH_ENDPOINT}?${params.toString()}`;
-    },
-
-    // 認証コードをトークンに交換
-    async exchangeCodeForTokens(code) {
-      return new Promise((resolve, reject) => {
-        GM_xmlhttpRequest({
-          method: 'POST',
-          url: CONFIG.TOKEN_ENDPOINT,
-          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-          data: new URLSearchParams({
-            client_id: CONFIG.CLIENT_ID,
-            client_secret: CONFIG.CLIENT_SECRET,
-            code: code,
-            redirect_uri: CONFIG.REDIRECT_URI,
-            grant_type: 'authorization_code'
-          }).toString(),
-          onload: (response) => {
-            if (response.status === 200) {
-              const data = JSON.parse(response.responseText);
-              const saved = this.saveTokens(data);
-              debugLog('OAuth', '認証コード交換成功');
-              resolve(saved);
-            } else {
-              debugError('OAuth', 'コード交換失敗:', response.responseText);
-              reject(new Error('認証に失敗しました'));
-            }
-          },
-          onerror: (err) => {
-            debugError('OAuth', 'コード交換エラー:', err);
-            reject(new Error('認証通信エラー'));
-          }
-        });
-      });
-    },
-
-    // 認証開始（ポップアップ）
-    startAuth() {
-      const authUrl = this.getAuthUrl();
-      debugLog('OAuth', '認証開始:', authUrl);
-      GM_openInTab(authUrl, { active: true });
     }
-  };
+    return getGoogleAuth();
+  }
 
-  // ==========================================
+  // ========================================== 
   // Google Drive APIモジュール
-  // ==========================================
+  // ========================================== 
   const DriveAPI = {
     // APIリクエスト共通処理
     async request(method, url, options = {}) {
-      const accessToken = await OAuth.getValidAccessToken();
+      const accessToken = await getGoogleAuth().getValidAccessToken();
 
       return new Promise((resolve, reject) => {
         const headers = {
@@ -261,7 +124,7 @@
               }
             } else if (response.status === 401) {
               // トークン期限切れ、リフレッシュ後にリトライ
-              OAuth.refreshAccessToken()
+              getGoogleAuth().refreshAccessToken()
                 .then(() => this.request(method, url, options))
                 .then(resolve)
                 .catch(reject);
@@ -280,7 +143,7 @@
 
     // Multipart Uploadでファイルをアップロード（変換付き）
     async uploadWithConversion(fileName, fileBlob, sourceMimeType, targetMimeType, properties = {}) {
-      const accessToken = await OAuth.getValidAccessToken();
+      const accessToken = await getGoogleAuth().getValidAccessToken();
 
       const boundary = '-------' + Date.now().toString(16);
 
@@ -345,7 +208,7 @@
 
     // ファイルをエクスポート（Google形式 → Office形式）
     async exportFile(fileId, mimeType) {
-      const accessToken = await OAuth.getValidAccessToken();
+      const accessToken = await getGoogleAuth().getValidAccessToken();
       const url = `${CONFIG.DRIVE_API_BASE}/files/${fileId}/export?mimeType=${encodeURIComponent(mimeType)}`;
 
       return new Promise((resolve, reject) => {
@@ -392,9 +255,9 @@
     }
   };
 
-  // ==========================================
+  // ========================================== 
   // Henry APIモジュール
-  // ==========================================
+  // ========================================== 
   const HenryAPI = {
     QUERIES: {
       GetFileUploadUrl: `
@@ -484,9 +347,9 @@
     }
   };
 
-  // ==========================================
+  // ========================================== 
   // UI共通
-  // ==========================================
+  // ========================================== 
   function showToast(message, isError = false, duration = 3000) {
     const toast = document.createElement('div');
     toast.textContent = message;
@@ -669,20 +532,9 @@
     });
   }
 
-  // ==========================================
-  // 設定チェック
-  // ==========================================
-  function checkConfig() {
-    if (!CONFIG.CLIENT_ID || !CONFIG.CLIENT_SECRET) {
-      debugError('Config', 'CLIENT_ID または CLIENT_SECRET が設定されていません');
-      return false;
-    }
-    return true;
-  }
-
-  // ==========================================
+  // ========================================== 
   // メイン分岐
-  // ==========================================
+  // ========================================== 
   debugLog('Init', `起動: ${isHenry ? 'Henry' : 'Google Docs'}モード`);
 
   if (isHenry) {
@@ -695,37 +547,14 @@
     }
   }
 
-  // ==========================================
+  // ========================================== 
   // [Mode A] Henry側ロジック
-  // ==========================================
+  // ========================================== 
   function runHenryMode() {
     const pageWindow = typeof unsafeWindow !== 'undefined' ? unsafeWindow : window;
     const cachedFilesByFolder = new Map();
     let log = null;
     const inflight = new Map();
-
-    // OAuth認証コード検出
-    function checkForAuthCode() {
-      const urlParams = new URLSearchParams(window.location.search);
-      const code = urlParams.get('code');
-
-      if (code) {
-        debugLog('OAuth', '認証コードを検出:', code.substring(0, 20) + '...');
-
-        // URLからcodeパラメータを削除
-        const newUrl = window.location.origin + window.location.pathname;
-        window.history.replaceState({}, '', newUrl);
-
-        // トークン交換
-        OAuth.exchangeCodeForTokens(code)
-          .then(() => {
-            showToast('Google認証が完了しました');
-          })
-          .catch((err) => {
-            showToast('認証に失敗しました: ' + err.message, true);
-          });
-      }
-    }
 
     // トークンリクエストに応答（他タブからのリクエスト用）
     function setupTokenRequestListener() {
@@ -891,16 +720,22 @@
 
       if (inflight.has(patientFileUuid)) return;
 
-      // 設定チェック
-      if (!checkConfig()) {
-        showToast('OAuth設定が未完了です。スクリプトを設定してください。', true);
+      // 認証設定チェック
+      if (!getGoogleAuth()?.isConfigured()) {
+        showToast('OAuth設定が未完了です。henry_core.user.jsでCLIENT_IDとCLIENT_SECRETを設定してください。', true);
         return;
       }
 
       // 認証チェック
-      if (!OAuth.isAuthenticated()) {
+      if (!getGoogleAuth()?.isAuthenticated()) {
         showToast('Google認証が必要です。認証画面を開きます...', false, 2000);
-        setTimeout(() => OAuth.startAuth(), 1000);
+        setTimeout(() => {
+          if (getGoogleAuth()) {
+            getGoogleAuth().startAuth();
+          } else {
+            alert('Google認証モジュールが見つかりません。ページを再読み込みしてください。');
+          }
+        }, 1000);
         return;
       }
 
@@ -958,37 +793,10 @@
       }
     }
 
-    // 認証ボタンをToolboxに追加
-    async function addAuthButton() {
-      if (!pageWindow.HenryCore?.registerPlugin) return;
-
-      const isAuth = OAuth.isAuthenticated();
-
-      await pageWindow.HenryCore.registerPlugin({
-        id: 'google-drive-direct-auth',
-        name: isAuth ? 'Google認証済み' : 'Google認証',
-        icon: isAuth ? '✅' : '🔐',
-        description: isAuth ? 'Google Drive連携が有効です' : 'Google Driveと連携するには認証が必要です',
-        version: '1.0.0',
-        order: 200,
-        onClick: () => {
-          if (isAuth) {
-            if (confirm('Google認証を解除しますか？')) {
-              OAuth.clearTokens();
-              showToast('認証を解除しました。ページを再読み込みしてください。');
-            }
-          } else {
-            OAuth.startAuth();
-          }
-        }
-      });
-    }
-
     // 初期化
     async function init() {
       debugLog('Henry', '初期化開始...');
 
-      checkForAuthCode();
       setupTokenRequestListener();
       setupRefreshListener();
 
@@ -1004,7 +812,6 @@
 
       log = pageWindow.HenryCore.utils.createLogger('DriveDirect');
       setupFetchIntercept();
-      await addAuthButton();
 
       const cleaner = pageWindow.HenryCore.utils.createCleaner();
       pageWindow.HenryCore.utils.subscribeNavigation(cleaner, () => {
@@ -1019,9 +826,9 @@
     init();
   }
 
-  // ==========================================
+  // ========================================== 
   // [Mode B] Google Docs側ロジック
-  // ==========================================
+  // ========================================== 
   function runGoogleDocsMode() {
     debugLog('Docs', 'Google Docsモード開始');
 
@@ -1207,13 +1014,13 @@
       btn.appendChild(textSpan);
 
       try {
-        // 設定チェック
-        if (!checkConfig()) {
-          throw new Error('OAuth設定が未完了です');
+        // 認証設定チェック
+        if (!getGoogleAuth()?.isConfigured()) {
+          throw new Error('OAuth設定が未完了です。henry_core.user.jsでCLIENT_IDとCLIENT_SECRETを設定してください。');
         }
 
         // Google Drive認証チェック
-        if (!OAuth.isAuthenticated()) {
+        if (!getGoogleAuth()?.isAuthenticated()) {
           throw new Error('Google認証が必要です。Henryタブで認証してください。');
         }
 
@@ -1346,7 +1153,7 @@
       if (document.getElementById('drive-direct-save-container')) return;
 
       // OAuth認証チェック
-      if (!OAuth.isAuthenticated()) {
+      if (!getGoogleAuth()?.isAuthenticated()) {
         debugLog('Docs', 'OAuth未認証のためボタン非表示');
         return;
       }

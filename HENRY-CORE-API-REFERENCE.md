@@ -1,6 +1,8 @@
-# Henry API リファレンス (v2.7.4)
+# Henry API リファレンス (v2.9.0)
 
-> **対象**: Henry Core v2.7.0 以降を使用するスクリプト開発者向けの詳細仕様書
+> **対象**: Henry Core v2.9.0 以降を使用するスクリプト開発者向けの詳細仕様書
+>
+> **v2.9.0の主な変更**: GoogleAuth統合、Google Docs対応、query()メソッド推奨化
 
 このドキュメントは、Henry Core が提供するAPIの詳細な仕様を記載しています。基本的な開発ルールは `CLAUDE.md` を参照してください。
 
@@ -8,33 +10,41 @@
 
 ## 1. 基本的な呼び出し (Core API)
 
-### HenryCore.call()
+### HenryCore.query()
 
-GraphQL APIを実行する中核メソッド。自動でハッシュ解決とエンドポイント振り分けを行う。
+GraphQL APIを実行するメソッド。フルクエリ方式でハッシュ事前収集が不要。
 
 **シグネチャ**:
 ```typescript
-call<T = any>(operationName: string, variables: Record<string, any>): Promise<{ data: T }>
+query<T = any>(queryString: string, variables?: Record<string, any>): Promise<{ data: T }>
 ```
 
 **パラメータ**:
 | 名前 | 型 | 説明 |
 |------|-----|------|
-| `operationName` | string | GraphQLクエリ/ミューテーション名（例: `'GetPatient'`） |
-| `variables` | object | GraphQL変数（例: `{ input: { uuid: '...' } }`） |
+| `queryString` | string | GraphQLクエリ文字列（フル形式） |
+| `variables` | object | GraphQL変数（省略可） |
 
 **戻り値**: `Promise<{ data: T }>` - GraphQLレスポンスオブジェクト
 
 **例外**: 以下の場合に `Error` をスロー
-- ハッシュが未収集（初回アクセス時）
 - トークン切れ（401エラー）
 - ネットワークエラー
 - GraphQLエラー
 
 **使用例**:
 ```javascript
+const QUERY = `
+  query GetPatient($input: GetPatientRequestInput!) {
+    getPatient(input: $input) {
+      fullName
+      detail { birthDate { year month day } }
+    }
+  }
+`;
+
 try {
-  const result = await HenryCore.call('GetPatient', {
+  const result = await HenryCore.query(QUERY, {
     input: { uuid: patientUuid }
   });
 
@@ -44,23 +54,12 @@ try {
     return null;
   }
 
-  console.log(patient.name); // 患者名
+  console.log(patient.fullName);
 } catch (e) {
   console.error('[SCRIPT_NAME]', e.message);
   return null;
 }
 ```
-
-**内部処理**:
-1. `operationName` から IndexedDB のハッシュを検索
-2. ハッシュが見つからない場合は例外をスロー
-3. ハッシュのエンドポイント（`/graphql` または `/graphql-v2`）を使用
-4. `Authorization` と `x-auth-organization-uuid` ヘッダーを自動付与
-5. `fetch` でリクエスト実行
-
-**注意事項**:
-- スクリプト側でヘッダーを指定する必要はない
-- レスポンスの `data` プロパティが `null` の場合も正常終了する（呼び出し側で null チェック必須）
 
 ---
 
@@ -629,7 +628,152 @@ const modal = HenryCore.ui.showModal({
 
 ---
 
-## 6. エラーハンドリング (Error Handling)
+## 6. Google認証モジュール (GoogleAuth Module)
+
+> **v2.9.0で追加**: Google OAuth認証機能がHenry Coreに統合されました。
+
+### 概要
+
+`HenryCore.modules.GoogleAuth` は Google Drive / Google Docs APIを使用するための認証機能を提供します。
+
+- **対応ドメイン**: henry-app.jp, docs.google.com
+- **用途**: Google Drive連携、主治医意見書作成など
+
+### 設定
+
+`henry_core.user.js`の`CONFIG`セクションに、GCPコンソールで取得したクライアント情報を設定してください：
+
+```javascript
+const CONFIG = {
+  // ...
+  GOOGLE_CLIENT_ID: 'your-client-id.apps.googleusercontent.com',
+  GOOGLE_CLIENT_SECRET: 'your-client-secret',
+  // ...
+};
+```
+
+---
+
+### HenryCore.modules.GoogleAuth.isConfigured()
+
+認証設定が完了しているか確認する。
+
+**シグネチャ**:
+```typescript
+isConfigured(): boolean
+```
+
+**戻り値**: `boolean` - CLIENT_IDとCLIENT_SECRETが設定されていれば`true`
+
+---
+
+### HenryCore.modules.GoogleAuth.isAuthenticated()
+
+Google認証が完了しているか確認する。
+
+**シグネチャ**:
+```typescript
+isAuthenticated(): boolean
+```
+
+**戻り値**: `boolean` - リフレッシュトークンが保存されていれば`true`
+
+---
+
+### HenryCore.modules.GoogleAuth.getValidAccessToken()
+
+有効なアクセストークンを取得する。期限切れの場合は自動でリフレッシュする。
+
+**シグネチャ**:
+```typescript
+getValidAccessToken(): Promise<string>
+```
+
+**戻り値**: `Promise<string>` - アクセストークン
+
+**例外**: 以下の場合に `Error` をスロー
+- 未認証
+- リフレッシュトークンがない
+- 設定が未完了
+- リフレッシュ失敗
+
+**使用例**:
+```javascript
+try {
+  const accessToken = await HenryCore.modules.GoogleAuth.getValidAccessToken();
+
+  // Google APIを呼び出し
+  const response = await fetch('https://www.googleapis.com/drive/v3/files', {
+    headers: { 'Authorization': `Bearer ${accessToken}` }
+  });
+} catch (e) {
+  console.error('[SCRIPT_NAME] Google認証エラー:', e.message);
+}
+```
+
+---
+
+### HenryCore.modules.GoogleAuth.startAuth()
+
+Google認証フローを開始する。新しいタブでGoogle認証画面を開く。
+
+**シグネチャ**:
+```typescript
+startAuth(): void
+```
+
+**使用例**:
+```javascript
+if (!HenryCore.modules.GoogleAuth.isAuthenticated()) {
+  HenryCore.modules.GoogleAuth.startAuth();
+}
+```
+
+**注意事項**:
+- 設定が未完了の場合はアラートを表示
+- 認証完了後、henry-app.jpにリダイレクトされトークンが自動保存される
+
+---
+
+### HenryCore.modules.GoogleAuth.clearTokens()
+
+保存されているトークンを削除する（ログアウト用）。
+
+**シグネチャ**:
+```typescript
+clearTokens(): void
+```
+
+---
+
+### 他スクリプトからの利用
+
+GoogleAuth機能を使用するスクリプトでは、以下のヘルパーパターンを推奨：
+
+```javascript
+// ページのwindowを取得（サンドボックス対応）
+const pageWindow = typeof unsafeWindow !== 'undefined' ? unsafeWindow : window;
+
+function getGoogleAuth() {
+  return pageWindow.HenryCore?.modules?.GoogleAuth;
+}
+
+// 使用例
+async function doSomethingWithDrive() {
+  const auth = getGoogleAuth();
+  if (!auth?.isAuthenticated()) {
+    auth?.startAuth();
+    return;
+  }
+
+  const token = await auth.getValidAccessToken();
+  // Google API呼び出し...
+}
+```
+
+---
+
+## 7. エラーハンドリング (Error Handling)
 
 ### 基本パターン
 
@@ -660,7 +804,7 @@ try {
 
 ---
 
-## 7. パフォーマンス最適化 (Performance)
+## 8. パフォーマンス最適化 (Performance)
 
 ### ハッシュキャッシュの仕組み
 
@@ -722,7 +866,7 @@ for (const item of items) {
 
 ---
 
-## 8. デバッグ・トラブルシューティング (Debug & Troubleshooting)
+## 9. デバッグ・トラブルシューティング (Debug & Troubleshooting)
 
 ### HenryCore.dumpHashes()
 
@@ -810,5 +954,6 @@ if (!hashes['GetPatient']) {
 
 | Version | Date | Changes |
 |---------|------|---------|
+| **v2.9.0** | **2026-01-08** | **GoogleAuth統合、Google Docs対応。`query()`メソッド追加（推奨）、`call()`非推奨化。`modules.GoogleAuth`セクション追加** |
 | v2.7.4 | 2026-01-05 | `showModal`に`closeOnOverlayClick`、`width`、`action.autoClose`オプションを追加 |
 | v2.6.9 | 2026-01-04 | 初版作成。Henry Core v2.6.9 の仕様を文書化。デバッグメソッド（dumpHashes, clearHashes）を追加 |

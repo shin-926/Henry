@@ -1,19 +1,14 @@
 // ==UserScript==
 // @name         主治医意見書作成フォーム
 // @namespace    https://henry-app.jp/
-// @version      2.0.0
+// @version      2.1.0
 // @description  主治医意見書の入力フォームとGoogle Docs出力（GAS不要版・API直接呼び出し）
 // @author       Henry Team
 // @match        https://henry-app.jp/*
 // @grant        GM_xmlhttpRequest
-// @grant        GM_setValue
-// @grant        GM_getValue
-// @grant        GM_deleteValue
 // @grant        GM_openInTab
 // @grant        unsafeWindow
 // @connect      googleapis.com
-// @connect      accounts.google.com
-// @connect      oauth2.googleapis.com
 // @connect      www.googleapis.com
 // @connect      docs.googleapis.com
 // @run-at       document-idle
@@ -31,14 +26,8 @@
   // 設定
   // ==========================================
 
-  // OAuth設定（henry_google_drive_bridgeと共有）
-  const OAUTH_CONFIG = {
-    // henry_google_drive_bridge.user.js と同じストレージキーを使用
-    STORAGE_KEY: 'google_drive_tokens',
-    SCOPES: 'https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/documents',
-    REDIRECT_URI: 'https://henry-app.jp/',
-    AUTH_ENDPOINT: 'https://accounts.google.com/o/oauth2/v2/auth',
-    TOKEN_ENDPOINT: 'https://oauth2.googleapis.com/token',
+  // Google API設定
+  const API_CONFIG = {
     DRIVE_API_BASE: 'https://www.googleapis.com/drive/v3',
     DOCS_API_BASE: 'https://docs.googleapis.com/v1'
   };
@@ -96,111 +85,12 @@
   let log = null;
 
   // =============================================================================
-  // OAuth認証モジュール（henry_google_drive_bridgeと共有）
+  // GoogleAuth取得ヘルパー（HenryCore.modules.GoogleAuth経由）
   // =============================================================================
 
-  const OAuth = {
-    // トークン取得
-    getTokens() {
-      return GM_getValue(OAUTH_CONFIG.STORAGE_KEY, null);
-    },
-
-    // トークン保存
-    saveTokens(tokens) {
-      const data = {
-        access_token: tokens.access_token,
-        refresh_token: tokens.refresh_token || this.getTokens()?.refresh_token,
-        expires_at: Date.now() + (tokens.expires_in * 1000) - 60000
-      };
-      GM_setValue(OAUTH_CONFIG.STORAGE_KEY, data);
-      return data;
-    },
-
-    // トークン削除
-    clearTokens() {
-      GM_deleteValue(OAUTH_CONFIG.STORAGE_KEY);
-    },
-
-    // 認証済みかどうか
-    isAuthenticated() {
-      const tokens = this.getTokens();
-      return tokens && tokens.refresh_token;
-    },
-
-    // アクセストークンが有効かどうか
-    isAccessTokenValid() {
-      const tokens = this.getTokens();
-      return tokens && tokens.access_token && Date.now() < tokens.expires_at;
-    },
-
-    // 有効なアクセストークンを取得（必要に応じてリフレッシュ）
-    async getValidAccessToken() {
-      if (!this.isAuthenticated()) {
-        throw new Error('未認証です。Google認証を行ってください。');
-      }
-
-      if (this.isAccessTokenValid()) {
-        return this.getTokens().access_token;
-      }
-
-      return await this.refreshAccessToken();
-    },
-
-    // アクセストークンをリフレッシュ
-    async refreshAccessToken() {
-      const tokens = this.getTokens();
-      if (!tokens?.refresh_token) {
-        throw new Error('リフレッシュトークンがありません');
-      }
-
-      // henry_google_drive_bridge の CLIENT_ID/SECRET を使用
-      const bridgeConfig = this.getBridgeConfig();
-      if (!bridgeConfig) {
-        throw new Error('Google Drive連携スクリプトの設定が必要です');
-      }
-
-      return new Promise((resolve, reject) => {
-        GM_xmlhttpRequest({
-          method: 'POST',
-          url: OAUTH_CONFIG.TOKEN_ENDPOINT,
-          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-          data: new URLSearchParams({
-            client_id: bridgeConfig.clientId,
-            client_secret: bridgeConfig.clientSecret,
-            refresh_token: tokens.refresh_token,
-            grant_type: 'refresh_token'
-          }).toString(),
-          onload: (response) => {
-            if (response.status === 200) {
-              const data = JSON.parse(response.responseText);
-              const saved = this.saveTokens(data);
-              resolve(saved.access_token);
-            } else {
-              if (response.status === 400 || response.status === 401) {
-                this.clearTokens();
-              }
-              reject(new Error('トークンリフレッシュに失敗しました'));
-            }
-          },
-          onerror: () => reject(new Error('トークンリフレッシュ通信エラー'))
-        });
-      });
-    },
-
-    // henry_google_drive_bridgeの設定を取得（localStorage経由）
-    getBridgeConfig() {
-      // henry_google_drive_bridge.user.js が同じページで動作している前提
-      // 実際のCLIENT_ID/SECRETはそちらのスクリプトに設定されている
-      // ここではトークンのみを共有し、認証はbridge側で行う
-      return GM_getValue('google_drive_bridge_config', null);
-    },
-
-    // 認証開始（henry_google_drive_bridgeにリダイレクト）
-    startAuth() {
-      // henry_google_drive_bridge の認証機能を使用
-      alert('Google認証が必要です。\n\nHenryツールボックスの「Google認証」ボタンから認証を行ってください。');
-    }
-  };
+  function getGoogleAuth() {
+    return pageWindow.HenryCore?.modules?.GoogleAuth;
+  }
 
   // =============================================================================
   // Google Drive API モジュール
@@ -209,7 +99,7 @@
   const DriveAPI = {
     // APIリクエスト共通処理
     async request(method, url, options = {}) {
-      const accessToken = await OAuth.getValidAccessToken();
+      const accessToken = await getGoogleAuth().getValidAccessToken();
 
       return new Promise((resolve, reject) => {
         const headers = {
@@ -235,7 +125,7 @@
                 }
               }
             } else if (response.status === 401) {
-              OAuth.refreshAccessToken()
+              getGoogleAuth().refreshAccessToken()
                 .then(() => this.request(method, url, options))
                 .then(resolve)
                 .catch(reject);
@@ -254,7 +144,7 @@
 
     // ファイルをコピー
     async copyFile(fileId, newName) {
-      const url = `${OAUTH_CONFIG.DRIVE_API_BASE}/files/${fileId}/copy`;
+      const url = `${API_CONFIG.DRIVE_API_BASE}/files/${fileId}/copy`;
       return await this.request('POST', url, {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name: newName })
@@ -263,7 +153,7 @@
 
     // ファイルメタデータ取得
     async getFileMetadata(fileId, fields = 'id,name,webViewLink') {
-      const url = `${OAUTH_CONFIG.DRIVE_API_BASE}/files/${fileId}?fields=${fields}`;
+      const url = `${API_CONFIG.DRIVE_API_BASE}/files/${fileId}?fields=${fields}`;
       return await this.request('GET', url);
     }
   };
@@ -275,8 +165,8 @@
   const DocsAPI = {
     // ドキュメントを取得
     async getDocument(documentId) {
-      const accessToken = await OAuth.getValidAccessToken();
-      const url = `${OAUTH_CONFIG.DOCS_API_BASE}/documents/${documentId}`;
+      const accessToken = await getGoogleAuth().getValidAccessToken();
+      const url = `${API_CONFIG.DOCS_API_BASE}/documents/${documentId}`;
 
       return new Promise((resolve, reject) => {
         GM_xmlhttpRequest({
@@ -297,8 +187,8 @@
 
     // ドキュメントを更新（batchUpdate）
     async batchUpdate(documentId, requests) {
-      const accessToken = await OAuth.getValidAccessToken();
-      const url = `${OAUTH_CONFIG.DOCS_API_BASE}/documents/${documentId}:batchUpdate`;
+      const accessToken = await getGoogleAuth().getValidAccessToken();
+      const url = `${API_CONFIG.DOCS_API_BASE}/documents/${documentId}:batchUpdate`;
 
       return new Promise((resolve, reject) => {
         GM_xmlhttpRequest({
@@ -358,11 +248,11 @@
   }
 
   /**
-   * カタカナ→ひらがな変換
+   *カタカナ→ひらがな変換
    */
   function katakanaToHiragana(str) {
     if (!str) return '';
-    return str.replace(/[\u30A1-\u30F6]/g, char =>
+    return str.replace(/[ァ-ヶ]/g, char =>
       String.fromCharCode(char.charCodeAt(0) - 0x60)
     );
   }
@@ -667,7 +557,7 @@
   ];
 
   /**
-   * ネストされたオブジェクトから値を取得
+   *ネストされたオブジェクトから値を取得
    */
   function getValueByPath(obj, path) {
     if (!path) return '';
@@ -681,7 +571,7 @@
   }
 
   /**
-   * 値を表示用テキストに変換（GASから移植）
+   *値を表示用テキストに変換（GASから移植）
    */
   function convertToDisplayText(value, inputType, mapping) {
     if (value === '' || value === null || value === undefined) {
@@ -893,8 +783,10 @@
    */
   async function createGoogleDoc(formData, fileName) {
     // 認証チェック
-    if (!OAuth.isAuthenticated()) {
-      throw new Error('Google認証が必要です。\n\nHenryツールボックスの「Google認証」ボタンから認証を行ってください。');
+    if (!getGoogleAuth()?.isAuthenticated()) {
+      throw new Error('Google認証が必要です。
+
+Henryツールボックスの「Google認証」ボタンから認証を行ってください。');
     }
 
     // 1. テンプレートをコピー
@@ -1264,7 +1156,7 @@
   }
 
   /**
-   * ネストされたオブジェクトから値を取得
+   *ネストされたオブジェクトから値を取得
    * @param {Object} obj - 対象オブジェクト
    * @param {string} path - パス（例: 'basic_info.consent'）
    * @returns {any} 値
@@ -1493,7 +1385,7 @@
   }
 
   /**
-   * セクション1: 基本情報
+   *セクション1: 基本情報
    */
   function createSection1(formData) {
     const section = document.createElement('div');
@@ -1591,7 +1483,7 @@
   }
 
   /**
-   * セクション2: 傷病に関する意見
+   *セクション2: 傷病に関する意見
    */
   function createSection2(formData) {
     const section = document.createElement('div');
@@ -1650,7 +1542,7 @@
   }
 
   /**
-   * セクション3: 特別な医療
+   *セクション3: 特別な医療
    */
   function createSection3(formData) {
     const section = document.createElement('div');
@@ -1692,7 +1584,7 @@
   }
 
   /**
-   * セクション4: 心身の状態
+   *セクション4: 心身の状態
    */
   function createSection4(formData) {
     const section = document.createElement('div');
@@ -2125,7 +2017,7 @@
       const hasParalysis = Array.from(paralysisRadios).find(r => r.checked)?.value === '1';
 
       if (!hasParalysis) {
-        // 麻痺が「なし」の場合、すべての子・孫を無効化
+        // 麻痺が「なし」の場合、すべての子を無効化
         paralysisChildFields.forEach(disableField);
       } else {
         // 麻痺が「あり」の場合、各部位を有効化し、個別の連動を更新
@@ -2323,7 +2215,7 @@
   }
 
   /**
-   * セクション5: 生活機能とサービス
+   *セクション5: 生活機能とサービス
    */
   function createSection5(formData) {
     const section = document.createElement('div');
@@ -2442,8 +2334,8 @@
       false
     ));
 
-    // (5) 医学管理の必要性
-    section.appendChild(createSubsectionTitle('(5) 医学管理の必要性'));
+    // (5) 医学的管理の必要性
+    section.appendChild(createSubsectionTitle('(5) 医学的管理の必要性'));
 
     // 医学的管理の必要性（チェックボックス、11桁）
     section.appendChild(createCheckboxFieldWithOtherInput(
@@ -2580,7 +2472,7 @@
 }
 
   /**
-   * セクション6: 特記事項
+   *セクション6: 特記事項
    */
   function createSection6(formData) {
     const section = document.createElement('div');
@@ -2600,7 +2492,7 @@
   }
 
   /**
-   * サブセクションタイトル
+   *サブセクションタイトル
    */
   function createSubsectionTitle(text, required = false) {
     const title = document.createElement('h4');
@@ -2610,7 +2502,7 @@
   }
 
   /**
-   * インラインラジオボタンフィールド（ラベルとラジオボタンが横並び）
+   *インラインラジオボタンフィールド（ラベルとラジオボタンが横並び）
    */
   function createInlineRadioField(label, name, section, options, currentValue) {
     const field = document.createElement('div');
@@ -2646,7 +2538,7 @@
   }
 
   /**
-   * 条件付きフィールドの連動設定（汎用ヘルパー）
+   *条件付きフィールドの連動設定（汎用ヘルパー）
    * ラジオボタンの選択に応じてテキストフィールドを有効化/無効化する
    */
   function setupConditionalField(radioField, textField, enableValue) {
