@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         主治医意見書作成フォーム
 // @namespace    https://henry-app.jp/
-// @version      2.1.0
+// @version      2.1.2
 // @description  主治医意見書の入力フォームとGoogle Docs出力（GAS不要版・API直接呼び出し）
 // @author       Henry Team
 // @match        https://henry-app.jp/*
@@ -784,9 +784,7 @@
   async function createGoogleDoc(formData, fileName) {
     // 認証チェック
     if (!getGoogleAuth()?.isAuthenticated()) {
-      throw new Error('Google認証が必要です。
-
-Henryツールボックスの「Google認証」ボタンから認証を行ってください。');
+      throw new Error('Google認証が必要です。\n\nHenryツールボックスの「Google認証」ボタンから認証を行ってください。');
     }
 
     // 1. テンプレートをコピー
@@ -3153,7 +3151,7 @@ Henryツールボックスの「Google認証」ボタンから認証を行って
                 }
               } catch (apiError) {
                 showFormMessage(`ドキュメント作成エラー：\n${apiError.message}`, 'error');
-                log?.error('GAS API エラー:', apiError.message);
+                log?.error('Google Docs API エラー:', apiError.message);
               } finally {
                 // ボタンを元に戻す
                 button.textContent = originalText;

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry Core
 // @namespace    https://henry-app.jp/
-// @version      2.9.0
+// @version      2.9.1
 // @description  Henry スクリプト実行基盤 (GoogleAuth統合 / Google Docs対応)
 // @match        https://henry-app.jp/*
 // @match        https://docs.google.com/*
@@ -557,15 +557,15 @@
 
     waitForGlobal: (key, timeout = 10000) => {
       return new Promise((resolve) => {
-        if (window[key]) return resolve(window[key]);
+        if (pageWindow[key]) return resolve(pageWindow[key]);
 
         const intervalTime = 100;
         let waited = 0;
 
         const timer = setInterval(() => {
-          if (window[key]) {
+          if (pageWindow[key]) {
             clearInterval(timer);
-            resolve(window[key]);
+            resolve(pageWindow[key]);
           } else {
             waited += intervalTime;
             if (waited >= timeout) {
