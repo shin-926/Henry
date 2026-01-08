@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         主治医意見書作成フォーム
 // @namespace    https://henry-app.jp/
-// @version      2.1.2
+// @version      2.1.3
 // @description  主治医意見書の入力フォームとGoogle Docs出力（GAS不要版・API直接呼び出し）
 // @author       Henry Team
 // @match        https://henry-app.jp/*
@@ -3150,8 +3150,10 @@
                   modal.close();
                 }
               } catch (apiError) {
-                showFormMessage(`ドキュメント作成エラー：\n${apiError.message}`, 'error');
-                log?.error('Google Docs API エラー:', apiError.message);
+                const errMsg = apiError?.message || String(apiError) || '不明なエラー';
+                showFormMessage(`ドキュメント作成エラー：\n${errMsg}`, 'error');
+                log?.error('Google Docs API エラー:', errMsg);
+                console.error('[OpinionForm] Full error:', apiError);
               } finally {
                 // ボタンを元に戻す
                 button.textContent = originalText;
