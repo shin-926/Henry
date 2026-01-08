@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Google Drive連携
 // @namespace    https://henry-app.jp/
-// @version      1.0.16
+// @version      1.0.17
 // @description  HenryのファイルをGoogle Drive APIで直接変換・編集。GAS不要版。
 // @match        https://henry-app.jp/*
 // @match        https://docs.google.com/*
@@ -1203,7 +1203,7 @@
       });
       btn.appendChild(spinner);
       const textSpan = document.createElement('span');
-      textSpan.textContent = '処理中...';
+      textSpan.textContent = '保存中...';
       btn.appendChild(textSpan);
 
       try {
@@ -1313,6 +1313,14 @@
 
         // Henryへリフレッシュ通知
         notifyHenryToRefresh(props.henryPatientUuid);
+
+        // Google Driveのファイルを削除
+        try {
+          await DriveAPI.deleteFile(docId);
+          debugLog('Docs', 'Google Driveファイル削除完了');
+        } catch (e) {
+          debugLog('Docs', 'Google Driveファイル削除スキップ:', e.message);
+        }
 
         const actionText = mode === 'overwrite' ? '上書き保存' : '新規保存';
         showToast(`Henryへ${actionText}しました`);
