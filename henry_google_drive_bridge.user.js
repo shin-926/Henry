@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Google Drive連携
 // @namespace    https://henry-app.jp/
-// @version      1.0.7
+// @version      1.0.8
 // @description  HenryのファイルをGoogle Drive APIで直接変換・編集。GAS不要版。
 // @match        https://henry-app.jp/*
 // @match        https://docs.google.com/*
@@ -1174,12 +1174,44 @@
       }
     }
 
+    // メタデータをチェックしてボタンを作成
+    async function checkAndCreateButton() {
+      if (document.getElementById('drive-direct-save-container')) return;
+
+      // OAuth認証チェック
+      if (!OAuth.isAuthenticated()) {
+        debugLog('Docs', 'OAuth未認証のためボタン非表示');
+        return;
+      }
+
+      // ドキュメントID取得
+      const docId = window.location.pathname.split('/')[3];
+      if (!docId) return;
+
+      try {
+        // メタデータ取得
+        const metadata = await DriveAPI.getFileMetadata(docId, 'id,name,properties');
+        const props = metadata.properties || {};
+
+        // henryPatientUuidがない場合はボタンを表示しない
+        if (!props.henryPatientUuid) {
+          debugLog('Docs', 'Henryメタデータなし、ボタン非表示');
+          return;
+        }
+
+        // ボタン作成
+        createHenryButton();
+      } catch (e) {
+        debugLog('Docs', 'メタデータ取得失敗:', e.message);
+      }
+    }
+
     // 初期化
-    createHenryButton();
+    checkAndCreateButton();
 
     const observer = new MutationObserver(() => {
       if (!document.getElementById('drive-direct-save-container')) {
-        createHenryButton();
+        checkAndCreateButton();
       }
     });
 
