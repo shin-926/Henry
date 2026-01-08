@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Google Drive連携
 // @namespace    https://henry-app.jp/
-// @version      1.0.10
+// @version      1.0.16
 // @description  HenryのファイルをGoogle Drive APIで直接変換・編集。GAS不要版。
 // @match        https://henry-app.jp/*
 // @match        https://docs.google.com/*
@@ -940,7 +940,12 @@
         const docType = isDocx ? 'document' : 'spreadsheets';
         const openUrl = `https://docs.google.com/${docType}/d/${driveFile.id}/edit`;
 
-        GM_openInTab(openUrl, { active: true });
+        const tab = GM_openInTab(openUrl, { active: true, setParent: true });
+        // タブが閉じたらHenryタブにフォーカスを戻す
+        tab.onclose = () => {
+          debugLog('Henry', 'Google Docsタブが閉じました。フォーカスを戻します。');
+          window.focus();
+        };
 
         showToast('ファイルを開きました');
 
@@ -1311,6 +1316,9 @@
 
         const actionText = mode === 'overwrite' ? '上書き保存' : '新規保存';
         showToast(`Henryへ${actionText}しました`);
+
+        // タブを閉じる
+        window.close();
 
       } catch (e) {
         debugError('Docs', 'エラー:', e.message);
