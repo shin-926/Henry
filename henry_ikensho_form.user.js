@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         主治医意見書作成フォーム
 // @namespace    https://henry-app.jp/
-// @version      2.1.3
+// @version      2.1.4
 // @description  主治医意見書の入力フォームとGoogle Docs出力（GAS不要版・API直接呼び出し）
 // @author       Henry Team
 // @match        https://henry-app.jp/*
@@ -21,6 +21,9 @@
 
   const SCRIPT_NAME = 'OpinionForm';
   const VERSION = '2.0.0';
+
+  // ページのwindowを取得（サンドボックス対応）
+  const pageWindow = typeof unsafeWindow !== 'undefined' ? unsafeWindow : window;
 
   // ==========================================
   // 設定
