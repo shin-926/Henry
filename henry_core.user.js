@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry Core
 // @namespace    https://henry-app.jp/
-// @version      2.9.1
+// @version      2.9.2
 // @description  Henry スクリプト実行基盤 (GoogleAuth統合 / Google Docs対応)
 // @match        https://henry-app.jp/*
 // @match        https://docs.google.com/*
@@ -233,7 +233,20 @@
       }
     },
 
-    getPatientUuid: () => Context._patientUuid,
+    getPatientUuid: () => {
+      // キャッシュがあればそれを返す
+      if (Context._patientUuid) return Context._patientUuid;
+
+      // URLから患者UUIDを抽出（フォールバック）
+      // 例: /patients/{uuid}/charts, /patients/{uuid}/encounters
+      const match = pageWindow.location.pathname.match(/\/patients\/([a-f0-9-]{36})/i);
+      if (match) {
+        Context._patientUuid = match[1];
+        return Context._patientUuid;
+      }
+
+      return null;
+    },
 
     getMyUuid: async () => {
       if (Context._myUuid) return Context._myUuid;
