@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Google Drive連携
 // @namespace    https://henry-app.jp/
-// @version      1.0.6
+// @version      1.0.7
 // @description  HenryのファイルをGoogle Drive APIで直接変換・編集。GAS不要版。
 // @match        https://henry-app.jp/*
 // @match        https://docs.google.com/*
@@ -814,7 +814,7 @@
           mimeInfo.source,
           mimeInfo.google,
           {
-            henryPatientId: patientUuid,
+            henryPatientUuid: patientUuid,
             henryFileUuid: patientFileUuid,
             henryFolderUuid: folderUuid || '',
             henrySource: 'drive-direct'
@@ -1094,7 +1094,7 @@
         const metadata = await DriveAPI.getFileMetadata(docId, 'id,name,properties');
         const props = metadata.properties || {};
 
-        if (!props.henryPatientId) {
+        if (!props.henryPatientUuid) {
           throw new Error('Henryメタデータがありません。Henryから開いたファイルですか？');
         }
 
@@ -1136,7 +1136,7 @@
 
         const createResult = await HenryAPI.call(henryToken, 'CreatePatientFile', {
           input: {
-            patientUuid: props.henryPatientId,
+            patientUuid: props.henryPatientUuid,
             parentFileFolderUuid: props.henryFolderUuid ? { value: props.henryFolderUuid } : null,
             title: fileName,
             description: '',
@@ -1156,7 +1156,7 @@
         }
 
         // Henryへリフレッシュ通知
-        notifyHenryToRefresh(props.henryPatientId);
+        notifyHenryToRefresh(props.henryPatientUuid);
 
         const actionText = mode === 'overwrite' ? '上書き保存' : '新規保存';
         showToast(`Henryへ${actionText}しました`);
