@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry Core
 // @namespace    https://henry-app.jp/
-// @version      2.9.8
+// @version      2.9.9
 // @description  Henry スクリプト実行基盤 (GoogleAuth統合 / Google Docs対応)
 // @match        https://henry-app.jp/*
 // @match        https://docs.google.com/*
@@ -55,7 +55,7 @@
     GOOGLE_CREDENTIALS_KEY: 'google_oauth_credentials'
   };
 
-  console.log('[Henry Core] Initializing v2.9.8...');
+  console.log('[Henry Core] Initializing v2.9.9...');
 
   // ==========================================
   // 1. IndexedDB Manager (ハッシュ + エンドポイント管理)
@@ -760,16 +760,12 @@
               console.error('[Henry Core] GoogleAuth: リフレッシュ失敗:', response.responseText);
               if (response.status === 400 || response.status === 401) {
                 this.clearTokens();
-                // 認証エラー時にプラグインを表示
-                showGoogleAuthPluginOnError();
               }
               reject(new Error('トークンリフレッシュに失敗しました'));
             }
           },
           onerror: (err) => {
             console.error('[Henry Core] GoogleAuth: リフレッシュエラー:', err);
-            // 通信エラー時にもプラグインを表示
-            showGoogleAuthPluginOnError();
             reject(new Error('トークンリフレッシュ通信エラー'));
           }
         });
@@ -918,7 +914,6 @@
   // 10. Plugin Registry
   // ==========================================
   const pluginRegistry = [];
-  let googleAuthPluginRegistered = false;  // Google認証プラグインの登録状態
 
   // ==========================================
   // 11. Public API
@@ -1133,76 +1128,6 @@
     setTimeout(() => toast.remove(), 3000);
   }
 
-  // Google認証プラグインの実際の登録処理
-  async function doRegisterGoogleAuthPlugin() {
-    if (googleAuthPluginRegistered) return;  // 既に登録済み
-
-    // Toolboxの準備を待つ
-    const toolbox = await Utils.waitForToolbox(5000);
-    if (!toolbox) {
-      console.warn('[Henry Core] HenryToolboxが見つからないためGoogle認証プラグインを登録できません');
-      return;
-    }
-
-    googleAuthPluginRegistered = true;
-
-    pageWindow.HenryCore.registerPlugin({
-      id: 'google-auth',
-      name: 'Google認証',
-      icon: '🔐',
-      description: 'Google Drive/Docs APIの認証管理',
-      version: '1.0.0',
-      order: 10,
-      onClick: () => {
-        // 未設定の場合 → 設定ダイアログ
-        if (!GoogleAuth.isConfigured()) {
-          GoogleAuth.showConfigDialog();
-          return;
-        }
-
-        // 認証済みの場合 → オプション表示
-        if (GoogleAuth.isAuthenticated()) {
-          const choice = prompt(
-            'Google認証 オプション:\n\n' +
-            '1: 認証を解除（トークン削除）\n' +
-            '2: OAuth設定を変更（Client ID/Secret）\n' +
-            '3: キャンセル\n\n' +
-            '番号を入力してください:'
-          );
-          if (choice === '1') {
-            GoogleAuth.clearTokens();
-            showToast('Google認証を解除しました');
-          } else if (choice === '2') {
-            GoogleAuth.showConfigDialog();
-          }
-        } else {
-          // 未認証の場合 → 認証開始
-          GoogleAuth.startAuth();
-        }
-      }
-    });
-    console.log('[Henry Core] Google認証プラグインを登録しました');
-  }
-
-  // 認証エラー時にプラグインを表示
-  function showGoogleAuthPluginOnError() {
-    if (googleAuthPluginRegistered) return;  // 既に登録済み
-    console.log('[Henry Core] 認証エラー発生 - Google認証プラグインを表示します');
-    doRegisterGoogleAuthPlugin();
-  }
-
-  // 初期化時のGoogle認証プラグイン登録（認証状態をチェック）
-  async function registerGoogleAuthPlugin() {
-    // 認証済みの場合はToolboxに表示しない
-    if (GoogleAuth.isAuthenticated()) {
-      console.log('[Henry Core] Google認証済み - プラグインを非表示');
-      return;
-    }
-
-    // 未認証の場合は表示
-    await doRegisterGoogleAuthPlugin();
-  }
-
   // ドメイン別初期化
   if (isHenry) {
     // Henryドメイン：フル機能
@@ -1210,17 +1135,15 @@
       document.addEventListener('DOMContentLoaded', () => {
         UI.init();
         checkForAuthCode();
-        registerGoogleAuthPlugin();
       });
     } else {
       UI.init();
       checkForAuthCode();
-      registerGoogleAuthPlugin();
     }
-    console.log('[Henry Core] Ready v2.9.8 (Henry mode)');
+    console.log('[Henry Core] Ready v2.9.9 (Henry mode)');
 
   } else if (isGoogleDocs) {
     // Google Docsドメイン：GoogleAuthのみ
-    console.log('[Henry Core] Ready v2.9.8 (Google Docs mode - GoogleAuth only)');
+    console.log('[Henry Core] Ready v2.9.9 (Google Docs mode - GoogleAuth only)');
   }
 })();

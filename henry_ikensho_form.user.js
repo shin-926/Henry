@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         主治医意見書作成フォーム
 // @namespace    https://henry-app.jp/
-// @version      2.1.6
+// @version      2.2.0
 // @description  主治医意見書の入力フォームとGoogle Docs出力（GAS不要版・API直接呼び出し）
 // @author       Henry Team
 // @match        https://henry-app.jp/*
@@ -20,7 +20,7 @@
   'use strict';
 
   const SCRIPT_NAME = 'OpinionForm';
-  const VERSION = '2.0.0';
+  const VERSION = '2.2.0';
 
   // ページのwindowを取得（サンドボックス対応）
   const pageWindow = typeof unsafeWindow !== 'undefined' ? unsafeWindow : window;
@@ -553,7 +553,8 @@
     { placeholder: '{{サービス提供運動}}', jsonKey: 'life_function.service_exercise', inputType: 'ラジオボタン' },
     { placeholder: '{{サービス提供運動留意事項}}', jsonKey: 'life_function.service_exercise_notes', inputType: '記述' },
     { placeholder: '{{サービス提供その他の留意事項}}', jsonKey: 'life_function.service_other_notes', inputType: '記述' },
-    { placeholder: '{{感染症有無}}', jsonKey: 'life_function.infection', inputType: 'ラジオボタン' },
+    { placeholder: '{{感染症有無1}}', jsonKey: 'life_function.infection', inputType: 'custom_infection_status' },
+    { placeholder: '{{感染症有無2}}', jsonKey: 'life_function.infection', inputType: 'custom_infection_status' },
     { placeholder: '{{感染症名}}', jsonKey: 'life_function.infection_name', inputType: '記述' },
     // 特記事項
     { placeholder: '{{その他特記事項}}', jsonKey: 'special_notes.other_notes', inputType: '記述' }
@@ -586,6 +587,8 @@
         return convertRadioValue(value, mapping);
       case 'チェックボックス':
         return convertCheckboxValue(value, mapping);
+      case 'custom_infection_status':
+        return convertInfectionStatus(value, mapping);
       case 'カレンダー':
         return formatDateValueForDoc(value);
       case '自動入力':
@@ -623,7 +626,7 @@
       '{{同意の有無}}': { '1': '■同意する\t□同意しない', '2': '□同意する\t■同意しない' },
       '{{意見書作成回数}}': { '1': '■初回\t□2回目以上', '2': '□初回\t■2回目以上' },
       '{{他科受診有無}}': { '1': '■有\t□無', '2': '□有\t■無' },
-      '{{症状安定性}}': { '1': '■安定\t□不安定\t□不明', '2': '□安定\t■不安定\t□不明', '3': '□安定\t□不安定\t■不明' },
+      '{{症状安定性}}': { '1': '■安定\t□不安定\t□不明', '2': '□安定\t■不安定\t□不明', '3': '□安定\t□不安定\t□不明' },
       '{{寝たきり度}}': {
         '1': '■自立\t□J1\t□J2\t□A1\t□A2\t□B1\t□B2\t□C1\t□C2',
         '2': '□自立\t■J1\t□J2\t□A1\t□A2\t□B1\t□B2\t□C1\t□C2',
@@ -683,7 +686,6 @@
         '2': '□期待できる\t■期待できない\t□不明',
         '3': '□期待できる\t□期待できない\t■不明'
       },
-      '{{感染症有無}}': { '1': '■有\t□無\t□不明', '2': '□有\t■無\t□不明', '3': '□有\t□無\t■不明' },
       '{{サービス提供血圧}}': { '1': '■特になし\t□あり', '2': '□特になし\t■あり' },
       '{{サービス提供摂食}}': { '1': '■特になし\t□あり', '2': '□特になし\t■あり' },
       '{{サービス提供嚥下}}': { '1': '■特になし\t□あり', '2': '□特になし\t■あり' },
@@ -701,6 +703,26 @@
     }
 
     return value;
+  }
+
+  /**
+   * 感染症有無の値を表示テキストに変換（特別処理）
+   */
+  function convertInfectionStatus(value, mapping) {
+    const placeholder = mapping.placeholder;
+
+    if (placeholder === '{{感染症有無1}}') {
+      if (value === '1') return '■有\t□無'; // Yes
+      if (value === '2') return '□有\t■無'; // No
+      return '□有\t□無'; // For "Unknown" or empty, both are unchecked
+    }
+
+    if (placeholder === '{{感染症有無2}}') {
+      if (value === '3') return '■不明'; // Unknown
+      return '□不明'; // For "Yes", "No", or empty
+    }
+
+    return ''; // Should not happen
   }
 
   /**
@@ -921,7 +943,7 @@
         return '';
       }
 
-      return (me.name || '').replace(/　/g, ' ');
+      return (me.name || '').replace(/\u3000/g, ' ');
     } catch (e) {
       log?.error('医師情報取得エラー:', e.message);
       return '';
@@ -1118,13 +1140,13 @@
 
     // 文字数制限チェック
     const course = data.diagnosis?.course_and_treatment || '';
-    if (course.length > 560) {
-      errors.push(`• 経過及び治療内容：560文字以内で入力してください（現在${course.length}文字）`);
+    if (course.length > 285) {
+      errors.push(`• 経過及び治療内容：285文字以内で入力してください（現在${course.length}文字）`);
     }
 
-    const notes = data.other_notes?.content || '';
-    if (notes.length > 700) {
-      errors.push(`• 特記すべき事項：700文字以内で入力してください（現在${notes.length}文字）`);
+    const notes = data.special_notes?.other_notes || '';
+    if (notes.length > 456) {
+      errors.push(`• 特記すべき事項：456文字以内で入力してください（現在${notes.length}文字）`);
     }
 
     // 条件付き必須項目チェック（基本的なもののみ）
@@ -1152,9 +1174,9 @@
     }
 
     // 感染症チェック
-    const infection = data.infection?.status;
+    const infection = data.life_function?.infection;
     if (infection === '1') {  // 有
-      const infectionName = data.infection?.name || '';
+      const infectionName = data.life_function?.infection_name || '';
       if (!infectionName) {
         errors.push('• 感染症名：感染症有無が「有」の場合は感染症名の入力が必要です');
       }
@@ -1663,22 +1685,32 @@
       true
     ));
 
-    // 日常の意思決定を行うための認知能力（必須、チェックボックス、4桁のビットフラグ）
-    section.appendChild(createCheckboxField(
+    // 日常の意思決定を行うための認知能力
+    section.appendChild(createRadioField(
       '日常の意思決定を行うための認知能力',
       'cognitive_ability',
       'mental_physical_state',
-      ['自立', 'いくらか困難', '見守りが必要', '判断できない'],
+      [
+        { label: '自立', value: '1' },
+        { label: 'いくらか困難', value: '2' },
+        { label: '見守りが必要', value: '3' },
+        { label: '判断できない', value: '4' }
+      ],
       data.cognitive_ability,
       true
     ));
 
-    // 自分の意思の伝達能力（必須、チェックボックス、4桁のビットフラグ）
-    section.appendChild(createCheckboxField(
+    // 自分の意思の伝達能力
+    section.appendChild(createRadioField(
       '自分の意思の伝達能力',
       'communication_ability',
       'mental_physical_state',
-      ['伝えられる', 'いくらか困難', '具体的要求に限られる', '伝えられない'],
+      [
+        { label: '伝えられる', value: '1' },
+        { label: 'いくらか困難', value: '2' },
+        { label: '具体的要求に限られる', value: '3' },
+        { label: '伝えられない', value: '4' }
+      ],
       data.communication_ability,
       true
     ));
@@ -2306,7 +2338,7 @@
     ));
 
     // 栄養・食生活上の留意点（任意）
-    section.appendChild(createTextField('栄養・食生活上の留意点', 'nutrition_diet_notes', 'life_function', data.nutrition_diet_notes, false));
+    section.appendChild(createTextField('栄養・食生活上の留意点', 'nutrition_diet_notes', 'life_function', data.nutrition_diet_notes, false, '', 14));
 
     // (3) 現在あるかまたは今後発生の可能性の高い状態
     section.appendChild(createSubsectionTitle('(3) 現在あるかまたは今後発生の可能性の高い状態'));
@@ -2323,7 +2355,7 @@
     ));
 
     // 対処方針内容（任意）
-    section.appendChild(createTextField('対処方針内容', 'response_policy', 'life_function', data.response_policy, false));
+    section.appendChild(createTextField('対処方針内容', 'response_policy', 'life_function', data.response_policy, false, '', 14));
 
     // (4) サービス利用による生活機能の維持・改善の見通し
     section.appendChild(createSubsectionTitle('(4) サービス利用による生活機能の維持・改善の見通し', true));
@@ -2372,7 +2404,7 @@
     );
     section.appendChild(serviceBloodPressureField);
 
-    const serviceBloodPressureNotesField = createTextField('留意事項', 'service_blood_pressure_notes', 'life_function', data.service_blood_pressure_notes, false);
+    const serviceBloodPressureNotesField = createTextField('留意事項', 'service_blood_pressure_notes', 'life_function', data.service_blood_pressure_notes, false, '', 14);
     serviceBloodPressureNotesField.style.marginLeft = '24px';
     section.appendChild(serviceBloodPressureNotesField);
     setupConditionalField(serviceBloodPressureField, serviceBloodPressureNotesField, '2');
@@ -2390,7 +2422,7 @@
     );
     section.appendChild(serviceEatingField);
 
-    const serviceEatingNotesField = createTextField('留意事項', 'service_eating_notes', 'life_function', data.service_eating_notes, false);
+    const serviceEatingNotesField = createTextField('留意事項', 'service_eating_notes', 'life_function', data.service_eating_notes, false, '', 14);
     serviceEatingNotesField.style.marginLeft = '24px';
     section.appendChild(serviceEatingNotesField);
     setupConditionalField(serviceEatingField, serviceEatingNotesField, '2');
@@ -2408,7 +2440,7 @@
     );
     section.appendChild(serviceSwallowingField);
 
-    const serviceSwallowingNotesField = createTextField('留意事項', 'service_swallowing_notes', 'life_function', data.service_swallowing_notes, false);
+    const serviceSwallowingNotesField = createTextField('留意事項', 'service_swallowing_notes', 'life_function', data.service_swallowing_notes, false, '', 14);
     serviceSwallowingNotesField.style.marginLeft = '24px';
     section.appendChild(serviceSwallowingNotesField);
     setupConditionalField(serviceSwallowingField, serviceSwallowingNotesField, '2');
@@ -2426,7 +2458,7 @@
     );
     section.appendChild(serviceMobilityField);
 
-    const serviceMobilityNotesField = createTextField('留意事項', 'service_mobility_notes', 'life_function', data.service_mobility_notes, false);
+    const serviceMobilityNotesField = createTextField('留意事項', 'service_mobility_notes', 'life_function', data.service_mobility_notes, false, '', 14);
     serviceMobilityNotesField.style.marginLeft = '24px';
     section.appendChild(serviceMobilityNotesField);
     setupConditionalField(serviceMobilityField, serviceMobilityNotesField, '2');
@@ -2444,13 +2476,13 @@
     );
     section.appendChild(serviceExerciseField);
 
-    const serviceExerciseNotesField = createTextField('留意事項', 'service_exercise_notes', 'life_function', data.service_exercise_notes, false);
+    const serviceExerciseNotesField = createTextField('留意事項', 'service_exercise_notes', 'life_function', data.service_exercise_notes, false, '', 14);
     serviceExerciseNotesField.style.marginLeft = '24px';
     section.appendChild(serviceExerciseNotesField);
     setupConditionalField(serviceExerciseField, serviceExerciseNotesField, '2');
 
     // その他の留意事項
-    section.appendChild(createTextField('その他の留意事項', 'service_other_notes', 'life_function', data.service_other_notes, false));
+    section.appendChild(createTextField('その他の留意事項', 'service_other_notes', 'life_function', data.service_other_notes, false, '', 14));
 
   // (7) 感染症
   section.appendChild(createSubsectionTitle('(7) 感染症'));
@@ -2493,8 +2525,8 @@
 
     const data = formData.special_notes;
 
-    // 特記すべき事項（任意、700文字/10行）
-    section.appendChild(createTextareaField('特記すべき事項', 'other_notes', 'special_notes', data.other_notes, false, 700, 10));
+    // 特記すべき事項（任意、456文字/10行）
+    section.appendChild(createTextareaField('特記すべき事項', 'other_notes', 'special_notes', data.other_notes, false, 456, 10));
 
     return section;
   }
@@ -2712,7 +2744,7 @@
   /**
    * テキストフィールド（単一行）
    */
-  function createTextField(label, name, section, currentValue, required = false, placeholder = '') {
+  function createTextField(label, name, section, currentValue, required = false, placeholder = '', maxChars = 0) {
     const field = document.createElement('div');
     field.style.cssText = 'margin-bottom: 16px;';
 
@@ -2729,7 +2761,31 @@
     input.dataset.section = section;
     input.style.cssText = 'padding: 8px 12px; border: 1px solid #cbd5e1; border-radius: 4px; font-size: 14px; width: 100%;';
 
+    if (maxChars > 0) {
+      input.maxLength = maxChars;
+    }
+
     field.appendChild(input);
+
+    if (maxChars > 0) {
+      const charCounter = document.createElement('div');
+      charCounter.style.cssText = 'margin-top: 4px; font-size: 13px; color: #64748b; text-align: right;';
+
+      const updateCounter = () => {
+        const currentLength = input.value.length;
+        charCounter.textContent = `${currentLength} / ${maxChars}文字`;
+        if (currentLength > maxChars) {
+          charCounter.style.color = '#ef4444';
+        } else {
+          charCounter.style.color = '#64748b';
+        }
+      };
+
+      input.addEventListener('input', updateCounter);
+      updateCounter();
+      field.appendChild(charCounter);
+    }
+
     return field;
   }
 
@@ -2780,7 +2836,7 @@
   }
 
   /**
-   * チェックボックスフィールド（ビットフラグ）
+   *チェックボックスフィールド（ビットフラグ）
    */
   function createCheckboxField(label, name, section, options, currentValue, required = false) {
     const field = document.createElement('div');
@@ -2822,7 +2878,7 @@
   }
 
   /**
-   * チェックボックスフィールド + 「その他」入力（ビットフラグ）
+   *チェックボックスフィールド + 「その他」入力（ビットフラグ）
    * 最後のオプション（「その他」）の右側にテキスト入力を追加し、
    * 「その他」が選択されていない場合はグレーアウトする
    */
