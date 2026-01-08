@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         照射オーダーセット検索支援
 // @namespace    https://henry-app.jp/
-// @version      5.12.1
-// @description  入院照射オーダーのセット挿入モーダルにモダリティ・部位フィルタを追加 (HenryCore v2.3+ 対応 / Refactored)
+// @version      5.13.4
+// @description  入院照射オーダーのセット挿入モーダルにモダリティ・部位フィルタを追加 (CT/MRI専用部位リスト対応)
 // @author       Henry UI Lab
 // @match        https://henry-app.jp/*
 // @grant        none
@@ -30,11 +30,31 @@
     { label: "ポータブル", value: "ポータブル" }
   ];
 
+  // XP用（既存）
   const BODY_PARTS = {
     "頭〜体幹": ["頭部", "胸部", "肋骨", "胸骨", "胸腹部", "腹部", "骨盤"],
     "脊椎": ["頚椎", "胸椎", "胸腰椎移行部", "腰椎", "仙骨", "尾骨", "全脊椎"],
     "上肢": ["鎖骨", "肩関節", "肩鎖関節", "胸鎖関節", "肩甲骨", "上腕骨", "肘関節", "前腕", "手関節", "手根管", "手部", "舟状骨", "指"],
     "下肢": ["股関節", "大腿骨", "膝", "下腿", "足関節", "足部", "踵骨", "趾"]
+  };
+
+  // CT用
+  const CT_BODY_PARTS = {
+    "入院・入所時": [],
+    "頭〜顔": ["頭蓋・脳", "鼻骨", "頬骨", "顎関節"],
+    "体幹": ["胸部", "肋骨・胸部", "胸腹部", "胸部〜骨盤", "骨盤・股関節"],
+    "脊椎": ["頚椎", "胸腰椎", "腰椎", "仙尾骨"],
+    "上肢": ["鎖骨", "肩関節", "肩甲骨", "上腕", "肘関節", "前腕", "手関節", "手部"],
+    "下肢": ["股関節", "大腿", "膝関節", "下腿", "足関節", "踵骨", "足部"]
+  };
+
+  // MRI用
+  const MRI_BODY_PARTS = {
+    "頭部": ["脳"],
+    "体幹": ["MRCP", "骨盤・股関節"],
+    "脊椎": ["頚椎", "胸椎", "胸腰椎移行部", "腰椎", "腰椎・仙骨"],
+    "上肢": ["肩関節", "手関節"],
+    "下肢": ["股関節", "膝関節", "足関節"]
   };
 
   const PORTABLE_PARTS = ["胸部", "腹部", "胸腹部"];
@@ -63,7 +83,7 @@
     // ★ ポイント1: cleaner は init() で1回だけ作成して使い回す
     const cleaner = utils.createCleaner();
 
-    logger.info('スクリプト初期化 (v5.12)');
+    logger.info('スクリプト初期化 (v5.13.4)');
 
     // ★ ポイント2: subscribeNavigation も init() で1回だけ登録
     // ページ遷移時、HenryCoreが自動で cleaner.exec() を呼び（前回分の掃除）、
@@ -346,17 +366,36 @@
             hideDropdown();
           });
         } else {
-          renderList(majorPanel, Object.keys(BODY_PARTS),
-            () => {},
-            (hoverItem) => {
-              state.major = hoverItem;
-              minorPanel.style.display = 'block';
-              renderList(minorPanel, BODY_PARTS[hoverItem], (subItem) => {
-                state.minor = subItem;
+          // モダリティに応じた部位リストを選択
+          const partsMap = state.modality === 'CT' ? CT_BODY_PARTS
+                        : state.modality === 'MRI' ? MRI_BODY_PARTS
+                        : BODY_PARTS;
+
+          renderList(majorPanel, Object.keys(partsMap),
+            (clickItem) => {
+              // サブカテゴリがない場合（例: CT「検査入院時・入所時」）は直接選択
+              if (!partsMap[clickItem] || partsMap[clickItem].length === 0) {
+                state.major = clickItem;
+                state.minor = '';
                 updateButtonText();
                 updateSearch();
                 hideDropdown();
-              });
+              }
+            },
+            (hoverItem) => {
+              state.major = hoverItem;
+              const subItems = partsMap[hoverItem];
+              if (subItems && subItems.length > 0) {
+                minorPanel.style.display = 'block';
+                renderList(minorPanel, subItems, (subItem) => {
+                  state.minor = subItem;
+                  updateButtonText();
+                  updateSearch();
+                  hideDropdown();
+                });
+              } else {
+                minorPanel.style.display = 'none';
+              }
             }
           );
         }
