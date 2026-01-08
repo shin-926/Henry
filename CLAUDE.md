@@ -453,11 +453,11 @@ try {
 
 > **AI向け指示**: セッション開始時にこのセクションを確認し、未完了のタスクがあればユーザーにリマインドすること。タスク完了後はこのセクションから削除すること。
 
-### 2026-01-07 更新
-- [x] ~~**デバッグログ削除**: 配布用スクリプトのデバッグログを整理~~ → google_bridge v2.10.4, reserve_integration v1.6.2
-- [x] ~~**reserve-integration確認**: フルクエリ方式に移行完了~~ → v1.7.2
-- [x] ~~**henry_core内部修正**: getMyUuid()でフルクエリ方式を使用~~ → v2.8.1
-- [ ] **動作確認**: フルクエリ方式に移行した他のスクリプトのテスト
-  - [x] ~~henry_ikensho_form.user.js~~ → v1.7.0（編集可能化・クリアボタン追加）
-  - henry_auto_approver.user.js → v3.5.0に更新済み、動作確認待ち（プラグイン登録を新形式に変更）
+### 2026-01-08 更新
+- [ ] **動作確認**: GoogleAuth統合後のスクリプト（v2.9.0）
+  - henry_core.user.js v2.9.0 - GoogleAuth統合、Google Docs対応
+  - henry_google_drive_bridge.user.js v2.2.0 - HenryCore.modules.GoogleAuth経由に変更
+  - henry_ikensho_form.user.js v2.1.0 - HenryCore.modules.GoogleAuth経由に変更
+- [ ] **動作確認**: フルクエリ方式に移行した他のスクリプト
+  - henry_auto_approver.user.js → v3.5.0に更新済み、動作確認待ち
 - [ ] **GAS実装**: 主治医意見書テンプレート埋め込み処理（henry_ikensho_form用）
