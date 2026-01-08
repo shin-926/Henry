@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Google Drive連携
 // @namespace    https://henry-app.jp/
-// @version      1.0.8
+// @version      1.0.9
 // @description  HenryのファイルをGoogle Drive APIで直接変換・編集。GAS不要版。
 // @match        https://henry-app.jp/*
 // @match        https://docs.google.com/*
@@ -416,6 +416,16 @@
         mutation DeletePatientFile($input: DeletePatientFileRequestInput!) {
           deletePatientFile(input: $input)
         }
+      `,
+      ListNonEmptyPatientFileFoldersOfPatient: `
+        query ListNonEmptyPatientFileFoldersOfPatient($input: ListNonEmptyPatientFileFoldersOfPatientRequestInput!) {
+          listNonEmptyPatientFileFoldersOfPatient(input: $input) {
+            patientFileFolders {
+              uuid
+              name
+            }
+          }
+        }
       `
     },
 
@@ -552,6 +562,111 @@
       container.style.opacity = '0';
       setTimeout(() => container.remove(), 300);
     };
+  }
+
+  // フォルダ選択モーダル
+  function showFolderSelectModal(folders) {
+    return new Promise((resolve) => {
+      const overlay = document.createElement('div');
+      Object.assign(overlay.style, {
+        position: 'fixed',
+        top: '0',
+        left: '0',
+        right: '0',
+        bottom: '0',
+        backgroundColor: 'rgba(0,0,0,0.5)',
+        zIndex: '100001',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center'
+      });
+
+      const modal = document.createElement('div');
+      Object.assign(modal.style, {
+        backgroundColor: '#fff',
+        borderRadius: '12px',
+        padding: '24px',
+        minWidth: '300px',
+        maxWidth: '400px',
+        maxHeight: '70vh',
+        boxShadow: '0 8px 32px rgba(0,0,0,0.3)',
+        fontFamily: '"Google Sans",Roboto,sans-serif'
+      });
+
+      const title = document.createElement('h3');
+      title.textContent = '保存先フォルダを選択';
+      Object.assign(title.style, {
+        margin: '0 0 16px 0',
+        fontSize: '18px',
+        fontWeight: '500'
+      });
+
+      const list = document.createElement('div');
+      Object.assign(list.style, {
+        maxHeight: '300px',
+        overflowY: 'auto'
+      });
+
+      // ルートオプション
+      const rootOption = document.createElement('div');
+      rootOption.textContent = '📁 ルート（フォルダなし）';
+      Object.assign(rootOption.style, {
+        padding: '12px 16px',
+        cursor: 'pointer',
+        borderRadius: '8px',
+        marginBottom: '4px'
+      });
+      rootOption.onmouseover = () => rootOption.style.backgroundColor = '#f5f5f5';
+      rootOption.onmouseout = () => rootOption.style.backgroundColor = '#fff';
+      rootOption.onclick = () => {
+        overlay.remove();
+        resolve({ uuid: null, name: 'ルート' });
+      };
+      list.appendChild(rootOption);
+
+      // フォルダ一覧
+      folders.forEach(folder => {
+        const item = document.createElement('div');
+        item.textContent = `📂 ${folder.name}`;
+        Object.assign(item.style, {
+          padding: '12px 16px',
+          cursor: 'pointer',
+          borderRadius: '8px',
+          marginBottom: '4px'
+        });
+        item.onmouseover = () => item.style.backgroundColor = '#f5f5f5';
+        item.onmouseout = () => item.style.backgroundColor = '#fff';
+        item.onclick = () => {
+          overlay.remove();
+          resolve(folder);
+        };
+        list.appendChild(item);
+      });
+
+      // キャンセルボタン
+      const cancelBtn = document.createElement('button');
+      cancelBtn.textContent = 'キャンセル';
+      Object.assign(cancelBtn.style, {
+        marginTop: '16px',
+        padding: '8px 16px',
+        backgroundColor: '#f5f5f5',
+        border: 'none',
+        borderRadius: '8px',
+        cursor: 'pointer',
+        fontSize: '14px',
+        width: '100%'
+      });
+      cancelBtn.onclick = () => {
+        overlay.remove();
+        resolve(null);
+      };
+
+      modal.appendChild(title);
+      modal.appendChild(list);
+      modal.appendChild(cancelBtn);
+      overlay.appendChild(modal);
+      document.body.appendChild(overlay);
+    });
   }
 
   // ==========================================
@@ -1114,6 +1229,30 @@
         const fileBuffer = await DriveAPI.exportFile(docId, mimeInfo.source);
         const blob = new Blob([fileBuffer], { type: mimeInfo.source });
 
+        // 保存先フォルダを決定
+        let targetFolderUuid = props.henryFolderUuid || null;
+
+        if (mode === 'new') {
+          // 新規保存の場合、フォルダ選択
+          debugLog('Docs', 'フォルダ一覧取得中...');
+          const foldersResult = await HenryAPI.call(henryToken, 'ListNonEmptyPatientFileFoldersOfPatient', {
+            input: {
+              patientUuid: props.henryPatientUuid,
+              pageSize: 100,
+              pageToken: ''
+            }
+          });
+          const folders = foldersResult?.listNonEmptyPatientFileFoldersOfPatient?.patientFileFolders || [];
+
+          const selectedFolder = await showFolderSelectModal(folders);
+          if (!selectedFolder) {
+            showToast('保存をキャンセルしました');
+            return;
+          }
+          targetFolderUuid = selectedFolder.uuid;
+          debugLog('Docs', '選択されたフォルダ:', selectedFolder.name);
+        }
+
         // 上書きモードの場合、既存ファイル削除
         if (mode === 'overwrite' && props.henryFileUuid) {
           debugLog('Docs', '既存ファイル削除中...');
@@ -1137,7 +1276,7 @@
         const createResult = await HenryAPI.call(henryToken, 'CreatePatientFile', {
           input: {
             patientUuid: props.henryPatientUuid,
-            parentFileFolderUuid: props.henryFolderUuid ? { value: props.henryFolderUuid } : null,
+            parentFileFolderUuid: targetFolderUuid ? { value: targetFolderUuid } : null,
             title: fileName,
             description: '',
             fileUrl: fileUrl
@@ -1151,7 +1290,8 @@
           debugLog('Docs', 'メタデータ更新中...');
           await DriveAPI.updateFileProperties(docId, {
             ...props,
-            henryFileUuid: newFileUuid
+            henryFileUuid: newFileUuid,
+            henryFolderUuid: targetFolderUuid || ''
           });
         }
 
