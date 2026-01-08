@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         主治医意見書作成フォーム
 // @namespace    https://henry-app.jp/
-// @version      2.1.5
+// @version      2.1.6
 // @description  主治医意見書の入力フォームとGoogle Docs出力（GAS不要版・API直接呼び出し）
 // @author       Henry Team
 // @match        https://henry-app.jp/*
@@ -3138,9 +3138,19 @@
               // ファイル名生成
               const fileName = generateFileName(collected);
 
-              // 処理中表示
-              button.textContent = 'ドキュメント作成中...';
+              // 処理中表示（スピナー付き）
               button.disabled = true;
+              button.innerHTML = '';
+              const spinner = document.createElement('span');
+              spinner.style.cssText = 'display:inline-block;width:14px;height:14px;border:2px solid #fff;border-top-color:transparent;border-radius:50%;animation:henrySpinnerRotate 0.8s linear infinite;margin-right:6px;vertical-align:middle;';
+              if (!document.getElementById('henry-spinner-style')) {
+                const style = document.createElement('style');
+                style.id = 'henry-spinner-style';
+                style.textContent = '@keyframes henrySpinnerRotate { to { transform: rotate(360deg); } }';
+                document.head.appendChild(style);
+              }
+              button.appendChild(spinner);
+              button.appendChild(document.createTextNode('ドキュメント作成中...'));
 
               // 一時保存（Googleドキュメントを閉じても編集内容が残るように）
               saveDraft(formData.basic_info.patient_uuid, collected);
