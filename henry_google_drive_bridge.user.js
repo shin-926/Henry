@@ -1029,7 +1029,7 @@
         }
 
         showToast('ファイルを破棄しました');
-        await new Promise(r => setTimeout(r, 1500));
+        await new Promise(r => setTimeout(r, 2000));
         window.close();
 
       } catch (e) {
