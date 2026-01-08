@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Google Drive連携
 // @namespace    https://henry-app.jp/
-// @version      1.0.9
+// @version      1.0.10
 // @description  HenryのファイルをGoogle Drive APIで直接変換・編集。GAS不要版。
 // @match        https://henry-app.jp/*
 // @match        https://docs.google.com/*
@@ -1056,7 +1056,7 @@
     }
 
     // Henryへ保存ボタン作成
-    function createHenryButton() {
+    function createHenryButton(props = {}) {
       if (document.getElementById('drive-direct-save-container')) return;
 
       const shareBtn = document.getElementById('docs-titlebar-share-client-button');
@@ -1129,8 +1129,19 @@
         return item;
       };
 
+      const hasExistingFile = !!props.henryFileUuid;
       const overwriteItem = createMenuItem('上書き保存', () => handleSaveToHenry('overwrite'));
       overwriteItem.style.borderBottom = '1px solid #eee';
+
+      // 既存ファイルがない場合は上書き保存をグレーアウト
+      if (!hasExistingFile) {
+        overwriteItem.style.color = '#999';
+        overwriteItem.style.cursor = 'not-allowed';
+        overwriteItem.onmouseover = null;
+        overwriteItem.onmouseout = null;
+        overwriteItem.onclick = null;
+      }
+
       menu.appendChild(overwriteItem);
       menu.appendChild(createMenuItem('新規保存', () => handleSaveToHenry('new')));
 
@@ -1339,8 +1350,8 @@
           return;
         }
 
-        // ボタン作成
-        createHenryButton();
+        // ボタン作成（メタデータを渡す）
+        createHenryButton(props);
       } catch (e) {
         debugLog('Docs', 'メタデータ取得失敗:', e.message);
       }
