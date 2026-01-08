@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry Core
 // @namespace    https://henry-app.jp/
-// @version      2.9.2
+// @version      2.9.3
 // @description  Henry スクリプト実行基盤 (GoogleAuth統合 / Google Docs対応)
 // @match        https://henry-app.jp/*
 // @match        https://docs.google.com/*
@@ -51,7 +51,7 @@
     GOOGLE_TOKENS_KEY: 'google_drive_tokens'
   };
 
-  console.log('[Henry Core] Initializing v2.9.0...');
+  console.log('[Henry Core] Initializing v2.9.3...');
 
   // ==========================================
   // 1. IndexedDB Manager (ハッシュ + エンドポイント管理)
@@ -1044,6 +1044,36 @@
     setTimeout(() => toast.remove(), 3000);
   }
 
+  // Google認証プラグイン登録
+  async function registerGoogleAuthPlugin() {
+    // Toolboxの準備を待つ
+    await Utils.waitForToolbox(5000);
+
+    pageWindow.HenryCore.registerPlugin({
+      id: 'google-auth',
+      name: 'Google認証',
+      icon: '🔐',
+      description: 'Google Drive/Docs APIの認証管理',
+      version: '1.0.0',
+      order: 10,
+      onClick: () => {
+        if (!GoogleAuth.isConfigured()) {
+          alert('Google認証の設定が未完了です。\n\nhenry_core.user.jsのCLIENT_IDとCLIENT_SECRETを設定してください。');
+          return;
+        }
+
+        if (GoogleAuth.isAuthenticated()) {
+          if (confirm('Google認証を解除しますか？')) {
+            GoogleAuth.clearTokens();
+            showToast('Google認証を解除しました');
+          }
+        } else {
+          GoogleAuth.startAuth();
+        }
+      }
+    });
+  }
+
   // ドメイン別初期化
   if (isHenry) {
     // Henryドメイン：フル機能
@@ -1051,15 +1081,17 @@
       document.addEventListener('DOMContentLoaded', () => {
         UI.init();
         checkForAuthCode();
+        registerGoogleAuthPlugin();
       });
     } else {
       UI.init();
       checkForAuthCode();
+      registerGoogleAuthPlugin();
     }
-    console.log('[Henry Core] Ready v2.9.0 (Henry mode)');
+    console.log('[Henry Core] Ready v2.9.3 (Henry mode)');
 
   } else if (isGoogleDocs) {
     // Google Docsドメイン：GoogleAuthのみ
-    console.log('[Henry Core] Ready v2.9.0 (Google Docs mode - GoogleAuth only)');
+    console.log('[Henry Core] Ready v2.9.3 (Google Docs mode - GoogleAuth only)');
   }
 })();
