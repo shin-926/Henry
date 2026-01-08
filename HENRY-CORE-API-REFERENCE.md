@@ -1,6 +1,8 @@
-# Henry API リファレンス (v2.9.0)
+# Henry API リファレンス (v2.9.6)
 
 > **対象**: Henry Core v2.9.0 以降を使用するスクリプト開発者向けの詳細仕様書
+>
+> **v2.9.6の主な変更**: OAuth認証情報のGM_storage永続化、設定ダイアログUI追加
 >
 > **v2.9.0の主な変更**: GoogleAuth統合、Google Docs対応、query()メソッド推奨化
 
@@ -631,6 +633,8 @@ const modal = HenryCore.ui.showModal({
 ## 6. Google認証モジュール (GoogleAuth Module)
 
 > **v2.9.0で追加**: Google OAuth認証機能がHenry Coreに統合されました。
+>
+> **v2.9.6で改善**: OAuth認証情報がGM_storageに永続化され、スクリプト更新後も設定が保持されます。
 
 ### 概要
 
@@ -641,16 +645,13 @@ const modal = HenryCore.ui.showModal({
 
 ### 設定
 
-`henry_core.user.js`の`CONFIG`セクションに、GCPコンソールで取得したクライアント情報を設定してください：
+**v2.9.6以降**: 初回のみ設定ダイアログが表示されます。入力した認証情報はGM_storageに保存され、スクリプト更新後も保持されます。
 
-```javascript
-const CONFIG = {
-  // ...
-  GOOGLE_CLIENT_ID: 'your-client-id.apps.googleusercontent.com',
-  GOOGLE_CLIENT_SECRET: 'your-client-secret',
-  // ...
-};
-```
+1. Toolboxの「Google認証」をクリック
+2. 設定ダイアログにClient IDとClient Secretを入力
+3. 保存ボタンをクリック → 自動でGoogle認証画面が開く
+
+**手動設定（非推奨）**: `henry_core.user.js`のCONFIGセクションに直接記述することも可能ですが、スクリプト更新のたびに再設定が必要です。
 
 ---
 
@@ -743,6 +744,64 @@ if (!HenryCore.modules.GoogleAuth.isAuthenticated()) {
 ```typescript
 clearTokens(): void
 ```
+
+---
+
+### HenryCore.modules.GoogleAuth.saveCredentials()
+
+> **v2.9.6で追加**
+
+OAuth認証情報をGM_storageに保存する。
+
+**シグネチャ**:
+```typescript
+saveCredentials(clientId: string, clientSecret: string): void
+```
+
+**パラメータ**:
+| 名前 | 型 | 説明 |
+|------|-----|------|
+| `clientId` | string | GCPコンソールで取得したClient ID |
+| `clientSecret` | string | GCPコンソールで取得したClient Secret |
+
+**注意事項**:
+- 保存後はCONFIGも即時更新され、現在のセッションで使用可能
+- スクリプト更新後も設定が保持される
+
+---
+
+### HenryCore.modules.GoogleAuth.clearCredentials()
+
+> **v2.9.6で追加**
+
+保存されているOAuth認証情報を削除する。
+
+**シグネチャ**:
+```typescript
+clearCredentials(): void
+```
+
+**注意事項**:
+- トークンは削除されない（`clearTokens()`と併用が必要な場合あり）
+
+---
+
+### HenryCore.modules.GoogleAuth.showConfigDialog()
+
+> **v2.9.6で追加**
+
+OAuth認証情報を入力するダイアログを表示する。
+
+**シグネチャ**:
+```typescript
+showConfigDialog(): void
+```
+
+**動作**:
+1. モーダルダイアログを表示
+2. Client ID と Client Secret の入力フォーム
+3. 保存ボタンで `saveCredentials()` を実行
+4. 保存後、自動で `startAuth()` を実行
 
 ---
 
@@ -954,6 +1013,8 @@ if (!hashes['GetPatient']) {
 
 | Version | Date | Changes |
 |---------|------|---------|
-| **v2.9.0** | **2026-01-08** | **GoogleAuth統合、Google Docs対応。`query()`メソッド追加（推奨）、`call()`非推奨化。`modules.GoogleAuth`セクション追加** |
+| **v2.9.6** | **2026-01-08** | **OAuth認証情報のGM_storage永続化。`saveCredentials()`, `clearCredentials()`, `showConfigDialog()`追加。Toolboxアイコン削除** |
+| v2.9.4 | 2026-01-08 | `drive.readonly`スコープ追加（テンプレートファイル読み取り用） |
+| v2.9.0 | 2026-01-08 | GoogleAuth統合、Google Docs対応。`query()`メソッド追加（推奨）、`call()`非推奨化。`modules.GoogleAuth`セクション追加 |
 | v2.7.4 | 2026-01-05 | `showModal`に`closeOnOverlayClick`、`width`、`action.autoClose`オプションを追加 |
 | v2.6.9 | 2026-01-04 | 初版作成。Henry Core v2.6.9 の仕様を文書化。デバッグメソッド（dumpHashes, clearHashes）を追加 |

@@ -1,6 +1,6 @@
-# Henry EMR 開発ガイドライン (Core Rules v4.5)
+# Henry EMR 開発ガイドライン (Core Rules v4.6)
 
-<!-- 📝 UPDATED: v4.5 - HenryCore v2.9.0対応（GoogleAuth統合、Google Docs対応） -->
+<!-- 📝 UPDATED: v4.6 - HenryCore v2.9.6対応（OAuth認証情報のGM_storage永続化） -->
 
 > **🆕 NEW**: このドキュメントはAIアシスタントとの協働開発における必須ルール集です。簡潔性を重視し、詳細な技術仕様は `HENRY-API-REFERENCE.md` を参照してください。
 
@@ -254,7 +254,7 @@ if (!patient) return null; // 静かに終了
 | `getMyUuid()` | ログイン中のユーザーUUID取得 | 初回はAPI呼び出し、以降キャッシュ |
 | `plugins` | 登録済みプラグインの配列 | v2.7.0以降。読み取り専用 |
 | `registerPlugin(options)` | プラグイン登録 | v2.7.0以降。自動的にToolboxに表示 |
-| `modules.GoogleAuth` | Google OAuth認証モジュール | v2.9.0以降。`isAuthenticated()`, `getValidAccessToken()`, `startAuth()` 等 |
+| `modules.GoogleAuth` | Google OAuth認証モジュール | v2.9.0以降。`isAuthenticated()`, `getValidAccessToken()`, `startAuth()`, `showConfigDialog()` 等。v2.9.6で認証情報のGM_storage永続化対応 |
 | `utils.createCleaner()` | クリーンアップ管理 | 上記参照 |
 | `utils.waitForElement(selector, timeout)` | 要素の出現待機 | - |
 | `utils.createLogger(name)` | ログ出力ユーティリティ | - |
@@ -404,6 +404,8 @@ try {
   - `henryFileUuid`: ファイルUUID（上書き保存用、新規は空）
   - `henryFolderUuid`: フォルダUUID（保存先、ルートなら空）
   - `henrySource`: 作成元識別子（例: `drive-direct`）
+- **YOU MUST**: ユーザーから「クラッシュした」と報告を受けた場合は、まず (1) どこまで作業が完了しているか確認し、(2) 残りの作業を明確にしてから再開すること。
+- **IMPORTANT**: 作業を進める際は、要所で「何をしようとしているか」「なぜそうするのか」を簡潔に説明すること。質問があれば丁寧に答える。
 
 ---
 
@@ -411,7 +413,8 @@ try {
 
 | Version | Date | Changes |
 |---------|------|---------|
-| **v4.5** | **2026-01-08** | **HenryCore v2.9.0対応。GoogleAuth統合（`modules.GoogleAuth`追加）、Google Docs対応** |
+| **v4.6** | **2026-01-08** | **HenryCore v2.9.6対応。OAuth認証情報のGM_storage永続化、設定ダイアログUI追加、Toolboxアイコン削除** |
+| v4.5 | 2026-01-08 | HenryCore v2.9.0対応。GoogleAuth統合（`modules.GoogleAuth`追加）、Google Docs対応 |
 | v4.4 | 2026-01-08 | コミュニケーション方針を詳細化。質問すべき観点・タイミング、作業前確認テンプレート追加 |
 | v4.3 | 2026-01-06 | HenryCore v2.8.0 フルクエリ方式追加。`query()` メソッド追加、`call()` は非推奨に。ハッシュ事前収集が不要になり、初回でもAPIが即座に呼び出し可能 |
 | v4.2 | 2026-01-05 | HenryCore v2.7.4 showModalオプション追加。`closeOnOverlayClick: false` でオーバーレイクリック無効化、`action.autoClose: false` でボタンクリック後の自動close無効化 |
@@ -454,10 +457,10 @@ try {
 > **AI向け指示**: セッション開始時にこのセクションを確認し、未完了のタスクがあればユーザーにリマインドすること。タスク完了後はこのセクションから削除すること。
 
 ### 2026-01-08 更新
-- [ ] **動作確認**: GoogleAuth統合後のスクリプト（v2.9.0）
-  - henry_core.user.js v2.9.0 - GoogleAuth統合、Google Docs対応
-  - henry_google_drive_bridge.user.js v2.2.0 - HenryCore.modules.GoogleAuth経由に変更
-  - henry_ikensho_form.user.js v2.1.0 - HenryCore.modules.GoogleAuth経由に変更
+- [x] **動作確認**: GoogleAuth統合後のスクリプト ✅ 完了
+  - henry_core.user.js v2.9.6 - GoogleAuth統合、スコープ修正、OAuth設定のGM_storage永続化
+  - henry_google_drive_bridge.user.js v2.2.1 - HenryCore.modules.GoogleAuth経由に変更
+  - henry_ikensho_form.user.js v2.1.5 - HenryCore.modules.GoogleAuth経由に変更
 - [ ] **動作確認**: フルクエリ方式に移行した他のスクリプト
   - henry_auto_approver.user.js → v3.5.0に更新済み、動作確認待ち
 - [ ] **GAS実装**: 主治医意見書テンプレート埋め込み処理（henry_ikensho_form用）

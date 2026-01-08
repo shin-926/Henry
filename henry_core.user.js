@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry Core
 // @namespace    https://henry-app.jp/
-// @version      2.9.3
+// @version      2.9.7
 // @description  Henry スクリプト実行基盤 (GoogleAuth統合 / Google Docs対応)
 // @match        https://henry-app.jp/*
 // @match        https://docs.google.com/*
@@ -31,6 +31,9 @@
   const isHenry = location.host === 'henry-app.jp';
   const isGoogleDocs = location.host === 'docs.google.com';
 
+  // GM_storageからGoogle認証情報を読み込み
+  const storedCredentials = GM_getValue('google_oauth_credentials', null);
+
   const CONFIG = {
     // 単一施設運用を前提としたハードコード（複数施設対応は想定しない）
     ORG_UUID: 'ce6b556b-2a8d-4fce-b8dd-89ba638fc825', // マオカ病院
@@ -39,19 +42,20 @@
     STORE_NAME: 'hashes',
     BASE_URL: 'https://henry-app.jp',
 
-    // GoogleAuth設定（ユーザーが設定）
-    GOOGLE_CLIENT_ID: '',      // GCPコンソールで取得
-    GOOGLE_CLIENT_SECRET: '',  // GCPコンソールで取得
+    // GoogleAuth設定（GM_storageから読み込み、未設定なら空）
+    GOOGLE_CLIENT_ID: storedCredentials?.clientId || '',
+    GOOGLE_CLIENT_SECRET: storedCredentials?.clientSecret || '',
 
     // GoogleAuth固定設定
-    GOOGLE_SCOPES: 'https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/documents',
+    GOOGLE_SCOPES: 'https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/drive.readonly https://www.googleapis.com/auth/documents',
     GOOGLE_REDIRECT_URI: 'https://henry-app.jp/',
     GOOGLE_AUTH_ENDPOINT: 'https://accounts.google.com/o/oauth2/v2/auth',
     GOOGLE_TOKEN_ENDPOINT: 'https://oauth2.googleapis.com/token',
-    GOOGLE_TOKENS_KEY: 'google_drive_tokens'
+    GOOGLE_TOKENS_KEY: 'google_drive_tokens',
+    GOOGLE_CREDENTIALS_KEY: 'google_oauth_credentials'
   };
 
-  console.log('[Henry Core] Initializing v2.9.3...');
+  console.log('[Henry Core] Initializing v2.9.7...');
 
   // ==========================================
   // 1. IndexedDB Manager (ハッシュ + エンドポイント管理)
@@ -817,12 +821,92 @@
     // 認証開始
     startAuth() {
       if (!this.isConfigured()) {
-        alert('Google認証の設定が未完了です。\n\nhenry_core.user.jsのCLIENT_IDとCLIENT_SECRETを設定してください。');
+        this.showConfigDialog();
         return;
       }
       const authUrl = this.getAuthUrl();
       console.log('[Henry Core] GoogleAuth: 認証開始:', authUrl);
       GM_openInTab(authUrl, { active: true });
+    },
+
+    // 認証情報を保存
+    saveCredentials(clientId, clientSecret) {
+      GM_setValue(CONFIG.GOOGLE_CREDENTIALS_KEY, {
+        clientId: clientId,
+        clientSecret: clientSecret
+      });
+      // CONFIGも更新（現在のセッション用）
+      CONFIG.GOOGLE_CLIENT_ID = clientId;
+      CONFIG.GOOGLE_CLIENT_SECRET = clientSecret;
+      console.log('[Henry Core] GoogleAuth: 認証情報を保存しました');
+    },
+
+    // 認証情報を削除
+    clearCredentials() {
+      GM_deleteValue(CONFIG.GOOGLE_CREDENTIALS_KEY);
+      CONFIG.GOOGLE_CLIENT_ID = '';
+      CONFIG.GOOGLE_CLIENT_SECRET = '';
+      console.log('[Henry Core] GoogleAuth: 認証情報を削除しました');
+    },
+
+    // 設定ダイアログを表示
+    showConfigDialog() {
+      const currentId = CONFIG.GOOGLE_CLIENT_ID || '';
+      const currentSecret = CONFIG.GOOGLE_CLIENT_SECRET || '';
+
+      const overlay = document.createElement('div');
+      overlay.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.5);z-index:100000;display:flex;align-items:center;justify-content:center;';
+
+      const dialog = document.createElement('div');
+      dialog.style.cssText = 'background:#fff;border-radius:12px;padding:24px;width:540px;max-width:90vw;font-family:-apple-system,sans-serif;';
+
+      dialog.innerHTML = `
+        <h3 style="margin:0 0 16px 0;font-size:18px;font-weight:600;">Google OAuth 設定</h3>
+        <p style="margin:0 0 16px 0;font-size:13px;color:#666;">
+          GCPコンソールで作成したOAuthクライアントの情報を入力してください。<br>
+          この設定はブラウザに保存され、スクリプト更新後も保持されます。
+        </p>
+        <div style="margin-bottom:12px;">
+          <label style="display:block;font-size:13px;font-weight:500;margin-bottom:4px;">Client ID</label>
+          <input type="text" id="hc-google-client-id" value="${currentId}"
+            style="width:100%;padding:8px 12px;border:1px solid #ddd;border-radius:6px;font-size:14px;box-sizing:border-box;">
+        </div>
+        <div style="margin-bottom:20px;">
+          <label style="display:block;font-size:13px;font-weight:500;margin-bottom:4px;">Client Secret</label>
+          <input type="password" id="hc-google-client-secret" value="${currentSecret}"
+            style="width:100%;padding:8px 12px;border:1px solid #ddd;border-radius:6px;font-size:14px;box-sizing:border-box;">
+        </div>
+        <div style="display:flex;gap:8px;justify-content:flex-end;">
+          <button id="hc-config-cancel" style="padding:8px 16px;border:1px solid #ddd;border-radius:6px;background:#fff;cursor:pointer;font-size:14px;">キャンセル</button>
+          <button id="hc-config-save" style="padding:8px 16px;border:none;border-radius:6px;background:#1a73e8;color:#fff;cursor:pointer;font-size:14px;font-weight:500;">保存</button>
+        </div>
+      `;
+
+      overlay.appendChild(dialog);
+      document.body.appendChild(overlay);
+
+      const idInput = dialog.querySelector('#hc-google-client-id');
+      const secretInput = dialog.querySelector('#hc-google-client-secret');
+      const cancelBtn = dialog.querySelector('#hc-config-cancel');
+      const saveBtn = dialog.querySelector('#hc-config-save');
+
+      cancelBtn.onclick = () => overlay.remove();
+      overlay.onclick = (e) => { if (e.target === overlay) overlay.remove(); };
+
+      saveBtn.onclick = () => {
+        const newId = idInput.value.trim();
+        const newSecret = secretInput.value.trim();
+        if (!newId || !newSecret) {
+          alert('Client ID と Client Secret を入力してください。');
+          return;
+        }
+        this.saveCredentials(newId, newSecret);
+        overlay.remove();
+        alert('設定を保存しました。Google認証を開始します。');
+        this.startAuth();
+      };
+
+      idInput.focus();
     }
   };
 
@@ -962,7 +1046,7 @@
       if (toolbox && typeof toolbox.register === 'function') {
         toolbox.register({
           event: `henrycore:plugin:${plugin.id}`,
-          label: `${plugin.icon} ${plugin.name}`.trim(),
+          label: plugin.name,
           order: plugin.order,
           onClick: plugin.onClick  // Toolbox v5.1.0 対応
         });
@@ -1057,17 +1141,29 @@
       version: '1.0.0',
       order: 10,
       onClick: () => {
+        // 未設定の場合 → 設定ダイアログ
         if (!GoogleAuth.isConfigured()) {
-          alert('Google認証の設定が未完了です。\n\nhenry_core.user.jsのCLIENT_IDとCLIENT_SECRETを設定してください。');
+          GoogleAuth.showConfigDialog();
           return;
         }
 
+        // 認証済みの場合 → オプション表示
         if (GoogleAuth.isAuthenticated()) {
-          if (confirm('Google認証を解除しますか？')) {
+          const choice = prompt(
+            'Google認証 オプション:\n\n' +
+            '1: 認証を解除（トークン削除）\n' +
+            '2: OAuth設定を変更（Client ID/Secret）\n' +
+            '3: キャンセル\n\n' +
+            '番号を入力してください:'
+          );
+          if (choice === '1') {
             GoogleAuth.clearTokens();
             showToast('Google認証を解除しました');
+          } else if (choice === '2') {
+            GoogleAuth.showConfigDialog();
           }
         } else {
+          // 未認証の場合 → 認証開始
           GoogleAuth.startAuth();
         }
       }
@@ -1088,10 +1184,10 @@
       checkForAuthCode();
       registerGoogleAuthPlugin();
     }
-    console.log('[Henry Core] Ready v2.9.3 (Henry mode)');
+    console.log('[Henry Core] Ready v2.9.7 (Henry mode)');
 
   } else if (isGoogleDocs) {
     // Google Docsドメイン：GoogleAuthのみ
-    console.log('[Henry Core] Ready v2.9.3 (Google Docs mode - GoogleAuth only)');
+    console.log('[Henry Core] Ready v2.9.7 (Google Docs mode - GoogleAuth only)');
   }
 })();

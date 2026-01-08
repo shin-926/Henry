@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Google Drive連携
 // @namespace    https://henry-app.jp/
-// @version      2.2.0
+// @version      2.2.3
 // @description  HenryのファイルをGoogle Drive APIで直接変換・編集。GAS不要版。
 // @match        https://henry-app.jp/*
 // @match        https://docs.google.com/*
@@ -915,7 +915,7 @@
         position: 'absolute',
         top: '40px',
         left: '0',
-        right: '0',
+        minWidth: '120px',
         backgroundColor: '#fff',
         border: '1px solid #ddd',
         borderRadius: '8px',
@@ -964,8 +964,42 @@
 
       document.addEventListener('click', () => { menu.style.display = 'none'; });
 
+      // 保存せずに閉じるボタン
+      const discardBtn = document.createElement('div');
+      discardBtn.id = 'drive-direct-discard-btn';
+      discardBtn.textContent = '保存せずに閉じる';
+      Object.assign(discardBtn.style, {
+        display: 'inline-flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        height: '36px',
+        padding: '0 16px',
+        marginLeft: '8px',
+        backgroundColor: '#f5f5f5',
+        color: '#666',
+        borderRadius: '18px',
+        fontSize: '14px',
+        fontWeight: '500',
+        cursor: 'pointer',
+        userSelect: 'none',
+        fontFamily: '"Google Sans",Roboto,sans-serif',
+        whiteSpace: 'nowrap',
+        border: '1px solid #ddd'
+      });
+
+      discardBtn.onmouseover = () => {
+        discardBtn.style.backgroundColor = '#e0e0e0';
+        discardBtn.style.color = '#333';
+      };
+      discardBtn.onmouseout = () => {
+        discardBtn.style.backgroundColor = '#f5f5f5';
+        discardBtn.style.color = '#666';
+      };
+      discardBtn.onclick = () => handleDiscardAndClose();
+
       container.appendChild(btn);
       container.appendChild(menu);
+      container.appendChild(discardBtn);
 
       if (shareBtn) {
         targetParent.insertBefore(container, shareBtn);
@@ -974,6 +1008,37 @@
       }
 
       debugLog('Docs', 'ボタン作成完了');
+    }
+
+    // 保存せずに閉じる処理
+    async function handleDiscardAndClose() {
+      if (!confirm('保存せずに閉じますか？\n\nGoogle Drive上のファイルは削除されます。')) {
+        return;
+      }
+
+      const discardBtn = document.getElementById('drive-direct-discard-btn');
+      discardBtn.style.pointerEvents = 'none';
+      discardBtn.style.opacity = '0.7';
+      discardBtn.textContent = '削除中...';
+
+      try {
+        const docId = window.location.pathname.split('/')[3];
+        if (docId) {
+          await DriveAPI.deleteFile(docId);
+          debugLog('Docs', 'ファイル削除完了');
+        }
+
+        showToast('ファイルを破棄しました');
+        await new Promise(r => setTimeout(r, 1500));
+        window.close();
+
+      } catch (e) {
+        debugError('Docs', '削除エラー:', e.message);
+        showToast(`エラー: ${e.message}`, true);
+        discardBtn.style.pointerEvents = 'auto';
+        discardBtn.style.opacity = '1';
+        discardBtn.textContent = '保存せずに閉じる';
+      }
     }
 
     // Henryへ保存処理
@@ -1132,7 +1197,8 @@
         const actionText = mode === 'overwrite' ? '上書き保存' : '新規保存';
         showToast(`Henryへ${actionText}しました`);
 
-        // タブを閉じる
+        // 1秒待ってからタブを閉じる
+        await new Promise(r => setTimeout(r, 1000));
         window.close();
 
       } catch (e) {
