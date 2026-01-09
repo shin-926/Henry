@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         予約システム連携
 // @namespace    https://github.com/shin-926/Tampermonkey
-// @version      1.8.4
+// @version      1.8.5
 // @description  Henryカルテと予約システム間の双方向連携（再診予約・患者プレビュー・ページ遷移）
 // @match        https://henry-app.jp/*
 // @match        https://manage-maokahp.reserve.ne.jp/*
@@ -610,15 +610,16 @@
     `;
     document.head.appendChild(previewStyle);
 
-    // プレビューウィンドウの位置を画面内に収める（下端のみ調整、左端は固定）
+    // プレビューウィンドウの高さを画面内に収める（位置は固定、max-heightで制限）
     function adjustPreviewPosition() {
       if (!previewWindow || previewWindow.style.display === 'none') return;
 
       const pwRect = previewWindow.getBoundingClientRect();
+      const availableHeight = window.innerHeight - pwRect.top - 10;
 
-      // 下端がはみ出す場合
-      if (pwRect.bottom > window.innerHeight) {
-        previewWindow.style.top = (window.innerHeight - pwRect.height - 10) + 'px';
+      // 下端がはみ出す場合はmax-heightを制限
+      if (pwRect.bottom > window.innerHeight - 10) {
+        previewWindow.style.maxHeight = availableHeight + 'px';
       }
     }
 
@@ -633,12 +634,11 @@
         box-shadow: 0 4px 20px rgba(0,0,0,0.15);
         padding: 12px;
         z-index: 100001;
-        max-width: 500px;
-        max-height: 600px;
         overflow-y: auto;
         font-family: 'Noto Sans JP', sans-serif;
         font-size: 13px;
         display: none;
+        box-sizing: border-box;
       `;
 
       div.addEventListener('mouseenter', () => {
@@ -668,10 +668,12 @@
         .replace(/生年月日/g, '<br>生年月日')
         .replace(/TEL/g, '<br>TEL');
 
-      // 位置を設定（元のツールチップの近く）
+      // 位置とサイズを元のツールチップに合わせる
       const rect = originalTooltip.getBoundingClientRect();
       previewWindow.style.left = rect.left + 'px';
       previewWindow.style.top = rect.top + 'px';
+      previewWindow.style.width = rect.width + 'px';
+      previewWindow.style.maxHeight = '';  // リセット（前回の制限をクリア）
       previewWindow.style.display = 'block';
 
       // 元のツールチップを非表示
