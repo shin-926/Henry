@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         主治医意見書作成フォーム
 // @namespace    https://henry-app.jp/
-// @version      2.2.0
+// @version      2.3.1
 // @description  主治医意見書の入力フォームとGoogle Docs出力（GAS不要版・API直接呼び出し）
 // @author       Henry Team
 // @match        https://henry-app.jp/*
@@ -20,7 +20,7 @@
   'use strict';
 
   const SCRIPT_NAME = 'OpinionForm';
-  const VERSION = '2.2.0';
+  const VERSION = '2.3.1';
 
   // ページのwindowを取得（サンドボックス対応）
   const pageWindow = typeof unsafeWindow !== 'undefined' ? unsafeWindow : window;
@@ -38,7 +38,7 @@
   // テンプレート設定
   const TEMPLATE_CONFIG = {
     TEMPLATE_ID: '1z1kJZ9wVUDotM1kPmvA5-S2mlq4CmfShnB9CzbfWtwU',
-    OUTPUT_FOLDER_NAME: '文書'
+    OUTPUT_FOLDER_NAME: '主治医意見書'
   };
 
   // 医療機関情報（ハードコード）
@@ -145,12 +145,19 @@
       });
     },
 
-    // ファイルをコピー
-    async copyFile(fileId, newName) {
+    // ファイルをコピー（親フォルダ・メタデータ指定可能）
+    async copyFile(fileId, newName, parentFolderId = null, properties = null) {
       const url = `${API_CONFIG.DRIVE_API_BASE}/files/${fileId}/copy`;
+      const body = { name: newName };
+      if (parentFolderId) {
+        body.parents = [parentFolderId];
+      }
+      if (properties) {
+        body.properties = properties;
+      }
       return await this.request('POST', url, {
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: newName })
+        body: JSON.stringify(body)
       });
     },
 
@@ -158,6 +165,49 @@
     async getFileMetadata(fileId, fields = 'id,name,webViewLink') {
       const url = `${API_CONFIG.DRIVE_API_BASE}/files/${fileId}?fields=${fields}`;
       return await this.request('GET', url);
+    },
+
+    // マイドライブでフォルダを検索
+    async findFolder(folderName) {
+      const query = `name='${folderName}' and mimeType='application/vnd.google-apps.folder' and 'root' in parents and trashed=false`;
+      const url = `${API_CONFIG.DRIVE_API_BASE}/files?q=${encodeURIComponent(query)}&fields=files(id,name)`;
+      console.log('[OpinionForm] findFolder query:', query);
+      console.log('[OpinionForm] findFolder url:', url);
+      const result = await this.request('GET', url);
+      console.log('[OpinionForm] findFolder result:', result);
+      return result.files?.[0] || null;
+    },
+
+    // マイドライブにフォルダを作成
+    async createFolder(folderName) {
+      console.log('[OpinionForm] createFolder:', folderName);
+      const url = `${API_CONFIG.DRIVE_API_BASE}/files`;
+      const result = await this.request('POST', url, {
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: folderName,
+          mimeType: 'application/vnd.google-apps.folder',
+          parents: ['root']
+        })
+      });
+      console.log('[OpinionForm] createFolder result:', result);
+      return result;
+    },
+
+    // フォルダを検索し、なければ作成
+    async getOrCreateFolder(folderName) {
+      try {
+        let folder = await this.findFolder(folderName);
+        if (!folder) {
+          log?.info(`フォルダ「${folderName}」を作成中...`);
+          folder = await this.createFolder(folderName);
+          log?.info(`フォルダ「${folderName}」を作成しました`);
+        }
+        return folder;
+      } catch (e) {
+        console.error('[OpinionForm] getOrCreateFolder error:', e);
+        throw new Error(`フォルダの取得/作成に失敗しました: ${e.message}`);
+      }
     }
   };
 
@@ -626,7 +676,7 @@
       '{{同意の有無}}': { '1': '■同意する\t□同意しない', '2': '□同意する\t■同意しない' },
       '{{意見書作成回数}}': { '1': '■初回\t□2回目以上', '2': '□初回\t■2回目以上' },
       '{{他科受診有無}}': { '1': '■有\t□無', '2': '□有\t■無' },
-      '{{症状安定性}}': { '1': '■安定\t□不安定\t□不明', '2': '□安定\t■不安定\t□不明', '3': '□安定\t□不安定\t□不明' },
+      '{{症状安定性}}': { '1': '■安定\t□不安定\t□不明', '2': '□安定\t■不安定\t□不明', '3': '□安定\t□不安定\t■不明' },
       '{{寝たきり度}}': {
         '1': '■自立\t□J1\t□J2\t□A1\t□A2\t□B1\t□B2\t□C1\t□C2',
         '2': '□自立\t■J1\t□J2\t□A1\t□A2\t□B1\t□B2\t□C1\t□C2',
@@ -819,13 +869,24 @@
       throw new Error('Google認証が必要です。\n\nHenryツールボックスの「Google認証」ボタンから認証を行ってください。');
     }
 
-    // 1. テンプレートをコピー
+    // 1. 保存先フォルダを取得（なければ作成）
+    log?.info('保存先フォルダを確認中...');
+    const folder = await DriveAPI.getOrCreateFolder(TEMPLATE_CONFIG.OUTPUT_FOLDER_NAME);
+    log?.info('保存先フォルダ:', folder.name, folder.id);
+
+    // 2. テンプレートをコピー（保存先フォルダ・メタデータを指定）
     log?.info('テンプレートをコピー中...');
-    const copiedFile = await DriveAPI.copyFile(TEMPLATE_CONFIG.TEMPLATE_ID, fileName);
+    const properties = {
+      henryPatientUuid: formData.basic_info?.patient_uuid || '',
+      henryFileUuid: '',  // 新規作成なので空
+      henryFolderUuid: folder.id,
+      henrySource: 'ikensho-form'
+    };
+    const copiedFile = await DriveAPI.copyFile(TEMPLATE_CONFIG.TEMPLATE_ID, fileName, folder.id, properties);
     const documentId = copiedFile.id;
     log?.info('コピー完了:', documentId);
 
-    // 2. 置換リクエストを作成
+    // 3. 置換リクエストを作成
     const requests = [];
     for (const mapping of PLACEHOLDER_MAPPINGS) {
       const value = getValueByPath(formData, mapping.jsonKey);
@@ -833,12 +894,12 @@
       requests.push(DocsAPI.createReplaceTextRequest(mapping.placeholder, displayText));
     }
 
-    // 3. バッチ更新を実行
+    // 4. バッチ更新を実行
     log?.info('プレースホルダーを置換中...', requests.length, '件');
     await DocsAPI.batchUpdate(documentId, requests);
     log?.info('置換完了');
 
-    // 4. ファイル情報を取得
+    // 5. ファイル情報を取得
     const fileInfo = await DriveAPI.getFileMetadata(documentId, 'id,name,webViewLink');
 
     return {
@@ -1560,13 +1621,13 @@
     section.appendChild(stabilityField);
 
     // 症状不安定時の具体的状況（条件付き必須：症状安定性=不安定の場合）
-    const unstableDetailsField = createTextField('症状不安定時の具体的状況', 'symptom_unstable_details', 'diagnosis', data.symptom_unstable_details, false, '不安定な場合の具体的な状況を記入');
+    const unstableDetailsField = createTextField('症状不安定時の具体的状況', 'symptom_unstable_details', 'diagnosis', data.symptom_unstable_details, false, '不安定な場合の具体的な状況を記入', 56);
     unstableDetailsField.style.marginLeft = '24px';
     section.appendChild(unstableDetailsField);
     setupConditionalField(stabilityField, unstableDetailsField, '2');
 
-    // 経過及び治療内容（必須、560文字/5行）
-    section.appendChild(createTextareaField('経過及び治療内容', 'course_and_treatment', 'diagnosis', data.course_and_treatment, true, 560, 5));
+    // 経過及び治療内容
+    section.appendChild(createTextareaField('生活機能低下の直接の原因となっている傷病または特定疾病の経過及び投薬内容を含む治療内容', 'course_and_treatment', 'diagnosis', data.course_and_treatment, true, 285, 5));
 
     return section;
   }
