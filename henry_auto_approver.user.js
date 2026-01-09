@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         承認アシスタント
 // @namespace    http://tampermonkey.net/
-// @version      3.8.0
+// @version      3.9.0
 // @description  承認待ちオーダーを自動で一括承認する
 // @match        https://henry-app.jp/*
 // @grant        none
@@ -309,6 +309,15 @@
       }
     }
 
+    // 承認完了後、画面を更新
+    if (window.__APOLLO_CLIENT__) {
+      try {
+        window.__APOLLO_CLIENT__.refetchQueries({ include: ['ListNotifiableOrders'] });
+      } catch (e) {
+        console.error(`[${SCRIPT_NAME}] 画面更新失敗:`, e.message);
+      }
+    }
+
     return { processed, successCount, errorCount, aborted: false };
   }
 
@@ -569,12 +578,12 @@
       name: '承認',
       icon: '⚡',
       description: '承認待ちオーダーを自動で一括承認',
-      version: '3.8.0',
+      version: '3.9.0',
       order: 20,
       onClick: main
     });
 
-    console.log(`[${SCRIPT_NAME}] v3.8.0 起動しました`);
+    console.log(`[${SCRIPT_NAME}] v3.9.0 起動しました`);
   }
 
   if (document.readyState === 'loading') {
