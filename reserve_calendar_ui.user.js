@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         予約システム：カレンダーUIカスタム
 // @namespace    http://tampermonkey.net/
-// @version      2.46
+// @version      2.48.0
 // @description  カレンダー縦表示、週ジャンプなど
 // @author       Gemini (with Claude's advice)
 // @match        https://manage-maokahp.reserve.ne.jp/manage/calendar.php*
@@ -32,16 +32,22 @@
 
   const BASE_FONT_PERCENT = 115;
   const BASE_WIDTH_EM = 19;
-  const CALC_FONT_SIZE = Math.round(BASE_FONT_PERCENT * CONFIG.magnification) + '%';
-  const CALC_WIDTH = (BASE_WIDTH_EM * CONFIG.magnification).toFixed(2) + 'em';
+  // 初期値（後で動的に調整される）
+  let currentMagnification = CONFIG.magnification;
 
   const css = `
+    :root {
+      --calendar-magnification: ${CONFIG.magnification};
+      --calendar-font-size: calc(${BASE_FONT_PERCENT}% * var(--calendar-magnification));
+      --calendar-width: calc(${BASE_WIDTH_EM}em * var(--calendar-magnification));
+    }
+
     ${CONFIG.targetSelector} {
       position: fixed !important;
       right: 0 !important;
       bottom: 0 !important;
       left: auto !important;
-      width: ${CALC_WIDTH} !important;
+      width: var(--calendar-width) !important;
       background-color: #fff !important;
       z-index: 2147483640 !important;
       border-left: 1px solid #ccc !important;
@@ -85,7 +91,7 @@ ${CONFIG.targetSelector} .ui-datepicker-calendar a.ui-state-active {
       width: 100% !important;
       position: relative !important;
       padding-top: 30px !important;
-      font-size: ${CALC_FONT_SIZE} !important;
+      font-size: var(--calendar-font-size) !important;
       border: none !important;
     }
 
@@ -140,7 +146,7 @@ ${CONFIG.targetSelector} .ui-datepicker-calendar a.ui-state-active {
       align-items: center !important;
       justify-content: center !important;
       gap: 8px !important;
-      font-size: ${CALC_FONT_SIZE} !important;
+      font-size: var(--calendar-font-size) !important;
       font-weight: bold !important;
     }
 
@@ -160,6 +166,45 @@ ${CONFIG.targetSelector} .ui-datepicker-calendar a.ui-state-active {
 
   function getJQuery() { return window.jQuery || null; }
   function getTargetNode() { return document.querySelector(CONFIG.targetSelector); }
+
+  // 倍率を設定
+  function setMagnification(mag) {
+    currentMagnification = mag;
+    document.documentElement.style.setProperty('--calendar-magnification', mag);
+  }
+
+  // 画面に収まる倍率を計算して適用
+  function adjustMagnification() {
+    const root = getTargetNode();
+    if (!root) return;
+
+    const jq = getJQuery();
+    const $header = jq ? jq(CONFIG.headerSelector) : [];
+    if (!$header.length) return;
+
+    // カレンダー内部のスクロール領域を取得
+    const datepickerInline = root.querySelector('.ui-datepicker-inline');
+    if (!datepickerInline) return;
+
+    // スクロールが発生しているか確認
+    const scrollHeight = datepickerInline.scrollHeight;
+    const clientHeight = datepickerInline.clientHeight;
+
+    const minMag = 0.8; // 最小倍率
+    const maxMag = CONFIG.magnification; // 最大倍率（設定値）
+
+    if (scrollHeight > clientHeight + 5) {
+      // はみ出している場合、倍率を下げる
+      const ratio = clientHeight / scrollHeight;
+      const newMag = currentMagnification * ratio * 0.98;
+      setMagnification(Math.max(minMag, newMag));
+    } else if (scrollHeight < clientHeight - 20) {
+      // 余裕がありすぎる場合、倍率を上げる
+      const ratio = clientHeight / scrollHeight;
+      const newMag = currentMagnification * ratio * 0.98;
+      setMagnification(Math.min(maxMag, newMag));
+    }
+  }
 
   function adjustLayout() {
     const jq = getJQuery();
@@ -253,8 +298,31 @@ ${CONFIG.targetSelector} .ui-datepicker-calendar a.ui-state-active {
   function tick() {
     if (applyCalendarSettings()) {
       ensureWeeksAfterUI();
+
+      // ツールバーを自動で隠す（初回のみ）
+      if (!window.toolbarHidden) {
+        const openBtn = document.querySelector('#div_toolbar_hider_open');
+        const hideBtn = document.querySelector('#div_toolbar_hider_hide');
+        const toolbar = document.querySelector('#div_contents_topmenu');
+        if (openBtn && hideBtn && toolbar) {
+          openBtn.style.display = 'block';
+          hideBtn.style.display = 'none';
+          toolbar.style.display = 'none';
+          window.toolbarHidden = true;
+        }
+      }
+
       if (!window.layoutSync) {
         window.layoutSync = setInterval(adjustLayout, 1000);
+
+        // 初回の倍率調整（少し遅延させて描画完了を待つ）
+        setTimeout(adjustMagnification, 500);
+
+        // ウィンドウリサイズ時に倍率を再調整
+        window.addEventListener('resize', () => {
+          setMagnification(CONFIG.magnification); // 一度リセット
+          setTimeout(adjustMagnification, 100);
+        });
 
         // 監視範囲の最適化：カレンダー要素のみを監視
         const observerTarget = getTargetNode();

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         予約システム連携
 // @namespace    https://github.com/shin-926/Tampermonkey
-// @version      1.7.2
+// @version      1.8.0
 // @description  Henryカルテと予約システム間の双方向連携（再診予約・患者プレビュー・ページ遷移）
 // @match        https://henry-app.jp/*
 // @match        https://manage-maokahp.reserve.ne.jp/*
@@ -591,14 +591,24 @@
     }
 
     // --------------------------------------------
-    // Reserve→Henry連携：ホバープレビュー・クリック遷移
+    // Reserve→Henry連携：ツールチップ内カルテ表示・クリック遷移
     // --------------------------------------------
-    let previewWindow = null;
-    let currentTarget = null;
+    let currentPatientNumber = null;
     let hoverTimeout = null;
+
+    // 独立したプレビューウィンドウを作成
+    let previewWindow = null;
     let closeTimeout = null;
-    let isOverPreview = false;
-    let isOverTarget = false;
+
+    // プレビューウィンドウ用のスタイルを追加
+    const previewStyle = document.createElement('style');
+    previewStyle.textContent = `
+      #henry-preview-window .datetime {
+        display: block;
+        margin-top: 4px;
+      }
+    `;
+    document.head.appendChild(previewStyle);
 
     function createPreviewWindow() {
       const div = document.createElement('div');
@@ -609,10 +619,10 @@
         border: 1px solid #ccc;
         border-radius: 8px;
         box-shadow: 0 4px 20px rgba(0,0,0,0.15);
-        padding: 16px;
+        padding: 12px;
         z-index: 100001;
-        max-width: 600px;
-        max-height: 800px;
+        max-width: 500px;
+        max-height: 600px;
         overflow-y: auto;
         font-family: 'Noto Sans JP', sans-serif;
         font-size: 13px;
@@ -620,63 +630,80 @@
       `;
 
       div.addEventListener('mouseenter', () => {
-        isOverPreview = true;
-        cancelClose();
+        if (closeTimeout) {
+          clearTimeout(closeTimeout);
+          closeTimeout = null;
+        }
       });
+
       div.addEventListener('mouseleave', () => {
-        isOverPreview = false;
-        scheduleClose();
+        closeTimeout = setTimeout(() => {
+          hidePreview();
+        }, 300);
       });
+
       document.body.appendChild(div);
       return div;
     }
 
-    function scheduleClose() {
-      cancelClose();
-      closeTimeout = setTimeout(() => {
-        if (!isOverPreview && !isOverTarget) {
-          hidePreview();
-        }
-      }, CONFIG.CLOSE_DELAY);
-    }
-
-    function cancelClose() {
-      if (closeTimeout) {
-        clearTimeout(closeTimeout);
-        closeTimeout = null;
-      }
-    }
-
-    function showPreview(target, content) {
+    function showPreview(originalTooltip) {
       if (!previewWindow) {
         previewWindow = createPreviewWindow();
       }
 
-      previewWindow.innerHTML = content;
-      previewWindow.onmouseenter = () => { isOverPreview = true; cancelClose(); };
-      previewWindow.onmouseleave = () => { isOverPreview = false; scheduleClose(); };
+      // 元のツールチップの内容をコピー
+      previewWindow.innerHTML = originalTooltip.innerHTML;
 
-      const rect = target.getBoundingClientRect();
-      previewWindow.style.left = (rect.right + 10) + 'px';
+      // 位置を設定（元のツールチップの近く）
+      const rect = originalTooltip.getBoundingClientRect();
+      previewWindow.style.left = rect.left + 'px';
       previewWindow.style.top = rect.top + 'px';
       previewWindow.style.display = 'block';
 
+      // 元のツールチップを非表示
+      originalTooltip.style.display = 'none';
+
+      // 画面外にはみ出さないように調整
       const pwRect = previewWindow.getBoundingClientRect();
       if (pwRect.right > window.innerWidth) {
-        previewWindow.style.left = (rect.left - pwRect.width - 10) + 'px';
+        previewWindow.style.left = (window.innerWidth - pwRect.width - 10) + 'px';
       }
       if (pwRect.bottom > window.innerHeight) {
         previewWindow.style.top = (window.innerHeight - pwRect.height - 10) + 'px';
       }
+
+      return previewWindow;
     }
 
     function hidePreview() {
       if (previewWindow) {
         previewWindow.style.display = 'none';
       }
-      currentTarget = null;
-      isOverPreview = false;
-      isOverTarget = false;
+      currentPatientNumber = null;
+    }
+
+    // カルテ情報をプレビューウィンドウに追加
+    function appendKarteToPreview(content) {
+      if (!previewWindow) return;
+
+      // 既存のカルテ情報があれば削除
+      const existing = previewWindow.querySelector('#henry-karte-info');
+      if (existing) existing.remove();
+
+      // カルテ情報を追加
+      const karteDiv = document.createElement('div');
+      karteDiv.id = 'henry-karte-info';
+      karteDiv.style.cssText = `
+        background-color: #f0f8ff;
+        padding: 10px;
+        margin-top: 10px;
+        border-top: 2px solid #4682B4;
+        font-size: 12px;
+        max-height: 300px;
+        overflow-y: auto;
+      `;
+      karteDiv.innerHTML = content;
+      previewWindow.appendChild(karteDiv);
     }
 
     function parseEditorData(editorDataStr) {
@@ -688,8 +715,8 @@
       }
     }
 
-    async function fetchAndShowEncounter(target, patientUuid) {
-      showPreview(target, '<div style="color:#666;">読み込み中...</div>');
+    async function fetchAndShowEncounter(patientUuid) {
+      appendKarteToPreview('<div style="color:#666;">読み込み中...</div>');
 
       try {
         const result = await callHenryAPIWithRetry('EncountersInPatient', {
@@ -702,7 +729,7 @@
 
         const encounters = result.data?.encountersInPatient?.encounters ?? [];
         if (encounters.length === 0) {
-          showPreview(target, '<div style="color:#666;">外来記録がありません</div>');
+          appendKarteToPreview('<div style="color:#666;">外来記録がありません</div>');
           return;
         }
 
@@ -713,24 +740,24 @@
           const visitDate = session?.scheduleTime ? new Date(session.scheduleTime).toLocaleDateString('ja-JP') : '不明';
           const doctorName = session?.doctor?.name || '不明';
           const noteText = progressNote?.editorData ? parseEditorData(progressNote.editorData) : '(診療録なし)';
-          const borderStyle = index < encounters.length - 1 ? 'border-bottom: 2px solid #ccc; margin-bottom: 16px; padding-bottom: 16px;' : '';
+          const borderStyle = index < encounters.length - 1 ? 'border-bottom: 1px solid #ccc; margin-bottom: 12px; padding-bottom: 12px;' : '';
 
           return `
             <div style="${borderStyle}">
-              <div style="margin-bottom:8px; padding-bottom:8px; border-bottom:1px solid #eee;">
-                <div style="font-weight:bold; color:#333;">受診日: ${visitDate}</div>
-                <div style="color:#666;">担当医: ${doctorName}</div>
+              <div style="margin-bottom:6px; padding-bottom:6px; border-bottom:1px solid #ddd;">
+                <span style="font-weight:bold; color:#333;">${visitDate}</span>
+                <span style="color:#666; margin-left:8px;">${doctorName}</span>
               </div>
-              <div style="white-space:pre-wrap; color:#333; line-height:1.5;">${escapeHtml(noteText)}</div>
+              <div style="white-space:pre-wrap; color:#333; line-height:1.4;">${escapeHtml(noteText)}</div>
             </div>
           `;
         });
 
-        showPreview(target, htmlParts.join(''));
+        appendKarteToPreview(htmlParts.join(''));
 
       } catch (e) {
         log.error(e.message);
-        showPreview(target, `<div style="color:#c00;">エラー: ${escapeHtml(e.message)}</div>`);
+        appendKarteToPreview(`<div style="color:#c00;">エラー: ${escapeHtml(e.message)}</div>`);
       }
     }
 
@@ -766,49 +793,71 @@
       }
     }
 
-    // ホバーイベント
+    // ホバーイベント：予約枠にホバーしたらプレビューウィンドウを表示
     document.addEventListener('mouseover', async (e) => {
-      const target = e.target.closest('span.num[id="reserve_tooltip_cus_record_no"]');
-      if (!target) return;
+      // 予約枠にホバー
+      const reserveTarget = e.target.closest('.div_reserve');
+      if (!reserveTarget) return;
 
-      if (target === currentTarget) {
-        isOverTarget = true;
-        cancelClose();
-        return;
+      // 閉じるタイマーをキャンセル
+      if (closeTimeout) {
+        clearTimeout(closeTimeout);
+        closeTimeout = null;
       }
 
-      currentTarget = target;
-      isOverTarget = true;
-      cancelClose();
-
+      // 少し待ってツールチップが表示されるのを待つ
       clearTimeout(hoverTimeout);
       hoverTimeout = setTimeout(async () => {
-        const patientNumber = target.textContent.trim();
+        const tooltip = document.getElementById('div_reserve_copy');
+        if (!tooltip) {
+          log.warn('ツールチップが見つかりません');
+          return;
+        }
+
+        // 患者番号を取得
+        const numSpan = tooltip.querySelector('#reserve_tooltip_cus_record_no');
+        if (!numSpan) {
+          log.warn('患者番号要素が見つかりません');
+          return;
+        }
+
+        const patientNumber = numSpan.textContent.trim();
         if (!patientNumber) return;
+        if (patientNumber === currentPatientNumber && previewWindow?.style.display !== 'none') return;
+
+        currentPatientNumber = patientNumber;
+        log.info('患者番号検出: ' + patientNumber);
+
+        // プレビューウィンドウを表示（ツールチップの内容をコピー）
+        showPreview(tooltip);
 
         // セットアップ状態チェック
         const setup = checkSetupStatus();
         if (!setup.ok) {
-          showPreview(target, '<div style="color:#c00;">Henryにログインしてください。<br>患者番号をクリックすると詳細が表示されます。</div>');
+          appendKarteToPreview('<div style="color:#c00;">Henryにログインしてください</div>');
           return;
         }
 
         const uuid = await getPatientUuid(patientNumber);
         if (!uuid) {
-          showPreview(target, '<div style="color:#c00;">患者が見つかりません</div>');
+          appendKarteToPreview('<div style="color:#c00;">患者が見つかりません</div>');
           return;
         }
-        await fetchAndShowEncounter(target, uuid);
-      }, CONFIG.HOVER_DELAY);
+        await fetchAndShowEncounter(uuid);
+      }, 150);
     });
 
-    // マウスアウトイベント
+    // 予約枠からマウスが離れたら閉じるタイマーを開始
     document.addEventListener('mouseout', (e) => {
-      const target = e.target.closest('span.num[id="reserve_tooltip_cus_record_no"]');
-      if (!target) return;
-      isOverTarget = false;
-      clearTimeout(hoverTimeout);
-      scheduleClose();
+      const reserveTarget = e.target.closest('.div_reserve');
+      if (!reserveTarget) return;
+
+      // プレビューウィンドウに移動中でなければ閉じるタイマーを開始
+      closeTimeout = setTimeout(() => {
+        if (previewWindow && !previewWindow.matches(':hover')) {
+          hidePreview();
+        }
+      }, 300);
     });
 
     // クリックイベント
