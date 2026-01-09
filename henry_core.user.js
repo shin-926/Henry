@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry Core
 // @namespace    https://henry-app.jp/
-// @version      2.9.9
+// @version      2.9.10
 // @description  Henry スクリプト実行基盤 (GoogleAuth統合 / Google Docs対応)
 // @match        https://henry-app.jp/*
 // @match        https://docs.google.com/*
@@ -55,7 +55,7 @@
     GOOGLE_CREDENTIALS_KEY: 'google_oauth_credentials'
   };
 
-  console.log('[Henry Core] Initializing v2.9.9...');
+  console.log('[Henry Core] Initializing v2.9.10...');
 
   // ==========================================
   // 1. IndexedDB Manager (ハッシュ + エンドポイント管理)
@@ -276,6 +276,8 @@
 
         if (!me) {
           console.error('[Henry Core] 医師一覧に該当ユーザーが見つかりませんでした (Name mismatch)');
+          console.error('[Henry Core] Firebaseの名前:', myName, '→ 正規化:', normalize(myName));
+          console.error('[Henry Core] 医師一覧:', users.map(u => `${u.name} → ${normalize(u.name)}`));
           return null;
         }
 
@@ -1140,10 +1142,10 @@
       UI.init();
       checkForAuthCode();
     }
-    console.log('[Henry Core] Ready v2.9.9 (Henry mode)');
+    console.log('[Henry Core] Ready v2.9.10 (Henry mode)');
 
   } else if (isGoogleDocs) {
     // Google Docsドメイン：GoogleAuthのみ
-    console.log('[Henry Core] Ready v2.9.9 (Google Docs mode - GoogleAuth only)');
+    console.log('[Henry Core] Ready v2.9.10 (Google Docs mode - GoogleAuth only)');
   }
 })();
