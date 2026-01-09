@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         予約システム連携
 // @namespace    https://github.com/shin-926/Tampermonkey
-// @version      1.8.6
+// @version      1.8.7
 // @description  Henryカルテと予約システム間の双方向連携（再診予約・患者プレビュー・ページ遷移）
 // @match        https://henry-app.jp/*
 // @match        https://manage-maokahp.reserve.ne.jp/*
@@ -346,6 +346,11 @@
   // ==========================================
   if (isReserve) {
     log.info('予約システムモード起動');
+
+    // --------------------------------------------
+    // カルテ情報キャッシュ（タブを閉じるまで保持）
+    // --------------------------------------------
+    const karteCache = new Map();
 
     // --------------------------------------------
     // トークンリクエスト（Henry側に依頼して最新トークンを取得）
@@ -738,6 +743,13 @@
     }
 
     async function fetchAndShowEncounter(patientUuid) {
+      // キャッシュを確認
+      if (karteCache.has(patientUuid)) {
+        log.info('カルテ情報をキャッシュから取得');
+        appendKarteToPreview(karteCache.get(patientUuid));
+        return;
+      }
+
       appendKarteToPreview('<div style="color:#666;">読み込み中...</div>');
 
       try {
@@ -751,7 +763,9 @@
 
         const encounters = result.data?.encountersInPatient?.encounters ?? [];
         if (encounters.length === 0) {
-          appendKarteToPreview('<div style="color:#666;">外来記録がありません</div>');
+          const noDataHtml = '<div style="color:#666;">外来記録がありません</div>';
+          karteCache.set(patientUuid, noDataHtml);
+          appendKarteToPreview(noDataHtml);
           return;
         }
 
@@ -775,10 +789,13 @@
           `;
         });
 
-        appendKarteToPreview(htmlParts.join(''));
+        const karteHtml = htmlParts.join('');
+        karteCache.set(patientUuid, karteHtml);
+        appendKarteToPreview(karteHtml);
 
       } catch (e) {
         log.error(e.message);
+        // エラーはキャッシュしない（再試行できるように）
         appendKarteToPreview(`<div style="color:#c00;">エラー: ${escapeHtml(e.message)}</div>`);
       }
     }
