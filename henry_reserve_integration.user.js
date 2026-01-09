@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         予約システム連携
 // @namespace    https://github.com/shin-926/Tampermonkey
-// @version      1.8.12
+// @version      1.8.13
 // @description  Henryカルテと予約システム間の双方向連携（再診予約・患者プレビュー・ページ遷移）
 // @match        https://henry-app.jp/*
 // @match        https://manage-maokahp.reserve.ne.jp/*
@@ -351,40 +351,28 @@
     // 不要なポップアップを削除（動的に追加される場合も対応）
     // --------------------------------------------
     function removePopup() {
-      const popup = document.querySelector('[data-testid="html-element"]');
-      log.info('ポップアップ検索結果:', popup ? '見つかった' : '見つからない');
-      if (popup) {
-        popup.remove();
-        log.info('不要なポップアップを削除しました');
+      const closeBtn = document.querySelector('[data-testid="closable-close-trigger"]');
+      if (closeBtn) {
+        closeBtn.click();
+        log.info('ポップアップを閉じました');
         return true;
       }
       return false;
     }
 
     // 初回チェック
-    log.info('初回ポップアップチェック開始');
     removePopup();
 
     // 動的に追加される場合に備えてMutationObserverで監視
-    let observerCallCount = 0;
     const popupObserver = new MutationObserver(() => {
-      observerCallCount++;
-      if (observerCallCount <= 5) {
-        log.info('MutationObserver発火 #' + observerCallCount);
-      }
       if (removePopup()) {
         popupObserver.disconnect();
-        log.info('ポップアップ削除完了、監視停止');
       }
     });
     popupObserver.observe(document.body, { childList: true, subtree: true });
-    log.info('MutationObserver監視開始');
 
     // 10秒後に監視を停止（無駄なリソース消費を防ぐ）
-    setTimeout(() => {
-      popupObserver.disconnect();
-      log.info('10秒経過、監視停止。observerCallCount=' + observerCallCount);
-    }, 10000);
+    setTimeout(() => popupObserver.disconnect(), 10000);
 
     // --------------------------------------------
     // カルテ情報キャッシュ（タブを閉じるまで保持）
