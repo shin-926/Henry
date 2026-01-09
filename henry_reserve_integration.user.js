@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         予約システム連携
 // @namespace    https://github.com/shin-926/Tampermonkey
-// @version      1.8.14
+// @version      1.8.15
 // @description  Henryカルテと予約システム間の双方向連携（再診予約・患者プレビュー・ページ遷移）
 // @match        https://henry-app.jp/*
 // @match        https://manage-maokahp.reserve.ne.jp/*
@@ -351,8 +351,8 @@
     // 不要なポップアップを削除（動的に追加される場合も対応）
     // --------------------------------------------
     function removePopup() {
-      // TechTouchのポップアップを探す
-      const container = document.querySelector('[id*="techtouch"]');
+      // TechTouchのポップアップを探す（Shadow DOMのhost要素）
+      const container = document.querySelector('#techtouch-player-snippet');
       if (container) {
         container.remove();
         log.info('TechTouchポップアップを削除しました');
