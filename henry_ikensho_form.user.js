@@ -514,7 +514,8 @@
     { placeholder: '{{意見書作成回数}}', jsonKey: 'basic_info.opinion_count', inputType: 'ラジオボタン' },
     { placeholder: '{{他科受診有無}}', jsonKey: 'basic_info.other_department_visit', inputType: 'ラジオボタン' },
     // 診断
-    { placeholder: '{{他科名}}', jsonKey: 'diagnosis.other_departments', inputType: 'チェックボックス' },
+    { placeholder: '{{他科名1}}', jsonKey: 'diagnosis.other_departments', inputType: 'custom' },
+    { placeholder: '{{他科名2}}', jsonKey: 'diagnosis.other_departments', inputType: 'custom' },
     { placeholder: '{{その他の他科名}}', jsonKey: 'diagnosis.other_department_names', inputType: '記述' },
     { placeholder: '{{診断名1}}', jsonKey: 'diagnosis.diagnosis_1_name', inputType: '記述' },
     { placeholder: '{{発症年月日1}}', jsonKey: 'diagnosis.diagnosis_1_onset', inputType: '記述' },
@@ -536,7 +537,8 @@
     { placeholder: '{{認知能力}}', jsonKey: 'mental_physical_state.cognitive_ability', inputType: 'ラジオボタン' },
     { placeholder: '{{伝達能力}}', jsonKey: 'mental_physical_state.communication_ability', inputType: 'ラジオボタン' },
     { placeholder: '{{周辺症状有無}}', jsonKey: 'mental_physical_state.peripheral_symptoms', inputType: 'ラジオボタン' },
-    { placeholder: '{{周辺症状詳細}}', jsonKey: 'mental_physical_state.peripheral_symptoms_details', inputType: 'チェックボックス' },
+    { placeholder: '{{周辺症状詳細1}}', jsonKey: 'mental_physical_state.peripheral_symptoms_details', inputType: 'custom' },
+    { placeholder: '{{周辺症状詳細2}}', jsonKey: 'mental_physical_state.peripheral_symptoms_details', inputType: 'custom' },
     { placeholder: '{{その他の周辺症状}}', jsonKey: 'mental_physical_state.other_peripheral_symptoms', inputType: '記述' },
     { placeholder: '{{精神神経症状有無}}', jsonKey: 'mental_physical_state.psychiatric_symptoms', inputType: 'ラジオボタン' },
     { placeholder: '{{精神神経症状名}}', jsonKey: 'mental_physical_state.psychiatric_symptom_name', inputType: '記述' },
@@ -712,7 +714,7 @@
         '4': '□伝えられる\t□いくらか困難\t□具体的要求に限られる\t■伝えられない'
       },
       '{{周辺症状有無}}': { '1': '■有\t□無', '2': '□有\t■無' },
-      '{{精神神経症状有無}}': { '1': '■有\t□無', '2': '□有\t■無' },
+      '{{精神神経症状有無}}': { '1': '□無\t■有', '2': '■無\t□有' },
       '{{専門医受診有無}}': { '1': '■有\t□無', '2': '□有\t■無' },
       '{{利き腕}}': { '1': '右', '2': '左' },
       '{{体重の変化}}': { '1': '■増加\t□維持\t□減少', '2': '□増加\t■維持\t□減少', '3': '□増加\t□維持\t■減少' },
@@ -782,11 +784,9 @@
     const placeholder = mapping.placeholder;
 
     const checkboxTemplates = {
-      '{{他科名}}': "□内科\t□精神科\t□外科\t□整形外科\t□脳神経外科\t□皮膚科\t□泌尿器科\n\t□婦人科\t□眼科\t□耳鼻咽喉科\t□リハビリテーション科\t□歯科",
       '{{処置内容}}': "□点滴管理\t□中心静脈栄養\t□透析\t□ストーマの処置\t□酸素療法\n\t\t□レスピレーター\t□気管切開の処置\t□透析の看護\t□経管栄養",
       '{{特別な対応}}': "□モニター測定（血圧、心拍、酸素飽和度等）\t□褥瘡の処置",
       '{{失禁への対応}}': "□カテーテル（コンドームカテーテル、留置カテーテル等）",
-      '{{周辺症状詳細}}': "□幻視・幻聴\t□妄想\t□昼夜逆転\t□暴言\t□暴行\t□介護への抵抗\t□徘徊\n\t\t\t□火の不始末\t□不潔行為\t□異食行動\t□性的問題行動",
       '{{発生可能性状態}}': "□尿失禁\t□転倒・骨折\t□移動能力の低下\t□褥瘡\t□心肺機能の低下\t□閉じこもり\t□意欲低下\t□徘徊\n\t□低栄養\t□摂食・嚥下機能低下\t□脱水\t□易感染性\t□がん等による疼痛",
       '{{医学的管理の必要性}}': "□訪問診療\t□訪問看護\t□看護職員の訪問による相談・支援\t□訪問歯科診療\n\t□訪問薬剤管理指導\t□訪問リハビリテーション\t□短期入所療養介護\t□訪問歯科衛生指導\n\t□訪問栄養食事指導\t□通所リハビリテーション",
       '{{歩行補助具・装具の使用}}': "□杖\t□歩行器・歩行車\t□装具",
@@ -894,9 +894,50 @@
 
     // 3. 置換リクエストを作成
     const requests = [];
+    const departmentMaster = ['内科', '精神科', '外科', '整形外科', '脳神経外科', '皮膚科', '泌尿器科', '婦人科', '眼科', '耳鼻咽喉科', 'リハビリテーション科', '歯科'];
+    const peripheralSymptomsMaster = ['幻視･幻聴', '妄想', '昼夜逆転', '暴言', '暴行', '介護への抵抗', '徘徊', '火の不始末', '不潔行為', '異食行動', '性的問題行動'];
+
     for (const mapping of PLACEHOLDER_MAPPINGS) {
-      const value = getValueByPath(formData, mapping.jsonKey);
-      const displayText = convertToDisplayText(value, mapping.inputType, mapping);
+      let value = getValueByPath(formData, mapping.jsonKey);
+      let displayText = '';
+
+      if (mapping.placeholder === '{{他科名1}}') {
+        // 「その他」を含む13ビットでパディング
+        const bitString = String(value).padStart(13, '0');
+        const part1 = departmentMaster.slice(0, 7);
+        displayText = part1.map((dept, i) => (bitString[i] === '1' ? '■' : '□') + dept).join('\t');
+      } else if (mapping.placeholder === '{{他科名2}}') {
+        // 「その他」を含む13ビットでパディング
+        const bitString = String(value).padStart(13, '0');
+        const part2 = departmentMaster.slice(7); // departmentMasterは12個のまま
+        let part2Text = part2.map((dept, i) => (bitString[i + 7] === '1' ? '■' : '□') + dept).join('\t');
+        
+        // 13番目のビット(インデックス12)を見て「その他」のチェックを判断
+        if (bitString[12] === '1') {
+          part2Text += '\t■その他';
+        } else {
+          part2Text += '\t□その他';
+        }
+        displayText = part2Text;
+      } else if (mapping.placeholder === '{{周辺症状詳細1}}') {
+        const bitString = String(value).padStart(12, '0');
+        const part1 = peripheralSymptomsMaster.slice(0, 7);
+        displayText = part1.map((symptom, i) => (bitString[i] === '1' ? '■' : '□') + symptom).join('\t');
+      } else if (mapping.placeholder === '{{周辺症状詳細2}}') {
+        const bitString = String(value).padStart(12, '0');
+        const part2 = peripheralSymptomsMaster.slice(7);
+        let part2Text = part2.map((symptom, i) => (bitString[i + 7] === '1' ? '■' : '□') + symptom).join('\t');
+
+        if (bitString[11] === '1') {
+          part2Text += '\t■その他';
+        } else {
+          part2Text += '\t□その他';
+        }
+        displayText = part2Text;
+      } else {
+        displayText = convertToDisplayText(value, mapping.inputType, mapping);
+      }
+      
       requests.push(DocsAPI.createReplaceTextRequest(mapping.placeholder, displayText));
     }
 
@@ -1659,6 +1700,15 @@
       'special_medical_care',
       ['点滴の管理', '中心静脈栄養', '透析', 'ストーマの処置', '酸素療法', 'レスピレーター', '気管切開の処置', '疼痛の看護', '経管栄養'],
       data.treatments
+    ));
+
+    // 特別な対応（チェックボックス、2桁のビットフラグ）
+    section.appendChild(createCheckboxField(
+      '特別な対応',
+      'special_responses',
+      'special_medical_care',
+      ['モニター測定（血圧、心拍、酸素飽和度等）', '褥瘡の処置'],
+      data.special_responses
     ));
 
     // 失禁への対処（チェックボックス、1桁のビットフラグ）
