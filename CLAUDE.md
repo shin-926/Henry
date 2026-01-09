@@ -461,6 +461,8 @@ try {
   - henry_core.user.js v2.9.6 - GoogleAuth統合、スコープ修正、OAuth設定のGM_storage永続化
   - henry_google_drive_bridge.user.js v2.2.1 - HenryCore.modules.GoogleAuth経由に変更
   - henry_ikensho_form.user.js v2.1.5 - HenryCore.modules.GoogleAuth経由に変更
-- [ ] **動作確認**: フルクエリ方式に移行した他のスクリプト
-  - henry_auto_approver.user.js → v3.5.0に更新済み、動作確認待ち
+- [ ] **動作確認**: henry_auto_approver.user.js v3.8.0
+  - v3.7.0: 取り消し承認（APPROVE_REVOCATION）対応
+  - v3.8.0: 全件処理（毎回最初のページから再取得）対応
+  - 承認待ちが溜まったら動作確認
 - [ ] **GAS実装**: 主治医意見書テンプレート埋め込み処理（henry_ikensho_form用）

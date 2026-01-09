@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         自動承認アシスタント
+// @name         承認アシスタント
 // @namespace    http://tampermonkey.net/
-// @version      3.6.2
+// @version      3.8.0
 // @description  承認待ちオーダーを自動で一括承認する
 // @match        https://henry-app.jp/*
 // @grant        none
@@ -145,6 +145,7 @@
   function getRequiredAction(orderStatus) {
     if (orderStatus === 'ORDER_STATUS_ON_HOLD') return 'ACCEPT';
     if (orderStatus === 'ORDER_STATUS_DRAFT') return 'APPROVE';
+    if (orderStatus === 'ORDER_STATUS_DRAFT_REVOKED') return 'APPROVE_REVOCATION';
     return null;
   }
 
@@ -240,62 +241,72 @@
     let processed = 0;
     let successCount = 0;
     let errorCount = 0;
-    let pageToken = '';
     let delay = BASE_DELAY;
 
+    // 承認するとリストから消えるため、毎回最初のページから取得し直す
     while (true) {
       if (abortSignal.aborted) {
         return { processed, successCount, errorCount, aborted: true };
       }
 
-      const result = await fetchPage(doctorUuid, pageToken);
+      // 常に最初のページを取得（承認済みは消えているので新しいオーダーが来る）
+      const result = await fetchPage(doctorUuid, '');
       const patientOrders = result.patientOrders || [];
 
+      // 承認対象のオーダーを抽出
+      const pendingOrders = [];
       for (const po of patientOrders) {
         for (const order of po.orders) {
-          if (abortSignal.aborted) {
-            return { processed, successCount, errorCount, aborted: true };
-          }
-
           const status = getOrderStatus(order);
           const action = getRequiredAction(status);
-          if (!action) continue;
-
-          try {
-            const approveResult = await approveOrder(order.orderType, order.uuid, status);
-
-            if (approveResult.success) {
-              successCount++;
-              delay = BASE_DELAY;
-            } else {
-              errorCount++;
-              console.error(`[${SCRIPT_NAME}] 承認エラー: ${approveResult.error}`, {
-                uuid: order.uuid,
-                orderType: order.orderType
-              });
-            }
-          } catch (e) {
-            errorCount++;
-            console.error(`[${SCRIPT_NAME}] 例外: ${e.message}`, {
-              uuid: order.uuid,
-              orderType: order.orderType
-            });
-
-            // バックオフ
-            if (e.message.includes('429') || e.message.includes('503')) {
-              delay = Math.min(delay * 2, MAX_DELAY);
-            }
+          if (action) {
+            pendingOrders.push({ order, status });
           }
-
-          processed++;
-          onProgress({ processed, successCount, errorCount });
-
-          await HenryCore.utils.sleep(delay);
         }
       }
 
-      pageToken = result.nextPageToken || '';
-      if (!pageToken) break;
+      // 承認対象がなくなったら終了
+      if (pendingOrders.length === 0) {
+        break;
+      }
+
+      // 取得したオーダーを処理
+      for (const { order, status } of pendingOrders) {
+        if (abortSignal.aborted) {
+          return { processed, successCount, errorCount, aborted: true };
+        }
+
+        try {
+          const approveResult = await approveOrder(order.orderType, order.uuid, status);
+
+          if (approveResult.success) {
+            successCount++;
+            delay = BASE_DELAY;
+          } else {
+            errorCount++;
+            console.error(`[${SCRIPT_NAME}] 承認エラー: ${approveResult.error}`, {
+              uuid: order.uuid,
+              orderType: order.orderType
+            });
+          }
+        } catch (e) {
+          errorCount++;
+          console.error(`[${SCRIPT_NAME}] 例外: ${e.message}`, {
+            uuid: order.uuid,
+            orderType: order.orderType
+          });
+
+          // バックオフ
+          if (e.message.includes('429') || e.message.includes('503')) {
+            delay = Math.min(delay * 2, MAX_DELAY);
+          }
+        }
+
+        processed++;
+        onProgress({ processed, successCount, errorCount });
+
+        await HenryCore.utils.sleep(delay);
+      }
     }
 
     return { processed, successCount, errorCount, aborted: false };
@@ -555,15 +566,15 @@
     // プラグイン登録（HenryCore v2.7.0以降）
     await HenryCore.registerPlugin({
       id: 'auto-approver',
-      name: '一括承認',
+      name: '承認',
       icon: '⚡',
       description: '承認待ちオーダーを自動で一括承認',
-      version: '3.6.2',
+      version: '3.8.0',
       order: 20,
       onClick: main
     });
 
-    console.log(`[${SCRIPT_NAME}] v3.6.2 起動しました`);
+    console.log(`[${SCRIPT_NAME}] v3.8.0 起動しました`);
   }
 
   if (document.readyState === 'loading') {
