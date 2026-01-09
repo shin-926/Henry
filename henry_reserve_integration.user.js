@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         予約システム連携
 // @namespace    https://github.com/shin-926/Tampermonkey
-// @version      1.8.0
+// @version      1.8.1
 // @description  Henryカルテと予約システム間の双方向連携（再診予約・患者プレビュー・ページ遷移）
 // @match        https://henry-app.jp/*
 // @match        https://manage-maokahp.reserve.ne.jp/*
@@ -610,6 +610,23 @@
     `;
     document.head.appendChild(previewStyle);
 
+    // プレビューウィンドウの位置を画面内に収める
+    function adjustPreviewPosition() {
+      if (!previewWindow || previewWindow.style.display === 'none') return;
+
+      const pwRect = previewWindow.getBoundingClientRect();
+
+      // 右端がはみ出す場合
+      if (pwRect.right > window.innerWidth) {
+        previewWindow.style.left = Math.max(10, window.innerWidth - pwRect.width - 10) + 'px';
+      }
+
+      // 下端がはみ出す場合
+      if (pwRect.bottom > window.innerHeight) {
+        previewWindow.style.top = Math.max(10, window.innerHeight - pwRect.height - 10) + 'px';
+      }
+    }
+
     function createPreviewWindow() {
       const div = document.createElement('div');
       div.id = 'henry-preview-window';
@@ -664,13 +681,7 @@
       originalTooltip.style.display = 'none';
 
       // 画面外にはみ出さないように調整
-      const pwRect = previewWindow.getBoundingClientRect();
-      if (pwRect.right > window.innerWidth) {
-        previewWindow.style.left = (window.innerWidth - pwRect.width - 10) + 'px';
-      }
-      if (pwRect.bottom > window.innerHeight) {
-        previewWindow.style.top = (window.innerHeight - pwRect.height - 10) + 'px';
-      }
+      adjustPreviewPosition();
 
       return previewWindow;
     }
@@ -704,6 +715,9 @@
       `;
       karteDiv.innerHTML = content;
       previewWindow.appendChild(karteDiv);
+
+      // コンテンツ追加後に位置を再調整
+      adjustPreviewPosition();
     }
 
     function parseEditorData(editorDataStr) {
