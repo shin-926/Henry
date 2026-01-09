@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         予約システム連携
 // @namespace    https://github.com/shin-926/Tampermonkey
-// @version      1.8.16
+// @version      1.8.17
 // @description  Henryカルテと予約システム間の双方向連携（再診予約・患者プレビュー・ページ遷移）
 // @match        https://henry-app.jp/*
 // @match        https://manage-maokahp.reserve.ne.jp/*
@@ -374,15 +374,6 @@
 
     // 10秒後に監視を停止（無駄なリソース消費を防ぐ）
     setTimeout(() => popupObserver.disconnect(), 10000);
-
-    // --------------------------------------------
-    // ヘッダーを削除
-    // --------------------------------------------
-    const header = document.querySelector('#div_header');
-    if (header) {
-      header.remove();
-      log.info('ヘッダーを削除しました');
-    }
 
     // --------------------------------------------
     // カルテ情報キャッシュ（タブを閉じるまで保持）
