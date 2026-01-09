@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         予約システム連携
 // @namespace    https://github.com/shin-926/Tampermonkey
-// @version      1.8.8
+// @version      1.8.9
 // @description  Henryカルテと予約システム間の双方向連携（再診予約・患者プレビュー・ページ遷移）
 // @match        https://henry-app.jp/*
 // @match        https://manage-maokahp.reserve.ne.jp/*
@@ -732,8 +732,6 @@
         margin-top: 10px;
         border-top: 2px solid #4682B4;
         font-size: 12px;
-        max-height: 300px;
-        overflow-y: auto;
       `;
       karteDiv.innerHTML = content;
       previewWindow.appendChild(karteDiv);
