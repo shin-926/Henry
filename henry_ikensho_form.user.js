@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         主治医意見書作成フォーム
 // @namespace    https://henry-app.jp/
-// @version      2.3.1
+// @version      2.3.2
 // @description  主治医意見書の入力フォームとGoogle Docs出力（GAS不要版・API直接呼び出し）
 // @author       Henry Team
 // @match        https://henry-app.jp/*
@@ -866,7 +866,13 @@
     console.log('[OpinionForm] isAuthenticated:', googleAuth?.isAuthenticated?.());
 
     if (!googleAuth?.isAuthenticated()) {
-      throw new Error('Google認証が必要です。\n\nHenryツールボックスの「Google認証」ボタンから認証を行ってください。');
+      // 自動で認証を開始
+      if (googleAuth?.startAuth) {
+        googleAuth.startAuth();
+        throw new Error('Google認証が必要です。認証画面を開きました。認証完了後、再度お試しください。');
+      } else {
+        throw new Error('Google認証モジュールが見つかりません。ページを再読み込みしてください。');
+      }
     }
 
     // 1. 保存先フォルダを取得（なければ作成）

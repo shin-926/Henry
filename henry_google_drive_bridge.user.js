@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Google Drive連携
 // @namespace    https://henry-app.jp/
-// @version      2.2.3
+// @version      2.2.4
 // @description  HenryのファイルをGoogle Drive APIで直接変換・編集。GAS不要版。
 // @match        https://henry-app.jp/*
 // @match        https://docs.google.com/*
@@ -1086,7 +1086,14 @@
 
         // Google Drive認証チェック
         if (!getGoogleAuth()?.isAuthenticated()) {
-          throw new Error('Google認証が必要です。Henryタブで認証してください。');
+          // 自動で認証を開始
+          const auth = getGoogleAuth();
+          if (auth?.startAuth) {
+            auth.startAuth();
+            throw new Error('Google認証が必要です。認証画面を開きました。認証完了後、再度お試しください。');
+          } else {
+            throw new Error('Google認証モジュールが見つかりません。Henryタブで認証してください。');
+          }
         }
 
         // ドキュメントID取得
