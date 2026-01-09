@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         承認アシスタント
 // @namespace    http://tampermonkey.net/
-// @version      3.9.0
+// @version      3.10.0
 // @description  承認待ちオーダーを自動で一括承認する
 // @match        https://henry-app.jp/*
 // @grant        none
@@ -417,10 +417,11 @@
   }
 
   function showProgressModal(totalOrders, abortController) {
+    const hasTotal = totalOrders != null;
     const content = document.createElement('div');
     content.innerHTML = `
       <p id="henry-progress-text" style="margin: 0 0 8px 0; color: #374151;">
-        処理済: 0 / ${totalOrders.toLocaleString()} 件
+        処理済: 0 件${hasTotal ? ` / ${totalOrders.toLocaleString()} 件` : ''}
       </p>
       <p id="henry-error-text" style="margin: 0; color: #6B7280; font-size: 13px;">
         エラー: 0 件
@@ -445,7 +446,9 @@
         const progressText = document.getElementById('henry-progress-text');
         const errorText = document.getElementById('henry-error-text');
         if (progressText) {
-          progressText.textContent = `処理済: ${processed.toLocaleString()} / ${totalOrders.toLocaleString()} 件`;
+          progressText.textContent = hasTotal
+            ? `処理済: ${processed.toLocaleString()} / ${totalOrders.toLocaleString()} 件`
+            : `処理済: ${processed.toLocaleString()} 件`;
         }
         if (errorText) {
           errorText.textContent = `エラー: ${errorCount} 件`;
@@ -501,66 +504,130 @@
       return;
     }
 
+    // 承認処理を開始する共通関数
+    async function startApproval(doctor, totalOrders = null) {
+      const abortController = new AbortController();
+
+      activeCleaner.add(() => abortController.abort());
+
+      HenryCore.utils.subscribeNavigation(activeCleaner, () => {
+        console.log(`[${SCRIPT_NAME}] 画面遷移のため処理を中断しました`);
+      });
+
+      const { modal, update } = showProgressModal(totalOrders, abortController);
+      activeCleaner.add(() => modal.close());
+
+      try {
+        const result = await autoApproveAll(doctor.uuid, abortController.signal, update);
+
+        modal.close();
+        if (!result.aborted) {
+          showResultModal(result);
+        }
+      } catch (e) {
+        if (e.name !== 'AbortError') {
+          console.error(`[${SCRIPT_NAME}] 予期せぬエラー:`, e);
+        }
+      }
+    }
+
     // 医師選択モーダルを表示
     showDoctorSelectModal(async (doctor) => {
       if (!doctor) return;
 
-      // カウント中モーダル
-      const countingContent = document.createElement('div');
-      countingContent.innerHTML = `
-        <p style="margin: 0; display: flex; justify-content: space-between; color: #374151;">
-          <span>${normalizeSpace(doctor.name)} の承認待ちオーダーを集計しています...</span>
-          <span id="henry-count-progress">0 件</span>
+      const isMe = doctor.uuid === myDoctorUuid;
+
+      // 自分以外の場合はカウントのみ
+      if (!isMe) {
+        const countingContent = document.createElement('div');
+        countingContent.innerHTML = `
+          <p style="margin: 0; display: flex; justify-content: space-between; color: #374151;">
+            <span>${normalizeSpace(doctor.name)} の承認待ちオーダーを集計しています...</span>
+            <span id="henry-count-progress">0 件</span>
+          </p>
+        `;
+
+        const countingModal = HenryCore.ui.showModal({
+          title: '🔄 カウント中...',
+          content: countingContent,
+          actions: []
+        });
+
+        activeCleaner.add(() => countingModal.close());
+
+        try {
+          const { totalOrders, elapsed } = await countAllOrders(doctor.uuid, (count) => {
+            const el = document.getElementById('henry-count-progress');
+            if (el) el.textContent = `${count.toLocaleString()} 件`;
+          });
+          countingModal.close();
+          showConfirmModal(doctor, totalOrders, elapsed, null);
+        } catch (e) {
+          countingModal.close();
+          console.error(`[${SCRIPT_NAME}] エラー:`, e);
+        }
+        return;
+      }
+
+      // 自分の場合：アクション選択モーダル
+      const actionContent = document.createElement('div');
+      actionContent.innerHTML = `
+        <p style="margin: 0 0 12px 0; color: #374151;">
+          <strong>${normalizeSpace(doctor.name)}</strong> の承認待ちオーダーを処理します。
+        </p>
+        <p style="margin: 0; color: #6B7280; font-size: 13px;">
+          カウントすると件数を確認してから開始できます。<br>
+          すぐに開始すると件数を確認せずに処理を開始します。
         </p>
       `;
 
-      const countingModal = HenryCore.ui.showModal({
-        title: '🔄 カウント中...',
-        content: countingContent,
-        actions: []
-      });
+      HenryCore.ui.showModal({
+        title: '⚡ 承認アシスタント',
+        content: actionContent,
+        actions: [
+          { label: 'キャンセル', variant: 'secondary' },
+          {
+            label: '📊 カウントする',
+            variant: 'secondary',
+            onClick: async () => {
+              // カウント中モーダル
+              const countingContent = document.createElement('div');
+              countingContent.innerHTML = `
+                <p style="margin: 0; display: flex; justify-content: space-between; color: #374151;">
+                  <span>承認待ちオーダーを集計しています...</span>
+                  <span id="henry-count-progress">0 件</span>
+                </p>
+              `;
 
-      activeCleaner.add(() => countingModal.close());
+              const countingModal = HenryCore.ui.showModal({
+                title: '🔄 カウント中...',
+                content: countingContent,
+                actions: []
+              });
 
-      try {
-        // 全件カウント（進捗表示付き）
-        const { totalOrders, elapsed } = await countAllOrders(doctor.uuid, (count) => {
-          const el = document.getElementById('henry-count-progress');
-          if (el) el.textContent = `${count.toLocaleString()} 件`;
-        });
-        countingModal.close();
+              activeCleaner.add(() => countingModal.close());
 
-        // 確認モーダル
-        showConfirmModal(doctor, totalOrders, elapsed, async () => {
-          // 処理開始（自分の場合のみここに来る）
-          const abortController = new AbortController();
+              try {
+                const { totalOrders, elapsed } = await countAllOrders(doctor.uuid, (count) => {
+                  const el = document.getElementById('henry-count-progress');
+                  if (el) el.textContent = `${count.toLocaleString()} 件`;
+                });
+                countingModal.close();
 
-          activeCleaner.add(() => abortController.abort());
-
-          HenryCore.utils.subscribeNavigation(activeCleaner, () => {
-            console.log(`[${SCRIPT_NAME}] 画面遷移のため処理を中断しました`);
-          });
-
-          const { modal, update } = showProgressModal(totalOrders, abortController);
-          activeCleaner.add(() => modal.close());
-
-          try {
-            const result = await autoApproveAll(doctor.uuid, abortController.signal, update);
-
-            modal.close();
-            if (!result.aborted) {
-              showResultModal(result);
+                showConfirmModal(doctor, totalOrders, elapsed, () => startApproval(doctor, totalOrders));
+              } catch (e) {
+                countingModal.close();
+                console.error(`[${SCRIPT_NAME}] エラー:`, e);
+              }
             }
-          } catch (e) {
-            if (e.name !== 'AbortError') {
-              console.error(`[${SCRIPT_NAME}] 予期せぬエラー:`, e);
-            }
+          },
+          {
+            label: '▶️ すぐに開始',
+            variant: 'primary',
+            onClick: () => startApproval(doctor, null)
           }
-        });
-      } catch (e) {
-        countingModal.close();
-        console.error(`[${SCRIPT_NAME}] エラー:`, e);
-      }
+        ]
+      });
     });
   }
 
@@ -578,12 +645,12 @@
       name: '承認',
       icon: '⚡',
       description: '承認待ちオーダーを自動で一括承認',
-      version: '3.9.0',
+      version: '3.10.0',
       order: 20,
       onClick: main
     });
 
-    console.log(`[${SCRIPT_NAME}] v3.9.0 起動しました`);
+    console.log(`[${SCRIPT_NAME}] v3.10.0 起動しました`);
   }
 
   if (document.readyState === 'loading') {
