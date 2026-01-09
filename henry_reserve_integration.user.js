@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         予約システム連携
 // @namespace    https://github.com/shin-926/Tampermonkey
-// @version      1.8.17
+// @version      1.9.5
 // @description  Henryカルテと予約システム間の双方向連携（再診予約・患者プレビュー・ページ遷移）
 // @match        https://henry-app.jp/*
 // @match        https://manage-maokahp.reserve.ne.jp/*
@@ -633,9 +633,87 @@
     }
 
     // --------------------------------------------
-    // Reserve→Henry連携：ツールチップ内カルテ表示・クリック遷移
+    // Reserve→Henry連携：ツールチップにカルテボタン追加・ホバーでカルテ表示
+    // --------------------------------------------
+
+    // ツールチップ（クリックで表示）に「カルテを開く」ボタンを追加
+    function addKarteButtonToTooltip(tooltip) {
+      // 既にボタンがあれば何もしない
+      if (tooltip.querySelector('#henry-open-karte-btn')) return;
+
+      const historyBtn = tooltip.querySelector('.button_func_history');
+      if (!historyBtn) return;
+
+      const karteBtn = document.createElement('input');
+      karteBtn.type = 'button';
+      karteBtn.className = 'button';
+      karteBtn.id = 'henry-open-karte-btn';
+      karteBtn.value = 'カルテ';
+      karteBtn.style.cssText = 'padding: 5px 14px; margin-left: 12px;';
+
+      karteBtn.addEventListener('click', async (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+
+        // セットアップ状態チェック
+        const setup = checkSetupStatus();
+        if (!setup.ok) {
+          alert(setup.message);
+          return;
+        }
+
+        // 患者番号を取得
+        const numSpan = tooltip.querySelector('#reserve_tooltip_cus_record_no');
+        const patientNumber = numSpan?.textContent.trim();
+        if (!patientNumber) {
+          alert('患者番号が取得できません');
+          return;
+        }
+
+        // UUIDを取得してHenryを開く
+        karteBtn.disabled = true;
+        karteBtn.value = '読込中...';
+        try {
+          const uuid = await getPatientUuid(patientNumber);
+          if (!uuid) {
+            alert(`患者番号 ${patientNumber} が見つかりません`);
+            return;
+          }
+          const url = CONFIG.HENRY_PATIENT_URL + uuid + '?tab=outpatient';
+          window.open(url, '_blank');
+        } catch (err) {
+          log.error(err.message);
+          alert('エラー: ' + err.message);
+        } finally {
+          karteBtn.disabled = false;
+          karteBtn.value = 'カルテ';
+        }
+      });
+
+      historyBtn.after(karteBtn);
+      log.info('カルテボタンを追加');
+    }
+
+    // ツールチップの表示を監視
+    const tooltipObserver = new MutationObserver(() => {
+      const tooltip = document.getElementById('div_reserve_copy');
+      if (tooltip && tooltip.style.display !== 'none' && tooltip.offsetParent !== null) {
+        addKarteButtonToTooltip(tooltip);
+      }
+    });
+    tooltipObserver.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['style'] });
+
+    // 初回チェック
+    const initialTooltip = document.getElementById('div_reserve_copy');
+    if (initialTooltip) {
+      addKarteButtonToTooltip(initialTooltip);
+    }
+
+    // --------------------------------------------
+    // ホバーでカルテ情報をプレビュー表示
     // --------------------------------------------
     let currentPatientNumber = null;
+    let currentPatientUuid = null;
     let hoverTimeout = null;
 
     // 独立したプレビューウィンドウを作成
@@ -732,6 +810,7 @@
         previewWindow.style.display = 'none';
       }
       currentPatientNumber = null;
+      currentPatientUuid = null;
     }
 
     // カルテ情報をプレビューウィンドウに追加
@@ -908,6 +987,7 @@
           appendKarteToPreview('<div style="color:#c00;">患者が見つかりません</div>');
           return;
         }
+        currentPatientUuid = uuid;
         await fetchAndShowEncounter(uuid);
       }, 150);
     });
@@ -925,32 +1005,5 @@
       }, 300);
     });
 
-    // クリックイベント
-    document.addEventListener('click', async (e) => {
-      const target = e.target.closest('span.num[id="reserve_tooltip_cus_record_no"]');
-      if (!target) return;
-
-      e.preventDefault();
-      e.stopPropagation();
-
-      const patientNumber = target.textContent.trim();
-      if (!patientNumber) return;
-
-      // セットアップ状態チェック
-      const setup = checkSetupStatus();
-      if (!setup.ok) {
-        alert(setup.message);
-        return;
-      }
-
-      const uuid = await getPatientUuid(patientNumber);
-      if (!uuid) {
-        alert(`患者番号 ${patientNumber} が見つかりません`);
-        return;
-      }
-
-      const url = CONFIG.HENRY_PATIENT_URL + uuid + '?tab=outpatient';
-      window.open(url, '_blank');
-    }, true);
   }
 })();
