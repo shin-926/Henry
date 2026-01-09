@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         予約システム連携
 // @namespace    https://github.com/shin-926/Tampermonkey
-// @version      1.8.5
+// @version      1.8.6
 // @description  Henryカルテと予約システム間の双方向連携（再診予約・患者プレビュー・ページ遷移）
 // @match        https://henry-app.jp/*
 // @match        https://manage-maokahp.reserve.ne.jp/*
@@ -393,8 +393,17 @@
           log.info('401エラー - 新しいトークンをリクエスト');
           const newToken = await requestToken();
           if (newToken) {
-            return await callHenryAPI(newToken, operationName, variables, endpoint);
+            try {
+              return await callHenryAPI(newToken, operationName, variables, endpoint);
+            } catch (retryError) {
+              if (retryError.message.includes('401')) {
+                throw new Error('認証エラー: Henryページを更新してから再度お試しください');
+              }
+              throw retryError;
+            }
           }
+          // トークン取得できなかった場合
+          throw new Error('認証エラー: Henryページを更新してから再度お試しください');
         }
         throw e;
       }
