@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         予約システム連携
 // @namespace    https://github.com/shin-926/Tampermonkey
-// @version      1.9.5
+// @version      1.9.6
 // @description  Henryカルテと予約システム間の双方向連携（再診予約・患者プレビュー・ページ遷移）
 // @match        https://henry-app.jp/*
 // @match        https://manage-maokahp.reserve.ne.jp/*
@@ -49,6 +49,7 @@
           entries {
             patient {
               uuid
+              serialNumber
             }
           }
         }
@@ -461,20 +462,6 @@
       }
 
       return { ok: true };
-    }
-
-    // --------------------------------------------
-    // UUIDキャッシュ管理
-    // --------------------------------------------
-    function getUuidFromCache(patientNumber) {
-      const cache = GM_getValue('henry-patient-cache', {});
-      return cache[patientNumber] || null;
-    }
-
-    function saveUuidToCache(patientNumber, uuid) {
-      const cache = GM_getValue('henry-patient-cache', {});
-      cache[patientNumber] = uuid;
-      GM_setValue('henry-patient-cache', cache);
     }
 
     // --------------------------------------------
@@ -906,30 +893,27 @@
     }
 
     async function getPatientUuid(patientNumber) {
-      // キャッシュを確認
-      const cachedUuid = getUuidFromCache(patientNumber);
-      if (cachedUuid) {
-        return cachedUuid;
-      }
-
       try {
         const result = await callHenryAPIWithRetry('ListPatientsV2', {
           input: {
             generalFilter: { query: patientNumber, patientCareType: 'PATIENT_CARE_TYPE_ANY' },
             hospitalizationFilter: { doctorUuid: null, roomUuids: [], wardUuids: [], states: [], onlyLatest: true },
             sorts: [],
-            pageSize: 1,
+            pageSize: 10,  // 複数件取得して完全一致を探す
             pageToken: ''
           }
         });
 
         const entries = result.data?.listPatientsV2?.entries ?? [];
-        const uuid = entries[0]?.patient?.uuid || null;
 
-        if (uuid) {
-          saveUuidToCache(patientNumber, uuid);
+        // 患者番号が完全一致するエントリを探す（患者取り違え防止）
+        const exactMatch = entries.find(e => e.patient?.serialNumber === patientNumber);
+        if (!exactMatch) {
+          log.warn(`患者番号 ${patientNumber} の完全一致が見つかりません`);
+          return null;
         }
-        return uuid;
+
+        return exactMatch.patient.uuid;
 
       } catch (e) {
         log.error('患者UUID取得エラー: ' + e.message);
