@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry Core
 // @namespace    https://henry-app.jp/
-// @version      2.9.11
+// @version      2.9.12
 // @description  Henry スクリプト実行基盤 (GoogleAuth統合 / Google Docs対応)
 // @match        https://henry-app.jp/*
 // @match        https://docs.google.com/*
@@ -55,7 +55,7 @@
     GOOGLE_CREDENTIALS_KEY: 'google_oauth_credentials'
   };
 
-  console.log('[Henry Core] Initializing v2.9.11...');
+  console.log('[Henry Core] Initializing v2.9.12...');
 
   // ==========================================
   // 1. IndexedDB Manager (ハッシュ + エンドポイント管理)
@@ -228,28 +228,12 @@
   // 4. Context Manager (動的コンテキスト)
   // ==========================================
   const Context = {
-    _patientUuid: null,
     _myUuid: null,
 
-    setPatientUuid: (uuid) => {
-      if (uuid && uuid !== Context._patientUuid) {
-        Context._patientUuid = uuid;
-      }
-    },
-
+    // URLからのみ取得（キャッシュ廃止：患者取り違え防止）
     getPatientUuid: () => {
-      // キャッシュがあればそれを返す
-      if (Context._patientUuid) return Context._patientUuid;
-
-      // URLから患者UUIDを抽出（フォールバック）
-      // 例: /patients/{uuid}/charts, /patients/{uuid}/encounters
       const match = pageWindow.location.pathname.match(/\/patients\/([a-f0-9-]{36})/i);
-      if (match) {
-        Context._patientUuid = match[1];
-        return Context._patientUuid;
-      }
-
-      return null;
+      return match ? match[1] : null;
     },
 
     getMyUuid: async () => {
@@ -302,7 +286,6 @@
   // ==========================================
   // 5. Fetch Hook (デュアルエンドポイント対応)
   // TODO: ハッシュ収集機能はフルクエリ方式 (query()) への移行完了後に削除予定
-  //       ただし patientUuid のキャッチは残す
   // ==========================================
   const originalFetch = window.fetch;
   window.fetch = function(url, options) {
@@ -327,12 +310,6 @@
           const requests = Array.isArray(rawBody) ? rawBody : [rawBody];
 
           requests.forEach(body => {
-            // [v2.6.9 修正] 患者UUIDを先にキャッチ（return前に必ず実行）
-            const patientUuid = body.variables?.input?.patientUuid;
-            if (patientUuid) {
-              Context.setPatientUuid(patientUuid);
-            }
-
             if (body.operationName && body.extensions?.persistedQuery?.sha256Hash) {
               const hash = body.extensions.persistedQuery.sha256Hash;
               const opName = body.operationName;
@@ -340,7 +317,7 @@
               // メモリキャッシュを確認（IndexedDBアクセス不要）
               const cached = hashCache.get(opName);
               if (cached && cached.hash === hash && cached.endpoint === endpoint) {
-                return;  // 変更なし → スキップ（patientUuidは既にセット済み）
+                return;  // 変更なし → スキップ
               }
 
               // 新規 or 更新 → IndexedDBに保存
@@ -1150,10 +1127,10 @@
       UI.init();
       checkForAuthCode();
     }
-    console.log('[Henry Core] Ready v2.9.11 (Henry mode)');
+    console.log('[Henry Core] Ready v2.9.12 (Henry mode)');
 
   } else if (isGoogleDocs) {
     // Google Docsドメイン：GoogleAuthのみ
-    console.log('[Henry Core] Ready v2.9.11 (Google Docs mode - GoogleAuth only)');
+    console.log('[Henry Core] Ready v2.9.12 (Google Docs mode - GoogleAuth only)');
   }
 })();
