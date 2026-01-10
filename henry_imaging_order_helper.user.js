@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         画像オーダー入力支援
 // @namespace    https://henry-app.jp/
-// @version      1.6.0
+// @version      1.6.2
 // @description  画像照射オーダーモーダルに部位・方向選択UIを追加（複数内容対応）
 // @author       Henry UI Lab
 // @match        https://henry-app.jp/*
@@ -324,7 +324,7 @@
     logger = utils.createLogger(CONFIG.SCRIPT_NAME);
     const cleaner = utils.createCleaner();
 
-    logger.info('スクリプト初期化 (v1.6.0)');
+    logger.info('スクリプト初期化 (v1.6.2)');
 
     utils.subscribeNavigation(cleaner, () => {
       logger.info('ページ遷移検出 -> 再セットアップ');
@@ -593,46 +593,39 @@
   }
 
   // ==========================================
-  // ChipInput（体位）に値を設定（React Fiber方式）
+  // 体位を設定（React Fiber方式 - 親コンポーネント経由）
   // ==========================================
-  async function setChipInputValue(chipInput, value) {
-    if (!chipInput || !value) return false;
+  async function setBodyPosition(chipInput, positionCode) {
+    if (!chipInput || !positionCode) return false;
 
     try {
       const fiberKey = Object.keys(chipInput).find(k => k.startsWith('__reactFiber$'));
       if (!fiberKey) {
-        logger.warn('ChipInput: React Fiberが見つかりません');
+        logger.warn('体位設定: React Fiberが見つかりません');
         return false;
       }
 
+      // 親を辿ってbodyPositionsとonChangeを持つコンポーネントを探す
       let target = chipInput[fiberKey]?.return;
-      for (let i = 0; i < 10 && target; i++) {
-        if (target.memoizedProps?.onChange && target.memoizedProps?.searchHandler) {
+      for (let i = 0; i < 15 && target; i++) {
+        const props = target.memoizedProps;
+        if (props?.bodyPositions !== undefined && props?.onChange) {
           break;
         }
         target = target.return;
       }
 
-      if (!target?.memoizedProps?.onChange || !target?.memoizedProps?.searchHandler) {
-        logger.warn('ChipInput: onChange/searchHandlerが見つかりません');
+      if (!target?.memoizedProps?.onChange) {
+        logger.warn('体位設定: 親コンポーネントが見つかりません');
         return false;
       }
 
-      const { searchHandler, onChange } = target.memoizedProps;
-
-      const results = await searchHandler(value);
-      const option = results?.find(r => r.label === value);
-
-      if (option) {
-        onChange([option]);  // ChipInputは配列で渡す
-        logger.info(`ChipInput: "${value}" を設定成功`);
-        return true;
-      } else {
-        logger.warn(`ChipInput: "${value}" が選択肢にありません`);
-        return false;
-      }
+      // 親コンポーネントのonChangeを直接呼ぶ
+      target.memoizedProps.onChange([positionCode]);
+      logger.info(`体位設定: "${positionCode}" を設定成功`);
+      return true;
     } catch (e) {
-      logger.warn('ChipInput: エラー', e.message);
+      logger.warn('体位設定: エラー', e.message);
       return false;
     }
   }
@@ -641,10 +634,21 @@
   // 体位を「任意」に設定（単純撮影・骨塩定量のとき）
   // ==========================================
   async function setBodyPositionToArbitrary() {
+    logger.info('体位設定: 開始');
+
+    // DOMの準備を待つ
+    await new Promise(r => setTimeout(r, 300));
+
     const chipInput = document.querySelector('[data-testid="BodyPositionForm__ChipInput"]');
-    if (chipInput) {
-      await setChipInputValue(chipInput, '任意');
+    logger.info('体位設定: ChipInput =', !!chipInput);
+
+    if (!chipInput) {
+      logger.warn('体位設定: ChipInputが見つかりません');
+      return;
     }
+
+    const result = await setBodyPosition(chipInput, 'BODY_POSITION_ANY');
+    logger.info('体位設定: 結果 =', result);
   }
 
   // ==========================================
@@ -959,6 +963,10 @@
       logger.info(`UI ${index + 1} 初期モダリティ: ${initialModality}`);
       if (initialModality && initialModality !== 'MD') {
         handleModalityChange(initialModality);
+      }
+      // 最初のUIのときのみ、XP/MDなら体位を設定
+      if (index === 0 && (initialModality === 'XP' || initialModality === 'MD')) {
+        setBodyPositionToArbitrary();
       }
     }
   }
