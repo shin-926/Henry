@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         画像オーダー入力支援
 // @namespace    https://henry-app.jp/
-// @version      1.8.0
+// @version      1.9.0
 // @description  画像照射オーダーモーダルに部位・方向選択UIを追加（複数内容対応）
 // @author       Henry UI Lab
 // @match        https://henry-app.jp/*
@@ -340,7 +340,7 @@
     logger = utils.createLogger(CONFIG.SCRIPT_NAME);
     const cleaner = utils.createCleaner();
 
-    logger.info('スクリプト初期化 (v1.8.0)');
+    logger.info('スクリプト初期化 (v1.9.0)');
 
     utils.subscribeNavigation(cleaner, () => {
       logger.info('ページ遷移検出 -> 再セットアップ');
@@ -689,6 +689,7 @@
       modality: currentModality,
       major: '',
       minor: '',
+      laterality: '',    // 側性（右/左/両）
       subItem: '',       // 指/趾の選択
       joint: '指定なし', // 関節の選択
       directions: [],
@@ -718,12 +719,23 @@
     const minorSelect = createSelect('小分類');
     minorSelect.disabled = true;
 
+    const lateralitySelect = createSelect('側性');
+    lateralitySelect.innerHTML = `
+      <option value="">側性</option>
+      <option value="右">右</option>
+      <option value="左">左</option>
+      <option value="両">両</option>
+    `;
+    lateralitySelect.style.display = 'none';
+    lateralitySelect.disabled = true;
+
     const subItemSelect = createSelect('指/趾');
     subItemSelect.style.display = 'none';
     subItemSelect.disabled = true;
 
     row1.appendChild(majorSelect);
     row1.appendChild(minorSelect);
+    row1.appendChild(lateralitySelect);
     row1.appendChild(subItemSelect);
 
     // --- 行2: 方向ボタン（XPのみ表示） ---
@@ -784,6 +796,11 @@
       // 出力名を決定（subItemがあればそれを使う）
       let displayName = state.subItem || state.minor;
 
+      // 側性がある場合は先頭に追加
+      if (state.laterality) {
+        displayName = state.laterality + displayName;
+      }
+
       // 関節指定がある場合は括弧付きで追加
       if (state.joint && state.joint !== '指定なし') {
         displayName += `（${state.joint}）`;
@@ -799,7 +816,11 @@
       if (state.modality === 'XP' && state.minorData) {
         // 枚数を更新（方向が選択されている場合のみ）
         if (filmCountInput && state.directions.length > 0) {
-          const count = calculateFilmCount(state.directions);
+          let count = calculateFilmCount(state.directions);
+          // 「両」の場合は2倍
+          if (state.laterality === '両') {
+            count *= 2;
+          }
           setNativeValue(filmCountInput, String(count));
           logger.info(`UI ${index + 1}: 枚数を ${count} に設定`);
         }
@@ -975,12 +996,18 @@
     const resetUI = () => {
       state.major = '';
       state.minor = '';
+      state.laterality = '';
+      state.subItem = '';
+      state.joint = '指定なし';
       state.directions = [];
       state.minorData = null;
       majorSelect.innerHTML = '<option value="">大分類</option>';
       majorSelect.disabled = true;
       minorSelect.innerHTML = '<option value="">小分類</option>';
       minorSelect.disabled = true;
+      lateralitySelect.selectedIndex = 0;
+      lateralitySelect.style.display = 'none';
+      lateralitySelect.disabled = true;
       subItemSelect.innerHTML = '<option value="">指/趾</option>';
       subItemSelect.style.display = 'none';
       subItemSelect.disabled = true;
@@ -1014,6 +1041,7 @@
       const major = majorSelect.value;
       state.major = major;
       state.minor = '';
+      state.laterality = '';
       state.subItem = '';
       state.joint = '指定なし';
       state.directions = [];
@@ -1021,6 +1049,9 @@
 
       minorSelect.innerHTML = '<option value="">小分類</option>';
       minorSelect.disabled = true;
+      lateralitySelect.selectedIndex = 0;
+      lateralitySelect.style.display = 'none';
+      lateralitySelect.disabled = true;
       subItemSelect.innerHTML = '<option value="">指/趾</option>';
       subItemSelect.style.display = 'none';
       subItemSelect.disabled = true;
@@ -1038,9 +1069,28 @@
         return;
       }
 
+      // 上肢・下肢の場合は側性ドロップダウンを表示
+      if (major === '上肢' || major === '下肢') {
+        lateralitySelect.style.display = 'block';
+        lateralitySelect.disabled = false;
+      }
+
       const data = getDataForModality(state.modality);
       if (data && data[major]) {
         populateMinorSelect(data[major]);
+      }
+      updateNoteInput();
+    });
+
+    lateralitySelect.addEventListener('change', () => {
+      state.laterality = lateralitySelect.value;
+      // 枚数を再計算
+      if (filmCountInput && state.directions.length > 0) {
+        let count = calculateFilmCount(state.directions);
+        if (state.laterality === '両') {
+          count *= 2;
+        }
+        setNativeValue(filmCountInput, String(count));
       }
       updateNoteInput();
     });
