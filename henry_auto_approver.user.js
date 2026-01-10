@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         承認アシスタント
 // @namespace    http://tampermonkey.net/
-// @version      3.10.0
+// @version      3.12.0
 // @description  承認待ちオーダーを自動で一括承認する
 // @match        https://henry-app.jp/*
 // @grant        none
@@ -146,6 +146,7 @@
     if (orderStatus === 'ORDER_STATUS_ON_HOLD') return 'ACCEPT';
     if (orderStatus === 'ORDER_STATUS_DRAFT') return 'APPROVE';
     if (orderStatus === 'ORDER_STATUS_DRAFT_REVOKED') return 'APPROVE_REVOCATION';
+    if (orderStatus === 'ORDER_STATUS_REVOKED') return 'CONFIRM_REVOCATION';
     return null;
   }
 
@@ -216,9 +217,20 @@
     const config = ORDER_TYPE_CONFIG[orderType];
     const operationName = config?.operationName || guessOperationName(orderType);
     const action = getRequiredAction(orderStatus);
+    const typeLabel = config?.label || orderType.replace('ORDER_TYPE_', '');
+
+    console.log(`[${SCRIPT_NAME}] 承認試行:`, {
+      uuid: uuid.slice(0, 8) + '...',
+      type: typeLabel,
+      status: orderStatus.replace('ORDER_STATUS_', ''),
+      action: action,
+      mutation: operationName
+    });
 
     if (!action) {
-      return { success: false, error: `不明なステータス: ${orderStatus}` };
+      const error = `不明なステータス: ${orderStatus}`;
+      console.warn(`[${SCRIPT_NAME}] ⚠️ スキップ: ${error}`);
+      return { success: false, error, skipped: true };
     }
 
     const input = { uuid, orderStatusAction: action };
@@ -227,12 +239,35 @@
     }
 
     const mutation = generateApprovalMutation(operationName);
-    const result = await HenryCore.query(mutation, { input });
 
-    if (result.errors) {
-      return { success: false, error: result.errors[0]?.message };
+    try {
+      const result = await HenryCore.query(mutation, { input });
+
+      if (result.errors) {
+        const errorMsg = result.errors[0]?.message || 'Unknown error';
+        console.error(`[${SCRIPT_NAME}] ❌ API エラー:`, {
+          uuid: uuid.slice(0, 8) + '...',
+          type: typeLabel,
+          error: errorMsg,
+          fullErrors: result.errors
+        });
+        return { success: false, error: errorMsg };
+      }
+
+      console.log(`[${SCRIPT_NAME}] ✅ 承認成功:`, {
+        uuid: uuid.slice(0, 8) + '...',
+        type: typeLabel
+      });
+      return { success: true };
+    } catch (e) {
+      console.error(`[${SCRIPT_NAME}] ❌ 例外発生:`, {
+        uuid: uuid.slice(0, 8) + '...',
+        type: typeLabel,
+        error: e.message,
+        stack: e.stack
+      });
+      throw e;
     }
-    return { success: true };
   }
 
   // ========== 自動承認処理 ==========
@@ -241,39 +276,81 @@
     let processed = 0;
     let successCount = 0;
     let errorCount = 0;
+    let skippedCount = 0;
     let delay = BASE_DELAY;
+    let loopCount = 0;
+
+    // 失敗したオーダーをスキップするためのSet
+    const failedUuids = new Set();
+    // 失敗の詳細を記録
+    const failedDetails = [];
+
+    console.log(`[${SCRIPT_NAME}] ========== 自動承認開始 ==========`);
+    console.log(`[${SCRIPT_NAME}] 医師UUID: ${doctorUuid.slice(0, 8)}...`);
 
     // 承認するとリストから消えるため、毎回最初のページから取得し直す
     while (true) {
+      loopCount++;
+
       if (abortSignal.aborted) {
-        return { processed, successCount, errorCount, aborted: true };
+        console.log(`[${SCRIPT_NAME}] ユーザーにより中断されました`);
+        return { processed, successCount, errorCount, skippedCount, aborted: true };
       }
 
       // 常に最初のページを取得（承認済みは消えているので新しいオーダーが来る）
+      console.log(`[${SCRIPT_NAME}] --- ループ ${loopCount}: ページ取得中... ---`);
       const result = await fetchPage(doctorUuid, '');
       const patientOrders = result.patientOrders || [];
 
-      // 承認対象のオーダーを抽出
+      // 承認対象のオーダーを抽出（失敗済みはスキップ）
       const pendingOrders = [];
+      let skippedInThisLoop = 0;
+
       for (const po of patientOrders) {
         for (const order of po.orders) {
+          // 失敗済みのオーダーはスキップ
+          if (failedUuids.has(order.uuid)) {
+            skippedInThisLoop++;
+            continue;
+          }
+
           const status = getOrderStatus(order);
           const action = getRequiredAction(status);
+
           if (action) {
             pendingOrders.push({ order, status });
+          } else if (status) {
+            // アクションがないステータス（PREPARING等）はスキップ扱い
+            console.log(`[${SCRIPT_NAME}] ⏭️ 対象外ステータス:`, {
+              uuid: order.uuid.slice(0, 8) + '...',
+              type: order.orderType.replace('ORDER_TYPE_', ''),
+              status: status.replace('ORDER_STATUS_', '')
+            });
+            failedUuids.add(order.uuid);
+            failedDetails.push({
+              uuid: order.uuid,
+              type: order.orderType,
+              status: status,
+              reason: '対象外ステータス'
+            });
+            skippedCount++;
           }
         }
       }
 
+      console.log(`[${SCRIPT_NAME}] ループ ${loopCount}: 取得=${patientOrders.length}患者, 処理対象=${pendingOrders.length}件, スキップ済=${skippedInThisLoop}件`);
+
       // 承認対象がなくなったら終了
       if (pendingOrders.length === 0) {
+        console.log(`[${SCRIPT_NAME}] 処理対象がなくなりました。終了します。`);
         break;
       }
 
       // 取得したオーダーを処理
       for (const { order, status } of pendingOrders) {
         if (abortSignal.aborted) {
-          return { processed, successCount, errorCount, aborted: true };
+          console.log(`[${SCRIPT_NAME}] ユーザーにより中断されました`);
+          return { processed, successCount, errorCount, skippedCount, aborted: true };
         }
 
         try {
@@ -284,21 +361,30 @@
             delay = BASE_DELAY;
           } else {
             errorCount++;
-            console.error(`[${SCRIPT_NAME}] 承認エラー: ${approveResult.error}`, {
+            // 失敗したオーダーを記録してスキップ
+            failedUuids.add(order.uuid);
+            failedDetails.push({
               uuid: order.uuid,
-              orderType: order.orderType
+              type: order.orderType,
+              status: status,
+              reason: approveResult.error
             });
           }
         } catch (e) {
           errorCount++;
-          console.error(`[${SCRIPT_NAME}] 例外: ${e.message}`, {
+          // 失敗したオーダーを記録してスキップ
+          failedUuids.add(order.uuid);
+          failedDetails.push({
             uuid: order.uuid,
-            orderType: order.orderType
+            type: order.orderType,
+            status: status,
+            reason: e.message
           });
 
           // バックオフ
           if (e.message.includes('429') || e.message.includes('503')) {
             delay = Math.min(delay * 2, MAX_DELAY);
+            console.warn(`[${SCRIPT_NAME}] レート制限検出。遅延を ${delay}ms に増加`);
           }
         }
 
@@ -307,6 +393,23 @@
 
         await HenryCore.utils.sleep(delay);
       }
+    }
+
+    // ========== 処理完了サマリー ==========
+    console.log(`[${SCRIPT_NAME}] ========== 処理完了サマリー ==========`);
+    console.log(`[${SCRIPT_NAME}] 総処理数: ${processed}`);
+    console.log(`[${SCRIPT_NAME}] 成功: ${successCount}`);
+    console.log(`[${SCRIPT_NAME}] エラー: ${errorCount}`);
+    console.log(`[${SCRIPT_NAME}] スキップ: ${skippedCount}`);
+    console.log(`[${SCRIPT_NAME}] ループ回数: ${loopCount}`);
+
+    if (failedDetails.length > 0) {
+      console.log(`[${SCRIPT_NAME}] ========== 失敗/スキップ詳細 ==========`);
+      failedDetails.forEach((detail, i) => {
+        console.log(`[${SCRIPT_NAME}] ${i + 1}. ${detail.type.replace('ORDER_TYPE_', '')} (${detail.status.replace('ORDER_STATUS_', '')}):`);
+        console.log(`[${SCRIPT_NAME}]    UUID: ${detail.uuid}`);
+        console.log(`[${SCRIPT_NAME}]    理由: ${detail.reason}`);
+      });
     }
 
     // 承認完了後、画面を更新
@@ -318,7 +421,7 @@
       }
     }
 
-    return { processed, successCount, errorCount, aborted: false };
+    return { processed, successCount, errorCount, skippedCount, aborted: false };
   }
 
   // ========== UI ==========
@@ -459,18 +562,22 @@
   }
 
   function showResultModal(result) {
-    const { processed, successCount, errorCount, aborted } = result;
+    const { processed, successCount, errorCount, skippedCount = 0, aborted } = result;
     const title = aborted ? '⏹ 中止しました' : '✅ 完了';
+    const hasIssues = errorCount > 0 || skippedCount > 0;
 
     const content = document.createElement('div');
     content.innerHTML = `
       <p style="margin: 0 0 8px 0; color: #374151;">
         成功: <strong style="color: #10B981;">${successCount.toLocaleString()}件</strong>
       </p>
-      <p style="margin: 0; color: ${errorCount > 0 ? '#EF4444' : '#6B7280'};">
+      <p style="margin: 0 0 8px 0; color: ${errorCount > 0 ? '#EF4444' : '#6B7280'};">
         エラー: <strong>${errorCount}件</strong>
-        ${errorCount > 0 ? '<span style="font-size: 12px;">（詳細はコンソールを確認）</span>' : ''}
       </p>
+      <p style="margin: 0; color: ${skippedCount > 0 ? '#F59E0B' : '#6B7280'};">
+        スキップ: <strong>${skippedCount}件</strong>
+      </p>
+      ${hasIssues ? '<p style="margin: 8px 0 0 0; font-size: 12px; color: #6B7280;">（詳細はコンソールを確認: F12 → Console）</p>' : ''}
     `;
 
     HenryCore.ui.showModal({
@@ -645,12 +752,12 @@
       name: '承認',
       icon: '⚡',
       description: '承認待ちオーダーを自動で一括承認',
-      version: '3.10.0',
+      version: '3.12.0',
       order: 20,
       onClick: main
     });
 
-    console.log(`[${SCRIPT_NAME}] v3.10.0 起動しました`);
+    console.log(`[${SCRIPT_NAME}] v3.12.0 起動しました`);
   }
 
   if (document.readyState === 'loading') {

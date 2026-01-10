@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         主治医意見書作成フォーム
 // @namespace    https://henry-app.jp/
-// @version      2.3.2
+// @version      2.4.4
 // @description  主治医意見書の入力フォームとGoogle Docs出力（GAS不要版・API直接呼び出し）
 // @author       Henry Team
 // @match        https://henry-app.jp/*
@@ -1748,6 +1748,40 @@
     section.appendChild(createSubsectionTitle('(1) 日常生活の自立度について'));
 
     // 障害高齢者の日常生活自立度（寝たきり度）（必須）
+    const bedriddenLevelHelp = `
+      <table style="border-collapse: collapse; font-size: 11px; white-space: nowrap;">
+        <tr style="background: #334155;">
+          <th style="border: 1px solid #475569; padding: 4px 8px;">ランク</th>
+          <th style="border: 1px solid #475569; padding: 4px 8px;">判定基準</th>
+          <th style="border: 1px solid #475569; padding: 4px 8px;">1</th>
+          <th style="border: 1px solid #475569; padding: 4px 8px;">2</th>
+        </tr>
+        <tr>
+          <td style="border: 1px solid #475569; padding: 6px 10px; font-weight: bold;">J<br><span style="font-size: 10px; font-weight: normal;">生活自立</span></td>
+          <td style="border: 1px solid #475569; padding: 6px 10px;">何らかの障害等を有するが、日常生活は<br>ほぼ自立しており独力で外出する</td>
+          <td style="border: 1px solid #475569; padding: 6px 10px;">交通機関等を利用して外出する</td>
+          <td style="border: 1px solid #475569; padding: 6px 10px;">隣近所へなら外出する</td>
+        </tr>
+        <tr>
+          <td style="border: 1px solid #475569; padding: 6px 10px; font-weight: bold;">A<br><span style="font-size: 10px; font-weight: normal;">準寝たきり</span></td>
+          <td style="border: 1px solid #475569; padding: 6px 10px;">屋内での生活はおおむね自立しているが、<br>介助なしには外出しない</td>
+          <td style="border: 1px solid #475569; padding: 6px 10px;">介助により外出し、日中はほとんど<br>ベッドから離れて生活する</td>
+          <td style="border: 1px solid #475569; padding: 6px 10px;">外出の頻度が少なく、日中も<br>寝たり起きたりの生活をしている</td>
+        </tr>
+        <tr>
+          <td style="border: 1px solid #475569; padding: 6px 10px; font-weight: bold;">B<br><span style="font-size: 10px; font-weight: normal;">寝たきり</span></td>
+          <td style="border: 1px solid #475569; padding: 6px 10px;">屋内での生活は何らかの介助を要し、日中も<br>ベッド上での生活が主体であるが、座位を保つ</td>
+          <td style="border: 1px solid #475569; padding: 6px 10px;">車いすに移乗し、食事、排泄は<br>ベッドから離れて行う</td>
+          <td style="border: 1px solid #475569; padding: 6px 10px;">介助により車いすに移乗する</td>
+        </tr>
+        <tr>
+          <td style="border: 1px solid #475569; padding: 6px 10px; font-weight: bold;">C<br><span style="font-size: 10px; font-weight: normal;">寝たきり</span></td>
+          <td style="border: 1px solid #475569; padding: 6px 10px;">1日中ベッド上で過ごし、排泄、食事、<br>着替において介助を要する</td>
+          <td style="border: 1px solid #475569; padding: 6px 10px;">自力で寝返りをうつ</td>
+          <td style="border: 1px solid #475569; padding: 6px 10px;">自力では寝返りもうてない</td>
+        </tr>
+      </table>
+    `;
     section.appendChild(createRadioField(
       '障害高齢者の日常生活自立度（寝たきり度）',
       'bedridden_level',
@@ -1764,10 +1798,55 @@
         { label: 'C2', value: '9' }
       ],
       data.bedridden_level,
-      true
+      true,
+      bedriddenLevelHelp
     ));
 
     // 認知症高齢者の日常生活自立度（必須）
+    const dementiaLevelHelp = `
+      <table style="border-collapse: collapse; font-size: 11px; white-space: nowrap;">
+        <tr style="background: #334155;">
+          <th style="border: 1px solid #475569; padding: 4px 8px;">ランク</th>
+          <th style="border: 1px solid #475569; padding: 4px 8px;">判定基準</th>
+          <th style="border: 1px solid #475569; padding: 4px 8px;">見られる症状・行動の例</th>
+        </tr>
+        <tr>
+          <td style="border: 1px solid #475569; padding: 6px 10px; font-weight: bold;">Ⅰ</td>
+          <td style="border: 1px solid #475569; padding: 6px 10px;">何らかの認知症を有するが、日常生活は<br>家庭内及び社会的にほぼ自立している</td>
+          <td style="border: 1px solid #475569; padding: 6px 10px;">－</td>
+        </tr>
+        <tr>
+          <td style="border: 1px solid #475569; padding: 6px 10px; font-weight: bold;">Ⅱa</td>
+          <td style="border: 1px solid #475569; padding: 6px 10px;">家庭外で、日常生活に支障を来たすような症状・行動や<br>意思疎通の困難さが多少見られても、誰かが注意していれば自立できる</td>
+          <td style="border: 1px solid #475569; padding: 6px 10px;">たびたび道に迷う、買物や事務、<br>金銭管理などにミスが目立つ等</td>
+        </tr>
+        <tr>
+          <td style="border: 1px solid #475569; padding: 6px 10px; font-weight: bold;">Ⅱb</td>
+          <td style="border: 1px solid #475569; padding: 6px 10px;">家庭内でも上記Ⅱの状態が見られる</td>
+          <td style="border: 1px solid #475569; padding: 6px 10px;">服薬管理ができない、電話の応対や<br>訪問者との対応など一人で留守番ができない等</td>
+        </tr>
+        <tr>
+          <td style="border: 1px solid #475569; padding: 6px 10px; font-weight: bold;">Ⅲa</td>
+          <td style="border: 1px solid #475569; padding: 6px 10px;">日中を中心として、日常生活に支障を来たすような<br>症状・行動や意思疎通の困難さが見られ、介護を必要とする</td>
+          <td style="border: 1px solid #475569; padding: 6px 10px;">着替え、食事、排便、排尿が上手にできない、<br>時間がかかる、徘徊、失禁、火の不始末等</td>
+        </tr>
+        <tr>
+          <td style="border: 1px solid #475569; padding: 6px 10px; font-weight: bold;">Ⅲb</td>
+          <td style="border: 1px solid #475569; padding: 6px 10px;">夜間を中心として、上記Ⅲの状態が見られる</td>
+          <td style="border: 1px solid #475569; padding: 6px 10px;">ランクⅢaに同じ</td>
+        </tr>
+        <tr>
+          <td style="border: 1px solid #475569; padding: 6px 10px; font-weight: bold;">Ⅳ</td>
+          <td style="border: 1px solid #475569; padding: 6px 10px;">日常生活に支障を来たすような症状・行動や<br>意思疎通の困難さが頻繁に見られ、常に介護を必要とする</td>
+          <td style="border: 1px solid #475569; padding: 6px 10px;">ランクⅢに同じ</td>
+        </tr>
+        <tr>
+          <td style="border: 1px solid #475569; padding: 6px 10px; font-weight: bold;">M</td>
+          <td style="border: 1px solid #475569; padding: 6px 10px;">著しい精神症状や問題行動あるいは重篤な<br>身体疾患が見られ、専門医療を必要とする</td>
+          <td style="border: 1px solid #475569; padding: 6px 10px;">せん妄、妄想、興奮、自傷・他害等の<br>精神症状や精神症状に起因する問題行動</td>
+        </tr>
+      </table>
+    `;
     section.appendChild(createRadioField(
       '認知症高齢者の日常生活自立度',
       'dementia_level',
@@ -1783,7 +1862,8 @@
         { label: 'M', value: '8' }
       ],
       data.dementia_level,
-      true
+      true,
+      dementiaLevelHelp
     ));
 
     // (2) 認知症の中核症状（認知症以外の疾患で同様の症状を認める場合を含む）
@@ -2789,13 +2869,71 @@
   /**
    * ラジオボタンフィールド
    */
-  function createRadioField(label, name, section, options, currentValue, required = false) {
+  function createRadioField(label, name, section, options, currentValue, required = false, helpContent = null) {
     const field = document.createElement('div');
     field.style.cssText = 'margin-bottom: 16px;';
 
     const labelEl = document.createElement('div');
-    labelEl.innerHTML = `${label}${required ? ' <span style="color: #ef4444;">*</span>' : ''}`;
-    labelEl.style.cssText = 'font-size: 14px; font-weight: 500; color: #1e293b; margin-bottom: 8px;';
+    labelEl.style.cssText = 'font-size: 14px; font-weight: 500; color: #1e293b; margin-bottom: 8px; display: flex; align-items: center; gap: 6px;';
+
+    const labelText = document.createElement('span');
+    labelText.innerHTML = `${label}${required ? ' <span style="color: #ef4444;">*</span>' : ''}`;
+    labelEl.appendChild(labelText);
+
+    // ヘルプアイコン（?）とツールチップ
+    if (helpContent) {
+      const helpWrapper = document.createElement('span');
+      helpWrapper.style.cssText = 'position: relative; display: inline-flex;';
+
+      const helpIcon = document.createElement('span');
+      helpIcon.textContent = '?';
+      helpIcon.style.cssText = `
+        display: inline-flex; align-items: center; justify-content: center;
+        width: 16px; height: 16px; border-radius: 50%;
+        background: #94a3b8; color: white; font-size: 11px; font-weight: bold;
+        cursor: help; user-select: none;
+      `;
+
+      const tooltip = document.createElement('div');
+      tooltip.innerHTML = helpContent;
+      tooltip.style.cssText = `
+        position: fixed;
+        background: #1e293b; color: white; padding: 12px 16px;
+        border-radius: 8px; font-size: 11px; font-weight: normal;
+        z-index: 10000;
+        opacity: 0; visibility: hidden; transition: opacity 0.2s, visibility 0.2s;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+        line-height: 1.5;
+      `;
+
+      helpWrapper.appendChild(helpIcon);
+      helpWrapper.appendChild(tooltip);
+      labelEl.appendChild(helpWrapper);
+
+      helpWrapper.addEventListener('mouseenter', () => {
+        // モーダルコンテンツ領域を探す
+        const modalContent = helpWrapper.closest('[style*="overflow-y"]') || helpWrapper.closest('[style*="max-height"]');
+        const iconRect = helpIcon.getBoundingClientRect();
+
+        if (modalContent) {
+          const contentRect = modalContent.getBoundingClientRect();
+          tooltip.style.left = `${contentRect.left}px`;
+          tooltip.style.maxWidth = `${contentRect.width}px`;
+        } else {
+          // フォールバック: アイコンの左端から、右端は画面端-24pxまで
+          tooltip.style.left = '24px';
+          tooltip.style.maxWidth = `${window.innerWidth - 48}px`;
+        }
+        tooltip.style.top = `${iconRect.bottom + 8}px`;
+        tooltip.style.opacity = '1';
+        tooltip.style.visibility = 'visible';
+      });
+      helpWrapper.addEventListener('mouseleave', () => {
+        tooltip.style.opacity = '0';
+        tooltip.style.visibility = 'hidden';
+      });
+    }
+
     field.appendChild(labelEl);
 
     const optionsContainer = document.createElement('div');
