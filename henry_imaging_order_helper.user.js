@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         画像オーダー入力支援
 // @namespace    https://henry-app.jp/
-// @version      1.6.2
+// @version      1.8.0
 // @description  画像照射オーダーモーダルに部位・方向選択UIを追加（複数内容対応）
 // @author       Henry UI Lab
 // @match        https://henry-app.jp/*
@@ -40,6 +40,7 @@
         bodySite: "胸部",
         defaultCondition: "110kvp,10mas,200cm",
         directions: ["正面", "ポータブル正面"],
+        exclusiveDirections: true,
         conditionByDirection: { "ポータブル正面": "85kvp,18mas,110cm" }
       },
       "肋骨": {
@@ -56,12 +57,14 @@
         bodySite: "胸腹部",
         defaultCondition: "80kvp,32mas,120cm",
         directions: ["正面", "ポータブル正面"],
+        exclusiveDirections: true,
         conditionByDirection: { "ポータブル正面": "100kvp,70mas,110cm" }
       },
       "腹部": {
         bodySite: "腹部",
         defaultCondition: "80kvp,32mas,120cm",
         directions: ["正面", "ポータブル正面"],
+        exclusiveDirections: true,
         conditionByDirection: { "ポータブル正面": "85kvp,20mas,110cm" }
       },
       "骨盤": {
@@ -176,12 +179,18 @@
       "手指": {
         bodySite: "手指",
         defaultCondition: "56kvp,10mas,110cm",
-        directions: ["正面", "側面", "両斜位", "（関節を指定）"]
-      },
-      "母指": {
-        bodySite: "手指",
-        defaultCondition: "56kvp,10mas,110cm",
-        directions: ["正面", "側面", "CMj正面", "CMj側面"]
+        directions: ["正面", "側面", "両斜位"],
+        subItems: {
+          "母指": {
+            directions: ["正面", "側面", "CM関節正面", "CM関節側面"],
+            showJointSelector: false
+          },
+          "示指": { directions: ["正面", "側面", "両斜位"] },
+          "中指": { directions: ["正面", "側面", "両斜位"] },
+          "環指": { directions: ["正面", "側面", "両斜位"] },
+          "小指": { directions: ["正面", "側面", "両斜位"] }
+        },
+        joints: ["指定なし", "DIP関節", "PIP関節"]
       }
     },
     "下肢": {
@@ -223,7 +232,14 @@
       "足趾": {
         bodySite: "足指",
         defaultCondition: "56kvp,10mas,130cm",
-        directions: ["正面", "側面", "両斜位"]
+        directions: ["正面", "側面", "両斜位"],
+        subItems: {
+          "第1趾": { directions: ["正面", "側面", "両斜位"] },
+          "第2趾": { directions: ["正面", "側面", "両斜位"] },
+          "第3趾": { directions: ["正面", "側面", "両斜位"] },
+          "第4趾": { directions: ["正面", "側面", "両斜位"] },
+          "第5趾": { directions: ["正面", "側面", "両斜位"] }
+        }
       }
     }
   };
@@ -324,7 +340,7 @@
     logger = utils.createLogger(CONFIG.SCRIPT_NAME);
     const cleaner = utils.createCleaner();
 
-    logger.info('スクリプト初期化 (v1.6.2)');
+    logger.info('スクリプト初期化 (v1.8.0)');
 
     utils.subscribeNavigation(cleaner, () => {
       logger.info('ページ遷移検出 -> 再セットアップ');
@@ -673,8 +689,10 @@
       modality: currentModality,
       major: '',
       minor: '',
+      subItem: '',       // 指/趾の選択
+      joint: '指定なし', // 関節の選択
       directions: [],
-      minorData: null  // 小分類の詳細データ（bodySite, defaultCondition等）
+      minorData: null    // 小分類の詳細データ（bodySite, defaultCondition等）
     };
 
     // --- コンテナ ---
@@ -692,16 +710,21 @@
       border: 1px solid var(--henry-border, #e0e0e0);
     `;
 
-    // --- 行1: 大分類・小分類ドロップダウン ---
+    // --- 行1: 大分類・小分類・サブアイテムドロップダウン ---
     const row1 = document.createElement('div');
-    row1.style.cssText = 'display: flex; gap: 8px; align-items: center;';
+    row1.style.cssText = 'display: flex; gap: 8px; align-items: center; flex-wrap: wrap;';
 
     const majorSelect = createSelect('大分類');
     const minorSelect = createSelect('小分類');
     minorSelect.disabled = true;
 
+    const subItemSelect = createSelect('指/趾');
+    subItemSelect.style.display = 'none';
+    subItemSelect.disabled = true;
+
     row1.appendChild(majorSelect);
     row1.appendChild(minorSelect);
+    row1.appendChild(subItemSelect);
 
     // --- 行2: 方向ボタン（XPのみ表示） ---
     const row2 = document.createElement('div');
@@ -726,8 +749,30 @@
     directionButtonsContainer.style.cssText = 'display: flex; flex-wrap: wrap; gap: 6px;';
     row2.appendChild(directionButtonsContainer);
 
+    // --- 行3: 関節選択ラジオボタン ---
+    const row3 = document.createElement('div');
+    row3.style.cssText = `
+      display: none;
+      align-items: center;
+      gap: 12px;
+      padding-top: 8px;
+    `;
+
+    const jointLabel = document.createElement('span');
+    jointLabel.textContent = '関節を指定:';
+    jointLabel.style.cssText = `
+      font-size: 13px;
+      color: var(--henry-text-medium, #666);
+    `;
+    row3.appendChild(jointLabel);
+
+    const jointRadiosContainer = document.createElement('div');
+    jointRadiosContainer.style.cssText = 'display: flex; gap: 12px;';
+    row3.appendChild(jointRadiosContainer);
+
     container.appendChild(row1);
     container.appendChild(row2);
+    container.appendChild(row3);
 
     // --- ロジック関数 ---
     const updateNoteInput = () => {
@@ -736,7 +781,15 @@
         return;
       }
 
-      let value = state.minor;
+      // 出力名を決定（subItemがあればそれを使う）
+      let displayName = state.subItem || state.minor;
+
+      // 関節指定がある場合は括弧付きで追加
+      if (state.joint && state.joint !== '指定なし') {
+        displayName += `（${state.joint}）`;
+      }
+
+      let value = displayName;
       if (state.directions.length > 0) {
         value += '　' + state.directions.join('・');
       }
@@ -786,6 +839,7 @@
       }
 
       row2.style.display = 'flex';
+      const isExclusive = state.minorData?.exclusiveDirections === true;
 
       directions.forEach(dir => {
         const btn = document.createElement('button');
@@ -806,12 +860,24 @@
         btn.addEventListener('click', () => {
           const isSelected = btn.dataset.selected === 'true';
           if (isSelected) {
+            // 選択解除
             btn.dataset.selected = 'false';
             btn.style.background = 'var(--henry-bg-base, #fff)';
             btn.style.borderColor = 'var(--henry-border, #ccc)';
             btn.style.color = 'var(--henry-text-high, #333)';
             state.directions = state.directions.filter(d => d !== dir);
           } else {
+            // 排他モードの場合、他のボタンの選択を解除
+            if (isExclusive) {
+              directionButtonsContainer.querySelectorAll('button').forEach(b => {
+                b.dataset.selected = 'false';
+                b.style.background = 'var(--henry-bg-base, #fff)';
+                b.style.borderColor = 'var(--henry-border, #ccc)';
+                b.style.color = 'var(--henry-text-high, #333)';
+              });
+              state.directions = [];
+            }
+            // このボタンを選択
             btn.dataset.selected = 'true';
             btn.style.background = 'var(--henry-primary, rgb(0, 204, 146))';
             btn.style.borderColor = 'var(--henry-primary, rgb(0, 204, 146))';
@@ -822,6 +888,65 @@
         });
 
         directionButtonsContainer.appendChild(btn);
+      });
+    };
+
+    // サブアイテム（指/趾）ドロップダウンを更新
+    const populateSubItemSelect = (subItems, placeholder) => {
+      subItemSelect.innerHTML = `<option value="">${placeholder}</option>`;
+      if (!subItems || Object.keys(subItems).length === 0) {
+        subItemSelect.style.display = 'none';
+        subItemSelect.disabled = true;
+        return;
+      }
+      Object.keys(subItems).forEach(item => {
+        const opt = document.createElement('option');
+        opt.value = item;
+        opt.textContent = item;
+        subItemSelect.appendChild(opt);
+      });
+      subItemSelect.style.display = 'block';
+      subItemSelect.disabled = false;
+    };
+
+    // 関節ラジオボタンを描画
+    const renderJointRadios = (joints, showJointSelector) => {
+      jointRadiosContainer.innerHTML = '';
+      state.joint = '指定なし';
+
+      // 表示しない条件：jointsがない、または showJointSelector === false
+      if (!joints || joints.length === 0 || showJointSelector === false) {
+        row3.style.display = 'none';
+        return;
+      }
+
+      row3.style.display = 'flex';
+
+      joints.forEach((joint, idx) => {
+        const label = document.createElement('label');
+        label.style.cssText = `
+          display: flex;
+          align-items: center;
+          gap: 4px;
+          cursor: pointer;
+          font-size: 13px;
+          color: var(--henry-text-high, #333);
+        `;
+
+        const radio = document.createElement('input');
+        radio.type = 'radio';
+        radio.name = `joint-${index}`;
+        radio.value = joint;
+        radio.checked = idx === 0; // 最初（指定なし）がデフォルト
+
+        radio.addEventListener('change', () => {
+          state.joint = joint;
+          updateNoteInput();
+        });
+
+        label.appendChild(radio);
+        label.appendChild(document.createTextNode(joint));
+        jointRadiosContainer.appendChild(label);
       });
     };
 
@@ -856,8 +981,13 @@
       majorSelect.disabled = true;
       minorSelect.innerHTML = '<option value="">小分類</option>';
       minorSelect.disabled = true;
+      subItemSelect.innerHTML = '<option value="">指/趾</option>';
+      subItemSelect.style.display = 'none';
+      subItemSelect.disabled = true;
       row2.style.display = 'none';
+      row3.style.display = 'none';
       directionButtonsContainer.innerHTML = '';
+      jointRadiosContainer.innerHTML = '';
     };
 
     const handleModalityChange = (modality) => {
@@ -884,13 +1014,20 @@
       const major = majorSelect.value;
       state.major = major;
       state.minor = '';
+      state.subItem = '';
+      state.joint = '指定なし';
       state.directions = [];
       state.minorData = null;
 
       minorSelect.innerHTML = '<option value="">小分類</option>';
       minorSelect.disabled = true;
+      subItemSelect.innerHTML = '<option value="">指/趾</option>';
+      subItemSelect.style.display = 'none';
+      subItemSelect.disabled = true;
       row2.style.display = 'none';
+      row3.style.display = 'none';
       directionButtonsContainer.innerHTML = '';
+      jointRadiosContainer.innerHTML = '';
 
       // 枚数と撮影条件を空欄にする
       if (filmCountInput) setNativeValue(filmCountInput, '');
@@ -911,6 +1048,8 @@
     minorSelect.addEventListener('change', async () => {
       const minor = minorSelect.value;
       state.minor = minor;
+      state.subItem = '';
+      state.joint = '指定なし';
       state.directions = [];
       state.minorData = null;
 
@@ -918,9 +1057,15 @@
       if (filmCountInput) setNativeValue(filmCountInput, '');
       if (configurationInput) setNativeValue(configurationInput, '');
 
+      // サブアイテム・関節・方向をリセット
+      subItemSelect.style.display = 'none';
+      subItemSelect.disabled = true;
+      row2.style.display = 'none';
+      row3.style.display = 'none';
+      directionButtonsContainer.innerHTML = '';
+      jointRadiosContainer.innerHTML = '';
+
       if (!minor) {
-        row2.style.display = 'none';
-        directionButtonsContainer.innerHTML = '';
         updateNoteInput();
         return;
       }
@@ -928,7 +1073,16 @@
       const data = getDataForModality(state.modality);
       if (data && data[state.major] && data[state.major][minor]) {
         state.minorData = data[state.major][minor];
-        renderDirectionButtons(state.minorData.directions || []);
+
+        // subItemsがある場合（手指・足趾）
+        if (state.minorData.subItems) {
+          const placeholder = minor === '手指' ? '指を選択' : '趾を選択';
+          populateSubItemSelect(state.minorData.subItems, placeholder);
+          // 方向ボタンは非表示のまま（subItem選択後に表示）
+        } else {
+          // subItemsがない場合は従来通り
+          renderDirectionButtons(state.minorData.directions || []);
+        }
 
         // 部位を自動入力
         await updateBodySite();
@@ -937,6 +1091,39 @@
         if (state.modality === 'XP' && configurationInput && state.minorData.defaultCondition) {
           setNativeValue(configurationInput, state.minorData.defaultCondition);
           logger.info(`UI ${index + 1}: 撮影条件（初期）を ${state.minorData.defaultCondition} に設定`);
+        }
+      }
+      updateNoteInput();
+    });
+
+    // サブアイテム（指/趾）選択時
+    subItemSelect.addEventListener('change', () => {
+      const subItem = subItemSelect.value;
+      state.subItem = subItem;
+      state.joint = '指定なし';
+      state.directions = [];
+
+      // 枚数を空欄にする
+      if (filmCountInput) setNativeValue(filmCountInput, '');
+
+      row2.style.display = 'none';
+      row3.style.display = 'none';
+      directionButtonsContainer.innerHTML = '';
+      jointRadiosContainer.innerHTML = '';
+
+      if (!subItem || !state.minorData?.subItems) {
+        updateNoteInput();
+        return;
+      }
+
+      const subItemData = state.minorData.subItems[subItem];
+      if (subItemData) {
+        // 方向ボタンを描画
+        renderDirectionButtons(subItemData.directions || state.minorData.directions || []);
+
+        // 関節ラジオボタンを描画（showJointSelector !== false の場合）
+        if (state.minorData.joints && subItemData.showJointSelector !== false) {
+          renderJointRadios(state.minorData.joints, subItemData.showJointSelector);
         }
       }
       updateNoteInput();
