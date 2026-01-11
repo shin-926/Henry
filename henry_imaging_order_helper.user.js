@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         画像オーダー入力支援
 // @namespace    https://henry-app.jp/
-// @version      1.12.3
+// @version      1.13.0
 // @description  画像照射オーダーモーダルに部位・方向選択UIを追加（複数内容対応）
 // @author       Henry UI Lab
 // @match        https://henry-app.jp/*
@@ -16,7 +16,6 @@
   const CONFIG = {
     SCRIPT_NAME: 'ImagingOrderHelper',
     MODALITY_SELECTOR: 'select[aria-label="モダリティ"]',
-    NOTE_INPUT_SELECTOR: 'input[name*=".note"]',
     CONTAINER_CLASS: 'henry-imaging-helper-container'
   };
 
@@ -340,7 +339,7 @@
     logger = utils.createLogger(CONFIG.SCRIPT_NAME);
     const cleaner = utils.createCleaner();
 
-    logger.info('スクリプト初期化 (v1.12.1)');
+    logger.info('スクリプト初期化 (v1.13.0)');
 
     utils.subscribeNavigation(cleaner, () => {
       logger.info('ページ遷移検出 -> 再セットアップ');
@@ -394,59 +393,59 @@
   }
 
   // ==========================================
+  // モーダル内容の処理（モダリティ登録・補足欄検出）
+  // ==========================================
+  function processModalContent() {
+    if (!isImagingOrderModal()) return;
+
+    const modalitySelect = document.querySelector(CONFIG.MODALITY_SELECTOR);
+    if (!modalitySelect) return;
+
+    // モダリティ選択のイベント登録（一度だけ）
+    if (!modalitySelect.dataset.hasModalityListener) {
+      modalitySelect.dataset.hasModalityListener = 'true';
+      modalitySelect.addEventListener('change', async () => {
+        const modalityValue = modalitySelect.value;
+        currentModality = MODALITY_MAP[modalityValue] || '';
+        logger.info(`モダリティ変更: ${currentModality}`);
+        modalityChangeCallbacks.forEach(cb => cb(currentModality));
+        hideAutoFilledFields();
+        if (currentModality === 'XP' || currentModality === 'MD') {
+          await setBodyPositionToArbitrary();
+        }
+        if (currentModality === 'MD') {
+          await setBodySiteToForearm();
+        }
+      });
+
+      // 初期値を設定
+      currentModality = MODALITY_MAP[modalitySelect.value] || '';
+      logger.info(`初期モダリティ: ${currentModality}`);
+      hideAutoFilledFields();
+      if (currentModality === 'XP' || currentModality === 'MD') {
+        setBodyPositionToArbitrary();
+      }
+      if (currentModality === 'MD') {
+        setBodySiteToForearm();
+      }
+    }
+
+    // 「補足」ラベルを持つフォームグループ内のinputを検出
+    const noteInputs = findNoteInputs();
+    noteInputs.forEach((noteInput, index) => {
+      if (!noteInput.dataset.hasHelperUI) {
+        logger.info(`補足欄 ${index + 1} を検出 (name=${noteInput.name})`);
+        setTimeout(() => injectHelperUI(noteInput, index), 50);
+      }
+    });
+  }
+
+  // ==========================================
   // ページ監視セットアップ
   // ==========================================
   function setupPage(cleaner) {
     const observer = new MutationObserver(() => {
-      // 照射オーダーモーダルでなければスキップ
-      if (!isImagingOrderModal()) return;
-
-      const modalitySelect = document.querySelector(CONFIG.MODALITY_SELECTOR);
-      if (!modalitySelect) return;
-
-      // モダリティ選択のイベント登録（一度だけ）
-      if (!modalitySelect.dataset.hasModalityListener) {
-        modalitySelect.dataset.hasModalityListener = 'true';
-        modalitySelect.addEventListener('change', async () => {
-          const modalityValue = modalitySelect.value;
-          currentModality = MODALITY_MAP[modalityValue] || '';
-          logger.info(`モダリティ変更: ${currentModality}`);
-          // 全UIに通知
-          modalityChangeCallbacks.forEach(cb => cb(currentModality));
-          // 自動入力フィールドを非表示
-          hideAutoFilledFields();
-          // 単純撮影(XP)・骨塩定量(MD)のとき体位を「任意」に設定
-          if (currentModality === 'XP' || currentModality === 'MD') {
-            await setBodyPositionToArbitrary();
-          }
-          // 骨塩定量(MD)のとき部位を「前腕」に設定
-          if (currentModality === 'MD') {
-            await setBodySiteToForearm();
-          }
-        });
-        // 初期値を設定
-        currentModality = MODALITY_MAP[modalitySelect.value] || '';
-        logger.info(`初期モダリティ: ${currentModality}`);
-        // 自動入力フィールドを非表示
-        hideAutoFilledFields();
-        // 単純撮影(XP)・骨塩定量(MD)のとき体位を「任意」に設定
-        if (currentModality === 'XP' || currentModality === 'MD') {
-          setBodyPositionToArbitrary();
-        }
-        // 骨塩定量(MD)のとき部位を「前腕」に設定
-        if (currentModality === 'MD') {
-          setBodySiteToForearm();
-        }
-      }
-
-      // 「補足」ラベルを持つフォームグループ内のinputを検出
-      const noteInputs = findNoteInputs();
-      noteInputs.forEach((noteInput, index) => {
-        if (!noteInput.dataset.hasHelperUI) {
-          logger.info(`補足欄 ${index + 1} を検出 (name=${noteInput.name})`);
-          setTimeout(() => injectHelperUI(noteInput, index), 50);
-        }
-      });
+      processModalContent();
     });
 
     observer.observe(document.body, { childList: true, subtree: true });
@@ -458,50 +457,7 @@
     });
 
     // 初回チェック
-    if (!isImagingOrderModal()) return;
-
-    const modalitySelect = document.querySelector(CONFIG.MODALITY_SELECTOR);
-    if (modalitySelect) {
-      if (!modalitySelect.dataset.hasModalityListener) {
-        modalitySelect.dataset.hasModalityListener = 'true';
-        modalitySelect.addEventListener('change', async () => {
-          const modalityValue = modalitySelect.value;
-          currentModality = MODALITY_MAP[modalityValue] || '';
-          logger.info(`モダリティ変更: ${currentModality}`);
-          modalityChangeCallbacks.forEach(cb => cb(currentModality));
-          // 自動入力フィールドを非表示
-          hideAutoFilledFields();
-          // 単純撮影(XP)・骨塩定量(MD)のとき体位を「任意」に設定
-          if (currentModality === 'XP' || currentModality === 'MD') {
-            await setBodyPositionToArbitrary();
-          }
-          // 骨塩定量(MD)のとき部位を「前腕」に設定
-          if (currentModality === 'MD') {
-            await setBodySiteToForearm();
-          }
-        });
-        currentModality = MODALITY_MAP[modalitySelect.value] || '';
-        logger.info(`初期モダリティ: ${currentModality}`);
-        // 自動入力フィールドを非表示
-        hideAutoFilledFields();
-        // 単純撮影(XP)・骨塩定量(MD)のとき体位を「任意」に設定
-        if (currentModality === 'XP' || currentModality === 'MD') {
-          setBodyPositionToArbitrary();
-        }
-        // 骨塩定量(MD)のとき部位を「前腕」に設定
-        if (currentModality === 'MD') {
-          setBodySiteToForearm();
-        }
-      }
-
-      const noteInputs = findNoteInputs();
-      noteInputs.forEach((noteInput, index) => {
-        if (!noteInput.dataset.hasHelperUI) {
-          logger.info(`初回: 補足欄 ${index + 1} を検出 (name=${noteInput.name})`);
-          setTimeout(() => injectHelperUI(noteInput, index), 50);
-        }
-      });
-    }
+    processModalContent();
   }
 
   // ==========================================
