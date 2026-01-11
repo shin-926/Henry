@@ -466,7 +466,6 @@ try {
   - [x] v3.8.0: 全件処理（毎回最初のページから再取得）対応 ✅
   - [x] v3.9.0: 承認完了後に画面を自動更新（Apollo Client refetch） ✅
   - [x] v3.11.0: 取消確認（CONFIRM_REVOCATION / ORDER_STATUS_REVOKED）対応 ✅
-- [ ] **GAS実装**: 主治医意見書テンプレート埋め込み処理（henry_ikensho_form用）
 - [ ] **調査**: ORDER_STATUS_REVOKED の承認APIを特定する
   - 現状: CONFIRM_REVOCATION アクションで処理しているが、承認できずに残るケースがある
   - 調査方法: devtoolで手動承認時に飛ぶAPIを確認

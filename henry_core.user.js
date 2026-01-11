@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry Core
 // @namespace    https://henry-app.jp/
-// @version      2.9.12
+// @version      2.10.0
 // @description  Henry スクリプト実行基盤 (GoogleAuth統合 / Google Docs対応)
 // @match        https://henry-app.jp/*
 // @match        https://docs.google.com/*
@@ -37,9 +37,6 @@
   const CONFIG = {
     // 単一施設運用を前提としたハードコード（複数施設対応は想定しない）
     ORG_UUID: 'ce6b556b-2a8d-4fce-b8dd-89ba638fc825', // マオカ病院
-    DB_NAME: 'HenryAPIHashes',
-    DB_VERSION: 2,
-    STORE_NAME: 'hashes',
     BASE_URL: 'https://henry-app.jp',
 
     // GoogleAuth設定（GM_storageから読み込み、未設定なら空）
@@ -55,104 +52,10 @@
     GOOGLE_CREDENTIALS_KEY: 'google_oauth_credentials'
   };
 
-  console.log('[Henry Core] Initializing v2.9.12...');
+  console.log('[Henry Core] Initializing v2.10.0...');
 
   // ==========================================
-  // 1. IndexedDB Manager (ハッシュ + エンドポイント管理)
-  // TODO: フルクエリ方式 (query()) への移行完了後、このセクションは削除予定
-  // ==========================================
-  const DB = {
-    open: () => new Promise((resolve, reject) => {
-      const req = indexedDB.open(CONFIG.DB_NAME, CONFIG.DB_VERSION);
-      req.onerror = () => reject(req.error);
-      req.onsuccess = () => resolve(req.result);
-      req.onupgradeneeded = (e) => {
-        const db = e.target.result;
-        if (db.objectStoreNames.contains(CONFIG.STORE_NAME)) {
-          db.deleteObjectStore(CONFIG.STORE_NAME);
-          console.log('[Henry Core] 旧形式のハッシュDBをクリアしました');
-        }
-        db.createObjectStore(CONFIG.STORE_NAME, { keyPath: 'operationName' });
-      };
-    }),
-
-    put: async (opName, hash, endpoint) => {
-      const db = await DB.open();
-      return new Promise((resolve) => {
-        const tx = db.transaction(CONFIG.STORE_NAME, 'readwrite');
-        tx.objectStore(CONFIG.STORE_NAME).put({
-          operationName: opName,
-          hash,
-          endpoint,
-          updatedAt: Date.now()
-        });
-        tx.oncomplete = () => resolve();
-      });
-    },
-
-    get: async (opName) => {
-      const db = await DB.open();
-      return new Promise((resolve) => {
-        const req = db.transaction(CONFIG.STORE_NAME, 'readonly')
-          .objectStore(CONFIG.STORE_NAME).get(opName);
-        req.onsuccess = () => {
-          const result = req.result;
-          if (result) {
-            resolve({ hash: result.hash, endpoint: result.endpoint });
-          } else {
-            resolve(null);
-          }
-        };
-        req.onerror = () => resolve(null);
-      });
-    },
-
-    getAll: async () => {
-      const db = await DB.open();
-      return new Promise((resolve) => {
-        const req = db.transaction(CONFIG.STORE_NAME, 'readonly')
-          .objectStore(CONFIG.STORE_NAME).getAll();
-        req.onsuccess = () => {
-          const map = {};
-          req.result.forEach(r => {
-            map[r.operationName] = { hash: r.hash, endpoint: r.endpoint };
-          });
-          resolve(map);
-        };
-      });
-    },
-
-    clear: async () => {
-      const db = await DB.open();
-      return new Promise((resolve) => {
-        const tx = db.transaction(CONFIG.STORE_NAME, 'readwrite');
-        tx.objectStore(CONFIG.STORE_NAME).clear();
-        tx.oncomplete = () => {
-          console.log('[Henry Core] ハッシュDBをクリアしました');
-          resolve();
-        };
-      });
-    }
-  };
-
-  // ==========================================
-  // 2. Hash Cache (メモリキャッシュ)
-  // TODO: フルクエリ方式 (query()) への移行完了後、このセクションは削除予定
-  // ==========================================
-  const hashCache = new Map();
-
-  // 起動時にIndexedDBから全ハッシュを読み込む
-  DB.getAll().then(all => {
-    Object.entries(all).forEach(([opName, data]) => {
-      hashCache.set(opName, { hash: data.hash, endpoint: data.endpoint });
-    });
-    console.log(`[Henry Core] Loaded ${hashCache.size} hashes into memory`);
-  }).catch(e => {
-    console.warn('[Henry Core] Failed to load hashes into memory', e);
-  });
-
-  // ==========================================
-  // 3. Auth Manager (認証トークン)
+  // 1. Auth Manager (認証トークン)
   // ==========================================
   const safeDecodeJWT = (token) => {
     try {
@@ -225,7 +128,7 @@
   };
 
   // ==========================================
-  // 4. Context Manager (動的コンテキスト)
+  // 2. Context Manager (動的コンテキスト)
   // ==========================================
   const Context = {
     _myUuid: null,
@@ -284,60 +187,12 @@
   };
 
   // ==========================================
-  // 5. Fetch Hook (デュアルエンドポイント対応)
-  // TODO: ハッシュ収集機能はフルクエリ方式 (query()) への移行完了後に削除予定
+  // 3. Original Fetch (query()で使用)
   // ==========================================
   const originalFetch = window.fetch;
-  window.fetch = function(url, options) {
-    let urlStr = '';
-    if (typeof url === 'string') {
-      urlStr = url;
-    } else if (url instanceof Request) {
-      urlStr = url.url;
-    }
-
-    if (urlStr && options?.body) {
-      let endpoint = null;
-      if (urlStr.includes('/graphql-v2')) {
-        endpoint = '/graphql-v2';
-      } else if (urlStr.includes('/graphql')) {
-        endpoint = '/graphql';
-      }
-
-      if (endpoint) {
-        try {
-          const rawBody = JSON.parse(options.body);
-          const requests = Array.isArray(rawBody) ? rawBody : [rawBody];
-
-          requests.forEach(body => {
-            if (body.operationName && body.extensions?.persistedQuery?.sha256Hash) {
-              const hash = body.extensions.persistedQuery.sha256Hash;
-              const opName = body.operationName;
-
-              // メモリキャッシュを確認（IndexedDBアクセス不要）
-              const cached = hashCache.get(opName);
-              if (cached && cached.hash === hash && cached.endpoint === endpoint) {
-                return;  // 変更なし → スキップ
-              }
-
-              // 新規 or 更新 → IndexedDBに保存
-              DB.put(opName, hash, endpoint)
-                .then(() => {
-                  hashCache.set(opName, { hash, endpoint });
-                  console.log(`[Henry Core] Saved: ${opName} → ${endpoint}`);
-                })
-                .catch(e => console.warn('[Henry Core] Hash save failed', e));
-            }
-          });
-
-        } catch (_) {}
-      }
-    }
-    return originalFetch.apply(this, arguments);
-  };
 
   // ==========================================
-  // 6. Navigation Hook (SPA対応)
+  // 4. Navigation Hook (SPA対応)
   // ==========================================
   if (!window.__henry_nav_hook__) {
     window.__henry_nav_hook__ = true;
@@ -354,7 +209,7 @@
   }
 
   // ==========================================
-  // 7. UI Manager (HenryUI)
+  // 5. UI Manager (HenryUI)
   // ==========================================
   const UI = {
     _initialized: false,
@@ -554,7 +409,7 @@
   };
 
   // ==========================================
-  // 8. Utilities
+  // 6. Utilities
   // ==========================================
   const Utils = {
     sleep: (ms) => new Promise(r => setTimeout(r, ms)),
@@ -658,7 +513,7 @@
   };
 
   // ==========================================
-  // 9. GoogleAuth Module (Google OAuth認証)
+  // 7. GoogleAuth Module (Google OAuth認証)
   // ==========================================
   const GoogleAuth = {
     // 設定チェック
@@ -898,12 +753,12 @@
   };
 
   // ==========================================
-  // 10. Plugin Registry
+  // 8. Plugin Registry
   // ==========================================
   const pluginRegistry = [];
 
   // ==========================================
-  // 11. Public API
+  // 9. Public API
   // ==========================================
   pageWindow.HenryCore = {
     // モジュール（GoogleAuth等）
@@ -913,58 +768,7 @@
 
     plugins: pluginRegistry,
 
-    // @deprecated: query() メソッドを使用してください。call() は後方互換性のために残されています。
-    call: async (operationName, variables) => {
-      // メモリキャッシュを優先、なければIndexedDB
-      let entry = hashCache.get(operationName);
-      if (!entry) {
-        entry = await DB.get(operationName);
-      }
-
-      if (!entry) {
-        UI.showModal({
-          title: '準備が必要です',
-          content: `機能「${operationName}」を使用するための情報が不足しています。\n\n【解決策】\nHenryの画面で一度、該当する操作（ファイル一覧の表示、詳細画面を開くなど）を行ってから再試行してください。`,
-          actions: [{ label: 'OK', onClick: () => {} }]
-        });
-        throw new Error(`${operationName} のハッシュが見つかりません`);
-      }
-
-      const token = await Auth.getToken();
-      if (!token) {
-        throw new Error('有効なトークンがありません。再ログインしてください。');
-      }
-
-      const url = CONFIG.BASE_URL + entry.endpoint;
-
-      const res = await originalFetch(url, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`,
-          'x-auth-organization-uuid': CONFIG.ORG_UUID
-        },
-        body: JSON.stringify({
-          operationName,
-          variables,
-          extensions: { persistedQuery: { version: 1, sha256Hash: entry.hash } }
-        })
-      });
-
-      if (!res.ok) {
-        throw new Error(`API Error: ${res.status}`);
-      }
-
-      const json = await res.json();
-
-      if (json.errors && json.errors.length > 0) {
-        throw new Error(json.errors[0].message || 'GraphQL Error');
-      }
-
-      return json;
-    },
-
-    // フルクエリ方式（APQ不要、ハッシュ事前収集不要）
+    // フルクエリ方式でGraphQL APIを呼び出す
     query: async (queryString, variables = {}) => {
       const token = await Auth.getToken();
       if (!token) {
@@ -1044,32 +848,14 @@
 
     getPatientUuid: Context.getPatientUuid,
     getToken: Auth.getToken,
-    getHashes: DB.getAll,
     tokenStatus: Auth.tokenStatus,
-
-    dumpHashes: async () => {
-      const hashes = await DB.getAll();
-      const rows = Object.entries(hashes).map(([op, data]) => ({
-        operationName: op,
-        endpoint: data.endpoint,
-        hash: data.hash.slice(0, 16) + '...'
-      }));
-      console.table(rows);
-      return hashes;
-    },
-
-    clearHashes: async () => {
-      await DB.clear();
-      hashCache.clear();
-      console.log('[Henry Core] 全ハッシュをクリアしました。Henryを操作して再収集してください。');
-    },
 
     utils: Utils,
     ui: UI
   };
 
   // ==========================================
-  // 12. 初期化
+  // 10. 初期化
   // ==========================================
 
   // 認証コールバック処理（Henryドメインのみ）
@@ -1127,10 +913,10 @@
       UI.init();
       checkForAuthCode();
     }
-    console.log('[Henry Core] Ready v2.9.12 (Henry mode)');
+    console.log('[Henry Core] Ready v2.10.0 (Henry mode)');
 
   } else if (isGoogleDocs) {
     // Google Docsドメイン：GoogleAuthのみ
-    console.log('[Henry Core] Ready v2.9.12 (Google Docs mode - GoogleAuth only)');
+    console.log('[Henry Core] Ready v2.10.0 (Google Docs mode - GoogleAuth only)');
   }
 })();
