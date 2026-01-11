@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         画像オーダー入力支援
 // @namespace    https://henry-app.jp/
-// @version      1.9.0
+// @version      1.12.1
 // @description  画像照射オーダーモーダルに部位・方向選択UIを追加（複数内容対応）
 // @author       Henry UI Lab
 // @match        https://henry-app.jp/*
@@ -340,7 +340,7 @@
     logger = utils.createLogger(CONFIG.SCRIPT_NAME);
     const cleaner = utils.createCleaner();
 
-    logger.info('スクリプト初期化 (v1.9.0)');
+    logger.info('スクリプト初期化 (v1.12.1)');
 
     utils.subscribeNavigation(cleaner, () => {
       logger.info('ページ遷移検出 -> 再セットアップ');
@@ -396,17 +396,29 @@
           logger.info(`モダリティ変更: ${currentModality}`);
           // 全UIに通知
           modalityChangeCallbacks.forEach(cb => cb(currentModality));
+          // 自動入力フィールドを非表示
+          hideAutoFilledFields();
           // 単純撮影(XP)・骨塩定量(MD)のとき体位を「任意」に設定
           if (currentModality === 'XP' || currentModality === 'MD') {
             await setBodyPositionToArbitrary();
+          }
+          // 骨塩定量(MD)のとき部位を「前腕」に設定
+          if (currentModality === 'MD') {
+            await setBodySiteToForearm();
           }
         });
         // 初期値を設定
         currentModality = MODALITY_MAP[modalitySelect.value] || '';
         logger.info(`初期モダリティ: ${currentModality}`);
-        // 初期状態でXP/MDの場合も体位を設定
+        // 自動入力フィールドを非表示
+        hideAutoFilledFields();
+        // 単純撮影(XP)・骨塩定量(MD)のとき体位を「任意」に設定
         if (currentModality === 'XP' || currentModality === 'MD') {
           setBodyPositionToArbitrary();
+        }
+        // 骨塩定量(MD)のとき部位を「前腕」に設定
+        if (currentModality === 'MD') {
+          setBodySiteToForearm();
         }
       }
 
@@ -438,16 +450,28 @@
           currentModality = MODALITY_MAP[modalityValue] || '';
           logger.info(`モダリティ変更: ${currentModality}`);
           modalityChangeCallbacks.forEach(cb => cb(currentModality));
+          // 自動入力フィールドを非表示
+          hideAutoFilledFields();
           // 単純撮影(XP)・骨塩定量(MD)のとき体位を「任意」に設定
           if (currentModality === 'XP' || currentModality === 'MD') {
             await setBodyPositionToArbitrary();
           }
+          // 骨塩定量(MD)のとき部位を「前腕」に設定
+          if (currentModality === 'MD') {
+            await setBodySiteToForearm();
+          }
         });
         currentModality = MODALITY_MAP[modalitySelect.value] || '';
         logger.info(`初期モダリティ: ${currentModality}`);
-        // 初期状態でXP/MDの場合も体位を設定
+        // 自動入力フィールドを非表示
+        hideAutoFilledFields();
+        // 単純撮影(XP)・骨塩定量(MD)のとき体位を「任意」に設定
         if (currentModality === 'XP' || currentModality === 'MD') {
           setBodyPositionToArbitrary();
+        }
+        // 骨塩定量(MD)のとき部位を「前腕」に設定
+        if (currentModality === 'MD') {
+          setBodySiteToForearm();
         }
       }
 
@@ -668,6 +692,68 @@
   }
 
   // ==========================================
+  // 部位を「前腕」に設定（骨塩定量検査のとき）
+  // ==========================================
+  async function setBodySiteToForearm() {
+    logger.info('部位設定(MD): 開始');
+
+    // DOMの準備を待つ
+    await new Promise(r => setTimeout(r, 300));
+
+    const bodySiteSelectBox = document.querySelector('[data-testid="BodySiteForm__FilterableSelectBox"]');
+    logger.info('部位設定(MD): SelectBox =', !!bodySiteSelectBox);
+
+    if (!bodySiteSelectBox) {
+      logger.warn('部位設定(MD): SelectBoxが見つかりません');
+      return;
+    }
+
+    const result = await setFilterableSelectBoxValue(bodySiteSelectBox, '前腕');
+    logger.info('部位設定(MD): 結果 =', result);
+  }
+
+  // ==========================================
+  // 自動入力フィールド（部位・体位・枚数・撮影条件）を非表示にする
+  // ==========================================
+  function hideAutoFilledFields() {
+    const styleId = 'henry-imaging-helper-hide-fields';
+    if (document.getElementById(styleId)) {
+      return;
+    }
+
+    const style = document.createElement('style');
+    style.id = styleId;
+    style.textContent = `
+      /* 部位フォームを非表示 */
+      div:has(> div > [data-testid="BodySiteForm__FilterableSelectBox"]) {
+        display: none !important;
+      }
+      /* 体位フォームを非表示 */
+      div:has(> div > [data-testid="BodyPositionForm__ChipInput"]) {
+        display: none !important;
+      }
+      /* 側性フォームを非表示 */
+      div:has(> div > div > select[name*="laterality"]) {
+        display: none !important;
+      }
+      /* 枚数フォームを非表示 */
+      div:has(> div > div > input[name*="filmCount"]) {
+        display: none !important;
+      }
+      /* 撮影条件フォームを非表示 */
+      div:has(> div > div > input[name*="configuration"]) {
+        display: none !important;
+      }
+      /* サイズフォームを非表示（骨塩定量用） */
+      div:has(> div > select > option[value*="FILM_SIZE_TYPE"]) {
+        display: none !important;
+      }
+    `;
+    document.head.appendChild(style);
+    logger.info('フィールド非表示CSS: 適用完了');
+  }
+
+  // ==========================================
   // ヘルパーUI注入（各補足欄ごと）
   // ==========================================
   function injectHelperUI(noteInput, index) {
@@ -693,7 +779,8 @@
       subItem: '',       // 指/趾の選択
       joint: '指定なし', // 関節の選択
       directions: [],
-      minorData: null    // 小分類の詳細データ（bodySite, defaultCondition等）
+      minorData: null,   // 小分類の詳細データ（bodySite, defaultCondition等）
+      mdForearm: ''      // 骨塩定量用：右前腕/左前腕
     };
 
     // --- コンテナ ---
@@ -711,15 +798,71 @@
       border: 1px solid var(--henry-border, #e0e0e0);
     `;
 
+    // --- 行MD: 骨塩定量用（右前腕/左前腕） ---
+    const rowMD = document.createElement('div');
+    rowMD.style.cssText = `
+      display: none;
+      align-items: center;
+      gap: 8px;
+    `;
+
+    const mdLabel = document.createElement('span');
+    mdLabel.textContent = '測定部位:';
+    mdLabel.style.cssText = `
+      font-size: 13px;
+      color: var(--henry-text-medium, #666);
+    `;
+    rowMD.appendChild(mdLabel);
+
+    const mdButtonsContainer = document.createElement('div');
+    mdButtonsContainer.style.cssText = 'display: flex; gap: 6px;';
+
+    ['右前腕', '左前腕'].forEach(label => {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.textContent = label;
+      btn.dataset.forearm = label;
+      btn.style.cssText = `
+        padding: 4px 16px;
+        font-size: 13px;
+        border: 1px solid var(--henry-border, #ccc);
+        border-radius: var(--henry-radius, 4px);
+        background: var(--henry-bg-base, #fff);
+        color: var(--henry-text-high, #333);
+        cursor: pointer;
+        transition: all 0.15s;
+      `;
+
+      btn.addEventListener('click', () => {
+        // 他のボタンの選択を解除
+        mdButtonsContainer.querySelectorAll('button').forEach(b => {
+          b.dataset.selected = 'false';
+          b.style.background = 'var(--henry-bg-base, #fff)';
+          b.style.borderColor = 'var(--henry-border, #ccc)';
+          b.style.color = 'var(--henry-text-high, #333)';
+        });
+        // このボタンを選択
+        btn.dataset.selected = 'true';
+        btn.style.background = 'var(--henry-primary, rgb(0, 204, 146))';
+        btn.style.borderColor = 'var(--henry-primary, rgb(0, 204, 146))';
+        btn.style.color = '#fff';
+        state.mdForearm = label;
+        setNativeValue(noteInput, label);
+      });
+
+      mdButtonsContainer.appendChild(btn);
+    });
+
+    rowMD.appendChild(mdButtonsContainer);
+
     // --- 行1: 大分類・小分類・サブアイテムドロップダウン ---
     const row1 = document.createElement('div');
     row1.style.cssText = 'display: flex; gap: 8px; align-items: center; flex-wrap: wrap;';
 
     const majorSelect = createSelect('大分類');
-    const minorSelect = createSelect('小分類');
-    minorSelect.disabled = true;
+    const minorSelect = createSelect('小分類', true);  // 初期状態で disabled
 
-    const lateralitySelect = createSelect('側性');
+    const lateralitySelect = createSelect('側性', true);  // 初期状態で disabled
     lateralitySelect.innerHTML = `
       <option value="">側性</option>
       <option value="右">右</option>
@@ -727,11 +870,9 @@
       <option value="両">両</option>
     `;
     lateralitySelect.style.display = 'none';
-    lateralitySelect.disabled = true;
 
-    const subItemSelect = createSelect('指/趾');
+    const subItemSelect = createSelect('指/趾', true);  // 初期状態で disabled
     subItemSelect.style.display = 'none';
-    subItemSelect.disabled = true;
 
     row1.appendChild(majorSelect);
     row1.appendChild(minorSelect);
@@ -771,7 +912,7 @@
     `;
 
     const jointLabel = document.createElement('span');
-    jointLabel.textContent = '関節を指定:';
+    jointLabel.textContent = '関節:';
     jointLabel.style.cssText = `
       font-size: 13px;
       color: var(--henry-text-medium, #666);
@@ -782,6 +923,7 @@
     jointRadiosContainer.style.cssText = 'display: flex; gap: 12px;';
     row3.appendChild(jointRadiosContainer);
 
+    container.appendChild(rowMD);
     container.appendChild(row1);
     container.appendChild(row2);
     container.appendChild(row3);
@@ -918,6 +1060,7 @@
       if (!subItems || Object.keys(subItems).length === 0) {
         subItemSelect.style.display = 'none';
         subItemSelect.disabled = true;
+        updateAllSelectBorders();
         return;
       }
       Object.keys(subItems).forEach(item => {
@@ -928,6 +1071,7 @@
       });
       subItemSelect.style.display = 'block';
       subItemSelect.disabled = false;
+      updateAllSelectBorders();
     };
 
     // 関節ラジオボタンを描画
@@ -980,6 +1124,7 @@
         majorSelect.appendChild(opt);
       });
       majorSelect.disabled = false;
+      updateAllSelectBorders();
     };
 
     const populateMinorSelect = (items) => {
@@ -991,6 +1136,7 @@
         minorSelect.appendChild(opt);
       });
       minorSelect.disabled = false;
+      updateAllSelectBorders();
     };
 
     const resetUI = () => {
@@ -1001,6 +1147,7 @@
       state.joint = '指定なし';
       state.directions = [];
       state.minorData = null;
+      state.mdForearm = '';
       majorSelect.innerHTML = '<option value="">大分類</option>';
       majorSelect.disabled = true;
       minorSelect.innerHTML = '<option value="">小分類</option>';
@@ -1011,18 +1158,45 @@
       subItemSelect.innerHTML = '<option value="">指/趾</option>';
       subItemSelect.style.display = 'none';
       subItemSelect.disabled = true;
+      rowMD.style.display = 'none';
+      row1.style.display = 'flex';
       row2.style.display = 'none';
       row3.style.display = 'none';
       directionButtonsContainer.innerHTML = '';
       jointRadiosContainer.innerHTML = '';
+      // MD用ボタンの選択解除
+      mdButtonsContainer.querySelectorAll('button').forEach(b => {
+        b.dataset.selected = 'false';
+        b.style.background = 'var(--henry-bg-base, #fff)';
+        b.style.borderColor = 'var(--henry-border, #ccc)';
+        b.style.color = 'var(--henry-text-high, #333)';
+      });
+      // 枠色を更新
+      updateAllSelectBorders();
+    };
+
+    // すべてのセレクトボックスの枠色を更新
+    const updateAllSelectBorders = () => {
+      updateSelectBorder(majorSelect);
+      updateSelectBorder(minorSelect);
+      updateSelectBorder(lateralitySelect);
+      updateSelectBorder(subItemSelect);
     };
 
     const handleModalityChange = (modality) => {
       state.modality = modality;
       resetUI();
 
-      if (!modality || modality === 'MD') {
+      if (!modality) {
         container.style.display = 'none';
+        return;
+      }
+
+      // 骨塩定量の場合は専用UIを表示
+      if (modality === 'MD') {
+        container.style.display = 'flex';
+        rowMD.style.display = 'flex';
+        row1.style.display = 'none';
         return;
       }
 
@@ -1066,6 +1240,7 @@
 
       if (!major) {
         updateNoteInput();
+        updateAllSelectBorders();
         return;
       }
 
@@ -1080,6 +1255,7 @@
         populateMinorSelect(data[major]);
       }
       updateNoteInput();
+      updateAllSelectBorders();
     });
 
     lateralitySelect.addEventListener('change', () => {
@@ -1093,6 +1269,7 @@
         setNativeValue(filmCountInput, String(count));
       }
       updateNoteInput();
+      updateAllSelectBorders();
     });
 
     minorSelect.addEventListener('change', async () => {
@@ -1117,6 +1294,7 @@
 
       if (!minor) {
         updateNoteInput();
+        updateAllSelectBorders();
         return;
       }
 
@@ -1144,6 +1322,7 @@
         }
       }
       updateNoteInput();
+      updateAllSelectBorders();
     });
 
     // サブアイテム（指/趾）選択時
@@ -1163,6 +1342,7 @@
 
       if (!subItem || !state.minorData?.subItems) {
         updateNoteInput();
+        updateAllSelectBorders();
         return;
       }
 
@@ -1177,13 +1357,13 @@
         }
       }
       updateNoteInput();
+      updateAllSelectBorders();
     });
 
     // --- DOM挿入（補足フォームグループの上） ---
     // 「補足」ラベルを含むフォームグループを探す
     let formGroup = noteInput.closest('div[class*="sc-d2f77e68"]');
     if (!formGroup) {
-      // フォールバック: 親を遡って適切な挿入位置を探す
       formGroup = noteInput.parentElement?.parentElement;
     }
     if (formGroup && formGroup.parentElement) {
@@ -1198,7 +1378,7 @@
     if (modalitySelect) {
       const initialModality = MODALITY_MAP[modalitySelect.value] || '';
       logger.info(`UI ${index + 1} 初期モダリティ: ${initialModality}`);
-      if (initialModality && initialModality !== 'MD') {
+      if (initialModality) {
         handleModalityChange(initialModality);
       }
       // 最初のUIのときのみ、XP/MDなら体位を設定
@@ -1211,12 +1391,18 @@
   // ==========================================
   // ユーティリティ: セレクト作成
   // ==========================================
-  function createSelect(placeholder) {
+  const EMPTY_BORDER_COLOR = '#f5a623';  // 未入力時のオレンジ
+  const NORMAL_BORDER_COLOR = 'var(--henry-border, #ccc)';  // 通常時
+
+  function createSelect(placeholder, initiallyDisabled = false) {
     const select = document.createElement('select');
+    const initialBorder = initiallyDisabled ? NORMAL_BORDER_COLOR : EMPTY_BORDER_COLOR;
     select.style.cssText = `
       height: 32px;
-      min-width: 120px;
-      border: 1px solid var(--henry-border, #ccc);
+      min-width: 80px;
+      flex: 1;
+      max-width: 150px;
+      border: 1px solid ${initialBorder};
       border-radius: var(--henry-radius, 4px);
       background-color: var(--henry-bg-base, #fff);
       color: var(--henry-text-high, #333);
@@ -1226,11 +1412,30 @@
       cursor: pointer;
       outline: none;
     `;
+    select.disabled = initiallyDisabled;
     const opt = document.createElement('option');
     opt.value = '';
     opt.textContent = placeholder;
     select.appendChild(opt);
+
+    // 値が変更されたら枠の色を更新
+    select.addEventListener('change', () => {
+      updateSelectBorder(select);
+    });
+
     return select;
+  }
+
+  // セレクトボックスの枠色を更新
+  function updateSelectBorder(select) {
+    // disabled の場合は通常色
+    if (select.disabled) {
+      select.style.borderColor = NORMAL_BORDER_COLOR;
+    } else if (select.value) {
+      select.style.borderColor = NORMAL_BORDER_COLOR;
+    } else {
+      select.style.borderColor = EMPTY_BORDER_COLOR;
+    }
   }
 
   init();
