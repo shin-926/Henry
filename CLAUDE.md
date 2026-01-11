@@ -406,6 +406,7 @@ try {
   - `henrySource`: 作成元識別子（例: `drive-direct`）
 - **YOU MUST**: ユーザーから「クラッシュした」と報告を受けた場合は、まず (1) どこまで作業が完了しているか確認し、(2) 残りの作業を明確にしてから再開すること。
 - **IMPORTANT**: 作業を進める際は、要所で「何をしようとしているか」「なぜそうするのか」を簡潔に説明すること。質問があれば丁寧に答える。
+- **YOU MUST**: 新規Tampermonkeyスクリプトを作成する際、`@grant GM_*`を使用する場合は必ず`@grant unsafeWindow`も追加し、`pageWindow = typeof unsafeWindow !== 'undefined' ? unsafeWindow : window` 経由でHenryCoreにアクセスすること。
 
 ---
 
