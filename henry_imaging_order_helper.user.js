@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         画像オーダー入力支援
 // @namespace    https://henry-app.jp/
-// @version      1.12.1
+// @version      1.12.3
 // @description  画像照射オーダーモーダルに部位・方向選択UIを追加（複数内容対応）
 // @author       Henry UI Lab
 // @match        https://henry-app.jp/*
@@ -380,10 +380,27 @@
   }
 
   // ==========================================
+  // 照射オーダーモーダルかどうかをチェック
+  // ==========================================
+  function isImagingOrderModal() {
+    const h2Elements = document.querySelectorAll('h2');
+    for (const h2 of h2Elements) {
+      const text = h2.textContent || '';
+      if (text === '外来 照射オーダー' || text === '入院 照射オーダー') {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  // ==========================================
   // ページ監視セットアップ
   // ==========================================
   function setupPage(cleaner) {
     const observer = new MutationObserver(() => {
+      // 照射オーダーモーダルでなければスキップ
+      if (!isImagingOrderModal()) return;
+
       const modalitySelect = document.querySelector(CONFIG.MODALITY_SELECTOR);
       if (!modalitySelect) return;
 
@@ -441,6 +458,8 @@
     });
 
     // 初回チェック
+    if (!isImagingOrderModal()) return;
+
     const modalitySelect = document.querySelector(CONFIG.MODALITY_SELECTOR);
     if (modalitySelect) {
       if (!modalitySelect.dataset.hasModalityListener) {
