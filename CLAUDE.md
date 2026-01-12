@@ -293,6 +293,17 @@ const core = pageWindow.HenryCore;
 
 `NOTES.md` - 調査結果、API仕様メモ、実装詳細など。保留タスクの詳細情報もここに記載。
 
+### chrome-devtools-mcp（ブラウザ連携）
+
+`NOTES.md` の「chrome-devtools-mcp 起動手順」セクションを参照。
+
+**機能**: Claude Codeがブラウザを直接操作・監視できる
+- DOM確認、ボタンクリック、フォーム入力
+- ネットワークリクエストのキャプチャ（GraphQL API調査）
+- コンソール出力の確認（スクリプト動作確認）
+
+**YOU MUST**: ユーザーから「chrome-devtoolsの起動方法」を聞かれたら、`NOTES.md` の手順を参照して回答すること。
+
 ### バージョン管理
 
 **YOU MUST**: 全てのスクリプトはセマンティックバージョニング（x.y.z）に従うこと。

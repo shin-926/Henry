@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         主治医意見書作成フォーム
 // @namespace    https://henry-app.jp/
-// @version      2.4.4
+// @version      2.4.5
 // @description  主治医意見書の入力フォームとGoogle Docs出力（GAS不要版・API直接呼び出し）
 // @author       Henry Team
 // @match        https://henry-app.jp/*
@@ -863,7 +863,15 @@
     console.log('[OpinionForm] HenryCore:', pageWindow.HenryCore);
     console.log('[OpinionForm] modules:', pageWindow.HenryCore?.modules);
     console.log('[OpinionForm] GoogleAuth:', pageWindow.HenryCore?.modules?.GoogleAuth);
+    console.log('[OpinionForm] isConfigured:', googleAuth?.isConfigured?.());
     console.log('[OpinionForm] isAuthenticated:', googleAuth?.isAuthenticated?.());
+
+    // OAuth設定チェック
+    if (!googleAuth?.isConfigured()) {
+      alert('OAuth設定が必要です。設定ダイアログを開きます。');
+      googleAuth?.showConfigDialog();
+      return null;
+    }
 
     if (!googleAuth?.isAuthenticated()) {
       // 自動で認証を開始

@@ -5,6 +5,50 @@
 
 ---
 
+## chrome-devtools-mcp 起動手順
+
+Claude Codeがブラウザを直接操作・監視できるようにするための設定。
+
+### 1. デバッグ用Chromeを起動
+
+```bash
+/Applications/Google\ Chrome.app/Contents/MacOS/Google\ Chrome \
+  --remote-debugging-port=9222 \
+  --user-data-dir=$HOME/chrome-debug-profile
+```
+
+**注意**:
+- 通常のChromeプロファイルとは別の専用プロファイル（`~/chrome-debug-profile`）を使用
+- このプロファイルにはTampermonkeyと全てのHenryスクリプトがインストール済み
+- 既に通常のChromeが起動している場合でも問題なく起動できる
+
+### 2. Claude Codeを再起動
+
+MCPサーバーが接続されるのを確認（起動時に `chrome-devtools` が表示される）
+
+### 3. 利用可能な主要機能
+
+| 機能 | ツール名 | 用途 |
+|------|---------|------|
+| ページ一覧 | `list_pages` | 開いているタブを確認 |
+| DOM確認 | `take_snapshot` | アクセシビリティツリーでDOM構造を取得 |
+| クリック | `click` | ボタンやリンクをクリック |
+| 入力 | `fill` | テキストフィールドに入力 |
+| ネットワーク | `list_network_requests` | GraphQL等のリクエストをキャプチャ |
+| リクエスト詳細 | `get_network_request` | リクエスト/レスポンスボディを取得 |
+| コンソール | `list_console_messages` | console.log出力を確認 |
+| ナビゲーション | `navigate_page` | URLへ移動 |
+| スクリーンショット | `take_screenshot` | 画面キャプチャ |
+
+### 4. 活用シーン
+
+- **GraphQL API調査**: 画面操作しながら `list_network_requests` でAPIをキャプチャ
+- **スクリプト動作確認**: `list_console_messages` でログ出力を直接確認
+- **UI操作テスト**: `click`, `fill` でユーザー操作をシミュレート
+- **DOM調査**: `take_snapshot` でセレクタ候補を確認
+
+---
+
 ## TASK-002: オーダーセット選択UI
 
 **目的**: 既存のセット選択UIが遅く操作性が悪いため、独自の高速UIを作成する

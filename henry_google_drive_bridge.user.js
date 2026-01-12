@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Google Drive連携
 // @namespace    https://henry-app.jp/
-// @version      2.2.4
+// @version      2.2.5
 // @description  HenryのファイルをGoogle Drive APIで直接変換・編集。GAS不要版。
 // @match        https://henry-app.jp/*
 // @match        https://docs.google.com/*
@@ -722,7 +722,10 @@
 
       // 認証設定チェック
       if (!getGoogleAuth()?.isConfigured()) {
-        showToast('OAuth設定が未完了です。henry_core.user.jsでCLIENT_IDとCLIENT_SECRETを設定してください。', true);
+        showToast('OAuth設定が必要です。設定ダイアログを開きます...', false, 2000);
+        setTimeout(() => {
+          getGoogleAuth()?.showConfigDialog();
+        }, 1000);
         return;
       }
 
@@ -1081,7 +1084,11 @@
       try {
         // 認証設定チェック
         if (!getGoogleAuth()?.isConfigured()) {
-          throw new Error('OAuth設定が未完了です。henry_core.user.jsでCLIENT_IDとCLIENT_SECRETを設定してください。');
+          showToast('OAuth設定が必要です。設定ダイアログを開きます...', false, 2000);
+          setTimeout(() => {
+            getGoogleAuth()?.showConfigDialog();
+          }, 1000);
+          return;
         }
 
         // Google Drive認証チェック
