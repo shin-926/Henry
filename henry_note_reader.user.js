@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry カルテ内容リーダー
 // @namespace    https://github.com/shin-926/Henry
-// @version      1.0.0
+// @version      1.0.1
 // @description  現在開いているカルテの内容を表示する
 // @author       shinichiro
 // @match        https://henry-app.jp/*
@@ -85,14 +85,17 @@
         return;
       }
 
+      // 表示用に改行を <br> に変換
+      const displayText = noteText.replace(/\n/g, '<br>');
+
       HenryCore.ui.showModal({
         title: 'カルテ内容',
-        content: noteText,
+        content: displayText,
         actions: [
           {
             label: 'コピー',
             onClick: () => {
-              navigator.clipboard.writeText(noteText);
+              navigator.clipboard.writeText(noteText);  // コピーは元のテキスト
             },
             autoClose: false
           },
