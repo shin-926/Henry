@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry Disease List
 // @namespace    https://henry-app.jp/
-// @version      1.0.1
+// @version      1.0.2
 // @description  患者の病名一覧を表示
 // @author       Claude
 // @match        https://henry-app.jp/*
@@ -17,7 +17,7 @@
   const SCRIPT_NAME = 'DiseaseList';
 
   const QUERY = `
-    query ListPatientReceiptDiseases($input: ListPatientReceiptDiseasesInput!) {
+    query ListPatientReceiptDiseases($input: ListPatientReceiptDiseasesRequestInput!) {
       listPatientReceiptDiseases(input: $input) {
         patientReceiptDiseases {
           masterDisease {
@@ -33,6 +33,7 @@
       const result = await HenryCore.query(QUERY, {
         input: {
           patientUuids: [patientUuid],
+          patientCareType: 'PATIENT_CARE_TYPE_ANY',
           onlyMain: false
         }
       });
