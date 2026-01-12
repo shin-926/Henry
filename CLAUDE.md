@@ -328,12 +328,30 @@ const core = pageWindow.HenryCore;
   - リファレンスに情報がない場合は、ユーザーに実際のカルテ操作で確認を依頼する
   - **推測でコードを書かない。スピードより確認の正確さを優先する**
 
+- **YOU MUST**: OAuth認証が必要な場合は、`alert()` で理由を伝えてから設定ダイアログや認証画面を開くこと：
+  ```javascript
+  // OAuth設定が未完了の場合
+  if (!googleAuth?.isConfigured()) {
+    alert('OAuth設定が必要です。設定ダイアログを開きます。');
+    googleAuth?.showConfigDialog();
+    return;
+  }
+  // 認証が未完了の場合
+  if (!googleAuth?.isAuthenticated()) {
+    alert('Google認証が必要です。認証画面を開きます。');
+    googleAuth?.startAuth();
+    return;
+  }
+  ```
+  - いきなりダイアログを表示するとユーザーが混乱するため、先に理由を伝える
+
 ---
 
 ## 変更履歴
 
 | Version | Date | Changes |
 |---------|------|---------|
+| v4.12 | 2026-01-13 | OAuth認証時はalertで理由を伝えるルール追加 |
 | v4.11 | 2026-01-12 | スピードより確認の正確さを優先するルール追加 |
 | v4.10 | 2026-01-12 | API使用前のリファレンス確認ルール追加（GraphQL/HenryCore両方） |
 | v4.9 | 2026-01-12 | タスクID運用ルール追加、メタ視点確認ルール追加 |
