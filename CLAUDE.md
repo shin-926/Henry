@@ -565,3 +565,21 @@ const progressNotes = Object.entries(cache)
 - [ ] フォルダ一覧取得API（`encounterTemplateFolders`）のハッシュ取得
 - [ ] UIの設計（モーダル or サイドパネル、検索機能など）
 - [ ] Tampermonkeyスクリプト化
+
+### 2026-01-12 追加: 病名サジェスト機能
+
+**目的**: カルテ内容を読み取り、登録すべき病名をClaudeで推論・提案する
+
+#### 完了済み
+- [x] カルテ内容読み取りスクリプト (`henry_note_reader.user.js` v1.0.1)
+- [x] Claude API (claude-haiku-4-5) 動作確認
+- [x] 病名登録API (`UpdateMultiPatientReceiptDiseases`) 動作確認
+- [x] 整形外科病名リスト (ICD-10 Mコード 1673件) を `整形外科病名リスト.csv` に保存
+- [x] 病名マスター・修飾語マスターをUTF-8に変換
+
+#### 次のステップ
+- [ ] 頻用病名リストを作成する（ユーザー作業）
+- [ ] 修飾語リストを作成する（ユーザー作業）
+- [ ] Claude APIで病名を推論するロジックを実装
+- [ ] 病名サジェストUIを作成
+- [ ] 確認後に病名登録APIを呼び出す
