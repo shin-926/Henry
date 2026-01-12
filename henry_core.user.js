@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry Core
 // @namespace    https://henry-app.jp/
-// @version      2.10.3
+// @version      2.10.4
 // @description  Henry スクリプト実行基盤 (GoogleAuth統合 / Google Docs対応)
 // @match        https://henry-app.jp/*
 // @match        https://docs.google.com/*
@@ -836,20 +836,21 @@
       }
 
       // キャッシュを確認
-      const cache = JSON.parse(localStorage.getItem(ENDPOINT_CACHE_KEY) || '{}');
+      let cache = JSON.parse(localStorage.getItem(ENDPOINT_CACHE_KEY) || '{}');
       const cachedEndpoint = cache[operationName];
 
-      // 試すエンドポイントの順序
+      // 試すエンドポイントの順序（キャッシュがあっても他のエンドポイントをフォールバックとして追加）
+      const allEndpoints = ['/graphql', '/graphql-v2'];
       const endpoints = cachedEndpoint
-        ? [cachedEndpoint]
-        : ['/graphql', '/graphql-v2'];
+        ? [cachedEndpoint, ...allEndpoints.filter(e => e !== cachedEndpoint)]
+        : allEndpoints;
 
       let lastError;
       for (const endpoint of endpoints) {
         try {
           const result = await tryQuery(endpoint);
-          // 成功したらキャッシュに保存（未キャッシュの場合のみ）
-          if (!cachedEndpoint && operationName !== 'unknown') {
+          // 成功したらキャッシュに保存（キャッシュと異なる場合も更新）
+          if (operationName !== 'unknown' && cache[operationName] !== endpoint) {
             cache[operationName] = endpoint;
             localStorage.setItem(ENDPOINT_CACHE_KEY, JSON.stringify(cache));
             console.log(`[Henry Core] Learned: ${operationName} → ${endpoint}`);
@@ -857,8 +858,13 @@
           return result;
         } catch (e) {
           lastError = e;
-          // 400/404エラーの場合は次のエンドポイントを試す
+          // 400/404エラーの場合はキャッシュを削除して次のエンドポイントを試す
           if (e.message.includes('400') || e.message.includes('404')) {
+            if (cachedEndpoint === endpoint) {
+              delete cache[operationName];
+              localStorage.setItem(ENDPOINT_CACHE_KEY, JSON.stringify(cache));
+              console.log(`[Henry Core] Cache cleared: ${operationName} (was ${endpoint})`);
+            }
             continue;
           }
           // それ以外のエラーは即座にthrow

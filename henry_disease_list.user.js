@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry Disease List
 // @namespace    https://henry-app.jp/
-// @version      1.0.0
+// @version      1.0.1
 // @description  患者の病名一覧を表示
 // @author       Claude
 // @match        https://henry-app.jp/*
@@ -20,7 +20,9 @@
     query ListPatientReceiptDiseases($input: ListPatientReceiptDiseasesInput!) {
       listPatientReceiptDiseases(input: $input) {
         patientReceiptDiseases {
-          name
+          masterDisease {
+            name
+          }
         }
       }
     }
@@ -50,7 +52,7 @@
       content.innerHTML = `
         <div style="margin-bottom: 8px; color: #666;">${diseases.length} 件</div>
         <ul style="margin: 0; padding-left: 20px; max-height: 400px; overflow-y: auto;">
-          ${diseases.map(d => `<li style="padding: 4px 0;">${d.name}</li>`).join('')}
+          ${diseases.map(d => `<li style="padding: 4px 0;">${d.masterDisease?.name || '（名称なし）'}</li>`).join('')}
         </ul>
       `;
     }
@@ -65,15 +67,13 @@
   async function main() {
     const patientUuid = HenryCore.getPatientUuid();
     if (!patientUuid) {
-      HenryCore.ui.showToast('患者が選択されていません', 'error');
+      alert('患者が選択されていません');
       return;
     }
 
-    HenryCore.ui.showToast('病名を取得中...', 'info');
-
     const diseases = await fetchDiseases(patientUuid);
     if (diseases === null) {
-      HenryCore.ui.showToast('病名の取得に失敗しました', 'error');
+      alert('病名の取得に失敗しました');
       return;
     }
 
@@ -90,7 +90,7 @@
       id: 'disease-list',
       name: '病名一覧',
       icon: '📋',
-      execute: main
+      onClick: main
     });
 
     console.log(`[${SCRIPT_NAME}] initialized`);
