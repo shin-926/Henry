@@ -1,0 +1,104 @@
+// ==UserScript==
+// @name         Henry Disease List
+// @namespace    https://henry-app.jp/
+// @version      1.0.0
+// @description  患者の病名一覧を表示
+// @author       Claude
+// @match        https://henry-app.jp/*
+// @icon         https://www.google.com/s2/favicons?sz=64&domain=henry-app.jp
+// @grant        none
+// @updateURL    https://raw.githubusercontent.com/shin-926/Henry/main/henry_disease_list.user.js
+// @downloadURL  https://raw.githubusercontent.com/shin-926/Henry/main/henry_disease_list.user.js
+// ==/UserScript==
+
+(function() {
+  'use strict';
+
+  const SCRIPT_NAME = 'DiseaseList';
+
+  const QUERY = `
+    query ListPatientReceiptDiseases($input: ListPatientReceiptDiseasesInput!) {
+      listPatientReceiptDiseases(input: $input) {
+        patientReceiptDiseases {
+          name
+        }
+      }
+    }
+  `;
+
+  async function fetchDiseases(patientUuid) {
+    try {
+      const result = await HenryCore.query(QUERY, {
+        input: {
+          patientUuids: [patientUuid],
+          onlyMain: false
+        }
+      });
+      return result.data?.listPatientReceiptDiseases?.patientReceiptDiseases || [];
+    } catch (e) {
+      console.error(`[${SCRIPT_NAME}]`, e.message);
+      return null;
+    }
+  }
+
+  function showModal(diseases) {
+    const content = document.createElement('div');
+
+    if (diseases.length === 0) {
+      content.innerHTML = '<p style="color: #888; text-align: center;">登録されている病名がありません</p>';
+    } else {
+      content.innerHTML = `
+        <div style="margin-bottom: 8px; color: #666;">${diseases.length} 件</div>
+        <ul style="margin: 0; padding-left: 20px; max-height: 400px; overflow-y: auto;">
+          ${diseases.map(d => `<li style="padding: 4px 0;">${d.name}</li>`).join('')}
+        </ul>
+      `;
+    }
+
+    HenryCore.ui.showModal({
+      title: '病名一覧',
+      content,
+      width: 400
+    });
+  }
+
+  async function main() {
+    const patientUuid = HenryCore.getPatientUuid();
+    if (!patientUuid) {
+      HenryCore.ui.showToast('患者が選択されていません', 'error');
+      return;
+    }
+
+    HenryCore.ui.showToast('病名を取得中...', 'info');
+
+    const diseases = await fetchDiseases(patientUuid);
+    if (diseases === null) {
+      HenryCore.ui.showToast('病名の取得に失敗しました', 'error');
+      return;
+    }
+
+    showModal(diseases);
+  }
+
+  function init() {
+    if (typeof HenryCore === 'undefined') {
+      console.error(`[${SCRIPT_NAME}] HenryCore not found`);
+      return;
+    }
+
+    HenryCore.registerPlugin({
+      id: 'disease-list',
+      name: '病名一覧',
+      icon: '📋',
+      execute: main
+    });
+
+    console.log(`[${SCRIPT_NAME}] initialized`);
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', init);
+  } else {
+    init();
+  }
+})();

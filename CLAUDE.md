@@ -1,8 +1,8 @@
-# Henry EMR 開発ガイドライン (Core Rules v4.7)
+# Henry EMR 開発ガイドライン (Core Rules v4.9)
 
-<!-- 📝 UPDATED: v4.7 - 問題解決のアプローチ（Problem-Solving Approach）追加 -->
+<!-- 📝 UPDATED: v4.9 - タスクID運用ルール、メタ視点確認ルール追加 -->
 
-> **🆕 NEW**: このドキュメントはAIアシスタントとの協働開発における必須ルール集です。簡潔性を重視し、詳細な技術仕様は `HENRY-API-REFERENCE.md` を参照してください。
+> このドキュメントはAIアシスタントとの協働開発における必須ルール集です。HenryCore APIの詳細は `henry_core.user.js` 冒頭のAPI目次と実装を参照。
 
 ---
 
@@ -60,11 +60,16 @@
 - 「期待と違う点があれば教えてください」
 - 「この方針で他の部分も進めてよいですか？」
 
+作業中は、要所で「何をしようとしているか」「なぜそうするのか」を簡潔に説明すること。
+
+#### クラッシュ報告時の対応
+
+**YOU MUST**: ユーザーから「クラッシュした」と報告を受けた場合は、まず (1) どこまで作業が完了しているか確認し、(2) 残りの作業を明確にしてから再開すること。
+
 ### ガイドラインの更新
 
-**YOU MUST**: ユーザーから新しいルールの追加指示があった場合、必ず **セクション6「カスタムルール」** に追記すること。
+**YOU MUST**: ユーザーから新しいルールの追加指示があった場合、必ず **カスタムルール** セクションに追記すること。
 
-<!-- 🆕 NEW: プロンプト階層の追加（URLのベストプラクティスから） -->
 ### プロンプト階層 (Instruction Hierarchy)
 
 指示の重要度は3段階で定義されている：
@@ -97,10 +102,11 @@
 - 純粋関数として切り出すことでテスト容易性を向上
 - `data-testid`、`role`、`aria-*` 属性の使用を推奨
 
-<!-- ✅ KEPT: 以下のセクションは元のまま維持 -->
 ### コード出力の制約 (Code Generation Protocol)
 
 **原則**: ユーザーからの明示的な指示（例：「コードを書いて」「実装して」）があるまで、コピー＆ペーストしてそのまま使える「完全な実装コード」を出力してはならない。
+
+**YOU MUST**: コードを修正する前に、まず修正内容をユーザーに確認すること。確認なしに直接編集しない。
 
 **禁止事項**: 議論の途中で、ユーザーが求めていないのに「修正した全体のコードはこちらです」と長いコードブロックを提示すること。
 
@@ -126,11 +132,7 @@
 
 ## 2. Henry開発の必須ルール (Core Development Rules)
 
-<!-- 📝 UPDATED: セクション1から再構成。重要なルールのみ抽出 -->
-
 ### 非侵入型UXの徹底
-
-**YOU MUST**: ユーザー操作なしでの自動スクロールやフォーカス奪取は厳禁。
 
 **IMPORTANT**: 「ぼかしオーバーレイ」等の視覚効果を伴うナビゲーションは、ユーザーのクリック操作を起点とする場合のみ許可。
 
@@ -156,177 +158,87 @@
 
 ### クリーンアップ
 
-**YOU MUST**: SPA遷移時（`henry:navigation` / `popstate`）には、全ての MutationObserver、タイマー、非同期処理（AbortController）を完全に破棄すること。
+**YOU MUST**: SPA遷移時（`henry:navigation` / `popstate`）には、全ての MutationObserver、タイマー、非同期処理を完全に破棄すること。
 
-#### 標準パターン：createCleaner
+**使用するAPI**:
+- `utils.createCleaner()` - 破棄対象の一括管理
+- `utils.subscribeNavigation()` - 画面遷移時の自動クリーンアップ
 
-破棄対象の漏れを防ぐため、`HenryCore.utils.createCleaner()` を使用する。
-
-```javascript
-const cleaner = HenryCore.utils.createCleaner();
-
-// 登録例
-const timerId = setTimeout(fn, 1000);
-cleaner.add(() => clearTimeout(timerId));
-
-const observer = new MutationObserver(callback);
-observer.observe(target, config);
-cleaner.add(() => observer.disconnect());
-
-// SPA遷移時に一括実行
-cleaner.exec();
-```
-
-#### 自動クリーンアップ：subscribeNavigation
-
-画面遷移のたびにクリーンアップ → 再初期化を自動で行う場合：
-
-```javascript
-const cleaner = HenryCore.utils.createCleaner();
-
-HenryCore.utils.subscribeNavigation(cleaner, () => {
-  // ここに初期化処理を書く
-  // 画面遷移時は自動で cleaner.exec() → この関数が再実行される
-});
-```
+実装例は `henry_core.user.js` を参照。
 
 ---
 
 ## 3. 基本的なコードパターン (Essential Patterns)
 
-<!-- 📝 UPDATED: セクション2,3,7を統合・簡略化 -->
-
 ### セレクタ戦略
-
-**NEVER**: `.sc-xxxx` などのランダムなクラス名や XPath を使用すること。
 
 **YOU MUST**: `data-testid`、`role`、`aria-*` 属性、または不変のテキストコンテンツを基準にすること。
 
 **IMPORTANT**: モーダル等は `document.body` 直下に現れるため、コンテナ外へのフォールバックを許容する設計にすること。
 
-### HenryCore API 概要
+### HenryCore 使用ガイドライン
 
-<!-- 📝 UPDATED: セクション3,4,5,6を大幅に簡略化。詳細はリファレンスへ移動 -->
+**前提条件**: HenryCore スクリプトが先に読み込まれていること。
 
-**YOU MUST**: DOM解析を避け、`window.HenryCore` を通じたデータ操作を行うこと。
+#### 使用すべき場面
 
-**前提条件**: API呼び出しには「Henry Core」スクリプトが必要。
+| 場面 | 使用するAPI | 理由 |
+|------|------------|------|
+| GraphQL呼び出し | `query()` | エンドポイント自動判別、エラー自動ログ |
+| 患者UUID取得 | `getPatientUuid()` | DOM解析より確実、タイミング問題を回避 |
+| SPA遷移時のクリーンアップ | `utils.createCleaner()` | メモリリーク・二重実行防止 |
+| プラグイン登録 | `registerPlugin()` | Toolbox自動連携 |
+| Google API連携 | `modules.GoogleAuth` | トークン管理の一元化 |
 
-#### 基本的な呼び出し
+#### 禁止事項
 
-```javascript
-// HenryCore の待機（タイムアウト付き）
-async function waitForHenryCore(timeout = 5000) {
-  let waited = 0;
-  while (!window.HenryCore) {
-    await new Promise(r => setTimeout(r, 100));
-    waited += 100;
-    if (waited > timeout) {
-      console.error('[SCRIPT_NAME] HenryCore が見つかりません');
-      return false;
-    }
-  }
-  return true;
-}
+**NEVER**:
+- 直接 `fetch()` でGraphQL APIを呼ぶ → `query()` を使う
+- URLやDOMから患者UUIDを解析する → `getPatientUuid()` を使う
+- `HenryToolbox.register()` を直接呼ぶ → `registerPlugin()` を使う
+- トークン等の秘匿情報をログ出力する
+- ハッシュ方式（APQ）でGraphQL APIを呼ぶ → フルクエリ方式を使う
 
-// API呼び出し（フルクエリ方式）
-const result = await HenryCore.query(`
-  query GetPatient($input: GetPatientRequestInput!) {
-    getPatient(input: $input) {
-      fullName
-      detail { birthDate { year month day } }
-    }
-  }
-`, { input: { uuid: patientUuid } });
+#### エラーハンドリング
 
-const patient = result.data?.getPatient;
-if (!patient) return null; // 静かに終了
-```
-
-#### 主要なAPI
-
-<!-- 📝 UPDATED: 型定義を表形式の概要に簡略化 -->
-
-| メソッド | 用途 | 詳細 |
-|---------|------|------|
-| `query(queryString, variables)` | GraphQL API呼び出し | v2.8.0以降。フルクエリ方式 |
-| `getPatientUuid()` | 現在表示中の患者UUID取得 | - |
-| `getMyUuid()` | ログイン中のユーザーUUID取得 | 初回はAPI呼び出し、以降キャッシュ |
-| `plugins` | 登録済みプラグインの配列 | v2.7.0以降。読み取り専用 |
-| `registerPlugin(options)` | プラグイン登録 | v2.7.0以降。自動的にToolboxに表示 |
-| `modules.GoogleAuth` | Google OAuth認証モジュール | v2.9.0以降。`isAuthenticated()`, `getValidAccessToken()`, `startAuth()`, `showConfigDialog()` 等。v2.9.6で認証情報のGM_storage永続化対応 |
-| `utils.createCleaner()` | クリーンアップ管理 | 上記参照 |
-| `utils.waitForElement(selector, timeout)` | 要素の出現待機 | - |
-| `utils.createLogger(name)` | ログ出力ユーティリティ | - |
-| `utils.withLock(map, key, generator)` | 二重送信防止 | - |
-| `ui.createButton(props)` | ボタン作成 | `HENRY-API-REFERENCE.md` 参照 |
-| `ui.showModal(props)` | モーダル表示 | v2.7.4: `closeOnOverlayClick`, `action.autoClose` オプション追加 |
-
-> **📝 UPDATED**: 完全な型定義（60行のTypeScriptインターフェース）は `HENRY-API-REFERENCE.md` に移動しました。
-
-#### プラグイン登録
-
-**YOU MUST**: HenryCore v2.7.0以降は、`HenryCore.registerPlugin()` を使用してプラグインを登録すること。自動的にHenryToolboxに表示される。
+**YOU MUST**: `query()` は失敗時に例外を投げる。try-catchで処理し、静かに終了すること。
 
 ```javascript
-await HenryCore.registerPlugin({
-  id: 'my-plugin',           // 必須: ユニークなID
-  name: 'マイプラグイン',      // 必須: 表示名
-  icon: '🔧',                // オプション: アイコン
-  description: '説明文',      // オプション: 説明
-  version: '1.0.0',          // オプション: バージョン
-  order: 100,                // オプション: 表示順序（小さいほど上）
-  onClick: () => {           // 必須: クリック時の処理
-    // ここに処理を書く
-  }
-});
-```
-
-**NEVER**: `HenryToolbox.register()` を直接呼び出さないこと。HenryCore が自動的に転送する。
-
-### エラーハンドリング
-
-**YOU MUST**: `HenryCore.query()` は失敗時に例外を投げるため、try-catchで処理すること。
-
-```javascript
-const QUERY = `
-  query GetPatient($input: GetPatientRequestInput!) {
-    getPatient(input: $input) { fullName }
-  }
-`;
-
 try {
   const result = await HenryCore.query(QUERY, { input: { uuid } });
   if (!result.data?.getPatient) return null;
-  // 正常処理
 } catch (e) {
   console.error('[SCRIPT_NAME]', e.message);
   return null;
 }
 ```
 
-**NEVER**: トークン等の秘匿情報をログ出力しないこと。
+#### API詳細
 
-### Tampermonkey サンドボックス対策
+`henry_core.user.js` 冒頭のAPI目次と各関数の実装を参照。
 
-**YOU MUST**: `@grant GM_*` を使用する場合、`unsafeWindow` 経由で HenryCore にアクセスすること。
+### Tampermonkey スクリプト作成
+
+#### サンドボックス対策
+
+**YOU MUST**: `@grant GM_*` を使用する場合、`@grant unsafeWindow` も追加し、`unsafeWindow` 経由で HenryCore にアクセスすること。
 
 ```javascript
-// ==UserScript==
-// @grant        GM_download
-// ==/UserScript==
-
-(async function() {
-  const pageWindow = typeof unsafeWindow !== 'undefined' ? unsafeWindow : window;
-  const core = pageWindow.HenryCore;
-})();
+const pageWindow = typeof unsafeWindow !== 'undefined' ? unsafeWindow : window;
+const core = pageWindow.HenryCore;
 ```
+
+#### メタデータ設定
+
+**YOU MUST**: 新規スクリプト作成時は以下を設定すること：
+- `@updateURL` と `@downloadURL` にGitHub raw URL（`https://raw.githubusercontent.com/shin-926/Henry/main/<filename>.user.js`）
+- `@version` をセマンティックバージョニング形式（x.y.z）
+
+**YOU MUST**: コミット時は `@version` を更新（バグ修正: パッチ、機能追加: マイナー、破壊的変更: メジャー）
 
 ---
 
 ## 4. デバッグとワークフロー (Debug & Workflow)
-
-<!-- 📝 UPDATED: セクション5から移動し、ワークフローを追加 -->
 
 ### デバッグ手順（原因究明ファースト）
 
@@ -334,10 +246,9 @@ try {
 2. **要因切り分け**: DOM変化、非同期タイミング、データ不整合
 3. **仮説検証**: 根拠のある修正のみを行う
 
-<!-- 🆕 NEW: 推奨ワークフロー（URLのベストプラクティスから） -->
-### 推奨ワークフロー
+**YOU MUST**: エラー発生時は、推測で別の可能性を提案する前に、まず実際のエラー内容を調査すること。APIエラーならレスポンスボディを確認し、具体的なエラーメッセージに基づいて修正する。
 
-> **🆕 NEW セクション**: 品質を最も向上させる開発フロー（Anthropic公式ベストプラクティスより）
+### 推奨ワークフロー
 
 **Explore → Plan → Code → Commit**
 
@@ -368,26 +279,19 @@ try {
 
 ## 5. 参照ドキュメント (Reference)
 
-<!-- 🆕 NEW: リファレンスへの参照セクション -->
+### HenryCore API
 
-### 詳細な技術仕様
+`henry_core.user.js` 冒頭のAPI目次と各関数の実装を参照。
 
-> **✂️ MOVED**: 以下の詳細内容は `HENRY-API-REFERENCE.md` に移動しました。
+**YOU MUST**: APIを変更・追加した場合は、`henry_core.user.js` 冒頭のAPI目次を更新すること。
 
-以下の内容は `HENRY-API-REFERENCE.md` を参照：
+### GraphQL API
 
-- ✂️ **HenryCore 完全な型定義** (元セクション4の60行のTypeScriptインターフェース)
-- ✂️ **各種ユーティリティの詳細仕様** (元セクション5のcreateLogger, waitForElement等)
-- ✂️ **バッチ処理パターン** (元セクション8の150行のコード例とチェックリスト)
-- ✂️ **プラグイン登録の詳細** (元セクション9の登録パラメータ、後方互換性)
-- ✂️ **UI System の詳細** (元セクション10のcreateButton/showModal全パラメータ)
-- ✂️ **クロスドメイン連携** (元セクション11のGM_*高度な使い方、双方向通信)
-- ✂️ **Apollo Client 連携** (元セクション12全体)
-- ✂️ **DOM監視パターンの詳細比較** (元セクション13全体)
+`HENRY-GRAPHQL-API-REFERENCE.md` を参照。
 
-### ユーザー向けガイド
+### 調査メモ・実装詳細
 
-> **📝 RELATED**: AIとの効果的な協働方法については `AI-COLLABORATION-TIPS.md` を参照してください。
+`NOTES.md` - 調査結果、API仕様メモ、実装詳細など。保留タスクの詳細情報もここに記載。
 
 ### バージョン管理
 
@@ -403,27 +307,9 @@ try {
 
 ### 追加ルール
 
-- **YOU MUST**: 複雑な指示や意図が曖昧な指示を受けた場合は、質問するか、指示をどのように理解したかを説明してから作業に入ること。
-- **YOU MUST**: コードを修正する前に、まず修正内容をユーザーに確認すること。確認なしに直接編集しない。
-- **YOU MUST**: HenryCoreのAPIを変更・追加した場合は、`CLAUDE.md`と`HENRY-CORE-API-REFERENCE.md`の該当箇所も更新すること。
-- **YOU MUST**: 新しいTampermonkeyスクリプトを作成する際は、`@updateURL` と `@downloadURL` にGitHubのraw URLを設定すること。形式: `https://raw.githubusercontent.com/shin-926/Henry/main/<filename>.user.js`
-- **YOU MUST**: スクリプトに修正を加えてコミットする際は、`@version` をセマンティックバージョニングに従って上げること（バグ修正: パッチ、機能追加: マイナー、破壊的変更: メジャー）
-- **YOU MUST**: GraphQL APIはフルクエリ方式を使用すること。ハッシュ方式（APQ）は非推奨。クロスドメイン（GM_xmlhttpRequest）でも同様にフルクエリを送信する。
-- **IMPORTANT**: GraphQL APIの構造がわからないときは `HENRY-GRAPHQL-API-REFERENCE.md` を参照すること。
-- **IMPORTANT**: コードベースの探索や広範な検索を行う場合は、Taskツール（Exploreエージェント等）を使用してメインのコンテキストウィンドウを節約すること。
-- **IMPORTANT**: コード固有の課題やTODOは、該当コード内にTODOコメントとして残すこと（例: `// TODO: 動作確認後にこのログを削除`）。
-- **YOU MUST**: スクリプトに機能追加や修正を行う際は、その変更に必要な部分のみを編集すること。関係ない部分を変更しない。
-- **YOU MUST**: エラーが発生したときは、推測で別の可能性を提案する前に、まず実際のエラー内容を調査すること。APIエラーならレスポンスボディを確認し、具体的なエラーメッセージに基づいて修正する。
-- **YOU MUST**: 保留タスクに関連する作業を完了したら、その都度CLAUDE.mdの「保留中のタスク」セクションを更新すること。
-- **YOU MUST**: Google Docsで患者文書を作成・編集するスクリプトでは、以下のメタデータをGoogle Driveのファイルプロパティに設定すること（新規作成時は空でも可）：
-  - `henryPatientUuid`: 患者UUID（必須）
-  - `henryFileUuid`: ファイルUUID（上書き保存用、新規は空）
-  - `henryFolderUuid`: フォルダUUID（保存先、ルートなら空）
-  - `henrySource`: 作成元識別子（例: `drive-direct`）
-- **YOU MUST**: ユーザーから「クラッシュした」と報告を受けた場合は、まず (1) どこまで作業が完了しているか確認し、(2) 残りの作業を明確にしてから再開すること。
-- **IMPORTANT**: 作業を進める際は、要所で「何をしようとしているか」「なぜそうするのか」を簡潔に説明すること。質問があれば丁寧に答える。
-- **YOU MUST**: 新規Tampermonkeyスクリプトを作成する際、`@grant GM_*`を使用する場合は必ず`@grant unsafeWindow`も追加し、`pageWindow = typeof unsafeWindow !== 'undefined' ? unsafeWindow : window` 経由でHenryCoreにアクセスすること。
-- **YOU MUST**: セッション開始時に「保留中のタスク」セクションを確認し、未完了タスクがあれば簡潔なリスト形式で提示すること。詳細は聞かれたら答える。
+- **IMPORTANT**: コード固有の課題やTODOは、該当コード内にTODOコメントとして残すこと（例: `// TODO: 動作確認後にこのログを削除`）
+
+- **IMPORTANT**: 作業完了後、一段上の視点（メタな視点）から影響範囲を確認し、必要な追加作業があればユーザーに提案すること。コード・ドキュメント・設計方針・運用フロー・命名規則など、あらゆる側面で整合性を考える。
 
 ---
 
@@ -431,155 +317,36 @@ try {
 
 | Version | Date | Changes |
 |---------|------|---------|
-| **v4.7** | **2026-01-11** | **問題解決のアプローチ追加。複雑な問題への段階的アプローチ（問題分解、仮定明示、複数案比較、段階的検証）を明文化** |
-| v4.6 | 2026-01-08 | HenryCore v2.9.6対応。OAuth認証情報のGM_storage永続化、設定ダイアログUI追加、Toolboxアイコン削除 |
-| v4.5 | 2026-01-08 | HenryCore v2.9.0対応。GoogleAuth統合（`modules.GoogleAuth`追加）、Google Docs対応 |
-| v4.4 | 2026-01-08 | コミュニケーション方針を詳細化。質問すべき観点・タイミング、作業前確認テンプレート追加 |
-| v4.3 | 2026-01-06 | HenryCore v2.8.0 フルクエリ方式追加。`query()` メソッド追加、`call()` は非推奨に。ハッシュ事前収集が不要になり、初回でもAPIが即座に呼び出し可能 |
-| v4.2 | 2026-01-05 | HenryCore v2.7.4 showModalオプション追加。`closeOnOverlayClick: false` でオーバーレイクリック無効化、`action.autoClose: false` でボタンクリック後の自動close無効化 |
-| v4.1 | 2026-01-05 | HenryCore v2.7.0 プラグインレジストリ対応。`HenryCore.plugins` 配列追加、`registerPlugin()` の仕様変更（自動的にToolboxへ表示）、プラグイン登録の例を追加 |
-| **v4.0** | **2026-01-04** | **🆕 コアルールとリファレンスを分離。プロンプト階層（NEVER/YOU MUST/IMPORTANT）導入。推奨ワークフロー追加。Anthropic公式ベストプラクティス反映。740行→330行に圧縮** |
-| v3.21 | 2026-01-02 | §11「クロスドメイン連携」拡張 |
-| v3.20 | 2026-01-01 | §11-13 追加 |
-| v3.19 | 2026-01-01 | HenryCore v2.6.0 対応 |
+| v4.9 | 2026-01-12 | タスクID運用ルール追加、メタ視点確認ルール追加 |
+| v4.8 | 2026-01-12 | ドキュメント構造簡略化、調査メモをNOTES.mdに分離 |
+| v4.7 | 2026-01-11 | 問題解決のアプローチ追加 |
+| v4.4 | 2026-01-08 | コミュニケーション方針を詳細化 |
+| v4.0 | 2026-01-04 | ルールとリファレンスを分離、プロンプト階層導入 |
 
----
-
-## 📊 変更サマリー
-
-### 🆕 新規追加 (3項目)
-1. **プロンプト階層 (NEVER/YOU MUST/IMPORTANT)** - セクション1
-2. **推奨ワークフロー (Explore→Plan→Code→Commit)** - セクション4
-3. **問題解決のアプローチ (Problem-Solving Approach)** - セクション4 (v4.7)
-
-### ✂️ リファレンスに移動 (8項目)
-1. HenryCore 完全な型定義（60行のTypeScriptインターフェース）
-2. 各種ユーティリティの詳細仕様
-3. バッチ処理パターン（150行のコード例）
-4. プラグイン登録の詳細
-5. UI Systemの詳細
-6. クロスドメイン連携の詳細
-7. Apollo Client連携（セクション12全体）
-8. DOM監視パターンの詳細比較（セクション13全体）
-
-### 📝 ユーザー向けガイドに分離 (1項目)
-- 効果的なコミュニケーション（視覚的フィードバック、具体的な指示）→ `AI-COLLABORATION-TIPS.md`
-
-### 📝 簡略化・再構成
-- セクション構成を5章に再編成（元は13章）
-- 740行 → 330行（-55%）
-- コード例は基本パターンのみに絞り込み
+> 詳細な変更履歴は `git log` を参照。
 
 ---
 
 ## 🔔 保留中のタスク (Pending Tasks)
 
-> **AI向け指示**: セッション開始時にこのセクションを確認し、未完了のタスクがあればユーザーにリマインドすること。タスク完了後はこのセクションから削除すること。
+> **AI向け指示**: セッション開始時に確認し、未完了タスクをリマインドすること。タスク完了時はこのセクションを更新すること。
+>
+> **タスクID運用ルール**:
+> - 新規タスク追加時は `TASK-XXX` 形式のIDを振る（連番）
+> - 詳細が必要なタスクは `NOTES.md` に同じIDで見出しを作成
+> - これにより両ファイル間で `TASK-XXX` で検索して対応を取れる
 
-### 2026-01-08 更新
-- [x] **動作確認**: GoogleAuth統合後のスクリプト ✅ 完了
-  - henry_core.user.js v2.9.6 - GoogleAuth統合、スコープ修正、OAuth設定のGM_storage永続化
-  - henry_google_drive_bridge.user.js v2.2.1 - HenryCore.modules.GoogleAuth経由に変更
-  - henry_ikensho_form.user.js v2.1.5 - HenryCore.modules.GoogleAuth経由に変更
-- [x] **動作確認**: henry_auto_approver.user.js v3.11.0 ✅
-  - [x] v3.7.0: 取り消し承認（APPROVE_REVOCATION）対応 ✅
-  - [x] v3.8.0: 全件処理（毎回最初のページから再取得）対応 ✅
-  - [x] v3.9.0: 承認完了後に画面を自動更新（Apollo Client refetch） ✅
-  - [x] v3.11.0: 取消確認（CONFIRM_REVOCATION / ORDER_STATUS_REVOKED）対応 ✅
-- [ ] **調査**: ORDER_STATUS_REVOKED の承認APIを特定する
-  - 現状: CONFIRM_REVOCATION アクションで処理しているが、承認できずに残るケースがある
-  - 調査方法: devtoolで手動承認時に飛ぶAPIを確認
-  - 確認ポイント: operationName、orderStatusAction、追加パラメータ
-  - 調査後: henry_auto_approver.user.js を修正（現在 v3.12.0）
+### 調査・開発タスク
+- [ ] TASK-001: ORDER_STATUS_REVOKED の承認API特定
+- [ ] TASK-002: 独自オーダーセット選択UI
+- [ ] TASK-003: 病名サジェスト機能
 
-### 2026-01-11 追加: 独自オーダーセット選択UI
+### API収集
+- [ ] TASK-004: 患者保険・資格画面を操作
+- [ ] TASK-005: 注射オーダーを操作
+- [ ] TASK-006: 外来会計画面を操作
 
-**目的**: 既存のセット選択UIが遅く操作性が悪いため、独自の高速UIを作成する
-
-#### 判明済みの情報
-
-**1. 空のオーダーセットを作成する関数**
-```javascript
-async function createEmptySet(title, folderId = "90518b91-bf8c-482f-9268-5146b03318fa") {
-  const result = await fetch('https://henry-app.jp/graphql-v2', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'authorization': `Bearer ${await HenryCore.getToken()}`,
-      'x-auth-organization-uuid': 'ce6b556b-2a8d-4fce-b8dd-89ba638fc825'
-    },
-    body: JSON.stringify({
-      operationName: 'SaveEncounterTemplate',
-      variables: {
-        input: {
-          id: crypto.randomUUID(),
-          title: title,
-          description: "",
-          startDate: null,
-          endDate: null,
-          folderId: folderId,
-          isDraft: false
-        }
-      },
-      extensions: {
-        persistedQuery: {
-          version: 1,
-          sha256Hash: "686c44230dbad179cefe87737e2b32c66457d2c5ce0fb3c43f70b2d68020143b"
-        }
-      }
-    })
-  }).then(r => r.json());
-  return result;
-}
-```
-
-**2. セット展開API（ExpandEncounterTemplate）**
-- エンドポイント: `https://henry-app.jp/graphql-v2`
-- APQハッシュ: `9399993dc569309020791a2c70c5171f9e87cc7e5ec0d433f4130c5a3de02685`
-- 必要なパラメータ:
-  - `encounterId`: 展開先の診察UUID
-  - `encounterTemplateId`: 展開するオーダーセットのUUID
-  - `progressNoteTemplateInsertPositionInput`: `{ progressNoteId, blockIndex }`
-  - `extendedInsuranceCombinationHrn`: null（既定の保険）
-  - `asNewOrder`: false
-
-**3. 現在の診察ID取得方法**
-```javascript
-const cache = window.__APOLLO_CLIENT__?.cache?.data?.data;
-const rootQuery = cache?.ROOT_QUERY;
-// "encounter({"id":"..."})" のキーから抽出
-const encounterKey = Object.keys(rootQuery || {}).find(k => k.startsWith('encounter({"id":'));
-const encounterId = encounterKey?.match(/"id":"([a-f0-9-]{36})"/)?.[1];
-```
-
-**4. プログレスノートID取得方法**
-```javascript
-const cache = window.__APOLLO_CLIENT__?.cache?.data?.data;
-const progressNotes = Object.entries(cache)
-  .filter(([k, v]) => k.startsWith('ProgressNote:') || v?.__typename === 'ProgressNote')
-  .map(([k, v]) => ({ key: k, id: v.id }));
-```
-
-#### 未調査・次のステップ
-- [ ] オーダーセット一覧取得API（`encounterTemplates`）のハッシュ取得
-- [ ] フォルダ一覧取得API（`encounterTemplateFolders`）のハッシュ取得
-- [ ] UIの設計（モーダル or サイドパネル、検索機能など）
-- [ ] Tampermonkeyスクリプト化
-
-### 2026-01-12 追加: 病名サジェスト機能
-
-**目的**: カルテ内容を読み取り、登録すべき病名をClaudeで推論・提案する
-
-#### 完了済み
-- [x] カルテ内容読み取りスクリプト (`henry_note_reader.user.js` v1.0.1)
-- [x] Claude API (claude-haiku-4-5) 動作確認
-- [x] 病名登録API (`UpdateMultiPatientReceiptDiseases`) 動作確認
-- [x] 整形外科病名リスト (ICD-10 Mコード 1673件) を `整形外科病名リスト.csv` に保存
-- [x] 病名マスター・修飾語マスターをUTF-8に変換
-
-#### 次のステップ
-- [ ] 頻用病名リストを作成する（ユーザー作業）
-- [ ] 修飾語リストを作成する（ユーザー作業）
-- [ ] Claude APIで病名を推論するロジックを実装
-- [ ] 病名サジェストUIを作成
-- [ ] 確認後に病名登録APIを呼び出す
+### 動作確認待ち
+- [ ] TASK-007: henry_disease_register.user.js v1.0.0
+- [ ] TASK-008: henry_error_logger.user.js v1.0.0
+- [ ] TASK-009: HenryCore v2.10.3 エラーログ機能

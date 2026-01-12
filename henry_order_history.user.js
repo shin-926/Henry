@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry Order History
 // @namespace    https://henry-app.jp/
-// @version      1.0.0
+// @version      1.0.7
 // @description  指定期間内の患者オーダー履歴を表示
 // @author       Claude
 // @match        https://henry-app.jp/*
@@ -15,49 +15,15 @@
   'use strict';
 
   const SCRIPT_NAME = 'OrderHistory';
+
   const QUERY = `
-    query ListSectionedOrdersInPatient($input: ListSectionedOrdersInPatientInput!) {
+    query ListSectionedOrdersInPatient($input: ListSectionedOrdersInPatientRequestInput!) {
       listSectionedOrdersInPatient(input: $input) {
         sections {
-          sectionDate {
-            year
-            month
-            day
-          }
+          sectionDate { year month day }
           orders {
             uuid
             orderType
-            order {
-              uuid
-              imagingOrder {
-                orderStatus
-                doctor { name }
-              }
-              prescriptionOrderV2 {
-                orderStatus
-                doctor { name }
-              }
-              injectionOrderV2 {
-                orderStatus
-                doctor { name }
-              }
-              specimenInspectionOrderV2 {
-                orderStatus
-                doctor { name }
-              }
-              rehabilitationOrder {
-                orderStatus
-                doctor { name }
-              }
-              accountingOrder {
-                orderStatus
-                doctor { name }
-              }
-              nutritionOrder {
-                orderStatus
-                doctor { name }
-              }
-            }
           }
         }
         nextPageToken
@@ -263,8 +229,8 @@
     const modal = HenryCore.ui.showModal({
       title: 'オーダー履歴検索',
       content,
-      width: 320,
-      action: {
+      width: '320px',
+      actions: [{
         label: '検索',
         autoClose: false,
         onClick: async () => {
@@ -291,7 +257,7 @@
             input.disabled = false;
           }
         }
-      }
+      }]
     });
 
     // Enterキーで検索
@@ -321,7 +287,7 @@
       name: 'オーダー履歴',
       icon: '📋',
       description: '指定期間内のオーダー履歴を表示',
-      version: '1.0.0',
+      version: '1.0.7',
       order: 200,
       onClick: showInputModal
     });
