@@ -1,6 +1,6 @@
-# Henry EMR 開発ガイドライン (Core Rules v4.6)
+# Henry EMR 開発ガイドライン (Core Rules v4.7)
 
-<!-- 📝 UPDATED: v4.6 - HenryCore v2.9.6対応（OAuth認証情報のGM_storage永続化） -->
+<!-- 📝 UPDATED: v4.7 - 問題解決のアプローチ（Problem-Solving Approach）追加 -->
 
 > **🆕 NEW**: このドキュメントはAIアシスタントとの協働開発における必須ルール集です。簡潔性を重視し、詳細な技術仕様は `HENRY-API-REFERENCE.md` を参照してください。
 
@@ -348,6 +348,22 @@ try {
 
 **IMPORTANT**: 探索・計画をスキップして直接コードを書くと品質が低下する。
 
+### 問題解決のアプローチ (Problem-Solving Approach)
+
+複雑な問題に取り組む際は、以下のプロセスを明示的に踏むこと：
+
+1. **問題の分解**: 大きな問題を小さな部分問題に分ける
+2. **仮定の明示**: 前提条件や制約を言語化する
+3. **複数案の検討**: 1つの解法に飛びつかず、少なくとも2つのアプローチを比較する
+4. **段階的な検証**: 各ステップの結果を確認してから次へ進む
+
+**IMPORTANT**: 「とりあえず動くコードを書く」前に、上記のプロセスを経ること。特に以下の場合は必須：
+- バグの原因が不明なとき
+- 複数の実装方法があるとき
+- 要件が複雑または曖昧なとき
+
+**理由**: 中間推論を明示することで論理の飛躍を防ぎ、手戻りを減らす。
+
 ---
 
 ## 5. 参照ドキュメント (Reference)
@@ -407,6 +423,7 @@ try {
 - **YOU MUST**: ユーザーから「クラッシュした」と報告を受けた場合は、まず (1) どこまで作業が完了しているか確認し、(2) 残りの作業を明確にしてから再開すること。
 - **IMPORTANT**: 作業を進める際は、要所で「何をしようとしているか」「なぜそうするのか」を簡潔に説明すること。質問があれば丁寧に答える。
 - **YOU MUST**: 新規Tampermonkeyスクリプトを作成する際、`@grant GM_*`を使用する場合は必ず`@grant unsafeWindow`も追加し、`pageWindow = typeof unsafeWindow !== 'undefined' ? unsafeWindow : window` 経由でHenryCoreにアクセスすること。
+- **YOU MUST**: セッション開始時に「保留中のタスク」セクションを確認し、未完了タスクがあれば簡潔なリスト形式で提示すること。詳細は聞かれたら答える。
 
 ---
 
@@ -414,7 +431,8 @@ try {
 
 | Version | Date | Changes |
 |---------|------|---------|
-| **v4.6** | **2026-01-08** | **HenryCore v2.9.6対応。OAuth認証情報のGM_storage永続化、設定ダイアログUI追加、Toolboxアイコン削除** |
+| **v4.7** | **2026-01-11** | **問題解決のアプローチ追加。複雑な問題への段階的アプローチ（問題分解、仮定明示、複数案比較、段階的検証）を明文化** |
+| v4.6 | 2026-01-08 | HenryCore v2.9.6対応。OAuth認証情報のGM_storage永続化、設定ダイアログUI追加、Toolboxアイコン削除 |
 | v4.5 | 2026-01-08 | HenryCore v2.9.0対応。GoogleAuth統合（`modules.GoogleAuth`追加）、Google Docs対応 |
 | v4.4 | 2026-01-08 | コミュニケーション方針を詳細化。質問すべき観点・タイミング、作業前確認テンプレート追加 |
 | v4.3 | 2026-01-06 | HenryCore v2.8.0 フルクエリ方式追加。`query()` メソッド追加、`call()` は非推奨に。ハッシュ事前収集が不要になり、初回でもAPIが即座に呼び出し可能 |
@@ -429,9 +447,10 @@ try {
 
 ## 📊 変更サマリー
 
-### 🆕 新規追加 (2項目)
+### 🆕 新規追加 (3項目)
 1. **プロンプト階層 (NEVER/YOU MUST/IMPORTANT)** - セクション1
 2. **推奨ワークフロー (Explore→Plan→Code→Commit)** - セクション4
+3. **問題解決のアプローチ (Problem-Solving Approach)** - セクション4 (v4.7)
 
 ### ✂️ リファレンスに移動 (8項目)
 1. HenryCore 完全な型定義（60行のTypeScriptインターフェース）
@@ -472,3 +491,77 @@ try {
   - 調査方法: devtoolで手動承認時に飛ぶAPIを確認
   - 確認ポイント: operationName、orderStatusAction、追加パラメータ
   - 調査後: henry_auto_approver.user.js を修正（現在 v3.12.0）
+
+### 2026-01-11 追加: 独自オーダーセット選択UI
+
+**目的**: 既存のセット選択UIが遅く操作性が悪いため、独自の高速UIを作成する
+
+#### 判明済みの情報
+
+**1. 空のオーダーセットを作成する関数**
+```javascript
+async function createEmptySet(title, folderId = "90518b91-bf8c-482f-9268-5146b03318fa") {
+  const result = await fetch('https://henry-app.jp/graphql-v2', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'authorization': `Bearer ${await HenryCore.getToken()}`,
+      'x-auth-organization-uuid': 'ce6b556b-2a8d-4fce-b8dd-89ba638fc825'
+    },
+    body: JSON.stringify({
+      operationName: 'SaveEncounterTemplate',
+      variables: {
+        input: {
+          id: crypto.randomUUID(),
+          title: title,
+          description: "",
+          startDate: null,
+          endDate: null,
+          folderId: folderId,
+          isDraft: false
+        }
+      },
+      extensions: {
+        persistedQuery: {
+          version: 1,
+          sha256Hash: "686c44230dbad179cefe87737e2b32c66457d2c5ce0fb3c43f70b2d68020143b"
+        }
+      }
+    })
+  }).then(r => r.json());
+  return result;
+}
+```
+
+**2. セット展開API（ExpandEncounterTemplate）**
+- エンドポイント: `https://henry-app.jp/graphql-v2`
+- APQハッシュ: `9399993dc569309020791a2c70c5171f9e87cc7e5ec0d433f4130c5a3de02685`
+- 必要なパラメータ:
+  - `encounterId`: 展開先の診察UUID
+  - `encounterTemplateId`: 展開するオーダーセットのUUID
+  - `progressNoteTemplateInsertPositionInput`: `{ progressNoteId, blockIndex }`
+  - `extendedInsuranceCombinationHrn`: null（既定の保険）
+  - `asNewOrder`: false
+
+**3. 現在の診察ID取得方法**
+```javascript
+const cache = window.__APOLLO_CLIENT__?.cache?.data?.data;
+const rootQuery = cache?.ROOT_QUERY;
+// "encounter({"id":"..."})" のキーから抽出
+const encounterKey = Object.keys(rootQuery || {}).find(k => k.startsWith('encounter({"id":'));
+const encounterId = encounterKey?.match(/"id":"([a-f0-9-]{36})"/)?.[1];
+```
+
+**4. プログレスノートID取得方法**
+```javascript
+const cache = window.__APOLLO_CLIENT__?.cache?.data?.data;
+const progressNotes = Object.entries(cache)
+  .filter(([k, v]) => k.startsWith('ProgressNote:') || v?.__typename === 'ProgressNote')
+  .map(([k, v]) => ({ key: k, id: v.id }));
+```
+
+#### 未調査・次のステップ
+- [ ] オーダーセット一覧取得API（`encounterTemplates`）のハッシュ取得
+- [ ] フォルダ一覧取得API（`encounterTemplateFolders`）のハッシュ取得
+- [ ] UIの設計（モーダル or サイドパネル、検索機能など）
+- [ ] Tampermonkeyスクリプト化
