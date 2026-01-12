@@ -357,4 +357,7 @@ const core = pageWindow.HenryCore;
 ### 動作確認待ち
 - [ ] TASK-007: henry_disease_register.user.js v1.0.0
 - [ ] TASK-008: henry_error_logger.user.js v1.0.0
-- [ ] TASK-009: HenryCore v2.10.3 エラーログ機能
+- [ ] TASK-009: HenryCore v2.10.4 エンドポイント自動復旧機能
+
+### 完了
+- [x] TASK-010: henry_disease_list.user.js v1.0.2
