@@ -348,6 +348,7 @@ const core = pageWindow.HenryCore;
 - [ ] TASK-001: ORDER_STATUS_REVOKED の承認API特定
 - [ ] TASK-002: 独自オーダーセット選択UI
 - [ ] TASK-003: 病名サジェスト機能
+- [ ] TASK-011: henry_karte_history 処方表示改善（mhlwMedicine対応、medicationTiming用法取得、検体検査フィールド調査）
 
 ### API収集
 - [ ] TASK-004: 患者保険・資格画面を操作

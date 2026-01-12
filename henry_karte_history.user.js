@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         カルテ履歴取得
 // @namespace    https://github.com/shin-926/Henry
-// @version      0.1.0
+// @version      0.2.0
 // @description  過去3ヶ月分のカルテ記事をコンソールに出力（実験用）
 // @match        https://henry-app.jp/*
 // @grant        unsafeWindow
@@ -33,6 +33,18 @@
             __typename
             ... on ProgressNote {
               editorData
+            }
+            ... on PrescriptionOrder {
+              rps {
+                dosageText
+                instructions {
+                  instruction {
+                    medicationDosageInstruction {
+                      localMedicine { name }
+                    }
+                  }
+                }
+              }
             }
           }
         }
@@ -106,7 +118,7 @@
         endDate,
         pageSize: PAGE_SIZE,
         pageToken: null
-      }, { endpoint: 'v2' });
+      }, { endpoint: '/graphql-v2' });
 
       const encounters = result.data?.encountersInPatient?.encounters ?? [];
       const nextPageToken = result.data?.encountersInPatient?.nextPageToken;
@@ -140,9 +152,27 @@
           console.log('診療録: なし');
         }
 
-        // ProgressNote以外の型を表示
+        // 処方を表示
+        const prescriptions = enc.records?.filter(r => r.__typename === 'PrescriptionOrder') ?? [];
+        prescriptions.forEach((rx, rxIdx) => {
+          console.group(`処方 ${rxIdx + 1}`);
+          rx.rps?.forEach((rp, rpIdx) => {
+            const medicines = rp.instructions
+              ?.map(inst => {
+                const med = inst.instruction?.medicationDosageInstruction;
+                if (!med) return null;
+                return med.localMedicine?.name || '不明';
+              })
+              .filter(Boolean)
+              .join(', ') || '薬剤不明';
+            console.log(`Rp${rpIdx + 1}: ${medicines} / ${rp.dosageText || '用法不明'}`);
+          });
+          console.groupEnd();
+        });
+
+        // その他の型を表示（検体検査含む - フィールド構造不明のため詳細は未取得）
         const otherTypes = enc.records
-          ?.filter(r => r.__typename !== 'ProgressNote')
+          ?.filter(r => !['ProgressNote', 'PrescriptionOrder'].includes(r.__typename))
           .map(r => r.__typename) ?? [];
         if (otherTypes.length > 0) {
           console.log('その他のレコード型:', [...new Set(otherTypes)]);
@@ -173,7 +203,7 @@
       name: 'カルテ履歴',
       icon: '📜',
       description: '過去3ヶ月分のカルテをコンソールに出力',
-      version: '0.1.0',
+      version: '0.2.0',
       order: 50,
       onClick: fetchKarteHistory
     });
