@@ -227,3 +227,66 @@ const progressNotes = Object.entries(cache)
 | `henryFileUuid` | ファイルUUID（上書き保存用、新規は空） |
 | `henryFolderUuid` | フォルダUUID（保存先、ルートなら空） |
 | `henrySource` | 作成元識別子（例: `drive-direct`） |
+
+## GraphQL インライン方式
+
+### 背景
+
+HenryのGraphQLサーバーは一部のmutationで入力型（例: `UpdateMultiPatientReceiptDiseasesInput`）を公開していない。そのため、変数型を使ったクエリがエラーになる。
+
+### エラー例
+
+```
+Validation error (UnknownType) : Unknown type 'UpdateMultiPatientReceiptDiseasesInput'
+```
+
+### 解決策: インライン方式
+
+変数型を使わず、値をクエリに直接埋め込む。
+
+**NG: 変数型**
+```javascript
+const MUTATION = `
+  mutation UpdateMultiPatientReceiptDiseases($input: UpdateMultiPatientReceiptDiseasesInput!) {
+    updateMultiPatientReceiptDiseases(input: $input) {
+      patientReceiptDiseases { uuid }
+    }
+  }
+`;
+await HenryCore.query(MUTATION, { input: data });
+```
+
+**OK: インライン方式**
+```javascript
+const MUTATION = `
+  mutation {
+    updateMultiPatientReceiptDiseases(input: {
+      records: [{
+        recordOperation: RECORD_OPERATION_CREATE,
+        patientReceiptDisease: {
+          patientUuid: "${patientUuid}",
+          masterDiseaseCode: "${diseaseCode}",
+          isMain: ${isMain},
+          outcome: CONTINUED,
+          startDate: { year: ${year}, month: ${month}, day: ${day} }
+        }
+      }]
+    }) {
+      patientReceiptDiseases { uuid }
+    }
+  }
+`;
+await HenryCore.query(MUTATION);  // 変数なし
+```
+
+### 注意点
+
+1. **文字列はダブルクォートで囲む**: `"${value}"`
+2. **数値・boolean・enumはそのまま**: `${num}`, `${bool}`, `ENUM_VALUE`
+3. **nullはそのまま**: `null`
+4. **配列**: `[${items.map(i => `"${i}"`).join(', ')}]`
+
+### 適用実績
+
+- `henry_disease_register.user.js` v1.2.1 - 病名登録mutation
+

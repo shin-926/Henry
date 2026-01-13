@@ -753,7 +753,7 @@
       dialog.innerHTML = `
         <h3 style="margin:0 0 16px 0;font-size:18px;font-weight:600;">Google OAuth 設定</h3>
         <p style="margin:0 0 16px 0;font-size:13px;color:#666;">
-          GCPコンソールで作成したOAuthクライアントの情報を入力してください。<br>
+          OAuthクライアントの情報を入力してください。<br>
           この設定はブラウザに保存され、スクリプト更新後も保持されます。
         </p>
         <div style="margin-bottom:12px;">

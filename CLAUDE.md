@@ -345,12 +345,25 @@ const core = pageWindow.HenryCore;
   ```
   - いきなりダイアログを表示するとユーザーが混乱するため、先に理由を伝える
 
+- **IMPORTANT**: GraphQL mutationで変数型（`$input: SomeInput!`）がエラーになる場合は、インライン方式を使うこと：
+  ```javascript
+  // NG: 変数型（サーバーが型を公開していない場合エラー）
+  const MUTATION = `mutation Update($input: UpdateInput!) { update(input: $input) { ... } }`;
+  await HenryCore.query(MUTATION, { input: data });
+  
+  // OK: インライン方式（値を直接埋め込む）
+  const MUTATION = `mutation { update(input: { field: "${value}", num: ${num} }) { ... } }`;
+  await HenryCore.query(MUTATION);
+  ```
+  - 詳細は `NOTES.md` の「GraphQL インライン方式」を参照
+
 ---
 
 ## 変更履歴
 
 | Version | Date | Changes |
 |---------|------|---------|
+| v4.13 | 2026-01-13 | GraphQL インライン方式ルール追加 |
 | v4.12 | 2026-01-13 | OAuth認証時はalertで理由を伝えるルール追加 |
 | v4.11 | 2026-01-12 | スピードより確認の正確さを優先するルール追加 |
 | v4.10 | 2026-01-12 | API使用前のリファレンス確認ルール追加（GraphQL/HenryCore両方） |
@@ -385,9 +398,9 @@ const core = pageWindow.HenryCore;
 - [ ] TASK-006: 外来会計画面を操作
 
 ### 動作確認待ち
-- [ ] TASK-007: henry_disease_register.user.js v1.0.0
 - [ ] TASK-008: henry_error_logger.user.js v1.0.0
 - [ ] TASK-009: HenryCore v2.10.4 エンドポイント自動復旧機能
 
 ### 完了
+- [x] TASK-007: henry_disease_register.user.js v1.2.1
 - [x] TASK-010: henry_disease_list.user.js v1.0.2
