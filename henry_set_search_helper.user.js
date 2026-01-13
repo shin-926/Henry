@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry セット展開検索ヘルパー
 // @namespace    https://henry-app.jp/
-// @version      2.0.9
+// @version      2.1.4
 // @description  セット展開画面の検索ボックス上にクイック検索ボタンを追加
 // @match        https://henry-app.jp/*
 // @grant        GM_setValue
@@ -227,6 +227,11 @@
         border-radius: 1px;
         pointer-events: none;
         z-index: 100;
+      }
+      /* 並び替えアニメーション */
+      .hss-quick-btn.hss-animating,
+      .hss-dropdown.hss-animating {
+        transition: transform 0.4s ease-out;
       }
       /* 右端コントロール */
       .hss-control-btn {
@@ -682,6 +687,88 @@
       }
     }
 
+    // FLIPアニメーション用：位置を記録
+    function capturePositions() {
+      const positions = [];
+      const elements = container.querySelectorAll('.hss-quick-btn, .hss-dropdown');
+      elements.forEach((el) => {
+        const rect = el.getBoundingClientRect();
+        positions.push({ left: rect.left, top: rect.top });
+      });
+      return positions;
+    }
+
+    // FLIPアニメーション付きでボタンを再描画
+    function refreshButtonsWithAnimation(oldFromIndex, oldToIndex) {
+      // First: 現在の位置を記録
+      const oldPositions = capturePositions();
+
+      // データは既に更新済みなので再描画
+      removeButtons();
+      insertButtons();
+
+      // Last: 新しい位置を取得してアニメーション
+      const newContainer = document.getElementById('hss-button-container');
+      if (!newContainer) return;
+
+      // 新しいインデックス順での対応を計算
+      // oldFromIndex -> newToIndex への移動
+      // 例: [0,1,2,3,4] で 2->4 なら [0,1,3,4,2] になる
+      // 旧インデックス -> 新インデックス のマッピングを作成
+      const indexMap = [];
+      for (let i = 0; i < oldPositions.length; i++) {
+        if (i === oldFromIndex) {
+          indexMap[i] = oldToIndex;
+        } else if (oldFromIndex < oldToIndex) {
+          // 左から右へ移動: fromとtoの間は1つ左にずれる
+          if (i > oldFromIndex && i <= oldToIndex) {
+            indexMap[i] = i - 1;
+          } else {
+            indexMap[i] = i;
+          }
+        } else {
+          // 右から左へ移動: toとfromの間は1つ右にずれる
+          if (i >= oldToIndex && i < oldFromIndex) {
+            indexMap[i] = i + 1;
+          } else {
+            indexMap[i] = i;
+          }
+        }
+      }
+
+      const newElements = newContainer.querySelectorAll('.hss-quick-btn, .hss-dropdown');
+
+      // 新しい各要素について、旧位置からアニメーション
+      newElements.forEach((el, newIndex) => {
+        // この新インデックスに対応する旧インデックスを探す
+        const oldIndex = indexMap.indexOf(newIndex);
+        if (oldIndex === -1 || !oldPositions[oldIndex]) return;
+
+        const oldPos = oldPositions[oldIndex];
+        const newRect = el.getBoundingClientRect();
+        const deltaX = oldPos.left - newRect.left;
+        const deltaY = oldPos.top - newRect.top;
+
+        if (Math.abs(deltaX) < 1 && Math.abs(deltaY) < 1) return;
+
+        // Invert: 既存のtransitionを無効化して古い位置に即座に配置
+        el.style.transition = 'none';
+        el.style.transform = `translate(${deltaX}px, ${deltaY}px)`;
+
+        // 強制リフロー（スタイル適用を確定）
+        el.offsetHeight;
+
+        // Play: アニメーションで新しい位置へ
+        el.style.transition = '';
+        el.classList.add('hss-animating');
+        el.style.transform = '';
+        el.addEventListener('transitionend', () => {
+          el.classList.remove('hss-animating');
+          el.style.transition = '';
+        }, { once: true });
+      });
+    }
+
     // マウスアップでドロップ処理
     function handleMouseUp() {
       // 長押しタイマーをクリア
@@ -709,11 +796,13 @@
           if (draggedIndex < newIndex) newIndex--;
 
           if (draggedIndex !== newIndex) {
+            const oldFromIndex = draggedIndex;
+            const oldToIndex = newIndex;
             items.splice(draggedIndex, 1);
             items.splice(newIndex, 0, draggedItem);
             saveItems(items);
             exitDragMode();
-            refreshButtons();
+            refreshButtonsWithAnimation(oldFromIndex, oldToIndex);
             return;
           }
         }
