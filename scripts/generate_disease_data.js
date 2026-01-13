@@ -77,13 +77,16 @@ function loadDiseases() {
   return diseases;
 }
 
-// 修飾語マスター読み込み
+// 修飾語マスター読み込み（接頭語・接尾語に分類）
 function loadModifiers() {
   console.log('修飾語マスターを読み込み中...');
   const content = fs.readFileSync(MODIFIER_MASTER, 'utf-8');
   const lines = content.split('\n').filter(line => line.trim());
 
-  const modifiers = [];
+  const all = [];
+  const prefixes = [];
+  const suffixes = [];
+
   for (const line of lines) {
     const fields = parseCSVLine(line);
 
@@ -94,12 +97,31 @@ function loadModifiers() {
 
     if (code && name) {
       const hiragana = katakanaToHiragana(katakanaReading || '');
-      modifiers.push([code, name, hiragana]);
+      all.push([code, name, hiragana]);
+
+      // 接頭語/接尾語の分類
+      if (name.startsWith('・')) {
+        // 「・」で始まる → 接尾語（「・」なし版も追加）
+        suffixes.push([code, name, name]);
+        suffixes.push([code, name, name.slice(1)]);
+      } else if (name.startsWith('の')) {
+        // 「の」で始まる → 接尾語
+        suffixes.push([code, name, name]);
+      } else {
+        // それ以外 → 接頭語
+        prefixes.push([code, name, name]);
+      }
     }
   }
 
-  console.log(`  ${modifiers.length} 件の修飾語を読み込み`);
-  return modifiers;
+  // 長い順にソート（最長一致のため）
+  prefixes.sort((a, b) => b[2].length - a[2].length);
+  suffixes.sort((a, b) => b[2].length - a[2].length);
+
+  console.log(`  ${all.length} 件の修飾語を読み込み`);
+  console.log(`  → 接頭語: ${prefixes.length} 件, 接尾語: ${suffixes.length} 件`);
+
+  return { all, prefixes, suffixes };
 }
 
 // データ出力
@@ -109,15 +131,23 @@ function writeOutput(diseases, modifiers) {
   const output = `// Henry Disease Data
 // 自動生成: ${new Date().toISOString()}
 // 病名マスター: ${diseases.length} 件
-// 修飾語マスター: ${modifiers.length} 件
+// 修飾語マスター: ${modifiers.all.length} 件
+//   - 接頭語: ${modifiers.prefixes.length} 件
+//   - 接尾語: ${modifiers.suffixes.length} 件
 //
 // データ構造:
 //   HENRY_DISEASES: [code, icd10, name, kana]
 //   HENRY_MODIFIERS: [code, name, kana]
+//   HENRY_PREFIX_MODIFIERS: [code, name, searchName] (長い順)
+//   HENRY_SUFFIX_MODIFIERS: [code, name, searchName] (長い順)
 
 window.HENRY_DISEASES = ${JSON.stringify(diseases)};
 
-window.HENRY_MODIFIERS = ${JSON.stringify(modifiers)};
+window.HENRY_MODIFIERS = ${JSON.stringify(modifiers.all)};
+
+window.HENRY_PREFIX_MODIFIERS = ${JSON.stringify(modifiers.prefixes)};
+
+window.HENRY_SUFFIX_MODIFIERS = ${JSON.stringify(modifiers.suffixes)};
 `;
 
   fs.writeFileSync(OUTPUT_FILE, output, 'utf-8');

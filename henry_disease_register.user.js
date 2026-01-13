@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry Disease Register
 // @namespace    https://henry-app.jp/
-// @version      1.4.0
+// @version      1.5.0
 // @description  高速病名検索・登録
 // @author       Claude
 // @match        https://henry-app.jp/*
@@ -41,31 +41,13 @@
   ];
 
   // ============================================
-  // 自然言語入力用の修飾語辞書
+  // 自然言語入力用の修飾語インデックス（事前構築済み）
   // ============================================
-  const MODIFIER_DICT = {
-    // 接頭語（入力の先頭からマッチ）
-    prefixes: [
-      '両側', '左右', // 2文字を先に
-      '左', '右',
-      '急性', '慢性', '亜急性',
-      '高度', '軽度', '中等度',
-      '原発性', '続発性', '特発性',
-      '先天性', '後天性',
-      '再発性', '反復性',
-      '進行性', '一過性',
-      '上', '下', '前', '後',
-    ],
-    // 接尾語（入力の末尾からマッチ）
-    suffixes: [
-      'の術後', '術後',
-      'の疑い', '疑い',
-      'の既往', '既往',
-      'の合併', '合併',
-      'の急性増悪', '急性増悪',
-      'の再発', '再発',
-    ]
-  };
+  // 接頭語: 「・」で始まらない修飾語（長い順にソート済み）
+  // 接尾語: 「・」で始まる修飾語 + 「の」で始まる修飾語（長い順にソート済み）
+  // データ構造: [code, name, searchName]
+  const PREFIX_MODIFIERS = window.HENRY_PREFIX_MODIFIERS;
+  const SUFFIX_MODIFIERS = window.HENRY_SUFFIX_MODIFIERS;
 
   // ============================================
   // ユーティリティ
@@ -155,48 +137,34 @@
   // 自然言語パーサー
   // ============================================
 
-  // 辞書の修飾語名からMODIFIERSのコードを検索
-  function findModifierCode(name) {
-    for (let i = 0; i < MODIFIERS.length; i++) {
-      if (MODIFIERS[i][1] === name) {
-        return { code: MODIFIERS[i][0], name: MODIFIERS[i][1] };
-      }
-    }
-    return null;
-  }
-
   // 自然言語入力をパースして候補を生成
   function parseNaturalInput(input) {
     if (!input || input.trim().length === 0) return [];
+    if (!PREFIX_MODIFIERS || !SUFFIX_MODIFIERS) return [];
 
     const normalized = input.trim();
     const candidates = [];
 
-    // 接頭語を抽出
+    // 接頭語を抽出（最長一致）
+    // データ構造: [code, name, searchName]
     let remaining = normalized;
     const foundPrefixes = [];
 
-    for (const prefix of MODIFIER_DICT.prefixes) {
-      if (remaining.startsWith(prefix)) {
-        const modifier = findModifierCode(prefix);
-        if (modifier) {
-          foundPrefixes.push(modifier);
-          remaining = remaining.slice(prefix.length);
-          break; // 1つだけマッチ（シンプル版）
-        }
+    for (const mod of PREFIX_MODIFIERS) {
+      if (remaining.startsWith(mod[2])) {
+        foundPrefixes.push({ code: mod[0], name: mod[1] });
+        remaining = remaining.slice(mod[2].length);
+        break; // 1つだけマッチ
       }
     }
 
-    // 接尾語を抽出
+    // 接尾語を抽出（最長一致）
     const foundSuffixes = [];
-    for (const suffix of MODIFIER_DICT.suffixes) {
-      if (remaining.endsWith(suffix)) {
-        const modifier = findModifierCode(suffix);
-        if (modifier) {
-          foundSuffixes.push(modifier);
-          remaining = remaining.slice(0, -suffix.length);
-          break; // 1つだけマッチ（シンプル版）
-        }
+    for (const mod of SUFFIX_MODIFIERS) {
+      if (remaining.endsWith(mod[2])) {
+        foundSuffixes.push({ code: mod[0], name: mod[1] });
+        remaining = remaining.slice(0, -mod[2].length);
+        break; // 1つだけマッチ
       }
     }
 
@@ -1033,7 +1001,7 @@
       name: '病名登録',
       icon: '🏥',
       description: '高速病名検索・登録',
-      version: '1.4.0',
+      version: '1.5.0',
       order: 150,
       onClick: () => {
         const patientUuid = HenryCore.getPatientUuid();
