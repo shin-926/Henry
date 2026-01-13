@@ -391,7 +391,6 @@ const core = pageWindow.HenryCore;
 - [ ] TASK-002: 独自オーダーセット選択UI
 - [ ] TASK-003: 病名サジェスト機能
 - [ ] TASK-011: henry_karte_history 処方表示改善（mhlwMedicine対応、medicationTiming用法取得、検体検査フィールド調査）
-- [ ] TASK-012: henry_disease_register.user.js v2.1.0 検索精度改善（修飾語分解の精度向上、AND検索の改善など）
 
 ### API収集
 - [ ] TASK-004: 患者保険・資格画面を操作
@@ -405,3 +404,4 @@ const core = pageWindow.HenryCore;
 ### 完了
 - [x] TASK-007: henry_disease_register.user.js v1.2.1
 - [x] TASK-010: henry_disease_list.user.js v1.0.2
+- [x] TASK-012: henry_disease_register.user.js v2.2.4 検索精度改善（N-gram検索追加）
