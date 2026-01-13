@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         画像オーダー入力支援
 // @namespace    https://henry-app.jp/
-// @version      1.13.0
+// @version      1.13.3
 // @description  画像照射オーダーモーダルに部位・方向選択UIを追加（複数内容対応）
 // @author       Henry UI Lab
 // @match        https://henry-app.jp/*
@@ -339,7 +339,7 @@
     logger = utils.createLogger(CONFIG.SCRIPT_NAME);
     const cleaner = utils.createCleaner();
 
-    logger.info('スクリプト初期化 (v1.13.0)');
+    logger.info('スクリプト初期化 (v1.13.3)');
 
     utils.subscribeNavigation(cleaner, () => {
       logger.info('ページ遷移検出 -> 再セットアップ');
@@ -689,46 +689,58 @@
 
   // ==========================================
   // 自動入力フィールド（部位・体位・枚数・撮影条件）を非表示にする
-  // TODO: フィールド非表示時に空白スペースが残る問題を解決する
-  //       CSSの:has()セレクタでは親要素のspacing指定を消せないため、
-  //       JavaScript側での対応が必要かもしれない
+  // 空白スペース対策: 親4（margin-top: 16px）もJSで非表示にする
   // ==========================================
   function hideAutoFilledFields() {
     const styleId = 'henry-imaging-helper-hide-fields';
-    if (document.getElementById(styleId)) {
-      return;
+
+    // CSS追加（まだなければ）
+    if (!document.getElementById(styleId)) {
+      const style = document.createElement('style');
+      style.id = styleId;
+      style.textContent = `
+        /* 親4（margin-top: 16pxのコンテナ）を非表示にする */
+        /* 構造: 親4 > 親3 > 親2 > 親1 > BodySiteForm */
+        div:has(> div > div > div > [data-testid="BodySiteForm__FilterableSelectBox"]) {
+          display: none !important;
+        }
+      `;
+      document.head.appendChild(style);
+      logger.info('フィールド非表示CSS: 適用完了');
     }
 
-    const style = document.createElement('style');
-    style.id = styleId;
-    style.textContent = `
-      /* 部位フォームを非表示 */
-      div:has(> div > [data-testid="BodySiteForm__FilterableSelectBox"]) {
-        display: none !important;
+    // JS側でも親4を非表示にする（CSSが効かない場合のフォールバック）
+    const hideParent4 = () => {
+      const bodySiteEl = document.querySelector('[data-testid="BodySiteForm__FilterableSelectBox"]');
+      if (!bodySiteEl) return false;
+
+      let parent = bodySiteEl;
+      for (let i = 0; i < 4; i++) {
+        parent = parent.parentElement;
+        if (!parent) return false;
       }
-      /* 体位フォームを非表示 */
-      div:has(> div > [data-testid="BodyPositionForm__ChipInput"]) {
-        display: none !important;
+
+      if (parent.style.display !== 'none') {
+        parent.style.display = 'none';
+        logger.info('フィールド非表示JS: 親4を非表示にしました');
       }
-      /* 側性フォームを非表示 */
-      div:has(> div > div > select[name*="laterality"]) {
-        display: none !important;
+      return true;
+    };
+
+    // 即座に実行を試みる
+    if (hideParent4()) return;
+
+    // まだなければMutationObserverで監視
+    const modal = document.querySelector('dialog');
+    if (!modal) return;
+
+    const observer = new MutationObserver(() => {
+      if (hideParent4()) {
+        observer.disconnect();
       }
-      /* 枚数フォームを非表示 */
-      div:has(> div > div > input[name*="filmCount"]) {
-        display: none !important;
-      }
-      /* 撮影条件フォームを非表示 */
-      div:has(> div > div > input[name*="configuration"]) {
-        display: none !important;
-      }
-      /* サイズフォームを非表示（骨塩定量用） */
-      div:has(> div > select > option[value*="FILM_SIZE_TYPE"]) {
-        display: none !important;
-      }
-    `;
-    document.head.appendChild(style);
-    logger.info('フィールド非表示CSS: 適用完了');
+    });
+    observer.observe(modal, { childList: true, subtree: true });
+    setTimeout(() => observer.disconnect(), 5000);
   }
 
   // ==========================================
