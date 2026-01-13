@@ -1,14 +1,13 @@
 // ==UserScript==
 // @name         照射オーダー自動印刷
 // @namespace    https://henry-app.jp/
-// @version      4.0.0
+// @version      4.0.1
 // @description  「外来 照射オーダー」の完了時、入力内容と一致するオーダーを特定して印刷ダイアログを開き、印刷ボタンを自動クリック
 // @author       Henry UI Lab
 // @match        https://henry-app.jp/*
 // @run-at       document-idle
 // @grant        GM_setValue
 // @grant        GM_getValue
-// @grant        GM_registerMenuCommand
 // @grant        GM_info
 // @grant        unsafeWindow
 // @updateURL    https://raw.githubusercontent.com/shin-926/Henry/main/henry_rad_order_auto_printer.user.js
@@ -909,30 +908,6 @@
     }
 
     // ==========================================
-    // メニューコマンド登録
-    // ==========================================
-    const registerMenuCommands = () => {
-        try {
-            GM_registerMenuCommand('🔄 停止/再開', () => {
-                state.isDisabled = !state.isDisabled;
-                Dashboard.updateStatus();
-                Logger.log(state.isDisabled ? '⛔ 停止しました' : '✅ 再開しました', 'warn');
-            });
-
-            GM_registerMenuCommand('🔃 状態リセット', () => {
-                FailureManager.reset();
-                Dashboard.updateStatus();
-            });
-
-            GM_registerMenuCommand('📊 デバッグパネル表示/非表示', () => {
-                Dashboard.toggle();
-            });
-        } catch (e) {
-            console.debug(`[${SCRIPT_NAME}] menu command error:`, e.message);
-        }
-    };
-
-    // ==========================================
     // 初期化 (HenryCore subscribeNavigation)
     // ==========================================
     const cleaner = utils.createCleaner();
@@ -942,7 +917,6 @@
         document.addEventListener('click', clickHandler, true);
         cleaner.add(() => document.removeEventListener('click', clickHandler, true));
 
-        registerMenuCommands();
         Dashboard.init();
         Dashboard.updateStatus();
 
