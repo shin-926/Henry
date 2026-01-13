@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry Disease Register
 // @namespace    https://henry-app.jp/
-// @version      2.2.4
+// @version      2.2.6
 // @description  高速病名検索・登録
 // @author       Claude
 // @match        https://henry-app.jp/*
@@ -888,6 +888,9 @@
     .dr-candidate-item:hover {
       background: #e3f2fd;
     }
+    .dr-candidate-item.selected {
+      background: #fff3e0;
+    }
     .dr-candidate-name {
       font-weight: bold;
       font-size: 14px;
@@ -974,6 +977,7 @@
       this.patientUuid = patientUuid;
       this.selectedDisease = null;
       this.selectedModifiers = [];
+      this.selectedCandidateIndex = null;
       this.overlay = null;
 
       this.render();
@@ -1283,6 +1287,10 @@
       container.querySelectorAll('.dr-candidate-item').forEach(item => {
         item.onclick = () => {
           const index = parseInt(item.dataset.index);
+          // 選択状態を更新
+          container.querySelectorAll('.dr-candidate-item').forEach(el => el.classList.remove('selected'));
+          item.classList.add('selected');
+          this.selectedCandidateIndex = index;
           this.selectCandidate(candidates[index]);
         };
       });
@@ -1302,10 +1310,6 @@
       this.selectedModifiers = [...candidate.prefixes, ...candidate.suffixes];
       this.updateModifierTags();
       this.updateModifierList(this.overlay.querySelector('#dr-modifier-search').value);
-
-      // 自然言語入力をクリア
-      this.overlay.querySelector('#dr-natural-input').value = '';
-      this.overlay.querySelector('#dr-candidates').style.display = 'none';
 
       // プレビューと登録ボタンを更新
       this.updatePreview();

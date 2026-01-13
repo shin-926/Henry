@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         主治医意見書作成フォーム
 // @namespace    https://henry-app.jp/
-// @version      2.4.5
+// @version      2.5.2
 // @description  主治医意見書の入力フォームとGoogle Docs出力（GAS不要版・API直接呼び出し）
 // @author       Henry Team
 // @match        https://henry-app.jp/*
@@ -1255,15 +1255,27 @@
       }
     });
 
-    // 文字数制限チェック
+    // 行数制限チェック（1行57文字で計算）
+    const countLogicalLines = (text, charsPerLine) => {
+      if (!text) return 0;
+      const lines = text.split('\n');
+      let totalLines = 0;
+      for (const line of lines) {
+        totalLines += Math.max(1, Math.ceil(line.length / charsPerLine));
+      }
+      return totalLines;
+    };
+
     const course = data.diagnosis?.course_and_treatment || '';
-    if (course.length > 285) {
-      errors.push(`• 経過及び治療内容：285文字以内で入力してください（現在${course.length}文字）`);
+    const courseLines = countLogicalLines(course, 57);
+    if (courseLines > 5) {
+      errors.push(`• 経過及び治療内容：5行以内で入力してください（現在${courseLines}行）`);
     }
 
     const notes = data.special_notes?.other_notes || '';
-    if (notes.length > 456) {
-      errors.push(`• 特記すべき事項：456文字以内で入力してください（現在${notes.length}文字）`);
+    const notesLines = countLogicalLines(notes, 57);
+    if (notesLines > 8) {
+      errors.push(`• 特記すべき事項：8行以内で入力してください（現在${notesLines}行）`);
     }
 
     // 条件付き必須項目チェック（基本的なもののみ）
@@ -1676,14 +1688,14 @@
     );
     section.appendChild(stabilityField);
 
-    // 症状不安定時の具体的状況（条件付き必須：症状安定性=不安定の場合）
-    const unstableDetailsField = createTextField('症状不安定時の具体的状況', 'symptom_unstable_details', 'diagnosis', data.symptom_unstable_details, false, '不安定な場合の具体的な状況を記入', 56);
+    // 症状不安定時の具体的状況（条件付き必須：症状安定性=不安定の場合、1行57文字）
+    const unstableDetailsField = createTextField('症状不安定時の具体的状況', 'symptom_unstable_details', 'diagnosis', data.symptom_unstable_details, false, '不安定な場合の具体的な状況を記入', 57);
     unstableDetailsField.style.marginLeft = '24px';
     section.appendChild(unstableDetailsField);
     setupConditionalField(stabilityField, unstableDetailsField, '2');
 
-    // 経過及び治療内容
-    section.appendChild(createTextareaField('生活機能低下の直接の原因となっている傷病または特定疾病の経過及び投薬内容を含む治療内容', 'course_and_treatment', 'diagnosis', data.course_and_treatment, true, 285, 5));
+    // 経過及び治療内容（1行57文字×5行）
+    section.appendChild(createTextareaField('生活機能低下の直接の原因となっている傷病または特定疾病の経過及び投薬内容を含む治療内容', 'course_and_treatment', 'diagnosis', data.course_and_treatment, true, 57, 5));
 
     return section;
   }
@@ -2543,8 +2555,8 @@
       true
     ));
 
-    // 栄養・食生活上の留意点（任意）
-    section.appendChild(createTextField('栄養・食生活上の留意点', 'nutrition_diet_notes', 'life_function', data.nutrition_diet_notes, false, '', 14));
+    // 栄養・食生活上の留意点（任意、40文字）
+    section.appendChild(createTextField('栄養・食生活上の留意点', 'nutrition_diet_notes', 'life_function', data.nutrition_diet_notes, false, '', 40));
 
     // (3) 現在あるかまたは今後発生の可能性の高い状態
     section.appendChild(createSubsectionTitle('(3) 現在あるかまたは今後発生の可能性の高い状態'));
@@ -2731,8 +2743,8 @@
 
     const data = formData.special_notes;
 
-    // 特記すべき事項（任意、456文字/10行）
-    section.appendChild(createTextareaField('特記すべき事項', 'other_notes', 'special_notes', data.other_notes, false, 456, 10));
+    // 特記すべき事項（任意、1行57文字×8行）
+    section.appendChild(createTextareaField('特記すべき事項', 'other_notes', 'special_notes', data.other_notes, false, 57, 8));
 
     return section;
   }
@@ -3055,8 +3067,10 @@
 
   /**
    * テキストエリア（複数行）
+   * @param {number} charsPerLine - 1行あたりの文字数（0で無制限）
+   * @param {number} maxLines - 最大行数（0で無制限）
    */
-  function createTextareaField(label, name, section, currentValue, required = false, maxChars = 0, maxLines = 0) {
+  function createTextareaField(label, name, section, currentValue, required = false, charsPerLine = 0, maxLines = 0) {
     const field = document.createElement('div');
     field.style.cssText = 'margin-bottom: 16px;';
 
@@ -3077,21 +3091,46 @@
     const charCounter = document.createElement('div');
     charCounter.style.cssText = 'margin-top: 4px; font-size: 13px; color: #64748b; text-align: right;';
 
+    // 論理行数を計算（手動改行 + 自動折り返し）
+    const countLogicalLines = (text) => {
+      if (!text || charsPerLine <= 0) return 0;
+      const lines = text.split('\n');
+      let totalLines = 0;
+      for (const line of lines) {
+        // 各行が何論理行になるか（空行も1行としてカウント）
+        totalLines += Math.max(1, Math.ceil(line.length / charsPerLine));
+      }
+      return totalLines;
+    };
+
+    let lastValidValue = textarea.value;
+
     const updateCounter = () => {
-      const currentLength = textarea.value.length;
-      if (maxChars > 0) {
-        charCounter.textContent = `${currentLength} / ${maxChars}文字`;
-        if (currentLength > maxChars) {
+      if (charsPerLine > 0 && maxLines > 0) {
+        const lineCount = countLogicalLines(textarea.value);
+        charCounter.textContent = `${lineCount} / ${maxLines}行（1行${charsPerLine}文字）`;
+        if (lineCount > maxLines) {
           charCounter.style.color = '#ef4444';
         } else {
           charCounter.style.color = '#64748b';
         }
       } else {
-        charCounter.textContent = `${currentLength}文字`;
+        charCounter.textContent = `${textarea.value.length}文字`;
       }
     };
 
-    textarea.addEventListener('input', updateCounter);
+    textarea.addEventListener('input', () => {
+      if (charsPerLine > 0 && maxLines > 0) {
+        const lineCount = countLogicalLines(textarea.value);
+        if (lineCount > maxLines) {
+          // 超過時は直前の値に戻す
+          textarea.value = lastValidValue;
+        } else {
+          lastValidValue = textarea.value;
+        }
+      }
+      updateCounter();
+    });
     updateCounter();
 
     field.appendChild(textarea);
