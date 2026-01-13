@@ -231,7 +231,7 @@
       /* 並び替えアニメーション */
       .hss-quick-btn.hss-animating,
       .hss-dropdown.hss-animating {
-        transition: transform 0.4s ease-out;
+        transition: transform 0.3s ease-out;
       }
       /* 右端コントロール */
       .hss-control-btn {
