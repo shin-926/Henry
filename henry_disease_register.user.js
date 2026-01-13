@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry Disease Register
 // @namespace    https://henry-app.jp/
-// @version      1.2.1
+// @version      1.4.0
 // @description  高速病名検索・登録
 // @author       Claude
 // @match        https://henry-app.jp/*
@@ -39,6 +39,33 @@
     { value: 'CANCELLED', label: '中止' },
     { value: 'MOVED', label: '転医' }
   ];
+
+  // ============================================
+  // 自然言語入力用の修飾語辞書
+  // ============================================
+  const MODIFIER_DICT = {
+    // 接頭語（入力の先頭からマッチ）
+    prefixes: [
+      '両側', '左右', // 2文字を先に
+      '左', '右',
+      '急性', '慢性', '亜急性',
+      '高度', '軽度', '中等度',
+      '原発性', '続発性', '特発性',
+      '先天性', '後天性',
+      '再発性', '反復性',
+      '進行性', '一過性',
+      '上', '下', '前', '後',
+    ],
+    // 接尾語（入力の末尾からマッチ）
+    suffixes: [
+      'の術後', '術後',
+      'の疑い', '疑い',
+      'の既往', '既往',
+      'の合併', '合併',
+      'の急性増悪', '急性増悪',
+      'の再発', '再発',
+    ]
+  };
 
   // ============================================
   // ユーティリティ
@@ -85,38 +112,152 @@
   }
 
   // 検索用インデックス（起動時に小文字化済み文字列を追加）
-  let diseaseIndex = null;
-  let modifierIndex = null;
+  // データ構造: DISEASES=[code, icd10, name, kana], MODIFIERS=[code, name, kana]
+  let diseaseNameIndex = null;
+  let diseaseKanaIndex = null;
+  let modifierNameIndex = null;
+  let modifierKanaIndex = null;
 
   function buildSearchIndex() {
-    diseaseIndex = DISEASES.map(d => d[2].toLowerCase());
-    modifierIndex = MODIFIERS.map(m => m[1].toLowerCase());
+    diseaseNameIndex = DISEASES.map(d => d[2].toLowerCase());
+    diseaseKanaIndex = DISEASES.map(d => (d[3] || '').toLowerCase());
+    modifierNameIndex = MODIFIERS.map(m => m[1].toLowerCase());
+    modifierKanaIndex = MODIFIERS.map(m => (m[2] || '').toLowerCase());
   }
 
-  // 病名検索（インデックス使用）
+  // 病名検索（インデックス使用、名前＋ひらがな両方で検索）
   function searchDiseases(query) {
     if (!query) return DISEASES.slice(0, 50);
     const q = query.toLowerCase();
     const results = [];
-    for (let i = 0; i < diseaseIndex.length && results.length < 50; i++) {
-      if (diseaseIndex[i].includes(q)) {
+    for (let i = 0; i < diseaseNameIndex.length && results.length < 50; i++) {
+      if (diseaseNameIndex[i].includes(q) || diseaseKanaIndex[i].includes(q)) {
         results.push(DISEASES[i]);
       }
     }
     return results;
   }
 
-  // 修飾語検索（インデックス使用）
+  // 修飾語検索（インデックス使用、名前＋ひらがな両方で検索）
   function searchModifiers(query) {
     if (!query) return MODIFIERS.slice(0, 50);
     const q = query.toLowerCase();
     const results = [];
-    for (let i = 0; i < modifierIndex.length && results.length < 50; i++) {
-      if (modifierIndex[i].includes(q)) {
+    for (let i = 0; i < modifierNameIndex.length && results.length < 50; i++) {
+      if (modifierNameIndex[i].includes(q) || modifierKanaIndex[i].includes(q)) {
         results.push(MODIFIERS[i]);
       }
     }
     return results;
+  }
+
+  // ============================================
+  // 自然言語パーサー
+  // ============================================
+
+  // 辞書の修飾語名からMODIFIERSのコードを検索
+  function findModifierCode(name) {
+    for (let i = 0; i < MODIFIERS.length; i++) {
+      if (MODIFIERS[i][1] === name) {
+        return { code: MODIFIERS[i][0], name: MODIFIERS[i][1] };
+      }
+    }
+    return null;
+  }
+
+  // 自然言語入力をパースして候補を生成
+  function parseNaturalInput(input) {
+    if (!input || input.trim().length === 0) return [];
+
+    const normalized = input.trim();
+    const candidates = [];
+
+    // 接頭語を抽出
+    let remaining = normalized;
+    const foundPrefixes = [];
+
+    for (const prefix of MODIFIER_DICT.prefixes) {
+      if (remaining.startsWith(prefix)) {
+        const modifier = findModifierCode(prefix);
+        if (modifier) {
+          foundPrefixes.push(modifier);
+          remaining = remaining.slice(prefix.length);
+          break; // 1つだけマッチ（シンプル版）
+        }
+      }
+    }
+
+    // 接尾語を抽出
+    const foundSuffixes = [];
+    for (const suffix of MODIFIER_DICT.suffixes) {
+      if (remaining.endsWith(suffix)) {
+        const modifier = findModifierCode(suffix);
+        if (modifier) {
+          foundSuffixes.push(modifier);
+          remaining = remaining.slice(0, -suffix.length);
+          break; // 1つだけマッチ（シンプル版）
+        }
+      }
+    }
+
+    // 残りの部分で病名を最長一致検索
+    const diseases = findDiseaseByLongestMatch(remaining);
+
+    // 候補を生成
+    for (const disease of diseases) {
+      candidates.push({
+        disease: disease,
+        prefixes: foundPrefixes,
+        suffixes: foundSuffixes,
+        displayName: buildDisplayName(disease.name, foundPrefixes, foundSuffixes)
+      });
+    }
+
+    return candidates;
+  }
+
+  // 最長一致で病名を検索（上位5件、名前＋ひらがな両方で検索）
+  function findDiseaseByLongestMatch(query) {
+    if (!query || query.length === 0) return [];
+
+    const q = query.toLowerCase();
+    const results = [];
+
+    // 完全一致を優先（名前 or ひらがな）
+    for (let i = 0; i < diseaseNameIndex.length; i++) {
+      if (diseaseNameIndex[i] === q || diseaseKanaIndex[i] === q) {
+        results.push({ code: DISEASES[i][0], icd10: DISEASES[i][1], name: DISEASES[i][2] });
+      }
+    }
+
+    // 部分一致（前方一致優先、名前 or ひらがな）
+    if (results.length < 5) {
+      for (let i = 0; i < diseaseNameIndex.length && results.length < 5; i++) {
+        if ((diseaseNameIndex[i].startsWith(q) || diseaseKanaIndex[i].startsWith(q)) &&
+            !results.some(r => r.code === DISEASES[i][0])) {
+          results.push({ code: DISEASES[i][0], icd10: DISEASES[i][1], name: DISEASES[i][2] });
+        }
+      }
+    }
+
+    // 含む（部分一致、名前 or ひらがな）
+    if (results.length < 5) {
+      for (let i = 0; i < diseaseNameIndex.length && results.length < 5; i++) {
+        if ((diseaseNameIndex[i].includes(q) || diseaseKanaIndex[i].includes(q)) &&
+            !results.some(r => r.code === DISEASES[i][0])) {
+          results.push({ code: DISEASES[i][0], icd10: DISEASES[i][1], name: DISEASES[i][2] });
+        }
+      }
+    }
+
+    return results;
+  }
+
+  // 表示用の病名を組み立て
+  function buildDisplayName(diseaseName, prefixes, suffixes) {
+    const prefixStr = prefixes.map(p => p.name).join('');
+    const suffixStr = suffixes.map(s => s.name).join('');
+    return prefixStr + diseaseName + suffixStr;
   }
 
   // 今日の日付
@@ -346,6 +487,86 @@
       color: #888;
       font-size: 13px;
     }
+    .dr-natural-input {
+      padding: 10px 12px;
+      border: 2px solid #4a90d9;
+      border-radius: 6px;
+      font-size: 14px;
+      width: 100%;
+      box-sizing: border-box;
+    }
+    .dr-natural-input:focus {
+      outline: none;
+      border-color: #2e6bb0;
+    }
+    .dr-natural-hint {
+      font-size: 11px;
+      color: #888;
+      margin-top: 4px;
+    }
+    .dr-candidates {
+      margin-top: 8px;
+      border: 1px solid #e0e0e0;
+      border-radius: 4px;
+      max-height: 200px;
+      overflow-y: auto;
+    }
+    .dr-candidate-item {
+      padding: 10px 12px;
+      cursor: pointer;
+      border-bottom: 1px solid #f0f0f0;
+    }
+    .dr-candidate-item:last-child {
+      border-bottom: none;
+    }
+    .dr-candidate-item:hover {
+      background: #e3f2fd;
+    }
+    .dr-candidate-name {
+      font-weight: bold;
+      font-size: 14px;
+    }
+    .dr-candidate-detail {
+      font-size: 11px;
+      color: #666;
+      margin-top: 4px;
+    }
+    .dr-candidate-tags {
+      display: flex;
+      gap: 4px;
+      margin-top: 4px;
+      flex-wrap: wrap;
+    }
+    .dr-candidate-tag {
+      font-size: 10px;
+      padding: 2px 6px;
+      background: #e8f5e9;
+      border-radius: 3px;
+      color: #2e7d32;
+    }
+    .dr-candidate-tag.suffix {
+      background: #fff3e0;
+      color: #e65100;
+    }
+    .dr-divider {
+      display: flex;
+      align-items: center;
+      margin: 16px 0;
+      color: #888;
+      font-size: 12px;
+    }
+    .dr-divider::before,
+    .dr-divider::after {
+      content: '';
+      flex: 1;
+      border-bottom: 1px solid #e0e0e0;
+    }
+    .dr-divider::before {
+      margin-right: 8px;
+    }
+    .dr-divider::after {
+      margin-left: 8px;
+    }
   `;
 
   // ============================================
@@ -393,6 +614,16 @@
             <span class="dr-close">&times;</span>
           </div>
           <div class="dr-body">
+            <!-- 自然言語入力 -->
+            <div class="dr-section">
+              <div class="dr-section-title">自然言語入力</div>
+              <input type="text" class="dr-natural-input" id="dr-natural-input" placeholder="例: 右橈骨遠位端骨折術後">
+              <div class="dr-natural-hint">修飾語（左/右/急性/術後など）を含めて入力すると自動分解します</div>
+              <div class="dr-candidates" id="dr-candidates" style="display:none;"></div>
+            </div>
+
+            <div class="dr-divider">または従来の検索</div>
+
             <!-- 病名検索 -->
             <div class="dr-section">
               <div class="dr-section-title">病名検索</div>
@@ -470,6 +701,10 @@
       this.overlay.onclick = (e) => {
         if (e.target === this.overlay) this.close();
       };
+
+      // 自然言語入力
+      const naturalInput = this.overlay.querySelector('#dr-natural-input');
+      naturalInput.oninput = debounce(() => this.updateCandidates(naturalInput.value), 200);
 
       // 病名検索
       const diseaseSearch = this.overlay.querySelector('#dr-disease-search');
@@ -589,6 +824,71 @@
           this.updatePreview();
         };
       });
+    }
+
+    // 自然言語入力の候補を更新
+    updateCandidates(input) {
+      const container = this.overlay.querySelector('#dr-candidates');
+
+      if (!input || input.trim().length === 0) {
+        container.style.display = 'none';
+        return;
+      }
+
+      const candidates = parseNaturalInput(input);
+
+      if (candidates.length === 0) {
+        container.style.display = 'block';
+        container.innerHTML = '<div class="dr-empty">候補が見つかりません</div>';
+        return;
+      }
+
+      container.style.display = 'block';
+      container.innerHTML = candidates.map((c, i) => {
+        const prefixTags = c.prefixes.map(p => `<span class="dr-candidate-tag">${p.name}</span>`).join('');
+        const suffixTags = c.suffixes.map(s => `<span class="dr-candidate-tag suffix">${s.name}</span>`).join('');
+        const allTags = prefixTags + suffixTags;
+
+        return `
+          <div class="dr-candidate-item" data-index="${i}">
+            <div class="dr-candidate-name">${c.displayName}</div>
+            <div class="dr-candidate-detail">${c.disease.name} (${c.disease.icd10 || '-'})</div>
+            ${allTags ? `<div class="dr-candidate-tags">${allTags}</div>` : ''}
+          </div>
+        `;
+      }).join('');
+
+      // クリックイベント
+      container.querySelectorAll('.dr-candidate-item').forEach(item => {
+        item.onclick = () => {
+          const index = parseInt(item.dataset.index);
+          this.selectCandidate(candidates[index]);
+        };
+      });
+    }
+
+    // 候補を選択して既存の状態に反映
+    selectCandidate(candidate) {
+      // 病名を設定
+      this.selectedDisease = {
+        code: candidate.disease.code,
+        name: candidate.disease.name
+      };
+      this.overlay.querySelector('#dr-selected-disease').style.display = 'flex';
+      this.overlay.querySelector('#dr-selected-disease-name').textContent = this.selectedDisease.name;
+
+      // 修飾語を設定（接頭語 + 接尾語）
+      this.selectedModifiers = [...candidate.prefixes, ...candidate.suffixes];
+      this.updateModifierTags();
+      this.updateModifierList(this.overlay.querySelector('#dr-modifier-search').value);
+
+      // 自然言語入力をクリア
+      this.overlay.querySelector('#dr-natural-input').value = '';
+      this.overlay.querySelector('#dr-candidates').style.display = 'none';
+
+      // プレビューと登録ボタンを更新
+      this.updatePreview();
+      this.updateRegisterButton();
     }
 
     updatePreview() {
@@ -733,7 +1033,7 @@
       name: '病名登録',
       icon: '🏥',
       description: '高速病名検索・登録',
-      version: '1.2.1',
+      version: '1.4.0',
       order: 150,
       onClick: () => {
         const patientUuid = HenryCore.getPatientUuid();
