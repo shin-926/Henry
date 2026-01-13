@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry Disease Register
 // @namespace    https://henry-app.jp/
-// @version      1.5.2
+// @version      1.6.0
 // @description  高速病名検索・登録
 // @author       Claude
 // @match        https://henry-app.jp/*
@@ -143,25 +143,38 @@
     if (!PREFIX_MODIFIERS || !SUFFIX_MODIFIERS) return [];
 
     const normalized = input.trim();
-    const candidates = [];
 
-    // 接頭語候補を全て抽出（長い順）
-    const prefixCandidates = [];
-    for (const mod of PREFIX_MODIFIERS) {
-      if (normalized.startsWith(mod[2])) {
-        prefixCandidates.push({ code: mod[0], name: mod[1], searchName: mod[2] });
+    // 再帰的に接頭語を抽出する関数
+    function extractPrefixes(str, prefixes, depth) {
+      if (depth > 5) return [{ remaining: str, prefixes }]; // 無限ループ防止
+
+      const results = [];
+
+      // この位置でマッチする接頭語候補を全て取得
+      for (const mod of PREFIX_MODIFIERS) {
+        if (str.startsWith(mod[2])) {
+          const newPrefixes = [...prefixes, { code: mod[0], name: mod[1], len: mod[2].length }];
+          const newRemaining = str.slice(mod[2].length);
+          // さらに接頭語を探す
+          results.push(...extractPrefixes(newRemaining, newPrefixes, depth + 1));
+        }
       }
+
+      // 接頭語なしのパターンも追加
+      results.push({ remaining: str, prefixes });
+
+      return results;
     }
 
-    // 接頭語なしも候補に追加
-    prefixCandidates.push(null);
+    // 全ての接頭語パターンを取得
+    const prefixPatterns = extractPrefixes(normalized, [], 0);
 
-    // 各接頭語候補で試行し、病名がマッチするものを採用
-    for (const prefixCandidate of prefixCandidates) {
-      let remaining = prefixCandidate
-        ? normalized.slice(prefixCandidate.searchName.length)
-        : normalized;
-      const foundPrefixes = prefixCandidate ? [{ code: prefixCandidate.code, name: prefixCandidate.name }] : [];
+    // 各パターンで病名を検索し、結果を収集
+    const allResults = [];
+
+    for (const pattern of prefixPatterns) {
+      let remaining = pattern.remaining;
+      const foundPrefixes = pattern.prefixes.map(p => ({ code: p.code, name: p.name }));
 
       // 接尾語を抽出（最長一致）
       const foundSuffixes = [];
@@ -176,17 +189,35 @@
       // 残りの部分で病名を検索
       const diseases = findDiseaseByLongestMatch(remaining);
 
-      // 病名が見つかればこのパターンを採用
+      // 病名が見つかれば結果に追加
       if (diseases.length > 0) {
         for (const disease of diseases) {
-          candidates.push({
+          allResults.push({
             disease: disease,
             prefixes: foundPrefixes,
             suffixes: foundSuffixes,
-            displayName: buildDisplayName(disease.name, foundPrefixes, foundSuffixes)
+            diseaseNameLen: disease.name.length
           });
         }
-        break; // 最初にマッチしたパターンを採用
+      }
+    }
+
+    // 病名の長さでソート（長い順 = より具体的な病名を優先）
+    allResults.sort((a, b) => b.diseaseNameLen - a.diseaseNameLen);
+
+    // 重複を除去して上位5件を返す
+    const seen = new Set();
+    const candidates = [];
+    for (const r of allResults) {
+      const key = r.disease.code + '|' + r.prefixes.map(p => p.code).join(',') + '|' + r.suffixes.map(s => s.code).join(',');
+      if (!seen.has(key) && candidates.length < 5) {
+        seen.add(key);
+        candidates.push({
+          disease: r.disease,
+          prefixes: r.prefixes,
+          suffixes: r.suffixes,
+          displayName: buildDisplayName(r.disease.name, r.prefixes, r.suffixes)
+        });
       }
     }
 
@@ -1034,7 +1065,7 @@
       name: '病名登録',
       icon: '🏥',
       description: '高速病名検索・登録',
-      version: '1.5.2',
+      version: '1.6.0',
       order: 150,
       onClick: () => {
         const patientUuid = HenryCore.getPatientUuid();
