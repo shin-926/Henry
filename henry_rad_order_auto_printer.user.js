@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         照射オーダー自動印刷
 // @namespace    https://henry-app.jp/
-// @version      3.2.1
+// @version      4.0.0
 // @description  「外来 照射オーダー」の完了時、入力内容と一致するオーダーを特定して印刷ダイアログを開き、印刷ボタンを自動クリック
 // @author       Henry UI Lab
 // @match        https://henry-app.jp/*
@@ -9,12 +9,17 @@
 // @grant        GM_setValue
 // @grant        GM_getValue
 // @grant        GM_registerMenuCommand
+// @grant        GM_info
+// @grant        unsafeWindow
 // @updateURL    https://raw.githubusercontent.com/shin-926/Henry/main/henry_rad_order_auto_printer.user.js
 // @downloadURL  https://raw.githubusercontent.com/shin-926/Henry/main/henry_rad_order_auto_printer.user.js
 // ==/UserScript==
 
 (function () {
     'use strict';
+
+    const SCRIPT_NAME = 'RadOrderAutoPrint';
+    const VERSION = GM_info.script.version;
 
     // ==========================================
     // 共有設定(localStorage ベース)
@@ -27,7 +32,7 @@
                 const raw = localStorage.getItem(STORAGE_PREFIX + key);
                 if (raw === null) return defaultValue;
                 return JSON.parse(raw);
-            } catch (e) {
+            } catch {
                 return defaultValue;
             }
         }
@@ -37,33 +42,34 @@
     // 起動時設定チェック
     // ==========================================
     const isEnabled = SharedSettings.get('auto_print_radiation', true);
-
-    console.log('=== AUTO PRINT RADIATION DEBUG START ===');
-    console.log('1. Storage prefix:', STORAGE_PREFIX);
-    console.log('2. auto_print_radiation setting:', isEnabled);
-    console.log('3. Raw localStorage value:', localStorage.getItem(STORAGE_PREFIX + 'auto_print_radiation'));
-
     if (!isEnabled) {
-        console.log('4. ❌ Stopping script (setting is OFF)');
-        console.log('=== AUTO PRINT RADIATION DEBUG END ===');
+        console.log(`[${SCRIPT_NAME}] 設定により無効化`);
         return;
     }
 
-    console.log('4. ✅ Script will run (setting is ON)');
-    console.log('=== AUTO PRINT RADIATION DEBUG END ===');
+    // ==========================================
+    // HenryCore連携
+    // ==========================================
+    const pageWindow = typeof unsafeWindow !== 'undefined' ? unsafeWindow : window;
+    const HenryCore = pageWindow.HenryCore;
+
+    if (!HenryCore) {
+        console.error(`[${SCRIPT_NAME}] HenryCoreが見つかりません`);
+        return;
+    }
+
+    const { utils } = HenryCore;
 
     // ==========================================
     // 多重起動ガード
     // ==========================================
     const GLOBAL_KEY = '__henry_autoPrint_radiationOrder__';
-    if (window[GLOBAL_KEY]?.started) return;
-    window[GLOBAL_KEY] = { started: true };
+    if (pageWindow[GLOBAL_KEY]?.started) return;
+    pageWindow[GLOBAL_KEY] = { started: true };
 
     // ==========================================
     // 設定 & 定数
     // ==========================================
-    const VERSION = '3.2.0';
-
     const CONFIG = Object.freeze({
         targetTitle: '外来 照射オーダー',
         printMenuText: '照射オーダーを印刷',
@@ -77,8 +83,8 @@
         settleTimeoutMs: 350,
         settleHardExtraMs: 1500,
         maxFailureScore: 5,
-        verboseKeywordLog: false,
-        printDialogWaitMs: 500,  // 印刷ダイアログ表示待機時間
+        printDialogWaitMs: 500,
+        onePageWaitMs: 1500,
     });
 
     const FAILURE_WEIGHTS = Object.freeze({
@@ -109,7 +115,6 @@
         failureCount: 0,
         failureScore: 0,
         isDisabled: false,
-        lastUrl: location.href,
     };
 
     // ==========================================
@@ -132,8 +137,13 @@
         return Number.isFinite(z) ? z : 0;
     };
 
-    const safeDisconnect = (obs) => { try { obs?.disconnect(); } catch (_) {} };
-    const safeClearTimeout = (id) => { try { if (id != null) clearTimeout(id); } catch (_) {} };
+    const safeDisconnect = (obs) => {
+        try { obs?.disconnect(); } catch (e) { console.debug(`[${SCRIPT_NAME}] disconnect error:`, e.message); }
+    };
+
+    const safeClearTimeout = (id) => {
+        try { if (id != null) clearTimeout(id); } catch (e) { console.debug(`[${SCRIPT_NAME}] clearTimeout error:`, e.message); }
+    };
 
     // ==========================================
     // パフォーマンスモニター
@@ -158,7 +168,7 @@
         log(msg, type = 'info') {
             const time = new Date().toLocaleTimeString('ja-JP');
             const formatted = `[${time}] ${msg}`;
-            console.log(`[HenryAutoPrint] ${msg}`);
+            console.log(`[${SCRIPT_NAME}] ${msg}`);
 
             if (this._dashboard?.logContainer) {
                 this._appendEntry(formatted, type);
@@ -264,7 +274,9 @@
             try {
                 const found = finder();
                 if (found) return finish(found);
-            } catch (_) {}
+            } catch (e) {
+                console.debug(`[${SCRIPT_NAME}] finder error:`, e.message);
+            }
 
             try {
                 obs = new MutationObserver(() => {
@@ -272,7 +284,9 @@
                     try {
                         const found = finder();
                         if (found) finish(found);
-                    } catch (_) {}
+                    } catch (e) {
+                        console.debug(`[${SCRIPT_NAME}] observer finder error:`, e.message);
+                    }
                 });
                 obs.observe(root, {
                     childList: true,
@@ -281,7 +295,8 @@
                     characterData: true,
                     attributeFilter: ['style', 'class', 'hidden', 'aria-hidden'],
                 });
-            } catch (_) {
+            } catch (e) {
+                console.debug(`[${SCRIPT_NAME}] observer setup error:`, e.message);
                 FailureManager.register('Observer失敗');
                 return finish(null);
             }
@@ -330,7 +345,9 @@
                     characterData: true,
                     attributeFilter: ['style', 'class'],
                 });
-            } catch (_) {}
+            } catch (e) {
+                console.debug(`[${SCRIPT_NAME}] settle observer error:`, e.message);
+            }
 
             softTimer = setTimeout(() => {
                 if (rafCompleted) finish(mutationDetected);
@@ -353,14 +370,20 @@
         try {
             try {
                 el.scrollIntoView({ behavior: 'auto', block: 'center', inline: 'center' });
-            } catch (_) {}
+            } catch (e) {
+                console.debug(`[${SCRIPT_NAME}] scrollIntoView error:`, e.message);
+            }
 
-            try { el.focus?.(); } catch (_) {}
+            try { el.focus?.(); } catch (e) {
+                console.debug(`[${SCRIPT_NAME}] focus error:`, e.message);
+            }
 
             try {
                 el.click();
                 return true;
-            } catch (_) {}
+            } catch (e) {
+                console.debug(`[${SCRIPT_NAME}] click error:`, e.message);
+            }
 
             const opts = { bubbles: true, cancelable: true, view: window };
             let ok = false;
@@ -368,11 +391,14 @@
                 try {
                     el.dispatchEvent(new MouseEvent(type, opts));
                     ok = true;
-                } catch (_) {}
+                } catch (e) {
+                    console.debug(`[${SCRIPT_NAME}] dispatchEvent ${type} error:`, e.message);
+                }
             }
             if (!ok) FailureManager.register('クリック失敗');
             return ok;
-        } catch (_) {
+        } catch (e) {
+            console.debug(`[${SCRIPT_NAME}] clickElement error:`, e.message);
             FailureManager.register('クリック失敗');
             return false;
         }
@@ -417,7 +443,7 @@
             if (this.el) return;
             this._create();
             Logger.setDashboard(this);
-            Logger.log(`Henry Auto Print v${VERSION} 起動`, 'info');
+            Logger.log(`v${VERSION} 起動`, 'info');
         },
 
         _create() {
@@ -566,6 +592,15 @@
             this.el.style.display = isHidden ? 'flex' : 'none';
             GM_setValue('dashboardVisible', isHidden);
         },
+
+        destroy() {
+            if (this.el) {
+                this.el.remove();
+                this.el = null;
+                this.logContainer = null;
+                this.statusEl = null;
+            }
+        },
     };
 
     // ==========================================
@@ -575,15 +610,11 @@
         extract(dialog) {
             const keywords = [];
 
-            const add = (val, source, { minLen = 1 } = {}) => {
+            const add = (val, _source, { minLen = 1 } = {}) => {
                 if (!val || typeof val !== 'string') return false;
                 const v = val.trim();
                 if (v.length < minLen || this._isPlaceholder(v)) return false;
-
                 keywords.push(v);
-                if (CONFIG.verboseKeywordLog) {
-                    Logger.log(`  キーワード [${source}]: "${v}"`, 'info');
-                }
                 return true;
             };
 
@@ -684,7 +715,9 @@
             try {
                 matches[0].record.style.outline = '2px solid #3b82f6';
                 setTimeout(() => { matches[0].record.style.outline = ''; }, 1500);
-            } catch (_) {}
+            } catch (e) {
+                console.debug(`[${SCRIPT_NAME}] highlight error:`, e.message);
+            }
 
             return matches[0];
         },
@@ -716,7 +749,9 @@
                 if (found) return found;
             }
 
-            try { scrollRoot.scrollTop = originalScrollTop; } catch (_) {}
+            try { scrollRoot.scrollTop = originalScrollTop; } catch (e) {
+                console.debug(`[${SCRIPT_NAME}] scroll restore error:`, e.message);
+            }
             return null;
         },
     };
@@ -740,21 +775,7 @@
             return pickTopmost(candidates);
         },
 
-        findPrintExecuteButton() {
-            const dialogs = Array.from(document.querySelectorAll('[role="dialog"]')).filter(isVisible);
-            const targets = dialogs.filter((d) => textOf(d).includes(CONFIG.printDialogTitle));
-            const top = pickTopmost(targets);
-            if (!top) return null;
-
-            return Array.from(top.querySelectorAll('button'))
-                .find((b) => textOf(b) === CONFIG.printButtonText && isVisible(b));
-        },
-
-        /**
-         * 印刷ダイアログ内の「印刷」ボタンを検索
-         */
         findPrintDialogButton() {
-            // 1. 印刷ダイアログを特定
             const dialogs = Array.from(document.querySelectorAll('[role="dialog"]')).filter(isVisible);
             const printDialog = dialogs.find((d) => {
                 const title = d.querySelector('h2');
@@ -763,7 +784,6 @@
 
             if (!printDialog) return null;
 
-            // 2. ダイアログ内の全てのボタンから「印刷」ボタンを検索
             const buttons = Array.from(printDialog.querySelectorAll('button'));
             return buttons.find((btn) => textOf(btn) === CONFIG.printButtonText && isVisible(btn));
         },
@@ -813,11 +833,9 @@
                 return;
             }
 
-            // 印刷ダイアログの表示を待機
             Logger.log('印刷ダイアログ表示待機中...');
             await sleep(CONFIG.printDialogWaitMs);
 
-            // 印刷ダイアログ内の「印刷」ボタンを検索
             const dialogPrintBtn = await waitForElement(
                 () => MenuHandler.findPrintDialogButton(),
                 { timeoutMs: 5000 }
@@ -829,9 +847,8 @@
                 return;
             }
 
-            // 1ページ化スクリプトがiframe内にスタイルを適用する時間を確保
             Logger.log('1ページ化処理待機中...');
-            await sleep(1500); // 1.5秒待機（1ページ化スクリプトのデバウンス500ms + 余裕）
+            await sleep(CONFIG.onePageWaitMs);
 
             Logger.log('印刷ダイアログ内の印刷ボタンをクリック');
             if (!clickElement(dialogPrintBtn)) {
@@ -861,6 +878,8 @@
     // ==========================================
     // イベントハンドラ
     // ==========================================
+    let clickHandler = null;
+
     function handleGlobalClick(e) {
         Dashboard.init();
 
@@ -890,35 +909,6 @@
     }
 
     // ==========================================
-    // SPA遷移検知
-    // ==========================================
-    const setupHistoryHook = () => {
-        const onChange = () => {
-            if (location.href === state.lastUrl) return;
-            state.lastUrl = location.href;
-            Logger.log(`ページ遷移: ${location.pathname}`, 'info');
-            state.pendingKeywords = [];
-        };
-
-        const originalPush = history.pushState;
-        const originalReplace = history.replaceState;
-
-        history.pushState = function (...args) {
-            const result = originalPush.apply(this, args);
-            onChange();
-            return result;
-        };
-
-        history.replaceState = function (...args) {
-            const result = originalReplace.apply(this, args);
-            onChange();
-            return result;
-        };
-
-        window.addEventListener('popstate', onChange);
-    };
-
-    // ==========================================
     // メニューコマンド登録
     // ==========================================
     const registerMenuCommands = () => {
@@ -937,19 +927,30 @@
             GM_registerMenuCommand('📊 デバッグパネル表示/非表示', () => {
                 Dashboard.toggle();
             });
-        } catch (_) {}
+        } catch (e) {
+            console.debug(`[${SCRIPT_NAME}] menu command error:`, e.message);
+        }
     };
 
     // ==========================================
-    // 初期化
+    // 初期化 (HenryCore subscribeNavigation)
     // ==========================================
+    const cleaner = utils.createCleaner();
+
     const init = () => {
-        document.addEventListener('click', handleGlobalClick, true);
-        setupHistoryHook();
+        clickHandler = handleGlobalClick;
+        document.addEventListener('click', clickHandler, true);
+        cleaner.add(() => document.removeEventListener('click', clickHandler, true));
+
         registerMenuCommands();
         Dashboard.init();
         Dashboard.updateStatus();
+
+        cleaner.add(() => {
+            Dashboard.destroy();
+            state.pendingKeywords = [];
+        });
     };
 
-    init();
+    utils.subscribeNavigation(cleaner, init);
 })();
