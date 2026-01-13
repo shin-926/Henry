@@ -392,11 +392,6 @@ const core = pageWindow.HenryCore;
 - [ ] TASK-003: 病名サジェスト機能
 - [ ] TASK-011: henry_karte_history 処方表示改善（mhlwMedicine対応、medicationTiming用法取得、検体検査フィールド調査）
 
-### API収集
-- [ ] TASK-004: 患者保険・資格画面を操作
-- [ ] TASK-005: 注射オーダーを操作
-- [ ] TASK-006: 外来会計画面を操作
-
 ### 動作確認待ち
 - [ ] TASK-008: henry_error_logger.user.js v1.0.0
 - [ ] TASK-009: HenryCore v2.10.4 エンドポイント自動復旧機能
