@@ -287,7 +287,7 @@ const core = pageWindow.HenryCore;
 
 ### GraphQL API
 
-`HENRY-GRAPHQL-API-REFERENCE.md` を参照。
+chrome-devtools-mcpでリアルタイム調査。静的リファレンスは廃止。
 
 ### 調査メモ・実装詳細
 
@@ -322,10 +322,9 @@ const core = pageWindow.HenryCore;
 
 - **IMPORTANT**: 作業完了後、一段上の視点（メタな視点）から影響範囲を確認し、必要な追加作業があればユーザーに提案すること。コード・ドキュメント・設計方針・運用フロー・命名規則など、あらゆる側面で整合性を考える。
 
-- **YOU MUST**: APIを使用する前に、必ずリファレンスで仕様を確認すること：
-  - GraphQL API → `HENRY-GRAPHQL-API-REFERENCE.md` でレスポンス構造・型名・必須フィールドを確認
+- **YOU MUST**: APIを使用する前に、必ず仕様を確認すること：
+  - GraphQL API → chrome-devtools-mcpでリアルタイム調査（ネットワークリクエストをキャプチャ）
   - HenryCore API → `henry_core.user.js` 冒頭のAPI目次と実装を確認（プロパティ名、関数の有無など）
-  - リファレンスに情報がない場合は、ユーザーに実際のカルテ操作で確認を依頼する
   - **推測でコードを書かない。スピードより確認の正確さを優先する**
 
 - **YOU MUST**: OAuth認証が必要な場合は、`alert()` で理由を伝えてから設定ダイアログや認証画面を開くこと：
