@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry Disease Register
 // @namespace    https://henry-app.jp/
-// @version      1.5.0
+// @version      1.5.2
 // @description  高速病名検索・登録
 // @author       Claude
 // @match        https://henry-app.jp/*
@@ -145,76 +145,109 @@
     const normalized = input.trim();
     const candidates = [];
 
-    // 接頭語を抽出（最長一致）
-    // データ構造: [code, name, searchName]
-    let remaining = normalized;
-    const foundPrefixes = [];
-
+    // 接頭語候補を全て抽出（長い順）
+    const prefixCandidates = [];
     for (const mod of PREFIX_MODIFIERS) {
-      if (remaining.startsWith(mod[2])) {
-        foundPrefixes.push({ code: mod[0], name: mod[1] });
-        remaining = remaining.slice(mod[2].length);
-        break; // 1つだけマッチ
+      if (normalized.startsWith(mod[2])) {
+        prefixCandidates.push({ code: mod[0], name: mod[1], searchName: mod[2] });
       }
     }
 
-    // 接尾語を抽出（最長一致）
-    const foundSuffixes = [];
-    for (const mod of SUFFIX_MODIFIERS) {
-      if (remaining.endsWith(mod[2])) {
-        foundSuffixes.push({ code: mod[0], name: mod[1] });
-        remaining = remaining.slice(0, -mod[2].length);
-        break; // 1つだけマッチ
+    // 接頭語なしも候補に追加
+    prefixCandidates.push(null);
+
+    // 各接頭語候補で試行し、病名がマッチするものを採用
+    for (const prefixCandidate of prefixCandidates) {
+      let remaining = prefixCandidate
+        ? normalized.slice(prefixCandidate.searchName.length)
+        : normalized;
+      const foundPrefixes = prefixCandidate ? [{ code: prefixCandidate.code, name: prefixCandidate.name }] : [];
+
+      // 接尾語を抽出（最長一致）
+      const foundSuffixes = [];
+      for (const mod of SUFFIX_MODIFIERS) {
+        if (remaining.endsWith(mod[2])) {
+          foundSuffixes.push({ code: mod[0], name: mod[1] });
+          remaining = remaining.slice(0, -mod[2].length);
+          break;
+        }
       }
-    }
 
-    // 残りの部分で病名を最長一致検索
-    const diseases = findDiseaseByLongestMatch(remaining);
+      // 残りの部分で病名を検索
+      const diseases = findDiseaseByLongestMatch(remaining);
 
-    // 候補を生成
-    for (const disease of diseases) {
-      candidates.push({
-        disease: disease,
-        prefixes: foundPrefixes,
-        suffixes: foundSuffixes,
-        displayName: buildDisplayName(disease.name, foundPrefixes, foundSuffixes)
-      });
+      // 病名が見つかればこのパターンを採用
+      if (diseases.length > 0) {
+        for (const disease of diseases) {
+          candidates.push({
+            disease: disease,
+            prefixes: foundPrefixes,
+            suffixes: foundSuffixes,
+            displayName: buildDisplayName(disease.name, foundPrefixes, foundSuffixes)
+          });
+        }
+        break; // 最初にマッチしたパターンを採用
+      }
     }
 
     return candidates;
   }
 
-  // 最長一致で病名を検索（上位5件、名前＋ひらがな両方で検索）
+  // 最長一致で病名を検索（クエリの先頭から最も長くマッチする病名を優先）
   function findDiseaseByLongestMatch(query) {
     if (!query || query.length === 0) return [];
 
     const q = query.toLowerCase();
-    const results = [];
+    const candidates = [];
 
-    // 完全一致を優先（名前 or ひらがな）
     for (let i = 0; i < diseaseNameIndex.length; i++) {
-      if (diseaseNameIndex[i] === q || diseaseKanaIndex[i] === q) {
-        results.push({ code: DISEASES[i][0], icd10: DISEASES[i][1], name: DISEASES[i][2] });
+      const name = diseaseNameIndex[i];
+      const kana = diseaseKanaIndex[i];
+
+      // クエリが病名と完全一致
+      if (name === q || kana === q) {
+        candidates.push({
+          code: DISEASES[i][0],
+          icd10: DISEASES[i][1],
+          name: DISEASES[i][2],
+          matchLength: q.length,
+          matchType: 0 // 完全一致
+        });
+      }
+      // クエリが病名で始まる（病名がクエリの先頭部分に一致）
+      else if (q.startsWith(name) && name.length > 0) {
+        candidates.push({
+          code: DISEASES[i][0],
+          icd10: DISEASES[i][1],
+          name: DISEASES[i][2],
+          matchLength: name.length,
+          matchType: 1 // 先頭一致
+        });
+      }
+      else if (q.startsWith(kana) && kana.length > 0) {
+        candidates.push({
+          code: DISEASES[i][0],
+          icd10: DISEASES[i][1],
+          name: DISEASES[i][2],
+          matchLength: kana.length,
+          matchType: 1 // 先頭一致
+        });
       }
     }
 
-    // 部分一致（前方一致優先、名前 or ひらがな）
-    if (results.length < 5) {
-      for (let i = 0; i < diseaseNameIndex.length && results.length < 5; i++) {
-        if ((diseaseNameIndex[i].startsWith(q) || diseaseKanaIndex[i].startsWith(q)) &&
-            !results.some(r => r.code === DISEASES[i][0])) {
-          results.push({ code: DISEASES[i][0], icd10: DISEASES[i][1], name: DISEASES[i][2] });
-        }
-      }
-    }
+    // ソート: マッチ長が長い順 → 同じ長さなら完全一致優先
+    candidates.sort((a, b) => {
+      if (b.matchLength !== a.matchLength) return b.matchLength - a.matchLength;
+      return a.matchType - b.matchType;
+    });
 
-    // 含む（部分一致、名前 or ひらがな）
-    if (results.length < 5) {
-      for (let i = 0; i < diseaseNameIndex.length && results.length < 5; i++) {
-        if ((diseaseNameIndex[i].includes(q) || diseaseKanaIndex[i].includes(q)) &&
-            !results.some(r => r.code === DISEASES[i][0])) {
-          results.push({ code: DISEASES[i][0], icd10: DISEASES[i][1], name: DISEASES[i][2] });
-        }
+    // 重複除去して上位5件
+    const seen = new Set();
+    const results = [];
+    for (const c of candidates) {
+      if (!seen.has(c.code) && results.length < 5) {
+        seen.add(c.code);
+        results.push({ code: c.code, icd10: c.icd10, name: c.name });
       }
     }
 
@@ -1001,7 +1034,7 @@
       name: '病名登録',
       icon: '🏥',
       description: '高速病名検索・登録',
-      version: '1.5.0',
+      version: '1.5.2',
       order: 150,
       onClick: () => {
         const patientUuid = HenryCore.getPatientUuid();
