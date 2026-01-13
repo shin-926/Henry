@@ -7,6 +7,7 @@
 // @match        https://henry-app.jp/*
 // @grant        GM_xmlhttpRequest
 // @grant        GM_openInTab
+// @grant        GM_info
 // @grant        unsafeWindow
 // @connect      googleapis.com
 // @connect      www.googleapis.com
@@ -20,7 +21,7 @@
   'use strict';
 
   const SCRIPT_NAME = 'OpinionForm';
-  const VERSION = '2.3.1';
+  const VERSION = GM_info.script.version;
 
   // ページのwindowを取得（サンドボックス対応）
   const pageWindow = typeof unsafeWindow !== 'undefined' ? unsafeWindow : window;
