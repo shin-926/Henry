@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry Order History
 // @namespace    https://henry-app.jp/
-// @version      1.0.7
+// @version      1.5.0
 // @description  指定期間内の患者オーダー履歴を表示
 // @author       Claude
 // @match        https://henry-app.jp/*
@@ -24,6 +24,53 @@
           orders {
             uuid
             orderType
+            order {
+              specimenInspectionOrder {
+                specimenInspectionOrderSpecimenInspections {
+                  specimenInspection { name }
+                  consultationOutsideInspections {
+                    masterOutsideInspection { name }
+                  }
+                }
+              }
+              biopsyInspectionOrder {
+                note
+                biopsyInspectionOrderBiopsyInspections {
+                  biopsyInspection { name }
+                  consultationDiagnoses {
+                    masterDiagnosis { name }
+                  }
+                }
+              }
+              prescriptionOrderV2 {
+                rps {
+                  instructions {
+                    instruction {
+                      medicationDosageInstruction {
+                        localMedicine { name }
+                      }
+                    }
+                  }
+                }
+              }
+              imagingOrder {
+                detail {
+                  imagingModality
+                  note
+                  condition {
+                    ct { series { bodySite { name } note } }
+                    plainRadiographyDigital { series { bodySite { name } note } }
+                    plainRadiographyAnalog { series { bodySite { name } note } }
+                    mriOther { series { bodySite { name } note } }
+                    mriAbove_1_5AndBelow_3Tesla { series { bodySite { name } note } }
+                    mammographyDigital { series { bodySite { name } note } }
+                    mammographyAnalog { series { bodySite { name } note } }
+                    dexa { series { bodySite { name } note } }
+                    fluoroscopy { series { bodySite { name } note } }
+                  }
+                }
+              }
+            }
           }
         }
         nextPageToken
@@ -45,25 +92,162 @@
     'ORDER_TYPE_TREATMENT': '処置'
   };
 
-  // オーダーからステータスと医師名を取得
-  function extractOrderDetails(order) {
-    const details = order.order;
-    if (!details) return { status: '-', doctor: '-' };
+  // 検体検査から検査名・検査項目を抽出
+  function extractSpecimenInspectionDetails(specimenOrder) {
+    if (!specimenOrder?.specimenInspectionOrderSpecimenInspections?.length) {
+      return { inspectionName: '', inspectionItems: [] };
+    }
 
-    const orderData = details.imagingOrder ||
-                      details.prescriptionOrderV2 ||
-                      details.injectionOrderV2 ||
-                      details.specimenInspectionOrderV2 ||
-                      details.rehabilitationOrder ||
-                      details.accountingOrder ||
-                      details.nutritionOrder;
+    const names = [];
+    const items = [];
 
-    if (!orderData) return { status: '-', doctor: '-' };
+    for (const si of specimenOrder.specimenInspectionOrderSpecimenInspections) {
+      // 検査名（検査機関名）
+      if (si.specimenInspection?.name) {
+        names.push(si.specimenInspection.name);
+      }
+      // 検査項目
+      if (si.consultationOutsideInspections?.length) {
+        for (const coi of si.consultationOutsideInspections) {
+          if (coi.masterOutsideInspection?.name) {
+            items.push(coi.masterOutsideInspection.name);
+          }
+        }
+      }
+    }
 
     return {
-      status: orderData.orderStatus || '-',
-      doctor: orderData.doctor?.name || '-'
+      inspectionName: [...new Set(names)].join(', '),
+      inspectionItems: items
     };
+  }
+
+  // 生体検査から検査名・検査項目・備考を抽出
+  function extractBiopsyInspectionDetails(biopsyOrder) {
+    if (!biopsyOrder?.biopsyInspectionOrderBiopsyInspections?.length) {
+      return { inspectionName: '', inspectionItems: [], note: biopsyOrder?.note || '' };
+    }
+
+    const names = [];
+    const items = [];
+    for (const bi of biopsyOrder.biopsyInspectionOrderBiopsyInspections) {
+      // カテゴリ名（例：生体検査、処置）
+      if (bi.biopsyInspection?.name) {
+        names.push(bi.biopsyInspection.name);
+      }
+      // 検査項目名（例：認知機能検査その他の心理検査...）
+      if (bi.consultationDiagnoses?.length) {
+        for (const cd of bi.consultationDiagnoses) {
+          if (cd.masterDiagnosis?.name) {
+            items.push(cd.masterDiagnosis.name);
+          }
+        }
+      }
+    }
+
+    return {
+      inspectionName: [...new Set(names)].join(', '),
+      inspectionItems: items,
+      note: biopsyOrder.note || ''
+    };
+  }
+
+  // 処方から薬品名を抽出
+  function extractPrescriptionDetails(prescriptionOrder) {
+    if (!prescriptionOrder?.rps?.length) {
+      return { inspectionName: '', inspectionItems: [] };
+    }
+
+    const medicines = [];
+    for (const rp of prescriptionOrder.rps) {
+      if (!rp.instructions?.length) continue;
+      for (const inst of rp.instructions) {
+        const med = inst.instruction?.medicationDosageInstruction;
+        if (med?.localMedicine?.name) {
+          medicines.push(med.localMedicine.name);
+        }
+      }
+    }
+
+    return {
+      inspectionName: '',
+      inspectionItems: medicines
+    };
+  }
+
+  // 画像オーダーから部位・備考を抽出
+  function extractImagingDetails(imagingOrder) {
+    const detail = imagingOrder?.detail;
+    if (!detail) return { inspectionName: '', inspectionItems: [], note: '' };
+
+    // モダリティ名のマッピング
+    const MODALITY_LABELS = {
+      'IMAGING_MODALITY_CT': 'CT',
+      'IMAGING_MODALITY_PLAIN_RADIOGRAPHY_DIGITAL': '一般撮影(デジタル)',
+      'IMAGING_MODALITY_PLAIN_RADIOGRAPHY_ANALOG': '一般撮影(アナログ)',
+      'IMAGING_MODALITY_MRI_OTHER': 'MRI',
+      'IMAGING_MODALITY_MRI_ABOVE_1_5_AND_BELOW_3_TESLA': 'MRI(1.5T以上3T未満)',
+      'IMAGING_MODALITY_MAMMOGRAPHY_DIGITAL': 'マンモグラフィ(デジタル)',
+      'IMAGING_MODALITY_MAMMOGRAPHY_ANALOG': 'マンモグラフィ(アナログ)',
+      'IMAGING_MODALITY_DEXA': 'DEXA',
+      'IMAGING_MODALITY_FLUOROSCOPY': '透視'
+    };
+
+    const modalityName = MODALITY_LABELS[detail.imagingModality] || detail.imagingModality || '';
+
+    // 各モダリティタイプからシリーズを取得
+    const condition = detail.condition;
+    const modalities = [
+      'ct', 'plainRadiographyDigital', 'plainRadiographyAnalog',
+      'mriOther', 'mriAbove_1_5AndBelow_3Tesla',
+      'mammographyDigital', 'mammographyAnalog', 'dexa', 'fluoroscopy'
+    ];
+
+    const bodySites = [];
+    for (const m of modalities) {
+      const series = condition?.[m]?.series;
+      if (series?.length) {
+        for (const s of series) {
+          if (s.bodySite?.name) {
+            bodySites.push(s.bodySite.name);
+          }
+        }
+      }
+    }
+
+    return {
+      inspectionName: modalityName,
+      inspectionItems: bodySites,
+      note: detail.note || ''
+    };
+  }
+
+  // オーダーから詳細を取得
+  function extractOrderDetails(order) {
+    const details = order.order;
+    if (!details) return { inspectionName: '', inspectionItems: [] };
+
+    // 検体検査
+    if (details.specimenInspectionOrder) {
+      return extractSpecimenInspectionDetails(details.specimenInspectionOrder);
+    }
+
+    // 生体検査
+    if (details.biopsyInspectionOrder) {
+      return extractBiopsyInspectionDetails(details.biopsyInspectionOrder);
+    }
+
+    // 処方
+    if (details.prescriptionOrderV2) {
+      return extractPrescriptionDetails(details.prescriptionOrderV2);
+    }
+
+    // 画像
+    if (details.imagingOrder) {
+      return extractImagingDetails(details.imagingOrder);
+    }
+
+    return { inspectionName: '', inspectionItems: [] };
   }
 
   // 指定月数以内のオーダーを取得
@@ -153,8 +337,9 @@
         <table style="width: 100%; border-collapse: collapse; font-size: 13px;">
           <thead style="position: sticky; top: 0; background: #f5f5f5;">
             <tr>
-              <th style="padding: 8px; text-align: left; border-bottom: 2px solid #ccc;">日付</th>
-              <th style="padding: 8px; text-align: left; border-bottom: 2px solid #ccc;">種別</th>
+              <th style="padding: 8px; text-align: left; border-bottom: 2px solid #ccc; white-space: nowrap;">日付</th>
+              <th style="padding: 8px; text-align: left; border-bottom: 2px solid #ccc; white-space: nowrap;">種別</th>
+              <th style="padding: 8px; text-align: left; border-bottom: 2px solid #ccc;">詳細</th>
             </tr>
           </thead>
           <tbody id="order-table-body">
@@ -174,15 +359,49 @@
 
       countSpan.textContent = filtered.length;
 
-      tbody.innerHTML = filtered.map(order => `
-        <tr style="border-bottom: 1px solid #eee;">
-          <td style="padding: 8px;">${order.date}</td>
-          <td style="padding: 8px;">${ORDER_TYPE_LABELS[order.orderType] || order.orderType}</td>
-        </tr>
-      `).join('');
+      tbody.innerHTML = filtered.map(order => {
+        // 詳細の表示文字列を作成
+        let detailContent = '';
+        if (order.inspectionName) {
+          detailContent = order.inspectionName;
+          if (order.inspectionItems?.length) {
+            // 項目が多い場合は省略
+            const itemsToShow = order.inspectionItems.slice(0, 5);
+            const remaining = order.inspectionItems.length - 5;
+            detailContent += ': ' + itemsToShow.join(', ');
+            if (remaining > 0) {
+              detailContent += ` 他${remaining}件`;
+            }
+          }
+          // 備考があれば追加（生体検査など）
+          if (order.note) {
+            const notePreview = order.note.replace(/\n/g, ' ').slice(0, 30);
+            detailContent += ` [${notePreview}${order.note.length > 30 ? '...' : ''}]`;
+          }
+        } else if (order.inspectionItems?.length) {
+          // 処方などinspectionNameが空で項目のみの場合
+          const itemsToShow = order.inspectionItems.slice(0, 3);
+          const remaining = order.inspectionItems.length - 3;
+          detailContent = itemsToShow.join(', ');
+          if (remaining > 0) {
+            detailContent += ` 他${remaining}件`;
+          }
+        } else if (order.note) {
+          // inspectionNameもinspectionItemsもないが備考がある場合
+          const notePreview = order.note.replace(/\n/g, ' ').slice(0, 50);
+          detailContent = notePreview + (order.note.length > 50 ? '...' : '');
+        }
+        return `
+          <tr style="border-bottom: 1px solid #eee;">
+            <td style="padding: 8px; white-space: nowrap;">${order.date}</td>
+            <td style="padding: 8px; white-space: nowrap;">${ORDER_TYPE_LABELS[order.orderType] || order.orderType}</td>
+            <td style="padding: 8px; font-size: 12px; color: #555;">${detailContent}</td>
+          </tr>
+        `;
+      }).join('');
 
       if (filtered.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="2" style="padding: 16px; text-align: center; color: #888;">該当するオーダーがありません</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="3" style="padding: 16px; text-align: center; color: #888;">該当するオーダーがありません</td></tr>';
       }
     }
 
@@ -197,7 +416,7 @@
     HenryCore.ui.showModal({
       title: 'オーダー履歴',
       content,
-      width: 500
+      width: 700
     });
   }
 
@@ -287,7 +506,7 @@
       name: 'オーダー履歴',
       icon: '📋',
       description: '指定期間内のオーダー履歴を表示',
-      version: '1.0.7',
+      version: '1.5.0',
       order: 200,
       onClick: showInputModal
     });

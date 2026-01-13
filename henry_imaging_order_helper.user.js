@@ -32,152 +32,152 @@
     "頭〜躯幹": {
       "頭部": {
         bodySite: "頭部",
-        defaultCondition: "80kvp,25mas,120cm",
+        defaultCondition: "80kVp, 25mAs, 120cm",
         directions: ["正面", "側面"]
       },
       "胸部": {
         bodySite: "胸部",
-        defaultCondition: "110kvp,10mas,200cm",
+        defaultCondition: "110kVp, 10mAs, 200cm",
         directions: ["正面", "ポータブル正面"],
         exclusiveDirections: true,
-        conditionByDirection: { "ポータブル正面": "85kvp,18mas,110cm" }
+        conditionByDirection: { "ポータブル正面": "85kVp, 18mAs, 110cm" }
       },
       "肋骨": {
         bodySite: "肋骨",
-        defaultCondition: "76kvp,63mas,120cm",
+        defaultCondition: "76kVp, 63mAs, 120cm",
         directions: ["正面", "両斜位"]
       },
       "胸骨": {
         bodySite: "胸骨",
-        defaultCondition: "76kvp,63mas,120cm",
+        defaultCondition: "76kVp, 63mAs, 120cm",
         directions: ["正面", "側面"]
       },
       "胸腹部": {
         bodySite: "胸腹部",
-        defaultCondition: "80kvp,32mas,120cm",
+        defaultCondition: "80kVp, 32mAs, 120cm",
         directions: ["正面", "ポータブル正面"],
         exclusiveDirections: true,
-        conditionByDirection: { "ポータブル正面": "100kvp,70mas,110cm" }
+        conditionByDirection: { "ポータブル正面": "100kVp, 70mAs, 110cm" }
       },
       "腹部": {
         bodySite: "腹部",
-        defaultCondition: "80kvp,32mas,120cm",
+        defaultCondition: "80kVp, 32mAs, 120cm",
         directions: ["正面", "ポータブル正面"],
         exclusiveDirections: true,
-        conditionByDirection: { "ポータブル正面": "85kvp,20mas,110cm" }
+        conditionByDirection: { "ポータブル正面": "85kVp, 20mAs, 110cm" }
       },
       "骨盤": {
         bodySite: "骨盤",
-        defaultCondition: "80kvp,63mas,120cm",
+        defaultCondition: "80kVp, 63mAs, 120cm",
         directions: ["正面", "側面", "斜位（右寛骨）", "斜位（左寛骨）", "inlet", "outlet"]
       }
     },
     "脊椎": {
       "頚椎": {
         bodySite: "頚椎",
-        defaultCondition: "70kvp,20mas,120cm",
+        defaultCondition: "70kVp, 20mAs, 120cm",
         directions: ["正面", "側面", "両斜位", "前後屈", "開口位正面"]
       },
       "胸椎": {
         bodySite: "胸椎",
-        defaultCondition: "80kvp,80mas,120cm",
+        defaultCondition: "80kVp, 80mAs, 120cm",
         directions: ["正面", "側面"]
       },
       "胸腰椎移行部": {
         bodySite: "胸腰椎移行部",
-        defaultCondition: "80kvp,80mas,120cm",
+        defaultCondition: "80kVp, 80mAs, 120cm",
         directions: ["正面", "側面"]
       },
       "腰椎": {
         bodySite: "腰椎",
-        defaultCondition: "80kvp,80mas,120cm",
+        defaultCondition: "80kVp, 80mAs, 120cm",
         directions: ["正面", "側面", "両斜位", "前後屈"]
       },
       "仙骨": {
         bodySite: "仙骨",
-        defaultCondition: "80kvp,80mas,120cm",
+        defaultCondition: "80kVp, 80mAs, 120cm",
         directions: ["正面", "側面"]
       },
       "仙尾骨": {
         bodySite: "仙骨/尾骨",
-        defaultCondition: "80kvp,80mas,120cm",
+        defaultCondition: "80kVp, 80mAs, 120cm",
         directions: ["正面", "側面"]
       },
       "尾骨": {
         bodySite: "尾骨",
-        defaultCondition: "80kvp,80mas,120cm",
+        defaultCondition: "80kVp, 80mAs, 120cm",
         directions: ["正面", "側面"]
       },
       "全脊椎": {
         bodySite: "脊椎",
-        defaultCondition: "80kvp,80mas,120cm",
+        defaultCondition: "80kVp, 80mAs, 120cm",
         directions: ["正面", "側面"]
       }
     },
     "上肢": {
       "鎖骨": {
         bodySite: "鎖骨",
-        defaultCondition: "70kvp,10mas,120cm",
+        defaultCondition: "70kVp, 10mAs, 120cm",
         directions: ["正面", "尾頭方向"]
       },
       "肩関節": {
         bodySite: "肩関節",
-        defaultCondition: "70kvp,10mas,120cm",
+        defaultCondition: "70kVp, 10mAs, 120cm",
         directions: ["正面", "スカプラY", "肩関節正面", "肩関節軸位", "肩関節（上腕内外旋）"]
       },
       "肩鎖関節": {
         bodySite: "肩鎖関節",
-        defaultCondition: "70kvp,10mas,120cm",
+        defaultCondition: "70kVp, 10mAs, 120cm",
         directions: ["正面"]
       },
       "胸鎖関節": {
         bodySite: "鎖骨",
-        defaultCondition: "70kvp,10mas,120cm",
+        defaultCondition: "70kVp, 10mAs, 120cm",
         directions: ["正面"]
       },
       "肩甲骨": {
         bodySite: "肩甲骨",
-        defaultCondition: "70kvp,10mas,120cm",
+        defaultCondition: "70kVp, 10mAs, 120cm",
         directions: ["正面", "スカプラY"]
       },
       "上腕骨": {
         bodySite: "上腕",
-        defaultCondition: "60kvp,10mas,120cm",
+        defaultCondition: "60kVp, 10mAs, 120cm",
         directions: ["正面", "側面", "片斜位"]
       },
       "肘関節": {
         bodySite: "肘関節",
-        defaultCondition: "56kvp,10mas,110cm",
+        defaultCondition: "56kVp, 10mAs, 110cm",
         directions: ["正面", "側面", "45°屈曲位正面", "両斜位"]
       },
       "前腕": {
         bodySite: "前腕",
-        defaultCondition: "56kvp,10mas,110cm",
+        defaultCondition: "56kVp, 10mAs, 110cm",
         directions: ["正面", "側面", "両斜位"]
       },
       "手関節": {
         bodySite: "手関節",
-        defaultCondition: "56kvp,10mas,110cm",
+        defaultCondition: "56kVp, 10mAs, 110cm",
         directions: ["正面", "側面", "両斜位"]
       },
       "舟状骨": {
         bodySite: "舟状骨",
-        defaultCondition: "56kvp,10mas,110cm",
+        defaultCondition: "56kVp, 10mAs, 110cm",
         directions: ["正面", "側面", "斜位", "尺屈"]
       },
       "手部": {
         bodySite: "手部",
-        defaultCondition: "56kvp,10mas,110cm",
+        defaultCondition: "56kVp, 10mAs, 110cm",
         directions: ["正面", "側面", "両斜位"]
       },
       "手根管": {
         bodySite: "手根管",
-        defaultCondition: "60kvp,12.5mas,110cm",
+        defaultCondition: "60kVp, 12.5mAs, 110cm",
         directions: []
       },
       "手指": {
         bodySite: "手指",
-        defaultCondition: "56kvp,10mas,110cm",
+        defaultCondition: "56kVp, 10mAs, 110cm",
         directions: ["正面", "側面", "両斜位"],
         subItems: {
           "母指": {
@@ -195,42 +195,42 @@
     "下肢": {
       "股関節": {
         bodySite: "股関節",
-        defaultCondition: "80kvp,63mas,120cm",
+        defaultCondition: "80kVp, 63mAs, 120cm",
         directions: ["正面", "ラウエン（外旋）"]
       },
       "大腿骨": {
         bodySite: "大腿骨",
-        defaultCondition: "70kvp,16mas,120cm",
+        defaultCondition: "70kVp, 16mAs, 120cm",
         directions: ["正面", "側面"]
       },
       "膝": {
         bodySite: "膝関節",
-        defaultCondition: "61kvp,10mas,120cm",
+        defaultCondition: "61kVp, 10mAs, 120cm",
         directions: ["正面", "側面", "両斜位", "スカイライン", "ローゼンバーグ"]
       },
       "下腿": {
         bodySite: "下腿骨",
-        defaultCondition: "58kvp,10mas,130cm",
+        defaultCondition: "58kVp, 10mAs, 130cm",
         directions: ["正面", "側面", "両斜位"]
       },
       "足関節": {
         bodySite: "足関節",
-        defaultCondition: "56kvp,10mas,130cm",
+        defaultCondition: "56kVp, 10mAs, 130cm",
         directions: ["正面", "側面", "両斜位"]
       },
       "足": {
         bodySite: "足",
-        defaultCondition: "56kvp,10mas,130cm",
+        defaultCondition: "56kVp, 10mAs, 130cm",
         directions: ["正面", "両斜位"]
       },
       "踵骨": {
         bodySite: "踵骨",
-        defaultCondition: "56kvp,10mas,130cm",
+        defaultCondition: "56kVp, 10mAs, 130cm",
         directions: ["正面", "側面", "アントンセン"]
       },
       "足趾": {
         bodySite: "足指",
-        defaultCondition: "56kvp,10mas,130cm",
+        defaultCondition: "56kVp, 10mAs, 130cm",
         directions: ["正面", "側面", "両斜位"],
         subItems: {
           "第1趾": { directions: ["正面", "側面", "両斜位"] },

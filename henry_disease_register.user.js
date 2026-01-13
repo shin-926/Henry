@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry Disease Register
 // @namespace    https://henry-app.jp/
-// @version      2.1.0
+// @version      2.2.4
 // @description  高速病名検索・登録
 // @author       Claude
 // @match        https://henry-app.jp/*
@@ -113,11 +113,80 @@
   let modifierNameIndex = null;
   let modifierKanaIndex = null;
 
+  // N-gramインデックス（Map<ngram, Set<diseaseIndex>>）
+  let ngramIndex = null;
+
   function buildSearchIndex() {
     diseaseNameIndex = DISEASES.map(d => d[2].toLowerCase());
     diseaseKanaIndex = DISEASES.map(d => (d[3] || '').toLowerCase());
     modifierNameIndex = MODIFIERS.map(m => m[1].toLowerCase());
     modifierKanaIndex = MODIFIERS.map(m => (m[2] || '').toLowerCase());
+
+    // N-gramインデックスを構築（2-gram）
+    ngramIndex = new Map();
+    for (let i = 0; i < DISEASES.length; i++) {
+      const name = normalizeText(DISEASES[i][2]).toLowerCase();
+      // 2-gramを生成
+      for (let j = 0; j <= name.length - 2; j++) {
+        const ngram = name.slice(j, j + 2);
+        if (!ngramIndex.has(ngram)) {
+          ngramIndex.set(ngram, new Set());
+        }
+        ngramIndex.get(ngram).add(i);
+      }
+    }
+  }
+
+  // N-gramを抽出
+  function extractNgrams(text, n = 2) {
+    const ngrams = [];
+    const normalized = normalizeText(text).toLowerCase();
+    for (let i = 0; i <= normalized.length - n; i++) {
+      ngrams.push(normalized.slice(i, i + n));
+    }
+    return ngrams;
+  }
+
+  // N-gram検索（マッチ数でスコアリング）
+  function searchByNgram(query, excludeCodes) {
+    if (!ngramIndex || query.length < 2) return [];
+
+    const queryNgrams = extractNgrams(query, 2);
+    if (queryNgrams.length === 0) return [];
+
+    // 各病名のマッチ数をカウント
+    const matchCounts = new Map();
+    for (const ngram of queryNgrams) {
+      const matches = ngramIndex.get(ngram);
+      if (matches) {
+        for (const idx of matches) {
+          if (!excludeCodes.has(DISEASES[idx][0])) {
+            matchCounts.set(idx, (matchCounts.get(idx) || 0) + 1);
+          }
+        }
+      }
+    }
+
+    // マッチ数でソートして上位を返す
+    const results = [...matchCounts.entries()]
+      .filter(([_, count]) => count >= 2)  // 最低2つのN-gramがマッチ
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 20)
+      .map(([idx, count]) => {
+        const icd10 = DISEASES[idx][1];
+        const icd10Bonus = getIcd10Bonus(icd10);
+        // スコア = マッチ率 × 0.5 + ICD10ボーナス
+        const matchRatio = count / queryNgrams.length;
+        return {
+          code: DISEASES[idx][0],
+          icd10: icd10,
+          name: DISEASES[idx][2],
+          score: matchRatio * 0.5 + icd10Bonus,
+          matchType: 'ngram'
+        };
+      });
+
+    return results;
   }
 
   // 病名検索（インデックス使用、名前＋ひらがな両方で検索）
@@ -188,7 +257,7 @@
 
     // スコア順にソートして上位5件
     candidates.sort((a, b) => b.score - a.score);
-    return candidates.slice(0, 5);
+    return candidates.slice(0, 10);
   }
 
   // 自然言語入力をパースして候補を生成
@@ -229,40 +298,63 @@
       return results;
     }
 
+    // 再帰的に接尾語を抽出する関数
+    function extractSuffixes(str, suffixes, depth) {
+      if (depth > 5) return [{ remaining: str, suffixes }];
+
+      const results = [];
+
+      // この位置でマッチする接尾語候補を全て取得
+      for (const mod of SUFFIX_MODIFIERS) {
+        if (str.endsWith(mod[2])) {
+          // 接尾語は先に見つかった方が外側（後ろ）なので先頭に追加
+          const newSuffixes = [{ code: mod[0], name: mod[1] }, ...suffixes];
+          const newRemaining = str.slice(0, -mod[2].length);
+          // さらに接尾語を探す
+          results.push(...extractSuffixes(newRemaining, newSuffixes, depth + 1));
+        }
+      }
+
+      // 接尾語なしのパターンも追加
+      results.push({ remaining: str, suffixes });
+
+      return results;
+    }
+
     // 全ての接頭語パターンを取得
     const prefixPatterns = extractPrefixes(normalized, [], 0);
 
     // 各パターンで病名を検索し、結果を収集
     const allResults = [];
 
-    for (const pattern of prefixPatterns) {
-      let remaining = pattern.remaining;
-      const foundPrefixes = pattern.prefixes.map(p => ({ code: p.code, name: p.name }));
+    for (const prefixPattern of prefixPatterns) {
+      const foundPrefixes = prefixPattern.prefixes.map(p => ({ code: p.code, name: p.name }));
 
-      // 接尾語を抽出（最長一致）
-      const foundSuffixes = [];
-      for (const mod of SUFFIX_MODIFIERS) {
-        if (remaining.endsWith(mod[2])) {
-          foundSuffixes.push({ code: mod[0], name: mod[1] });
-          remaining = remaining.slice(0, -mod[2].length);
-          break;
-        }
-      }
+      // 接尾語パターンを取得
+      const suffixPatterns = extractSuffixes(prefixPattern.remaining, [], 0);
 
-      // 残りの部分で病名を検索
-      const diseases = findDiseaseByLongestMatch(remaining);
+      for (const suffixPattern of suffixPatterns) {
+        const foundSuffixes = suffixPattern.suffixes.map(s => ({ code: s.code, name: s.name }));
+        const remaining = suffixPattern.remaining;
 
-      // 病名が見つかれば結果に追加
-      if (diseases.length > 0) {
-        for (const disease of diseases) {
-          allResults.push({
-            disease: disease,
-            prefixes: foundPrefixes,
-            suffixes: foundSuffixes,
-            score: disease.score || 0,
-            modifierCount: foundPrefixes.length + foundSuffixes.length,
-            diseaseNameLen: disease.name.length
-          });
+        // 残りの部分で病名を検索
+        const diseases = findDiseaseByLongestMatch(remaining);
+
+        // 病名が見つかれば結果に追加
+        if (diseases.length > 0) {
+          for (const disease of diseases) {
+            // 病名長ボーナス: 長い病名（具体的な病名）を優先
+            // 2文字→0.2, 5文字→0.5, 10文字以上→1.0
+            const lengthBonus = Math.min(disease.name.length / 10, 1.0);
+            allResults.push({
+              disease: disease,
+              prefixes: foundPrefixes,
+              suffixes: foundSuffixes,
+              score: (disease.score || 0) + lengthBonus,
+              modifierCount: foundPrefixes.length + foundSuffixes.length,
+              diseaseNameLen: disease.name.length
+            });
+          }
         }
       }
     }
@@ -270,31 +362,35 @@
     // ソート優先順位:
     // 1. スコア（高い順）
     // 2. 修飾語数（少ない順 = シンプルな解釈を優先）
-    // 3. 病名の長さ（長い順 = より具体的な病名を優先）
     allResults.sort((a, b) => {
       // スコアが大きく違う場合はスコア優先
       if (Math.abs(b.score - a.score) > 0.1) return b.score - a.score;
       // スコアが近い場合は修飾語数が少ない方を優先
-      if (a.modifierCount !== b.modifierCount) return a.modifierCount - b.modifierCount;
-      // 修飾語数も同じなら病名が長い方を優先
-      return b.diseaseNameLen - a.diseaseNameLen;
+      return a.modifierCount - b.modifierCount;
     });
 
     // 重複を除去して上位5件を返す
-    const seen = new Set();
-    const candidates = [];
+    // 同じ表示名（修飾語+病名）の場合は、病名が長い方（具体的な病名）を採用
+    const displayNameMap = new Map();
     for (const r of allResults) {
-      const key = r.disease.code + '|' + r.prefixes.map(p => p.code).join(',') + '|' + r.suffixes.map(s => s.code).join(',');
-      if (!seen.has(key) && candidates.length < 5) {
-        seen.add(key);
-        candidates.push({
+      const displayName = buildDisplayName(r.disease.name, r.prefixes, r.suffixes);
+      const existing = displayNameMap.get(displayName);
+      // 同じ表示名なら病名長が長い方を採用
+      if (!existing || r.diseaseNameLen > existing.diseaseNameLen) {
+        displayNameMap.set(displayName, {
           disease: r.disease,
           prefixes: r.prefixes,
           suffixes: r.suffixes,
-          displayName: buildDisplayName(r.disease.name, r.prefixes, r.suffixes)
+          displayName: displayName,
+          diseaseNameLen: r.diseaseNameLen,
+          score: r.score
         });
       }
     }
+    // スコア順で上位5件を取得
+    const candidates = [...displayNameMap.values()]
+      .sort((a, b) => b.score - a.score)
+      .slice(0, 10);
 
     return candidates;
   }
@@ -376,8 +472,8 @@
     const maxLen = Math.max(query.length, diseaseName.length);
     if (maxLen === 0) return 0;
 
-    // 編集距離の閾値（文字列長の30%まで許容）
-    const maxDist = Math.ceil(maxLen * 0.3);
+    // 編集距離の閾値（文字列長の35%まで許容）
+    const maxDist = Math.ceil(maxLen * 0.35);
     const dist = levenshteinDistance(query, diseaseName, maxDist);
 
     // 閾値を超えたらスコア0
@@ -433,18 +529,18 @@
     }
 
     // フェーズ2: ファジー検索（先頭一致で十分な結果がない場合）
-    // 先頭3文字が一致する病名のみを対象（最適化）
-    if (candidates.length < 3 && q.length >= 3) {
-      const prefix3 = q.slice(0, 3);
+    // 先頭2文字が一致する病名のみを対象（最適化）
+    if (candidates.length < 5 && q.length >= 2) {
+      const prefix2 = q.slice(0, 2);
 
       for (let i = 0; i < diseaseNameIndex.length; i++) {
         const name = normalizeText(diseaseNameIndex[i]).toLowerCase();
 
-        // 先頭3文字一致 + まだ候補にない
-        if (name.slice(0, 3) === prefix3 && !candidates.some(c => c.code === DISEASES[i][0])) {
+        // 先頭2文字一致 + まだ候補にない
+        if (name.slice(0, 2) === prefix2 && !candidates.some(c => c.code === DISEASES[i][0])) {
           const fuzzyScore = calculateFuzzyScore(q, name);
 
-          if (fuzzyScore > 0.7) {  // 70%以上の類似度
+          if (fuzzyScore > 0.65) {  // 65%以上の類似度
             const icd10 = DISEASES[i][1];
             const icd10Bonus = getIcd10Bonus(icd10);
 
@@ -458,6 +554,52 @@
             });
           }
         }
+      }
+    }
+
+    // フェーズ3: 包含検索（先頭一致・ファジーで十分な結果がない場合）
+    // 病名の途中にクエリが含まれるものを検索
+    if (candidates.length < 5 && q.length >= 2) {
+      const existingCodes = new Set(candidates.map(c => c.code));
+
+      for (let i = 0; i < diseaseNameIndex.length && candidates.length < 20; i++) {
+        if (existingCodes.has(DISEASES[i][0])) continue;
+
+        const name = normalizeText(diseaseNameIndex[i]).toLowerCase();
+        const kana = normalizeText(diseaseKanaIndex[i]).toLowerCase();
+
+        // 名前または読みに含まれる
+        if (name.includes(q) || kana.includes(q)) {
+          const icd10 = DISEASES[i][1];
+          const icd10Bonus = getIcd10Bonus(icd10);
+
+          // カバー率を計算（クエリ長 / 病名長）
+          const coverage = q.length / name.length;
+
+          candidates.push({
+            code: DISEASES[i][0],
+            icd10: icd10,
+            name: DISEASES[i][2],
+            normalizedName: name,
+            score: 0.4 * coverage + icd10Bonus,  // 包含検索は低スコア
+            matchType: 'contains'
+          });
+        }
+      }
+    }
+
+    // フェーズ4: N-gram検索（語順に依存しない部分一致）
+    // 先頭一致・ファジー・包含で十分な結果がない場合
+    if (candidates.length < 5 && q.length >= 3) {
+      const existingCodes = new Set(candidates.map(c => c.code));
+      const ngramResults = searchByNgram(q, existingCodes);
+
+      for (const result of ngramResults) {
+        if (candidates.length >= 20) break;
+        candidates.push({
+          ...result,
+          normalizedName: ''
+        });
       }
     }
 
@@ -732,7 +874,7 @@
       margin-top: 8px;
       border: 1px solid #e0e0e0;
       border-radius: 4px;
-      max-height: 200px;
+      max-height: 430px;
       overflow-y: auto;
     }
     .dr-candidate-item {
@@ -791,6 +933,37 @@
     .dr-divider::after {
       margin-left: 8px;
     }
+    .dr-tabs {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 16px;
+    }
+    .dr-tab {
+      flex: 1;
+      padding: 10px 16px;
+      border: 1px solid #ccc;
+      border-radius: 4px;
+      background: #f5f5f5;
+      cursor: pointer;
+      font-size: 14px;
+      text-align: center;
+      transition: all 0.2s;
+    }
+    .dr-tab:hover {
+      background: #e8e8e8;
+    }
+    .dr-tab.active {
+      background: #4a90d9;
+      color: white;
+      border-color: #4a90d9;
+    }
+    .dr-tab-content {
+      display: none;
+      min-height: 510px;
+    }
+    .dr-tab-content.active {
+      display: block;
+    }
   `;
 
   // ============================================
@@ -827,6 +1000,9 @@
       // 初期表示
       this.updateDiseaseList('');
       this.updateModifierList('');
+
+      // 検索窓にフォーカス
+      this.overlay.querySelector('#dr-natural-input').focus();
     }
 
     getModalHTML() {
@@ -838,34 +1014,42 @@
             <span class="dr-close">&times;</span>
           </div>
           <div class="dr-body">
-            <!-- 自然言語入力 -->
-            <div class="dr-section">
-              <div class="dr-section-title">自然言語入力</div>
-              <input type="text" class="dr-natural-input" id="dr-natural-input" placeholder="例: 右橈骨遠位端骨折術後">
-              <div class="dr-natural-hint">修飾語（左/右/急性/術後など）を含めて入力すると自動分解します</div>
-              <div class="dr-candidates" id="dr-candidates" style="display:none;"></div>
+            <!-- タブ切り替え -->
+            <div class="dr-tabs">
+              <div class="dr-tab active" data-tab="natural">自然言語検索</div>
+              <div class="dr-tab" data-tab="classic">従来の検索</div>
             </div>
 
-            <div class="dr-divider">または従来の検索</div>
-
-            <!-- 病名検索 -->
-            <div class="dr-section">
-              <div class="dr-section-title">病名検索</div>
-              <input type="text" class="dr-search-input" id="dr-disease-search" placeholder="病名を入力...">
-              <div class="dr-list" id="dr-disease-list"></div>
-              <div class="dr-selected-disease" id="dr-selected-disease" style="display:none;">
-                <span class="dr-selected-disease-name" id="dr-selected-disease-name"></span>
-                <span class="dr-clear-btn" id="dr-clear-disease">クリア</span>
+            <!-- 自然言語入力 -->
+            <div class="dr-tab-content active" id="dr-tab-natural">
+              <div class="dr-section">
+                <input type="text" class="dr-natural-input" id="dr-natural-input" placeholder="例: 右橈骨遠位端骨折術後">
+                <div class="dr-natural-hint">修飾語（左/右/急性/術後など）を含めて入力すると自動分解します</div>
+                <div class="dr-candidates" id="dr-candidates" style="display:none;"></div>
               </div>
             </div>
 
-            <!-- 修飾語選択 -->
-            <div class="dr-section">
-              <div class="dr-section-title">修飾語（選択順に適用）</div>
-              <input type="text" class="dr-search-input" id="dr-modifier-search" placeholder="修飾語を検索...">
-              <div class="dr-list" id="dr-modifier-list"></div>
-              <div class="dr-modifier-tags" id="dr-modifier-tags">
-                <span style="color:#888;font-size:12px;">選択した修飾語がここに表示されます</span>
+            <!-- 従来の検索 -->
+            <div class="dr-tab-content" id="dr-tab-classic">
+              <!-- 病名検索 -->
+              <div class="dr-section">
+                <div class="dr-section-title">病名検索</div>
+                <input type="text" class="dr-search-input" id="dr-disease-search" placeholder="病名を入力...">
+                <div class="dr-list" id="dr-disease-list"></div>
+                <div class="dr-selected-disease" id="dr-selected-disease" style="display:none;">
+                  <span class="dr-selected-disease-name" id="dr-selected-disease-name"></span>
+                  <span class="dr-clear-btn" id="dr-clear-disease">クリア</span>
+                </div>
+              </div>
+
+              <!-- 修飾語選択 -->
+              <div class="dr-section">
+                <div class="dr-section-title">修飾語（選択順に適用）</div>
+                <input type="text" class="dr-search-input" id="dr-modifier-search" placeholder="修飾語を検索...">
+                <div class="dr-list" id="dr-modifier-list"></div>
+                <div class="dr-modifier-tags" id="dr-modifier-tags">
+                  <span style="color:#888;font-size:12px;">選択した修飾語がここに表示されます</span>
+                </div>
               </div>
             </div>
 
@@ -925,6 +1109,19 @@
       this.overlay.onclick = (e) => {
         if (e.target === this.overlay) this.close();
       };
+
+      // タブ切り替え
+      this.overlay.querySelectorAll('.dr-tab').forEach(tab => {
+        tab.onclick = () => {
+          const tabName = tab.dataset.tab;
+          // タブのアクティブ状態を切り替え
+          this.overlay.querySelectorAll('.dr-tab').forEach(t => t.classList.remove('active'));
+          tab.classList.add('active');
+          // コンテンツの表示を切り替え
+          this.overlay.querySelectorAll('.dr-tab-content').forEach(c => c.classList.remove('active'));
+          this.overlay.querySelector(`#dr-tab-${tabName}`).classList.add('active');
+        };
+      });
 
       // 自然言語入力
       const naturalInput = this.overlay.querySelector('#dr-natural-input');
@@ -1072,12 +1269,12 @@
         const prefixTags = c.prefixes.map(p => `<span class="dr-candidate-tag">${p.name}</span>`).join('');
         const suffixTags = c.suffixes.map(s => `<span class="dr-candidate-tag suffix">${s.name}</span>`).join('');
         const allTags = prefixTags + suffixTags;
+        const diseaseInfo = `<span style="color:#666;">${c.disease.name} (${c.disease.icd10 || '-'})</span>`;
 
         return `
           <div class="dr-candidate-item" data-index="${i}">
             <div class="dr-candidate-name">${c.displayName}</div>
-            <div class="dr-candidate-detail">${c.disease.name} (${c.disease.icd10 || '-'})</div>
-            ${allTags ? `<div class="dr-candidate-tags">${allTags}</div>` : ''}
+            <div class="dr-candidate-detail">${allTags ? allTags + ' ' : ''}${diseaseInfo}</div>
           </div>
         `;
       }).join('');
@@ -1257,7 +1454,7 @@
       name: '病名登録',
       icon: '🏥',
       description: '高速病名検索・登録',
-      version: '2.1.0',
+      version: '2.2.0',
       order: 150,
       onClick: () => {
         const patientUuid = HenryCore.getPatientUuid();
