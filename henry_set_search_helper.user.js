@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry セット展開検索ヘルパー
 // @namespace    https://henry-app.jp/
-// @version      1.4.6
+// @version      2.0.9
 // @description  セット展開画面の検索ボックス上にクイック検索ボタンを追加
 // @match        https://henry-app.jp/*
 // @grant        GM_setValue
@@ -112,8 +112,10 @@
         gap: 6px;
         padding: 8px 12px;
         align-items: center;
+        position: relative;
       }
       .hss-quick-btn {
+        position: relative;
         padding: 4px 12px;
         font-size: 13px;
         border: 1px solid #d0d0d0;
@@ -123,6 +125,7 @@
         cursor: pointer;
         transition: all 0.15s ease;
         white-space: nowrap;
+        user-select: none;
       }
       .hss-quick-btn:hover {
         background: #e8e8e8;
@@ -147,6 +150,7 @@
         display: flex;
         align-items: center;
         gap: 4px;
+        user-select: none;
       }
       .hss-dropdown-btn:hover {
         background: #e8e8e8;
@@ -197,7 +201,7 @@
       .hss-dropdown-item:active {
         background: #e0e0e0;
       }
-      /* カルテ上のドラッグ用スタイル */
+      /* ドラッグ用スタイル */
       .hss-drag-mode .hss-quick-btn.hss-dragging,
       .hss-drag-mode .hss-dropdown.hss-dragging {
         opacity: 0.3;
@@ -224,671 +228,143 @@
         pointer-events: none;
         z-index: 100;
       }
-      .hss-settings-btn {
+      /* 右端コントロール */
+      .hss-control-btn {
         padding: 4px 8px;
         font-size: 14px;
-        border: none;
-        background: transparent;
+        border: 1px solid #d0d0d0;
+        border-radius: 16px;
+        background: #f5f5f5;
         color: #888;
         cursor: pointer;
-        transition: color 0.15s ease;
+        transition: all 0.15s ease;
       }
-      .hss-settings-btn:hover {
-        color: #333;
-      }
-      .hss-modal-overlay {
-        position: fixed;
-        top: 0;
-        left: 0;
-        right: 0;
-        bottom: 0;
-        background: rgba(0, 0, 0, 0.5);
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        z-index: 10000;
-      }
-      .hss-modal {
-        background: white;
-        border-radius: 8px;
-        padding: 20px;
-        min-width: 420px;
-        max-width: 480px;
-        box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
-      }
-      .hss-modal-title {
-        font-size: 16px;
-        font-weight: 600;
-        margin-bottom: 16px;
-        color: #333;
-      }
-      .hss-button-list {
-        display: flex;
-        flex-direction: column;
-        gap: 8px;
-        margin-bottom: 16px;
-        max-height: 200px;
-        overflow-y: auto;
-      }
-      .hss-button-item {
-        display: flex;
-        align-items: center;
-        gap: 8px;
-        padding: 8px 12px;
-        background: #f5f5f5;
-        border-radius: 6px;
-        cursor: grab;
-        user-select: none;
-        transition: background 0.15s, box-shadow 0.15s;
-      }
-      .hss-button-item:hover {
-        background: #eee;
-      }
-      .hss-button-item.dragging {
-        opacity: 0.5;
-        background: #e0e0e0;
-      }
-      .hss-button-item.drag-over {
-        box-shadow: 0 -2px 0 #2196f3;
-      }
-      .hss-drag-handle {
-        color: #999;
-        font-size: 14px;
-        cursor: grab;
-      }
-      .hss-button-item-text {
-        flex: 1;
-        font-size: 14px;
-        color: #333;
-        padding: 2px 4px;
-        border-radius: 4px;
-        cursor: text;
-      }
-      .hss-button-item-text:hover {
+      .hss-control-btn:hover {
         background: #e8e8e8;
+        color: #333;
       }
-      .hss-button-item-input {
-        flex: 1;
+      .hss-trash-zone {
+        padding: 4px 10px;
         font-size: 14px;
-        padding: 2px 4px;
-        border: 1px solid #2196f3;
-        border-radius: 4px;
-        outline: none;
+        border: 1px dashed #d0d0d0;
+        border-radius: 16px;
+        background: #fafafa;
+        color: #aaa;
+        transition: all 0.15s ease;
       }
-      .hss-delete-btn {
-        padding: 2px 8px;
-        font-size: 12px;
-        border: 1px solid #e57373;
-        background: transparent;
-        color: #e57373;
-        border-radius: 4px;
-        cursor: pointer;
-      }
-      .hss-delete-btn:hover {
+      .hss-trash-zone.active {
+        border-color: #e53935;
         background: #ffebee;
+        color: #e53935;
       }
-      .hss-add-section {
-        display: flex;
-        gap: 8px;
-        margin-bottom: 16px;
-        align-items: stretch;
+      .hss-trash-zone.drag-over {
+        border-color: #e53935;
+        background: #ffcdd2;
+        color: #c62828;
+        transform: scale(1.1);
       }
-      .hss-add-section > * {
-        box-sizing: border-box;
-        height: 36px;
+      /* 編集ポップアップ */
+      .hss-edit-popup {
+        position: fixed;
+        background: white;
+        border: 1px solid #d0d0d0;
+        border-radius: 8px;
+        box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15);
+        min-width: 200px;
+        max-width: 280px;
+        z-index: 10000;
+        padding: 12px;
       }
-      .hss-add-input {
-        flex: 1;
-        padding: 0 12px;
-        font-size: 14px;
+      .hss-edit-popup-section {
+        margin-bottom: 12px;
+      }
+      .hss-edit-popup-section:last-child {
+        margin-bottom: 0;
+      }
+      .hss-edit-popup-label {
+        font-size: 11px;
+        color: #666;
+        margin-bottom: 4px;
+        display: block;
+      }
+      .hss-edit-popup-input {
+        width: 100%;
+        padding: 6px 10px;
+        font-size: 13px;
         border: 1px solid #d0d0d0;
         border-radius: 6px;
         outline: none;
+        box-sizing: border-box;
       }
-      .hss-add-input:focus {
+      .hss-edit-popup-input:focus {
         border-color: #2196f3;
       }
-      .hss-add-btn {
-        padding: 0 16px;
-        font-size: 14px;
-        border: 1px solid #9e9e9e;
-        background: transparent;
-        color: #616161;
-        border-radius: 6px;
-        cursor: pointer;
+      .hss-edit-popup-items {
+        max-height: 150px;
+        overflow-y: auto;
       }
-      .hss-add-btn:hover {
-        background: #f5f5f5;
-      }
-      .hss-add-btn.has-pending {
-        border-color: #ff9800;
-        background-color: #fff8e1;
-        color: #e65100;
-      }
-      .hss-modal-actions {
-        display: flex;
-        justify-content: flex-end;
-        gap: 8px;
-      }
-      .hss-cancel-btn {
-        padding: 8px 16px;
-        font-size: 14px;
-        border: 1px solid #d0d0d0;
-        background: white;
-        color: #333;
-        border-radius: 6px;
-        cursor: pointer;
-      }
-      .hss-cancel-btn:hover {
-        background: #f5f5f5;
-      }
-      .hss-confirm-btn {
-        padding: 8px 16px;
-        font-size: 14px;
-        border: none;
-        background: #2196f3;
-        color: white;
-        border-radius: 6px;
-        cursor: pointer;
-      }
-      .hss-confirm-btn:hover {
-        background: #1976d2;
-      }
-      .hss-empty-message {
-        text-align: center;
-        color: #888;
-        padding: 16px;
-        font-size: 14px;
-      }
-      .hss-item-type {
-        font-size: 11px;
-        color: #888;
-        background: #f0f0f0;
-        padding: 2px 6px;
-        border-radius: 4px;
-        margin-right: 4px;
-      }
-      .hss-item-type.dropdown {
-        background: #e3f2fd;
-        color: #1976d2;
-      }
-      .hss-dropdown-items {
-        margin-left: 24px;
-        margin-top: 8px;
-        padding: 8px;
-        background: #fafafa;
-        border-radius: 6px;
-        border: 1px solid #e0e0e0;
-      }
-      .hss-dropdown-items-title {
-        font-size: 12px;
-        color: #666;
-        margin-bottom: 6px;
-      }
-      .hss-dropdown-item-row {
+      .hss-edit-popup-item {
         display: flex;
         align-items: center;
         gap: 6px;
-        margin-bottom: 4px;
+        padding: 4px 0;
       }
-      .hss-dropdown-item-row:last-child {
-        margin-bottom: 0;
+      .hss-edit-popup-item-text {
+        flex: 1;
+        font-size: 13px;
+        color: #333;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
       }
-      .hss-dropdown-item-row.draggable {
-        cursor: grab;
+      .hss-edit-popup-item-delete {
+        padding: 2px 6px;
+        font-size: 11px;
+        border: none;
+        background: transparent;
+        color: #e57373;
+        cursor: pointer;
+        border-radius: 4px;
       }
-      .hss-dropdown-item-row.dragging {
-        opacity: 0.5;
-        background: #e0e0e0;
+      .hss-edit-popup-item-delete:hover {
+        background: #ffebee;
       }
-      .hss-dropdown-item-row.drag-over {
-        box-shadow: 0 -2px 0 #2196f3;
+      .hss-edit-popup-add {
+        display: flex;
+        gap: 6px;
+        margin-top: 8px;
       }
-      .hss-sub-drag-handle {
-        color: #bbb;
-        font-size: 12px;
-        cursor: grab;
-        user-select: none;
-      }
-      .hss-dropdown-item-input {
+      .hss-edit-popup-add input {
         flex: 1;
         padding: 4px 8px;
-        font-size: 13px;
+        font-size: 12px;
         border: 1px solid #d0d0d0;
         border-radius: 4px;
         outline: none;
       }
-      .hss-dropdown-item-input:focus {
+      .hss-edit-popup-add input:focus {
         border-color: #2196f3;
       }
-      .hss-small-btn {
-        padding: 2px 6px;
-        font-size: 11px;
-        border: 1px solid #d0d0d0;
-        background: white;
+      .hss-edit-popup-add button {
+        padding: 4px 10px;
+        font-size: 12px;
+        border: 1px solid #2196f3;
+        background: #e3f2fd;
+        color: #1976d2;
         border-radius: 4px;
         cursor: pointer;
       }
-      .hss-small-btn:hover {
-        background: #f5f5f5;
+      .hss-edit-popup-add button:hover {
+        background: #bbdefb;
       }
-      .hss-small-btn.delete {
-        border-color: #e57373;
-        color: #e57373;
-      }
-      .hss-small-btn.delete:hover {
-        background: #ffebee;
-      }
-      .hss-add-type-select {
-        padding: 0 12px;
-        font-size: 14px;
-        border: 1px solid #d0d0d0;
-        border-radius: 6px;
-        outline: none;
-        background: white;
+      .hss-edit-popup-empty {
+        font-size: 12px;
+        color: #999;
+        text-align: center;
+        padding: 8px 0;
       }
     `;
     document.head.appendChild(style);
-  }
-
-  // 設定モーダルを表示
-  function showSettingsModal(onSave) {
-    let items = loadItems();
-    let draggedIndex = null;
-
-    const overlay = document.createElement('div');
-    overlay.className = 'hss-modal-overlay';
-
-    const modal = document.createElement('div');
-    modal.className = 'hss-modal';
-
-    // ドロップダウンの項目編集UIを作成
-    function createDropdownItemsEditor(item, index) {
-      const container = document.createElement('div');
-      container.className = 'hss-dropdown-items';
-
-      const title = document.createElement('div');
-      title.className = 'hss-dropdown-items-title';
-      title.textContent = 'メニュー項目:';
-      container.appendChild(title);
-
-      const itemsList = document.createElement('div');
-
-      let subDraggedIndex = null;
-
-      function renderDropdownItems() {
-        itemsList.innerHTML = '';
-        (item.items || []).forEach((subItem, subIndex) => {
-          const row = document.createElement('div');
-          row.className = 'hss-dropdown-item-row draggable';
-          row.draggable = true;
-          row.dataset.subIndex = subIndex;
-
-          // ドラッグハンドル
-          const handle = document.createElement('span');
-          handle.className = 'hss-sub-drag-handle';
-          handle.textContent = '☰';
-
-          const input = document.createElement('input');
-          input.type = 'text';
-          input.className = 'hss-dropdown-item-input';
-          input.value = subItem;
-          input.onchange = () => {
-            const newVal = input.value.trim();
-            if (newVal) {
-              item.items[subIndex] = newVal;
-            }
-          };
-
-          const deleteBtn = document.createElement('button');
-          deleteBtn.className = 'hss-small-btn delete';
-          deleteBtn.textContent = '×';
-          deleteBtn.onclick = () => {
-            item.items.splice(subIndex, 1);
-            renderDropdownItems();
-          };
-
-          // ドラッグイベント
-          row.ondragstart = (e) => {
-            subDraggedIndex = subIndex;
-            row.classList.add('dragging');
-            e.dataTransfer.effectAllowed = 'move';
-          };
-
-          row.ondragend = () => {
-            row.classList.remove('dragging');
-            subDraggedIndex = null;
-            itemsList.querySelectorAll('.drag-over').forEach(el => el.classList.remove('drag-over'));
-          };
-
-          row.ondragover = (e) => {
-            e.preventDefault();
-            e.dataTransfer.dropEffect = 'move';
-            if (subDraggedIndex !== null && subDraggedIndex !== subIndex) {
-              row.classList.add('drag-over');
-            }
-          };
-
-          row.ondragleave = () => {
-            row.classList.remove('drag-over');
-          };
-
-          row.ondrop = (e) => {
-            e.preventDefault();
-            row.classList.remove('drag-over');
-            if (subDraggedIndex !== null && subDraggedIndex !== subIndex) {
-              const draggedItem = item.items[subDraggedIndex];
-              item.items.splice(subDraggedIndex, 1);
-              item.items.splice(subIndex, 0, draggedItem);
-              renderDropdownItems();
-            }
-          };
-
-          row.appendChild(handle);
-          row.appendChild(input);
-          row.appendChild(deleteBtn);
-          itemsList.appendChild(row);
-        });
-
-        // 追加行
-        const addRow = document.createElement('div');
-        addRow.className = 'hss-dropdown-item-row';
-        const addInput = document.createElement('input');
-        addInput.type = 'text';
-        addInput.className = 'hss-dropdown-item-input hss-pending-input';
-        addInput.placeholder = '項目を追加...';
-        addInput.dataset.itemIndex = index; // どのドロップダウンの入力欄か識別用
-
-        const addSubItem = () => {
-          const val = addInput.value.trim();
-          if (val) {
-            if (!item.items) item.items = [];
-            item.items.push(val);
-            renderDropdownItems();
-            // 再描画後、追加用入力欄にフォーカス
-            const newAddInput = itemsList.querySelector('.hss-dropdown-item-row:last-child input');
-            if (newAddInput) newAddInput.focus();
-          }
-        };
-
-        addInput.onkeydown = (e) => {
-          if (e.isComposing) return;
-          if (e.key === 'Enter') {
-            e.preventDefault();
-            addSubItem();
-          }
-        };
-
-        addRow.appendChild(addInput);
-        itemsList.appendChild(addRow);
-      }
-
-      renderDropdownItems();
-      container.appendChild(itemsList);
-      return container;
-    }
-
-    // ドラッグ中の自動スクロール
-    let scrollInterval = null;
-    function startAutoScroll(list, direction) {
-      if (scrollInterval) return;
-      scrollInterval = setInterval(() => {
-        list.scrollTop += direction * 8;
-      }, 16);
-    }
-    function stopAutoScroll() {
-      if (scrollInterval) {
-        clearInterval(scrollInterval);
-        scrollInterval = null;
-      }
-    }
-
-    function renderList() {
-      const list = modal.querySelector('.hss-button-list');
-      list.innerHTML = '';
-
-      if (items.length === 0) {
-        list.innerHTML = '<div class="hss-empty-message">アイテムがありません</div>';
-        return;
-      }
-
-      // リスト全体のdragoverで自動スクロール判定
-      list.ondragover = (e) => {
-        const rect = list.getBoundingClientRect();
-        const y = e.clientY;
-        const threshold = 40;
-
-        if (y - rect.top < threshold) {
-          startAutoScroll(list, -1); // 上へスクロール
-        } else if (rect.bottom - y < threshold) {
-          startAutoScroll(list, 1); // 下へスクロール
-        } else {
-          stopAutoScroll();
-        }
-      };
-
-      list.ondragleave = () => stopAutoScroll();
-      list.ondrop = () => stopAutoScroll();
-
-      items.forEach((item, index) => {
-        const wrapper = document.createElement('div');
-
-        const row = document.createElement('div');
-        row.className = 'hss-button-item';
-        row.draggable = true;
-        row.dataset.index = index;
-
-        // ドラッグハンドル
-        const handle = document.createElement('span');
-        handle.className = 'hss-drag-handle';
-        handle.textContent = '☰';
-
-        // タイプバッジ
-        const typeBadge = document.createElement('span');
-        typeBadge.className = 'hss-item-type' + (item.type === 'dropdown' ? ' dropdown' : '');
-        typeBadge.textContent = item.type === 'dropdown' ? '▼' : '●';
-
-        // テキスト（クリックで編集）
-        const textEl = document.createElement('span');
-        textEl.className = 'hss-button-item-text';
-        textEl.textContent = item.text;
-        textEl.onclick = (e) => {
-          e.stopPropagation();
-          const input = document.createElement('input');
-          input.type = 'text';
-          input.className = 'hss-button-item-input';
-          input.value = item.text;
-          textEl.replaceWith(input);
-          input.focus();
-          input.select();
-
-          const finishEdit = () => {
-            const newText = input.value.trim();
-            if (newText) {
-              item.text = newText;
-            }
-            renderList();
-          };
-
-          input.onblur = finishEdit;
-          input.onkeydown = (ev) => {
-            if (ev.key === 'Enter') {
-              ev.preventDefault();
-              finishEdit();
-            } else if (ev.key === 'Escape') {
-              renderList();
-            }
-          };
-        };
-
-        // 削除ボタン
-        const deleteBtn = document.createElement('button');
-        deleteBtn.className = 'hss-delete-btn';
-        deleteBtn.textContent = '削除';
-        deleteBtn.onclick = (e) => {
-          e.stopPropagation();
-          items.splice(index, 1);
-          renderList();
-        };
-
-        row.appendChild(handle);
-        row.appendChild(typeBadge);
-        row.appendChild(textEl);
-        row.appendChild(deleteBtn);
-
-        // ドラッグイベント
-        row.ondragstart = (e) => {
-          draggedIndex = index;
-          row.classList.add('dragging');
-          e.dataTransfer.effectAllowed = 'move';
-        };
-
-        row.ondragend = () => {
-          row.classList.remove('dragging');
-          draggedIndex = null;
-          list.querySelectorAll('.drag-over').forEach(el => el.classList.remove('drag-over'));
-          stopAutoScroll();
-        };
-
-        row.ondragover = (e) => {
-          e.preventDefault();
-          e.dataTransfer.dropEffect = 'move';
-          if (draggedIndex !== null && draggedIndex !== index) {
-            row.classList.add('drag-over');
-          }
-        };
-
-        row.ondragleave = () => {
-          row.classList.remove('drag-over');
-        };
-
-        row.ondrop = (e) => {
-          e.preventDefault();
-          row.classList.remove('drag-over');
-          if (draggedIndex !== null && draggedIndex !== index) {
-            const draggedItem = items[draggedIndex];
-            items.splice(draggedIndex, 1);
-            items.splice(index, 0, draggedItem);
-            renderList();
-          }
-        };
-
-        wrapper.appendChild(row);
-
-        // ドロップダウンの場合は項目編集UIを追加
-        if (item.type === 'dropdown') {
-          wrapper.appendChild(createDropdownItemsEditor(item, index));
-        }
-
-        list.appendChild(wrapper);
-      });
-    }
-
-    modal.innerHTML = `
-      <div class="hss-modal-title">クイック検索の設定</div>
-      <div class="hss-button-list"></div>
-      <div class="hss-add-section">
-        <select class="hss-add-type-select">
-          <option value="button">ボタン</option>
-          <option value="dropdown">ドロップダウン</option>
-        </select>
-        <input type="text" class="hss-add-input" placeholder="テキストを入力">
-        <button class="hss-add-btn">追加</button>
-      </div>
-      <div class="hss-modal-actions">
-        <button class="hss-cancel-btn">キャンセル</button>
-        <button class="hss-confirm-btn">この内容で設定</button>
-      </div>
-    `;
-
-    overlay.appendChild(modal);
-    document.body.appendChild(overlay);
-
-    renderList();
-
-    const typeSelect = modal.querySelector('.hss-add-type-select');
-    const addInput = modal.querySelector('.hss-add-input');
-    const addBtn = modal.querySelector('.hss-add-btn');
-    const cancelBtn = modal.querySelector('.hss-cancel-btn');
-    const confirmBtn = modal.querySelector('.hss-confirm-btn');
-
-    const handleAdd = () => {
-      const text = addInput.value.trim();
-      if (!text) return;
-
-      // 重複チェック（同じテキストのアイテムがあるか）
-      if (items.some(item => item.text === text)) {
-        addInput.style.borderColor = '#e53935';
-        addInput.style.backgroundColor = '#ffebee';
-        setTimeout(() => {
-          addInput.style.borderColor = '';
-          addInput.style.backgroundColor = '';
-        }, 300);
-        return;
-      }
-
-      const type = typeSelect.value;
-      if (type === 'button') {
-        items.push({ type: 'button', text });
-      } else {
-        items.push({ type: 'dropdown', text, items: [] });
-      }
-      addInput.value = '';
-      renderList();
-    };
-
-    // 入力値があるときに追加ボタンの色を変えて注意を促す
-    const updateAddBtnHighlight = () => {
-      if (addInput.value.trim()) {
-        addBtn.classList.add('has-pending');
-      } else {
-        addBtn.classList.remove('has-pending');
-      }
-    };
-
-    addInput.addEventListener('input', updateAddBtnHighlight);
-
-    addBtn.onclick = () => {
-      handleAdd();
-      updateAddBtnHighlight();
-    };
-    addInput.onkeydown = (e) => {
-      if (e.isComposing) return;
-      if (e.key === 'Enter') {
-        e.preventDefault();
-        handleAdd();
-        updateAddBtnHighlight();
-      }
-    };
-
-    confirmBtn.onclick = () => {
-      // 入力途中のテキストを拾ってドロップダウンに追加
-      modal.querySelectorAll('.hss-pending-input').forEach(input => {
-        const val = input.value.trim();
-        if (val) {
-          const idx = parseInt(input.dataset.itemIndex, 10);
-          if (!isNaN(idx) && items[idx] && items[idx].type === 'dropdown') {
-            if (!items[idx].items) items[idx].items = [];
-            items[idx].items.push(val);
-          }
-        }
-      });
-      saveItems(items);
-      overlay.remove();
-      if (onSave) onSave();
-    };
-
-    cancelBtn.onclick = () => {
-      overlay.remove();
-    };
-
-    overlay.onclick = (e) => {
-      if (e.target === overlay) {
-        overlay.remove();
-      }
-    };
-
-    addInput.focus();
   }
 
   // 開いているドロップダウンを閉じる
@@ -901,21 +377,35 @@
     });
   }
 
+  // 編集ポップアップを閉じる
+  function closeEditPopup() {
+    const popup = document.querySelector('.hss-edit-popup');
+    if (popup) popup.remove();
+  }
+
   // ボタンコンテナを作成
   function createButtonContainer() {
-    const items = loadItems();
+    let items = loadItems();
     const container = document.createElement('div');
     container.className = 'hss-button-container';
     container.id = 'hss-button-container';
 
-    // ドラッグ関連の状態
+    // 状態管理
     let dragMode = false;
     let draggedIndex = null;
     let dropTargetIndex = null;
-    let dropPosition = null; // 'left' or 'right'
+    let dropPosition = null;
     let longPressTimer = null;
+    let longPressStartX = 0;
+    let longPressStartY = 0;
+    let longPressTargetIndex = null;
+    let longPressTargetText = '';
+    let popupShowedDuringThisPress = false; // ポップアップ表示中はドラッグ無効
     let ghost = null;
-    const LONG_PRESS_DURATION = 500;
+    let trashZone = null;
+    let overTrash = false;
+    const LONG_PRESS_DURATION = 400;
+    const DRAG_THRESHOLD = 8;
 
     // ゴースト要素作成
     function createGhost(text, x, y) {
@@ -927,7 +417,6 @@
       document.body.appendChild(ghost);
     }
 
-    // ゴースト位置更新
     function updateGhostPosition(x, y) {
       if (ghost) {
         ghost.style.left = x + 'px';
@@ -935,7 +424,6 @@
       }
     }
 
-    // ゴースト削除
     function removeGhost() {
       if (ghost) {
         ghost.remove();
@@ -943,14 +431,13 @@
       }
     }
 
-    // ドロップインジケーター（縦線）
+    // ドロップインジケーター
     let dropIndicator = null;
 
     function createDropIndicator() {
       dropIndicator = document.createElement('div');
       dropIndicator.className = 'hss-drop-indicator';
       dropIndicator.style.display = 'none';
-      container.style.position = 'relative';
       container.appendChild(dropIndicator);
     }
 
@@ -963,47 +450,209 @@
     }
 
     function hideDropIndicator() {
-      if (dropIndicator) {
-        dropIndicator.style.display = 'none';
-      }
+      if (dropIndicator) dropIndicator.style.display = 'none';
       dropTargetIndex = null;
       dropPosition = null;
     }
 
     // ドラッグモード開始
     function enterDragMode(startIndex, text, x, y) {
+      closeEditPopup();
+      closeAllDropdowns();
       dragMode = true;
       draggedIndex = startIndex;
       container.classList.add('hss-drag-mode');
-      closeAllDropdowns();
 
-      // ドラッグ中の要素にクラス追加
       const elements = container.querySelectorAll('.hss-quick-btn, .hss-dropdown');
       elements[startIndex]?.classList.add('hss-dragging');
 
-      // ゴースト作成
       createGhost(text, x, y);
+      if (trashZone) trashZone.classList.add('active');
     }
 
-    // ドラッグモード終了
     function exitDragMode() {
       dragMode = false;
       draggedIndex = null;
+      overTrash = false;
       container.classList.remove('hss-drag-mode');
-      container.querySelectorAll('.hss-dragging').forEach(el => {
-        el.classList.remove('hss-dragging');
-      });
+      container.querySelectorAll('.hss-dragging').forEach(el => el.classList.remove('hss-dragging'));
       removeGhost();
       hideDropIndicator();
+      if (trashZone) {
+        trashZone.classList.remove('active');
+        trashZone.classList.remove('drag-over');
+      }
     }
 
-    // ドロップインジケーター作成
+    // 編集ポップアップを表示
+    function showEditPopup(targetElement, index) {
+      closeEditPopup();
+      closeAllDropdowns();
+
+      const item = items[index];
+      const popup = document.createElement('div');
+      popup.className = 'hss-edit-popup';
+
+      // 名前編集セクション
+      const nameSection = document.createElement('div');
+      nameSection.className = 'hss-edit-popup-section';
+      const nameLabel = document.createElement('label');
+      nameLabel.className = 'hss-edit-popup-label';
+      nameLabel.textContent = '名前';
+      const nameInput = document.createElement('input');
+      nameInput.type = 'text';
+      nameInput.className = 'hss-edit-popup-input';
+      nameInput.value = item.text;
+      nameInput.onchange = () => {
+        const newText = nameInput.value.trim();
+        if (newText && newText !== item.text) {
+          item.text = newText;
+          saveItems(items);
+          refreshButtons();
+        }
+      };
+      nameInput.onkeydown = (e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          nameInput.blur();
+        }
+      };
+      nameSection.appendChild(nameLabel);
+      nameSection.appendChild(nameInput);
+      popup.appendChild(nameSection);
+
+      // 項目セクション
+      const itemsSection = document.createElement('div');
+      itemsSection.className = 'hss-edit-popup-section';
+
+      const itemsList = document.createElement('div');
+      itemsList.className = 'hss-edit-popup-items';
+
+      function renderItems() {
+        itemsList.innerHTML = '';
+        const subItems = item.items || [];
+        subItems.forEach((subItem, subIndex) => {
+            const row = document.createElement('div');
+            row.className = 'hss-edit-popup-item';
+            const text = document.createElement('span');
+            text.className = 'hss-edit-popup-item-text';
+            text.textContent = subItem;
+            const deleteBtn = document.createElement('button');
+            deleteBtn.className = 'hss-edit-popup-item-delete';
+            deleteBtn.textContent = '×';
+            deleteBtn.onclick = () => {
+              item.items.splice(subIndex, 1);
+              saveItems(items);
+              renderItems();
+            };
+            row.appendChild(text);
+            row.appendChild(deleteBtn);
+            itemsList.appendChild(row);
+        });
+      }
+      renderItems();
+      itemsSection.appendChild(itemsList);
+
+      // 項目追加
+      const addRow = document.createElement('div');
+      addRow.className = 'hss-edit-popup-add';
+      const addInput = document.createElement('input');
+      addInput.type = 'text';
+      addInput.placeholder = '項目を追加...';
+      const addBtn = document.createElement('button');
+      addBtn.textContent = '追加';
+      addBtn.onclick = () => {
+        const val = addInput.value.trim();
+        if (val) {
+          if (!item.items) item.items = [];
+          item.items.push(val);
+          saveItems(items);
+          addInput.value = '';
+          renderItems();
+        }
+      };
+      addInput.onkeydown = (e) => {
+        if (e.isComposing) return;
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          addBtn.click();
+        }
+      };
+      addRow.appendChild(addInput);
+      addRow.appendChild(addBtn);
+      itemsSection.appendChild(addRow);
+      popup.appendChild(itemsSection);
+
+      // ポップアップをdocument.bodyに追加（親要素のoverflowでクリップされないように）
+      document.body.appendChild(popup);
+
+      // ボタンの位置を取得
+      const targetRect = targetElement.getBoundingClientRect();
+      const popupRect = popup.getBoundingClientRect();
+
+      // ポップアップをボタンの直下に配置
+      popup.style.top = (targetRect.bottom + 4) + 'px';
+
+      // ボタン中央とポップアップ中央を合わせる
+      let popupLeft = targetRect.left + (targetRect.width - popupRect.width) / 2;
+
+      // 右端が画面外に出ないように調整
+      const viewportWidth = window.innerWidth;
+      if (popupLeft + popupRect.width > viewportWidth - 8) {
+        popupLeft = viewportWidth - popupRect.width - 8;
+      }
+
+      // 左端が画面外に出ないように調整
+      if (popupLeft < 8) {
+        popupLeft = 8;
+      }
+
+      popup.style.left = popupLeft + 'px';
+
+      // ポップアップ内クリックで閉じない
+      popup.onclick = (e) => e.stopPropagation();
+    }
+
     createDropIndicator();
 
     // マウス移動ハンドラ
     function handleMouseMove(e) {
+      // 長押し待機中またはポップアップ表示後に移動したらドラッグモードへ
+      // ただしポップアップ内でのマウス移動は除外
+      if (longPressTargetIndex !== null && !e.target.closest('.hss-edit-popup')) {
+        const dx = e.clientX - longPressStartX;
+        const dy = e.clientY - longPressStartY;
+        if (Math.sqrt(dx * dx + dy * dy) > DRAG_THRESHOLD) {
+          if (longPressTimer !== null) {
+            clearTimeout(longPressTimer);
+            longPressTimer = null;
+          }
+          closeEditPopup();
+          const targetIndex = longPressTargetIndex;
+          const targetText = longPressTargetText;
+          longPressTargetIndex = null;
+          enterDragMode(targetIndex, targetText, e.clientX, e.clientY);
+        }
+      }
+
       if (!dragMode) return;
       updateGhostPosition(e.clientX, e.clientY);
+
+      // ゴミ箱判定
+      if (trashZone) {
+        const trashRect = trashZone.getBoundingClientRect();
+        const isOver = e.clientX >= trashRect.left && e.clientX <= trashRect.right &&
+                       e.clientY >= trashRect.top && e.clientY <= trashRect.bottom;
+        if (isOver && !overTrash) {
+          overTrash = true;
+          trashZone.classList.add('drag-over');
+          hideDropIndicator();
+        } else if (!isOver && overTrash) {
+          overTrash = false;
+          trashZone.classList.remove('drag-over');
+        }
+        if (overTrash) return;
+      }
 
       // ドロップ位置の計算
       const elements = Array.from(container.querySelectorAll('.hss-quick-btn, .hss-dropdown'));
@@ -1012,11 +661,8 @@
 
       for (let i = 0; i < elements.length; i++) {
         if (i === draggedIndex) continue;
-
         const rect = elements[i].getBoundingClientRect();
         const centerX = rect.left + rect.width / 2;
-
-        // X座標とY座標の両方をチェック
         const inXRange = e.clientX >= rect.left - 10 && e.clientX <= rect.right + 10;
         const inYRange = e.clientY >= rect.top - 5 && e.clientY <= rect.bottom + 5;
 
@@ -1024,52 +670,88 @@
           dropTargetIndex = i;
           const indicatorHeight = rect.height;
           const indicatorTop = rect.top - containerRect.top;
-
           if (e.clientX < centerX) {
             dropPosition = 'left';
-            const indicatorX = rect.left - containerRect.left - 3;
-            showDropIndicator(indicatorX, indicatorTop, indicatorHeight);
+            showDropIndicator(rect.left - containerRect.left - 3, indicatorTop, indicatorHeight);
           } else {
             dropPosition = 'right';
-            const indicatorX = rect.right - containerRect.left + 1;
-            showDropIndicator(indicatorX, indicatorTop, indicatorHeight);
+            showDropIndicator(rect.right - containerRect.left + 1, indicatorTop, indicatorHeight);
           }
           break;
         }
       }
     }
 
+    // マウスアップでドロップ処理
+    function handleMouseUp() {
+      // 長押しタイマーをクリア
+      if (longPressTimer !== null) {
+        clearTimeout(longPressTimer);
+        longPressTimer = null;
+      }
+      longPressTargetIndex = null;
+      popupShowedDuringThisPress = false; // 次のmousedownでドラッグ可能に
+
+      if (dragMode && draggedIndex !== null) {
+        // ゴミ箱にドロップ → 削除
+        if (overTrash) {
+          items.splice(draggedIndex, 1);
+          saveItems(items);
+          exitDragMode();
+          refreshButtons();
+          return;
+        }
+
+        // 通常のドロップ
+        if (dropTargetIndex !== null && dropPosition !== null) {
+          const draggedItem = items[draggedIndex];
+          let newIndex = dropPosition === 'left' ? dropTargetIndex : dropTargetIndex + 1;
+          if (draggedIndex < newIndex) newIndex--;
+
+          if (draggedIndex !== newIndex) {
+            items.splice(draggedIndex, 1);
+            items.splice(newIndex, 0, draggedItem);
+            saveItems(items);
+            exitDragMode();
+            refreshButtons();
+            return;
+          }
+        }
+        exitDragMode();
+      }
+    }
+
     // 長押し検出の設定
     function setupLongPress(element, index, text) {
-      let startX, startY;
-
       element.addEventListener('mousedown', (e) => {
-        if (e.button !== 0) return; // 左クリックのみ
-        startX = e.clientX;
-        startY = e.clientY;
+        if (e.button !== 0) return;
+        longPressStartX = e.clientX;
+        longPressStartY = e.clientY;
+        longPressTargetIndex = index;
+        longPressTargetText = text;
+
         longPressTimer = setTimeout(() => {
-          enterDragMode(index, text, startX, startY);
+          longPressTimer = null;
+          popupShowedDuringThisPress = true; // このmousedown中はドラッグ無効
+          // 長押し完了 → ポップアップ表示
+          showEditPopup(element, index);
         }, LONG_PRESS_DURATION);
       });
 
       element.addEventListener('mouseup', () => {
-        if (longPressTimer) {
-          clearTimeout(longPressTimer);
-          longPressTimer = null;
-        }
-      });
-
-      element.addEventListener('mouseleave', () => {
-        if (longPressTimer) {
+        if (longPressTimer !== null) {
           clearTimeout(longPressTimer);
           longPressTimer = null;
         }
       });
     }
 
+    // 項目が0個ならボタン、1個以上ならドロップダウンとして描画
     items.forEach((item, index) => {
-      if (item.type === 'dropdown') {
-        // ドロップダウン作成
+      const hasItems = item.items && item.items.length > 0;
+
+      if (hasItems) {
+        // ドロップダウン
         const dropdown = document.createElement('div');
         dropdown.className = 'hss-dropdown';
 
@@ -1080,7 +762,7 @@
         const menu = document.createElement('div');
         menu.className = 'hss-dropdown-menu';
 
-        (item.items || []).forEach(subItem => {
+        item.items.forEach(subItem => {
           const menuItem = document.createElement('button');
           menuItem.className = 'hss-dropdown-item';
           menuItem.textContent = subItem;
@@ -1100,6 +782,8 @@
         btn.onclick = (e) => {
           e.stopPropagation();
           if (dragMode) return;
+          // ポップアップが表示中なら何もしない（長押し後のclickを無視）
+          if (document.querySelector('.hss-edit-popup')) return;
           const isOpen = btn.classList.contains('open');
           closeAllDropdowns();
           if (!isOpen) {
@@ -1111,8 +795,6 @@
         dropdown.appendChild(btn);
         dropdown.appendChild(menu);
         container.appendChild(dropdown);
-
-        // 長押し検出をドロップダウン全体に設定
         setupLongPress(dropdown, index, item.text);
       } else {
         // 通常ボタン
@@ -1121,6 +803,8 @@
         btn.textContent = item.text;
         btn.onclick = () => {
           if (dragMode) return;
+          // ポップアップが表示中なら何もしない（長押し後のclickを無視）
+          if (document.querySelector('.hss-edit-popup')) return;
           const searchInput = getSearchInput();
           if (searchInput) {
             setInputValueReactSafe(searchInput, item.text + ' ');
@@ -1128,65 +812,34 @@
           }
         };
         container.appendChild(btn);
-
-        // 長押し検出
         setupLongPress(btn, index, item.text);
       }
     });
 
-    const settingsBtn = document.createElement('button');
-    settingsBtn.className = 'hss-settings-btn';
-    settingsBtn.textContent = '⚙️';
-    settingsBtn.title = 'ボタンの設定';
-    settingsBtn.onclick = (e) => {
+    // 右端コントロール: 追加ボタン
+    const addBtn = document.createElement('button');
+    addBtn.className = 'hss-control-btn';
+    addBtn.textContent = '+';
+    addBtn.title = '新規ボタンを追加';
+    addBtn.onclick = (e) => {
       e.stopPropagation();
-      if (dragMode) {
-        exitDragMode();
-        return;
-      }
-      showSettingsModal(() => refreshButtons());
+      closeEditPopup();
+      items.push({ type: 'button', text: '新規', items: [] });
+      saveItems(items);
+      refreshButtons();
     };
-    container.appendChild(settingsBtn);
+    container.appendChild(addBtn);
 
-    // マウスアップでドロップ処理
-    const handleMouseUp = () => {
-      if (dragMode && draggedIndex !== null) {
-        if (dropTargetIndex !== null && dropPosition !== null) {
-          // ドロップ位置を計算
-          const currentItems = loadItems();
-          const draggedItem = currentItems[draggedIndex];
-
-          // 新しい位置を決定
-          let newIndex;
-          if (dropPosition === 'left') {
-            newIndex = dropTargetIndex;
-          } else {
-            newIndex = dropTargetIndex + 1;
-          }
-
-          // ドラッグ元より後ろに移動する場合は1つ引く
-          if (draggedIndex < newIndex) {
-            newIndex--;
-          }
-
-          // 実際に移動
-          if (draggedIndex !== newIndex) {
-            currentItems.splice(draggedIndex, 1);
-            currentItems.splice(newIndex, 0, draggedItem);
-            saveItems(currentItems);
-            exitDragMode();
-            refreshButtons();
-            return;
-          }
-        }
-        exitDragMode();
-      }
-    };
+    // 右端コントロール: ゴミ箱
+    trashZone = document.createElement('div');
+    trashZone.className = 'hss-trash-zone';
+    trashZone.textContent = '🗑';
+    trashZone.title = 'ボタンをここにドラッグで削除';
+    container.appendChild(trashZone);
 
     document.addEventListener('mouseup', handleMouseUp);
     document.addEventListener('mousemove', handleMouseMove);
 
-    // クリーンアップ用にイベントを記録
     container._cleanupHandlers = { handleMouseUp, handleMouseMove };
 
     return container;
@@ -1205,10 +858,7 @@
 
   // ボタンを再描画
   function refreshButtons() {
-    const existing = document.getElementById('hss-button-container');
-    if (existing) {
-      existing.remove();
-    }
+    removeButtons(); // イベントハンドラも含めてクリーンアップ
     insertButtons();
   }
 
@@ -1254,10 +904,17 @@
       subtree: true
     });
 
-    // ドキュメントクリックでドロップダウンを閉じる
+    // ドキュメントクリックでドロップダウンと編集ポップアップを閉じる
     const handleDocumentClick = (e) => {
       if (!e.target.closest('.hss-dropdown')) {
         closeAllDropdowns();
+      }
+      if (!e.target.closest('.hss-edit-popup') && !e.target.closest('.hss-quick-btn') && !e.target.closest('.hss-dropdown')) {
+        const hadPopup = document.querySelector('.hss-edit-popup');
+        closeEditPopup();
+        if (hadPopup) {
+          refreshButtons(); // ポップアップを閉じたらボタンを再描画（ドロップダウン切り替え反映）
+        }
       }
     };
     document.addEventListener('click', handleDocumentClick);
