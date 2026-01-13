@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry Disease Register
 // @namespace    https://henry-app.jp/
-// @version      1.6.0
+// @version      2.1.0
 // @description  高速病名検索・登録
 // @author       Claude
 // @match        https://henry-app.jp/*
@@ -93,6 +93,19 @@
     };
   }
 
+  // 正規化: 半角→全角、カタカナ統一など
+  function normalizeText(text) {
+    return text
+      // 半角英数→全角英数
+      .replace(/[A-Za-z0-9]/g, s => String.fromCharCode(s.charCodeAt(0) + 0xFEE0))
+      // 半角カタカナ→全角カタカナ
+      .replace(/[\uFF66-\uFF9F]/g, s => {
+        const kanaMap = 'ヲァィゥェォャュョッーアイウエオカキクケコサシスセソタチツテトナニヌネノハヒフヘホマミムメモヤユヨラリルレロワン゛゜';
+        const idx = s.charCodeAt(0) - 0xFF66;
+        return kanaMap[idx] || s;
+      });
+  }
+
   // 検索用インデックス（起動時に小文字化済み文字列を追加）
   // データ構造: DISEASES=[code, icd10, name, kana], MODIFIERS=[code, name, kana]
   let diseaseNameIndex = null;
@@ -137,12 +150,62 @@
   // 自然言語パーサー
   // ============================================
 
+  // AND検索: スペース区切りで複数キーワードを含む病名を検索
+  function searchByAndKeywords(input) {
+    // スペース（全角・半角）で分割
+    const keywords = input.split(/[\s　]+/).filter(k => k.length > 0);
+    if (keywords.length < 2) return null; // 1キーワードなら通常検索へ
+
+    const normalizedKeywords = keywords.map(k => normalizeText(k).toLowerCase());
+    const candidates = [];
+
+    for (let i = 0; i < diseaseNameIndex.length; i++) {
+      const name = normalizeText(diseaseNameIndex[i]).toLowerCase();
+      const kana = normalizeText(diseaseKanaIndex[i]).toLowerCase();
+
+      // すべてのキーワードが含まれているかチェック
+      const allMatch = normalizedKeywords.every(kw =>
+        name.includes(kw) || kana.includes(kw)
+      );
+
+      if (allMatch) {
+        const icd10 = DISEASES[i][1];
+        const icd10Bonus = getIcd10Bonus(icd10);
+        // スコア: キーワードカバー率 + ICD10ボーナス
+        const totalKeywordLen = normalizedKeywords.reduce((sum, kw) => sum + kw.length, 0);
+        const coverage = totalKeywordLen / name.length;
+        const score = Math.min(coverage, 1.0) + icd10Bonus;
+
+        candidates.push({
+          disease: { code: DISEASES[i][0], icd10: icd10, name: DISEASES[i][2] },
+          prefixes: [],
+          suffixes: [],
+          score: score,
+          displayName: DISEASES[i][2]
+        });
+      }
+    }
+
+    // スコア順にソートして上位5件
+    candidates.sort((a, b) => b.score - a.score);
+    return candidates.slice(0, 5);
+  }
+
   // 自然言語入力をパースして候補を生成
   function parseNaturalInput(input) {
     if (!input || input.trim().length === 0) return [];
     if (!PREFIX_MODIFIERS || !SUFFIX_MODIFIERS) return [];
 
-    const normalized = input.trim();
+    // スペースが含まれている場合はAND検索モード
+    if (/[\s　]/.test(input.trim())) {
+      const andResults = searchByAndKeywords(input);
+      if (andResults && andResults.length > 0) {
+        return andResults;
+      }
+    }
+
+    // 入力を正規化（半角→全角など）
+    const normalized = normalizeText(input.trim());
 
     // 再帰的に接頭語を抽出する関数
     function extractPrefixes(str, prefixes, depth) {
@@ -196,14 +259,26 @@
             disease: disease,
             prefixes: foundPrefixes,
             suffixes: foundSuffixes,
+            score: disease.score || 0,
+            modifierCount: foundPrefixes.length + foundSuffixes.length,
             diseaseNameLen: disease.name.length
           });
         }
       }
     }
 
-    // 病名の長さでソート（長い順 = より具体的な病名を優先）
-    allResults.sort((a, b) => b.diseaseNameLen - a.diseaseNameLen);
+    // ソート優先順位:
+    // 1. スコア（高い順）
+    // 2. 修飾語数（少ない順 = シンプルな解釈を優先）
+    // 3. 病名の長さ（長い順 = より具体的な病名を優先）
+    allResults.sort((a, b) => {
+      // スコアが大きく違う場合はスコア優先
+      if (Math.abs(b.score - a.score) > 0.1) return b.score - a.score;
+      // スコアが近い場合は修飾語数が少ない方を優先
+      if (a.modifierCount !== b.modifierCount) return a.modifierCount - b.modifierCount;
+      // 修飾語数も同じなら病名が長い方を優先
+      return b.diseaseNameLen - a.diseaseNameLen;
+    });
 
     // 重複を除去して上位5件を返す
     const seen = new Set();
@@ -224,61 +299,178 @@
     return candidates;
   }
 
-  // 最長一致で病名を検索（クエリの先頭から最も長くマッチする病名を優先）
+  // 編集距離（Levenshtein距離）計算
+  // 早期打ち切り付き（閾値を超えたら計算中止）
+  function levenshteinDistance(s1, s2, maxDist = Infinity) {
+    if (s1 === s2) return 0;
+    if (s1.length === 0) return s2.length;
+    if (s2.length === 0) return s1.length;
+
+    // 長さの差が閾値を超えていたら早期リターン
+    if (Math.abs(s1.length - s2.length) > maxDist) return maxDist + 1;
+
+    // 短い方をs1にする（メモリ効率）
+    if (s1.length > s2.length) [s1, s2] = [s2, s1];
+
+    const len1 = s1.length;
+    const len2 = s2.length;
+
+    // 1行分だけ保持（メモリ効率）
+    let prevRow = Array.from({ length: len1 + 1 }, (_, i) => i);
+    let currRow = new Array(len1 + 1);
+
+    for (let j = 1; j <= len2; j++) {
+      currRow[0] = j;
+      let minInRow = j;
+
+      for (let i = 1; i <= len1; i++) {
+        const cost = s1[i - 1] === s2[j - 1] ? 0 : 1;
+        currRow[i] = Math.min(
+          prevRow[i] + 1,      // 削除
+          currRow[i - 1] + 1,  // 挿入
+          prevRow[i - 1] + cost // 置換
+        );
+        minInRow = Math.min(minInRow, currRow[i]);
+      }
+
+      // この行の最小値が閾値を超えていたら打ち切り
+      if (minInRow > maxDist) return maxDist + 1;
+
+      [prevRow, currRow] = [currRow, prevRow];
+    }
+
+    return prevRow[len1];
+  }
+
+  // 病名検索スコア計算
+  // 共通部分の割合と長さの近さでスコアリング
+  function calculateDiseaseScore(query, diseaseName) {
+    // 完全一致は最高スコア（ICD10ボーナスを加算しても逆転しない値）
+    if (query === diseaseName) {
+      return 10.0;
+    }
+
+    // 共通の先頭部分の長さを計算
+    let commonPrefix = 0;
+    const minLen = Math.min(query.length, diseaseName.length);
+    while (commonPrefix < minLen && query[commonPrefix] === diseaseName[commonPrefix]) {
+      commonPrefix++;
+    }
+
+    // マッチしない場合は0
+    if (commonPrefix === 0) return 0;
+
+    // 共通部分の割合（病名長に対するカバー率）
+    const coverage = commonPrefix / diseaseName.length;
+
+    // 長さの近さ（1に近いほど良い）
+    const lengthRatio = Math.min(query.length, diseaseName.length) /
+                        Math.max(query.length, diseaseName.length);
+
+    // スコア = カバー率60% + 長さの近さ40%
+    return coverage * 0.6 + lengthRatio * 0.4;
+  }
+
+  // ファジースコア計算（編集距離ベース）
+  function calculateFuzzyScore(query, diseaseName) {
+    const maxLen = Math.max(query.length, diseaseName.length);
+    if (maxLen === 0) return 0;
+
+    // 編集距離の閾値（文字列長の30%まで許容）
+    const maxDist = Math.ceil(maxLen * 0.3);
+    const dist = levenshteinDistance(query, diseaseName, maxDist);
+
+    // 閾値を超えたらスコア0
+    if (dist > maxDist) return 0;
+
+    // 類似度 = 1 - (距離 / 最大長)
+    return 1 - (dist / maxLen);
+  }
+
+  // ICD10コードによる優先度ボーナス
+  // S=損傷（最優先）、M=筋骨格系（次点）
+  function getIcd10Bonus(icd10) {
+    if (!icd10) return 0;
+    const firstChar = icd10.charAt(0).toUpperCase();
+    if (firstChar === 'S') return 0.3;  // 損傷・外傷
+    if (firstChar === 'M') return 0.2;  // 筋骨格系
+    return 0;
+  }
+
+  // 病名検索（スコアリング方式 + ファジー検索）
   function findDiseaseByLongestMatch(query) {
     if (!query || query.length === 0) return [];
 
-    const q = query.toLowerCase();
+    // クエリを正規化して小文字化
+    const q = normalizeText(query).toLowerCase();
     const candidates = [];
 
+    // フェーズ1: 先頭一致検索（高速）
     for (let i = 0; i < diseaseNameIndex.length; i++) {
-      const name = diseaseNameIndex[i];
-      const kana = diseaseKanaIndex[i];
+      const name = normalizeText(diseaseNameIndex[i]).toLowerCase();
+      const kana = normalizeText(diseaseKanaIndex[i]).toLowerCase();
 
-      // クエリが病名と完全一致
-      if (name === q || kana === q) {
+      // 名前でスコア計算
+      const nameScore = calculateDiseaseScore(q, name);
+      const kanaScore = calculateDiseaseScore(q, kana);
+      const baseScore = Math.max(nameScore, kanaScore);
+
+      // ICD10ボーナスを加算
+      const icd10 = DISEASES[i][1];
+      const icd10Bonus = getIcd10Bonus(icd10);
+      const score = baseScore + icd10Bonus;
+
+      if (baseScore >= 0.3 || (name.startsWith(q.slice(0, 3)) && q.length >= 3)) {
         candidates.push({
           code: DISEASES[i][0],
-          icd10: DISEASES[i][1],
+          icd10: icd10,
           name: DISEASES[i][2],
-          matchLength: q.length,
-          matchType: 0 // 完全一致
-        });
-      }
-      // クエリが病名で始まる（病名がクエリの先頭部分に一致）
-      else if (q.startsWith(name) && name.length > 0) {
-        candidates.push({
-          code: DISEASES[i][0],
-          icd10: DISEASES[i][1],
-          name: DISEASES[i][2],
-          matchLength: name.length,
-          matchType: 1 // 先頭一致
-        });
-      }
-      else if (q.startsWith(kana) && kana.length > 0) {
-        candidates.push({
-          code: DISEASES[i][0],
-          icd10: DISEASES[i][1],
-          name: DISEASES[i][2],
-          matchLength: kana.length,
-          matchType: 1 // 先頭一致
+          normalizedName: name,
+          score: score,
+          matchType: 'prefix'
         });
       }
     }
 
-    // ソート: マッチ長が長い順 → 同じ長さなら完全一致優先
-    candidates.sort((a, b) => {
-      if (b.matchLength !== a.matchLength) return b.matchLength - a.matchLength;
-      return a.matchType - b.matchType;
-    });
+    // フェーズ2: ファジー検索（先頭一致で十分な結果がない場合）
+    // 先頭3文字が一致する病名のみを対象（最適化）
+    if (candidates.length < 3 && q.length >= 3) {
+      const prefix3 = q.slice(0, 3);
 
-    // 重複除去して上位5件
+      for (let i = 0; i < diseaseNameIndex.length; i++) {
+        const name = normalizeText(diseaseNameIndex[i]).toLowerCase();
+
+        // 先頭3文字一致 + まだ候補にない
+        if (name.slice(0, 3) === prefix3 && !candidates.some(c => c.code === DISEASES[i][0])) {
+          const fuzzyScore = calculateFuzzyScore(q, name);
+
+          if (fuzzyScore > 0.7) {  // 70%以上の類似度
+            const icd10 = DISEASES[i][1];
+            const icd10Bonus = getIcd10Bonus(icd10);
+
+            candidates.push({
+              code: DISEASES[i][0],
+              icd10: icd10,
+              name: DISEASES[i][2],
+              normalizedName: name,
+              score: fuzzyScore * 0.9 + icd10Bonus,  // ファジーは少し減点
+              matchType: 'fuzzy'
+            });
+          }
+        }
+      }
+    }
+
+    // スコアでソート（高い順）
+    candidates.sort((a, b) => b.score - a.score);
+
+    // 重複除去して上位5件（スコアも返す）
     const seen = new Set();
     const results = [];
     for (const c of candidates) {
       if (!seen.has(c.code) && results.length < 5) {
         seen.add(c.code);
-        results.push({ code: c.code, icd10: c.icd10, name: c.name });
+        results.push({ code: c.code, icd10: c.icd10, name: c.name, score: c.score });
       }
     }
 
@@ -1065,7 +1257,7 @@
       name: '病名登録',
       icon: '🏥',
       description: '高速病名検索・登録',
-      version: '1.6.0',
+      version: '2.1.0',
       order: 150,
       onClick: () => {
         const patientUuid = HenryCore.getPatientUuid();

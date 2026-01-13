@@ -61,11 +61,11 @@ function loadDiseases() {
   for (const line of lines) {
     const fields = parseCSVLine(line);
 
-    // フィールド: 3=コード, 6=病名, 10=カタカナ読み, 13=ICD10
+    // フィールド: 3=コード, 6=病名, 10=カタカナ読み, 16=ICD10
     const code = fields[2];
     const name = fields[5];
     const katakanReading = fields[9];
-    const icd10 = fields[12] || '';
+    const icd10 = fields[15] || '';
 
     if (code && name) {
       const hiragana = katakanaToHiragana(katakanReading || '');
