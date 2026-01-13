@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         画像オーダー入力支援
 // @namespace    https://henry-app.jp/
-// @version      1.13.3
+// @version      1.14.1
 // @description  画像照射オーダーモーダルに部位・方向選択UIを追加（複数内容対応）
 // @author       Henry UI Lab
 // @match        https://henry-app.jp/*
@@ -29,7 +29,7 @@
 
   // XP用データ（部位・撮影条件・方向を含む）
   const XP_DATA = {
-    "頭部〜体幹": {
+    "頭〜躯幹": {
       "頭部": {
         bodySite: "頭部",
         defaultCondition: "80kvp,25mas,120cm",
@@ -320,6 +320,8 @@
   let modalityChangeCallbacks = [];
   // 現在のモダリティを保持
   let currentModality = '';
+  // ヘルパーUIモード（true: ヘルパーUI, false: 標準UI）
+  let helperMode = true;
 
   // ==========================================
   // メイン処理
@@ -339,7 +341,7 @@
     logger = utils.createLogger(CONFIG.SCRIPT_NAME);
     const cleaner = utils.createCleaner();
 
-    logger.info('スクリプト初期化 (v1.13.3)');
+    logger.info('スクリプト初期化 (v1.14.1)');
 
     utils.subscribeNavigation(cleaner, () => {
       logger.info('ページ遷移検出 -> 再セットアップ');
@@ -430,6 +432,9 @@
       }
     }
 
+    // トグルボタンを追加（まだなければ）
+    injectToggleButton();
+
     // 「補足」ラベルを持つフォームグループ内のinputを検出
     const noteInputs = findNoteInputs();
     noteInputs.forEach((noteInput, index) => {
@@ -438,6 +443,83 @@
         setTimeout(() => injectHelperUI(noteInput, index), 50);
       }
     });
+  }
+
+  // ==========================================
+  // トグルボタン注入
+  // ==========================================
+  function injectToggleButton() {
+    const toggleBtnId = 'henry-imaging-helper-toggle';
+    if (document.getElementById(toggleBtnId)) return;
+
+    // 「内容」ヘッダー（h4）を探す
+    const h4Elements = document.querySelectorAll('h4');
+    let contentHeader = null;
+    for (const h4 of h4Elements) {
+      if (h4.textContent?.includes('内容')) {
+        contentHeader = h4;
+        break;
+      }
+    }
+    if (!contentHeader) return;
+
+    // ボタンを作成
+    const toggleBtn = document.createElement('button');
+    toggleBtn.id = toggleBtnId;
+    toggleBtn.type = 'button';
+    toggleBtn.textContent = helperMode ? '標準UIに切替' : 'ヘルパーUIに切替';
+    toggleBtn.style.cssText = `
+      margin-left: 12px;
+      padding: 4px 12px;
+      font-size: 12px;
+      border: 1px solid var(--henry-border, #ccc);
+      border-radius: var(--henry-radius, 4px);
+      background: var(--henry-bg-base, #fff);
+      color: var(--henry-text-medium, #666);
+      cursor: pointer;
+    `;
+
+    toggleBtn.addEventListener('click', () => {
+      toggleHelperMode();
+      toggleBtn.textContent = helperMode ? '標準UIに切替' : 'ヘルパーUIに切替';
+    });
+
+    // ヘッダーの横に挿入
+    contentHeader.parentElement.appendChild(toggleBtn);
+    logger.info('トグルボタンを追加しました');
+  }
+
+  // ==========================================
+  // ヘルパーUI/標準UI切替
+  // ==========================================
+  function toggleHelperMode() {
+    helperMode = !helperMode;
+    logger.info(`UIモード切替: ${helperMode ? 'ヘルパーUI' : '標準UI'}`);
+
+    // ヘルパーUIコンテナの表示/非表示
+    const containers = document.querySelectorAll('.' + CONFIG.CONTAINER_CLASS);
+    containers.forEach(c => {
+      c.style.display = helperMode ? 'flex' : 'none';
+    });
+
+    // CSSスタイルの有効/無効切替
+    const styleEl = document.getElementById('henry-imaging-helper-hide-fields');
+    if (styleEl) {
+      styleEl.disabled = !helperMode;
+    }
+
+    // 標準フォーム（親4）の表示/非表示（JS側で設定したstyleをリセット）
+    const bodySiteEl = document.querySelector('[data-testid="BodySiteForm__FilterableSelectBox"]');
+    if (bodySiteEl) {
+      let parent = bodySiteEl;
+      for (let i = 0; i < 4; i++) {
+        parent = parent.parentElement;
+        if (!parent) break;
+      }
+      if (parent) {
+        parent.style.display = helperMode ? 'none' : '';
+      }
+    }
   }
 
   // ==========================================
@@ -702,6 +784,10 @@
         /* 親4（margin-top: 16pxのコンテナ）を非表示にする */
         /* 構造: 親4 > 親3 > 親2 > 親1 > BodySiteForm */
         div:has(> div > div > div > [data-testid="BodySiteForm__FilterableSelectBox"]) {
+          display: none !important;
+        }
+        /* 撮影条件フォームを非表示 */
+        div:has(> div > div > input[name*="configuration"]) {
           display: none !important;
         }
       `;
@@ -1001,7 +1087,7 @@
         btn.dataset.direction = dir;
         btn.style.cssText = `
           padding: 4px 10px;
-          font-size: 13px;
+          font-size: 14px;
           border: 1px solid var(--henry-border, #ccc);
           border-radius: var(--henry-radius, 4px);
           background: var(--henry-bg-base, #fff);
@@ -1388,17 +1474,17 @@
     const select = document.createElement('select');
     const initialBorder = initiallyDisabled ? NORMAL_BORDER_COLOR : EMPTY_BORDER_COLOR;
     select.style.cssText = `
-      height: 32px;
-      min-width: 80px;
+      height: 36px;
+      min-width: 100px;
       flex: 1;
-      max-width: 150px;
+      max-width: 160px;
       border: 1px solid ${initialBorder};
       border-radius: var(--henry-radius, 4px);
       background-color: var(--henry-bg-base, #fff);
       color: var(--henry-text-high, #333);
       font-family: "Noto Sans JP", sans-serif;
-      font-size: 13px;
-      padding: 0 8px;
+      font-size: 14px;
+      padding: 0 10px;
       cursor: pointer;
       outline: none;
     `;
