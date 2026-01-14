@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         主治医意見書作成フォーム
 // @namespace    https://henry-app.jp/
-// @version      2.5.9
+// @version      2.6.0
 // @description  主治医意見書の入力フォームとGoogle Docs出力（GAS不要版・API直接呼び出し）
 // @author       Henry Team
 // @match        https://henry-app.jp/*
@@ -83,7 +83,7 @@
 
   // localStorage設定
   const STORAGE_KEY_PREFIX = 'henry_opinion_draft_';
-  const MAX_DRAFT_AGE_DAYS = 30;
+  // 下書きは期限なし（永続保存）
   const DRAFT_SCHEMA_VERSION = 1;  // 下書きの構造バージョン（構造変更時にインクリメント）
 
   let log = null;
@@ -414,6 +414,7 @@
 
   /**
    * 下書き読み込み
+   * @returns {{ data: object, savedAt: string } | null}
    */
   function loadDraft(patientUuid) {
     try {
@@ -437,18 +438,8 @@
         return null;
       }
 
-      const savedDate = new Date(draft.savedAt);
-      const now = new Date();
-      const ageInDays = (now - savedDate) / (1000 * 60 * 60 * 24);
-
-      if (ageInDays > MAX_DRAFT_AGE_DAYS) {
-        localStorage.removeItem(key);
-        log?.info('期限切れの下書きを削除:', key);
-        return null;
-      }
-
       log?.info('下書き読み込み成功:', key);
-      return draft.data;
+      return { data: draft.data, savedAt: draft.savedAt };
     } catch (e) {
       log?.error('下書き読み込み失敗:', e.message);
       return null;
@@ -456,36 +447,10 @@
   }
 
   /**
-   * 古い下書きのクリーンアップ
+   * 古い下書きのクリーンアップ（現在は無効化 - 下書きは永続保存）
    */
   function cleanupOldDrafts() {
-    try {
-      const now = new Date();
-      let deletedCount = 0;
-
-      for (let i = localStorage.length - 1; i >= 0; i--) {
-        const key = localStorage.key(i);
-        if (key && key.startsWith(STORAGE_KEY_PREFIX)) {
-          const stored = localStorage.getItem(key);
-          if (stored) {
-            const draft = JSON.parse(stored);
-            const savedDate = new Date(draft.savedAt);
-            const ageInDays = (now - savedDate) / (1000 * 60 * 60 * 24);
-
-            if (ageInDays > MAX_DRAFT_AGE_DAYS) {
-              localStorage.removeItem(key);
-              deletedCount++;
-            }
-          }
-        }
-      }
-
-      if (deletedCount > 0) {
-        log?.info(`古い下書きを${deletedCount}件削除しました`);
-      }
-    } catch (e) {
-      log?.error('下書きクリーンアップ失敗:', e.message);
-    }
+    // 下書きは期限なしで永続保存するため、クリーンアップは行わない
   }
 
   // =============================================================================
@@ -1391,7 +1356,8 @@
       const savedDraft = loadDraft(patientInfo.patient_uuid);
 
       // データの準備
-      const formData = savedDraft || createInitialFormData(patientInfo, physicianName);
+      const formData = savedDraft?.data || createInitialFormData(patientInfo, physicianName);
+      const lastSavedAt = savedDraft?.savedAt || null;
 
       // 基本情報は常に最新の患者情報で上書き（下書きがあっても患者情報は最新を使用）
       formData.basic_info.patient_uuid = patientInfo.patient_uuid;
@@ -1409,10 +1375,10 @@
       formData.basic_info.phone = patientInfo.phone;
       formData.basic_info.physician_name = physicianName;
 
-      // フォームHTML生成（次のステップで実装）
-      const formHTML = createFormHTML(formData);
+      // フォームHTML生成
+      const formHTML = createFormHTML(formData, lastSavedAt);
 
-      // モーダル表示（次のステップで実装）
+      // モーダル表示
       showFormModal(pageWindow, formHTML, formData);
 
     } catch (e) {
@@ -1555,10 +1521,28 @@
 
   /**
    * フォームHTML生成
+   * @param {object} formData - フォームデータ
+   * @param {string|null} lastSavedAt - 最終保存日時（ISO形式）
    */
-  function createFormHTML(formData) {
+  function createFormHTML(formData, lastSavedAt = null) {
     const container = document.createElement('div');
     container.style.cssText = 'max-height: 70vh; overflow-y: auto; padding: 20px;';
+
+    // 最終更新日表示
+    if (lastSavedAt) {
+      const lastUpdatedArea = document.createElement('div');
+      lastUpdatedArea.style.cssText = 'padding: 10px 14px; margin-bottom: 16px; background-color: #f0f9ff; border: 1px solid #bae6fd; border-radius: 6px; font-size: 13px; color: #0369a1;';
+      const savedDate = new Date(lastSavedAt);
+      const formattedDate = savedDate.toLocaleString('ja-JP', {
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit'
+      });
+      lastUpdatedArea.textContent = `📝 下書き最終更新: ${formattedDate}`;
+      container.appendChild(lastUpdatedArea);
+    }
 
     // メッセージ表示領域
     const messageArea = document.createElement('div');
