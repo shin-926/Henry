@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         主治医意見書作成フォーム
 // @namespace    https://henry-app.jp/
-// @version      2.6.0
+// @version      2.6.1
 // @description  主治医意見書の入力フォームとGoogle Docs出力（GAS不要版・API直接呼び出し）
 // @author       Henry Team
 // @match        https://henry-app.jp/*
