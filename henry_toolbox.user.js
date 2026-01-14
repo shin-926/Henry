@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         ツールボックス
 // @namespace    https://haru-chan.example
-// @version      5.1.1
+// @version      5.1.4
 // @description  プラグイン方式。シンプルUI、Noto Sans JP、ドラッグ＆ドロップ並び替え対応。HenryCore v2.7.0 対応。
 // @match        https://henry-app.jp/*
 // @match        https://*.henry-app.jp/*
@@ -83,6 +83,24 @@
     .ht-row.drag-over {
       border-top: 2px solid #10B981;
     }
+
+    /* Henry風カスタムツールチップ */
+    #ht-tooltip {
+      position: absolute;
+      background-color: rgba(0, 0, 0, 0.73);
+      color: #fff;
+      padding: 4px 8px;
+      border-radius: 2px;
+      font-size: 12px;
+      line-height: 16px;
+      z-index: 1500;
+      pointer-events: none;
+      visibility: hidden;
+      white-space: nowrap;
+    }
+    #ht-tooltip.visible {
+      visibility: visible;
+    }
   `);
 
   // ============================================
@@ -130,6 +148,27 @@
 
   let panel = null;
   let dragSrcEl = null;
+  let tooltip = null;
+
+  function createTooltip() {
+    tooltip = document.createElement('div');
+    tooltip.id = 'ht-tooltip';
+    document.body.appendChild(tooltip);
+    return tooltip;
+  }
+
+  function showTooltip(text, targetEl) {
+    if (!tooltip) createTooltip();
+    tooltip.textContent = text;
+    const rect = targetEl.getBoundingClientRect();
+    tooltip.style.left = (rect.right + 8) + 'px';
+    tooltip.style.top = rect.top + 'px';
+    tooltip.classList.add('visible');
+  }
+
+  function hideTooltip() {
+    if (tooltip) tooltip.classList.remove('visible');
+  }
 
   function createPanel() {
     panel = document.createElement('div');
@@ -299,7 +338,10 @@
     `;
 
     btn.appendChild(iconSvg);
-    btn.title = "ツールボックス";
+
+    // カスタムツールチップ
+    btn.addEventListener('mouseenter', () => showTooltip('ツールボックス', btn));
+    btn.addEventListener('mouseleave', hideTooltip);
 
     btn.addEventListener('click', (e) => {
       e.preventDefault();

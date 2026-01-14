@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         主治医意見書作成フォーム
 // @namespace    https://henry-app.jp/
-// @version      2.5.2
+// @version      2.5.9
 // @description  主治医意見書の入力フォームとGoogle Docs出力（GAS不要版・API直接呼び出し）
 // @author       Henry Team
 // @match        https://henry-app.jp/*
@@ -589,11 +589,14 @@
     { placeholder: '{{食事行為}}', jsonKey: 'life_function.eating_behavior', inputType: 'ラジオボタン' },
     { placeholder: '{{現在の栄養状態}}', jsonKey: 'life_function.current_nutrition_status', inputType: 'ラジオボタン' },
     { placeholder: '{{栄養・食生活上の留意点}}', jsonKey: 'life_function.nutrition_diet_notes', inputType: '記述' },
-    { placeholder: '{{発生可能性状態}}', jsonKey: 'life_function.possible_conditions', inputType: 'チェックボックス' },
+    { placeholder: '{{発生可能性状態1}}', jsonKey: 'life_function.possible_conditions', inputType: 'custom_possible_conditions_1' },
+    { placeholder: '{{発生可能性状態2}}', jsonKey: 'life_function.possible_conditions', inputType: 'custom_possible_conditions_2' },
+    { placeholder: '{{その他の発生可能性状態}}', jsonKey: 'life_function.possible_conditions', inputType: 'custom_possible_conditions_other' },
     { placeholder: '{{その他の状態名}}', jsonKey: 'life_function.other_condition_name', inputType: '記述' },
     { placeholder: '{{対処方針内容}}', jsonKey: 'life_function.response_policy', inputType: '記述' },
     { placeholder: '{{生活機能改善見通し}}', jsonKey: 'life_function.life_function_improvement_outlook', inputType: 'ラジオボタン' },
     { placeholder: '{{医学的管理の必要性}}', jsonKey: 'life_function.medical_management_necessity', inputType: 'チェックボックス' },
+    { placeholder: '{{その他の医学管理の必要性}}', jsonKey: 'life_function.medical_management_necessity', inputType: 'custom_other_medical_flag' },
     { placeholder: '{{その他の医学的管理}}', jsonKey: 'life_function.other_medical_management', inputType: '記述' },
     { placeholder: '{{サービス提供血圧}}', jsonKey: 'life_function.service_blood_pressure', inputType: 'ラジオボタン' },
     { placeholder: '{{サービス提供血圧留意事項}}', jsonKey: 'life_function.service_blood_pressure_notes', inputType: '記述' },
@@ -642,6 +645,18 @@
         return convertCheckboxValue(value, mapping);
       case 'custom_infection_status':
         return convertInfectionStatus(value, mapping);
+      case 'custom_other_medical_flag':
+        // 医学的管理の必要性の「その他」フラグ（インデックス10）
+        return (value && value.charAt(10) === '1') ? '■' : '□';
+      case 'custom_possible_conditions_1':
+        // 発生可能性状態1（インデックス0-7: 尿失禁〜徘徊）
+        return convertPossibleConditions(value, 0, 8, mapping);
+      case 'custom_possible_conditions_2':
+        // 発生可能性状態2（インデックス8-12: 低栄養〜がん等による疼痛）
+        return convertPossibleConditions(value, 8, 5, mapping);
+      case 'custom_possible_conditions_other':
+        // 発生可能性状態その他（インデックス13）
+        return (value && value.charAt(13) === '1') ? '■その他' : '□その他';
       case 'カレンダー':
         return formatDateValueForDoc(value);
       case '自動入力':
@@ -788,7 +803,8 @@
       '{{処置内容}}': "□点滴管理\t□中心静脈栄養\t□透析\t□ストーマの処置\t□酸素療法\n\t\t□レスピレーター\t□気管切開の処置\t□透析の看護\t□経管栄養",
       '{{特別な対応}}': "□モニター測定（血圧、心拍、酸素飽和度等）\t□褥瘡の処置",
       '{{失禁への対応}}': "□カテーテル（コンドームカテーテル、留置カテーテル等）",
-      '{{発生可能性状態}}': "□尿失禁\t□転倒・骨折\t□移動能力の低下\t□褥瘡\t□心肺機能の低下\t□閉じこもり\t□意欲低下\t□徘徊\n\t□低栄養\t□摂食・嚥下機能低下\t□脱水\t□易感染性\t□がん等による疼痛",
+      '{{発生可能性状態1}}': "□尿失禁\t□転倒・骨折\t□移動能力の低下\t□褥瘡\t□心肺機能の低下\t□閉じこもり\t□意欲低下\t□徘徊",
+      '{{発生可能性状態2}}': "□低栄養\t□摂食・嚥下機能低下\t□脱水\t□易感染性\t□がん等による疼痛",
       '{{医学的管理の必要性}}': "□訪問診療\t□訪問看護\t□看護職員の訪問による相談・支援\t□訪問歯科診療\n\t□訪問薬剤管理指導\t□訪問リハビリテーション\t□短期入所療養介護\t□訪問歯科衛生指導\n\t□訪問栄養食事指導\t□通所リハビリテーション",
       '{{歩行補助具・装具の使用}}': "□杖\t□歩行器・歩行車\t□装具",
       '{{失調不随意運動上肢}}': "□右\t□左",
@@ -829,6 +845,34 @@
 
       return newString;
     }
+  }
+
+  /**
+   * 発生可能性状態のビットフラグを部分的に変換
+   * @param {string} value - ビットフラグ文字列
+   * @param {number} startIndex - 開始インデックス
+   * @param {number} count - 処理する項目数
+   * @param {Object} mapping - プレースホルダーマッピング
+   */
+  function convertPossibleConditions(value, startIndex, count, mapping) {
+    const templates = {
+      0: "□尿失禁\t□転倒・骨折\t□移動能力の低下\t□褥瘡\t□心肺機能の低下\t□閉じこもり\t□意欲低下\t□徘徊",
+      8: "□低栄養\t□摂食・嚥下機能低下\t□脱水\t□易感染性\t□がん等による疼痛"
+    };
+
+    const template = templates[startIndex];
+    if (!template) return '';
+
+    const parts = template.split('□');
+    const bitString = String(value || '').padStart(14, '0');
+    let newString = parts[0];
+
+    for (let i = 0; i < count; i++) {
+      const mark = bitString[startIndex + i] === '1' ? '■' : '□';
+      newString += mark + parts[i + 1];
+    }
+
+    return newString;
   }
 
   /**
@@ -1626,7 +1670,7 @@
       true
     ));
 
-    // 受診科（チェックボックス、13桁のビットフラグ）+ その他の科名入力
+    // 受診科（チェックボックス、13桁のビットフラグ）+ その他の科名入力（6文字）
     const departmentField = createCheckboxFieldWithOtherInput(
       '受診した場合はその受診科',
       'other_departments',
@@ -1634,7 +1678,9 @@
       ['内科', '精神科', '外科', '整形外科', '脳神経外科', '皮膚科', '泌尿器科', '眼科', '耳鼻咽喉科', '歯科', 'リハビリ科', '放射線科', 'その他'],
       formData.diagnosis.other_departments,
       'other_department_names',
-      formData.diagnosis.other_department_names
+      formData.diagnosis.other_department_names,
+      false,
+      6
     );
     section.appendChild(departmentField);
 
@@ -1655,23 +1701,23 @@
 
     const data = formData.diagnosis;
 
-    // 診断名1（必須）
-    section.appendChild(createTextField('診断名1', 'diagnosis_1_name', 'diagnosis', data.diagnosis_1_name, true, '例：脳梗塞'));
+    // 診断名1（必須、30文字）
+    section.appendChild(createTextField('診断名1', 'diagnosis_1_name', 'diagnosis', data.diagnosis_1_name, true, '例：脳梗塞', 30));
 
-    // 発症年月日1（必須）
-    section.appendChild(createTextField('発症年月日1', 'diagnosis_1_onset', 'diagnosis', data.diagnosis_1_onset, true, '例：令和4年3月15日'));
+    // 発症年月日1（必須、15文字）
+    section.appendChild(createTextField('発症年月日1', 'diagnosis_1_onset', 'diagnosis', data.diagnosis_1_onset, true, '例：令和4年3月15日', 15));
 
-    // 診断名2（任意）
-    section.appendChild(createTextField('診断名2', 'diagnosis_2_name', 'diagnosis', data.diagnosis_2_name, false));
+    // 診断名2（任意、30文字）
+    section.appendChild(createTextField('診断名2', 'diagnosis_2_name', 'diagnosis', data.diagnosis_2_name, false, '', 30));
 
-    // 発症年月日2（任意）
-    section.appendChild(createTextField('発症年月日2', 'diagnosis_2_onset', 'diagnosis', data.diagnosis_2_onset, false, '例：令和3年5月20日'));
+    // 発症年月日2（任意、15文字）
+    section.appendChild(createTextField('発症年月日2', 'diagnosis_2_onset', 'diagnosis', data.diagnosis_2_onset, false, '例：令和3年5月20日', 15));
 
-    // 診断名3（任意）
-    section.appendChild(createTextField('診断名3', 'diagnosis_3_name', 'diagnosis', data.diagnosis_3_name, false));
+    // 診断名3（任意、30文字）
+    section.appendChild(createTextField('診断名3', 'diagnosis_3_name', 'diagnosis', data.diagnosis_3_name, false, '', 30));
 
-    // 発症年月日3（任意）
-    section.appendChild(createTextField('発症年月日3', 'diagnosis_3_onset', 'diagnosis', data.diagnosis_3_onset, false, '例：令和2年10月1日'));
+    // 発症年月日3（任意、15文字）
+    section.appendChild(createTextField('発症年月日3', 'diagnosis_3_onset', 'diagnosis', data.diagnosis_3_onset, false, '例：令和2年10月1日', 15));
 
     // 症状としての安定性（必須）
     const stabilityField = createRadioField(
@@ -1949,7 +1995,7 @@
       true
     ));
 
-    // 該当する項目をすべてチェック（チェックボックス、12桁）+ その他の症状入力
+    // 該当する項目をすべてチェック（チェックボックス、12桁）+ その他の症状入力（13文字）
     const bpsdField = createCheckboxFieldWithOtherInput(
       '該当する項目をすべてチェック',
       'peripheral_symptoms_details',
@@ -1957,7 +2003,9 @@
       ['幻視･幻聴', '妄想', '昼夜逆転', '暴言', '暴行', '介護への抵抗', '徘徊', '火の不始末', '不潔行為', '異食行動', '性的問題行動', 'その他'],
       data.peripheral_symptoms_details,
       'other_peripheral_symptoms',
-      data.other_peripheral_symptoms
+      data.other_peripheral_symptoms,
+      false,
+      13
     );
     section.appendChild(bpsdField);
 
@@ -1978,8 +2026,8 @@
     );
     section.appendChild(psychiatricSymptomsField);
 
-    // 症状名（任意）
-    const psychiatricSymptomNameField = createTextField('症状名', 'psychiatric_symptom_name', 'mental_physical_state', data.psychiatric_symptom_name, false);
+    // 症状名（任意、16文字）
+    const psychiatricSymptomNameField = createTextField('症状名', 'psychiatric_symptom_name', 'mental_physical_state', data.psychiatric_symptom_name, false, '', 16);
     psychiatricSymptomNameField.style.marginLeft = '24px';
     section.appendChild(psychiatricSymptomNameField);
     setupConditionalField(psychiatricSymptomsField, psychiatricSymptomNameField, '1');
@@ -1998,8 +2046,8 @@
     );
     section.appendChild(specialistVisitField);
 
-    // 受診科名（任意）
-    const specialistDepartmentField = createTextField('受診科名', 'specialist_department', 'mental_physical_state', data.specialist_department, false);
+    // 受診科名（任意、9文字）
+    const specialistDepartmentField = createTextField('受診科名', 'specialist_department', 'mental_physical_state', data.specialist_department, false, '', 9);
     specialistDepartmentField.style.marginLeft = '24px';
     section.appendChild(specialistDepartmentField);
     setupConditionalField(specialistVisitField, specialistDepartmentField, '1');
@@ -2054,8 +2102,8 @@
     );
     section.appendChild(limbLossField);
 
-    // 四肢欠損部位（条件付き必須）
-    const limbLossLocationField = createTextField('部位', 'limb_loss_location', 'mental_physical_state', data.limb_loss_location, false, '例：右下肢');
+    // 四肢欠損部位（条件付き必須、19文字）
+    const limbLossLocationField = createTextField('部位', 'limb_loss_location', 'mental_physical_state', data.limb_loss_location, false, '例：右下肢', 19);
     limbLossLocationField.style.marginLeft = '24px';
     section.appendChild(limbLossLocationField);
     setupConditionalField(limbLossField, limbLossLocationField, '1');
@@ -2209,7 +2257,7 @@
     paralysisOtherField.style.marginLeft = '24px';
     section.appendChild(paralysisOtherField);
 
-    const paralysisOtherLocationField = createTextField('麻痺 - その他部位', 'paralysis_other_location', 'mental_physical_state', data.paralysis_other_location, false);
+    const paralysisOtherLocationField = createTextField('麻痺 - その他部位', 'paralysis_other_location', 'mental_physical_state', data.paralysis_other_location, false, '', 16);
     paralysisOtherLocationField.style.marginLeft = '48px';
     section.appendChild(paralysisOtherLocationField);
 
@@ -2561,15 +2609,17 @@
     // (3) 現在あるかまたは今後発生の可能性の高い状態
     section.appendChild(createSubsectionTitle('(3) 現在あるかまたは今後発生の可能性の高い状態'));
 
-    // 現在あるかまたは今後発生の可能性の高い状態（チェックボックス、14桁）
+    // 発生可能性状態（13項目+その他、プレースホルダー出力時に1と2に分割）+ その他（9文字）
     section.appendChild(createCheckboxFieldWithOtherInput(
       '',
       'possible_conditions',
       'life_function',
-      ['尿失禁', '転倒・骨折', '痛み', '褥瘡', '徘徊', 'うつ状態', '意欲低下', '閉じこもり', 'リハビリテーションの必要性', '嚥下障害', '口腔衛生管理の必要性', '栄養管理の必要性', '服薬管理の必要性', 'その他'],
+      ['尿失禁', '転倒・骨折', '移動能力の低下', '褥瘡', '心肺機能の低下', '閉じこもり', '意欲低下', '徘徊', '低栄養', '摂食・嚥下機能低下', '脱水', '易感染性', 'がん等による疼痛', 'その他'],
       data.possible_conditions,
       'other_condition_name',
-      data.other_condition_name
+      data.other_condition_name,
+      false,
+      9
     ));
 
     // 対処方針内容（任意）
@@ -2595,7 +2645,7 @@
     // (5) 医学的管理の必要性
     section.appendChild(createSubsectionTitle('(5) 医学的管理の必要性'));
 
-    // 医学的管理の必要性（チェックボックス、11桁）
+    // 医学的管理の必要性（チェックボックス、11桁、その他23文字）
     section.appendChild(createCheckboxFieldWithOtherInput(
       '',
       'medical_management_necessity',
@@ -2603,7 +2653,9 @@
       ['血圧', '心疾患', '誤嚥', '呼吸障害', '嚥下障害', '移動', '運動', '栄養・食生活', '摂食・嚥下機能', '口腔衛生管理', 'その他'],
       data.medical_management_necessity,
       'other_medical_management',
-      data.other_medical_management
+      data.other_medical_management,
+      false,
+      23
     ));
 
     // (6) サービス提供時における医学的観点からの留意事項
@@ -2700,7 +2752,7 @@
     setupConditionalField(serviceExerciseField, serviceExerciseNotesField, '2');
 
     // その他の留意事項
-    section.appendChild(createTextField('その他の留意事項', 'service_other_notes', 'life_function', data.service_other_notes, false, '', 14));
+    section.appendChild(createTextField('その他の留意事項', 'service_other_notes', 'life_function', data.service_other_notes, false, '', 17));
 
   // (7) 感染症
   section.appendChild(createSubsectionTitle('(7) 感染症'));
@@ -2720,8 +2772,8 @@
   );
   section.appendChild(infectionField);
 
-  // 感染症名（条件付き必須）
-  const infectionNameField = createTextField('感染症名', 'infection_name', 'life_function', data.infection_name, false);
+  // 感染症名（条件付き必須、38文字）
+  const infectionNameField = createTextField('感染症名', 'infection_name', 'life_function', data.infection_name, false, '', 38);
   infectionNameField.style.marginLeft = '24px';
   section.appendChild(infectionNameField);
   setupConditionalField(infectionField, infectionNameField, '1');
@@ -2843,8 +2895,8 @@
     );
     fields.push(mainField);
 
-    // 部位フィールド
-    const locationField = createTextField('部位', `${namePrefix}_location`, section, data[`${namePrefix}_location`], false);
+    // 部位フィールド（19文字）
+    const locationField = createTextField('部位', `${namePrefix}_location`, section, data[`${namePrefix}_location`], false, '', 19);
     locationField.style.marginLeft = '24px';
     fields.push(locationField);
 
@@ -3185,7 +3237,7 @@
    * 最後のオプション（「その他」）の右側にテキスト入力を追加し、
    * 「その他」が選択されていない場合はグレーアウトする
    */
-  function createCheckboxFieldWithOtherInput(label, name, section, options, currentValue, otherFieldName, otherFieldValue, required = false) {
+  function createCheckboxFieldWithOtherInput(label, name, section, options, currentValue, otherFieldName, otherFieldValue, required = false, otherMaxChars = 0) {
     const field = document.createElement('div');
     field.style.cssText = 'margin-bottom: 16px;';
 
@@ -3240,8 +3292,25 @@
           otherInput.style.backgroundColor = '#f1f5f9';
           otherInput.style.color = '#94a3b8';
         }
+        if (otherMaxChars > 0) {
+          otherInput.maxLength = otherMaxChars;
+        }
 
         optionLabel.appendChild(otherInput);
+
+        // 文字数カウンター（otherMaxChars > 0 の場合）
+        if (otherMaxChars > 0) {
+          const charCounter = document.createElement('span');
+          charCounter.style.cssText = 'font-size: 12px; color: #64748b; white-space: nowrap;';
+          const updateCounter = () => {
+            const currentLength = otherInput.value.length;
+            charCounter.textContent = `${currentLength}/${otherMaxChars}文字`;
+            charCounter.style.color = currentLength > otherMaxChars ? '#ef4444' : '#64748b';
+          };
+          otherInput.addEventListener('input', updateCounter);
+          updateCounter();
+          optionLabel.appendChild(charCounter);
+        }
 
         // チェックボックスの状態に応じてテキスト入力を有効/無効化
         otherCheckbox.addEventListener('change', () => {
