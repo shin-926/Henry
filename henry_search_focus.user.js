@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         検索パネル→検索ボックスにフォーカス＋☆入力
 // @namespace    http://tampermonkey.net/
-// @version      1.5.1
+// @version      1.5.2
 // @description  「/」で検索パネルを開き、検索ボックスにフォーカス＋☆を入力する（Reactの状態も更新）
 // @match        https://henry-app.jp/*
 // @run-at       document-idle
@@ -148,8 +148,8 @@
         };
 
         // イベントリスナー登録
-        document.addEventListener("keydown", handleKeydown, true);
-        cleaner.add(() => document.removeEventListener("keydown", handleKeydown, true));
+        document.addEventListener("keydown", handleKeydown);
+        cleaner.add(() => document.removeEventListener("keydown", handleKeydown));
 
         // SPA遷移時の自動クリーンアップ＆再初期化
         HenryCore.utils.subscribeNavigation(cleaner, init);

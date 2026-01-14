@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         ログインヘルパー
 // @namespace    http://tampermonkey.net/
-// @version      6.9.1
+// @version      6.9.2
 // @description  Henry電子カルテのログイン入力補助（React完全対応 + フィルタリング機能）
 // @author       Henry UI Lab
 // @match        https://henry-app.jp/*
@@ -654,11 +654,11 @@
             const onScroll = hideDropdown;
 
             window.addEventListener('resize', onResize);
-            window.addEventListener('scroll', onScroll, true);
+            window.addEventListener('scroll', onScroll);
 
             cleanupFunctions.push(() => {
                 window.removeEventListener('resize', onResize);
-                window.removeEventListener('scroll', onScroll, true);
+                window.removeEventListener('scroll', onScroll);
             });
 
             console.log('[Henry Helper] 初期化完了 v6.9');

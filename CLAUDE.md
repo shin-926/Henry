@@ -1,6 +1,6 @@
-# Henry EMR 開発ガイドライン (Core Rules v4.11)
+# Henry EMR 開発ガイドライン (Core Rules v4.14)
 
-<!-- 📝 UPDATED: v4.11 - スピードより確認の正確さを優先するルール追加 -->
+<!-- 📝 UPDATED: v4.14 - SPA遷移対応（subscribeNavigation）ルール追加 -->
 
 > このドキュメントはAIアシスタントとの協働開発における必須ルール集です。HenryCore APIの詳細は `henry_core.user.js` 冒頭のAPI目次と実装を参照。
 
@@ -217,6 +217,31 @@ try {
 
 `henry_core.user.js` 冒頭のAPI目次と各関数の実装を参照。
 
+### SPA遷移対応（必須）
+
+**YOU MUST**: Henry本体（henry-app.jp）で動作するスクリプトは、`subscribeNavigation` パターンを使用すること。
+
+```javascript
+const cleaner = HenryCore.utils.createCleaner();
+
+function init() {
+  // リソース作成
+  const observer = new MutationObserver(callback);
+  observer.observe(target, options);
+
+  // クリーンアップ登録
+  cleaner.add(() => observer.disconnect());
+}
+
+HenryCore.utils.subscribeNavigation(cleaner, init);
+```
+
+**理由**: HenryはSPAのため、ページ遷移してもリロードされない。クリーンアップしないと、Observer/タイマー/リスナーが残り続け、メモリリークや予期しない動作の原因となる。
+
+**例外**:
+- ログインページ専用スクリプト（henry_login_helper.user.js）
+- 非SPAサイト用スクリプト（reserve_*.user.js）
+
 ### Tampermonkey スクリプト作成
 
 #### サンドボックス対策
@@ -362,6 +387,7 @@ chrome-devtools-mcpでリアルタイム調査。静的リファレンスは廃�
 
 | Version | Date | Changes |
 |---------|------|---------|
+| v4.14 | 2026-01-14 | SPA遷移対応（subscribeNavigation）ルール追加 |
 | v4.13 | 2026-01-13 | GraphQL インライン方式ルール追加 |
 | v4.12 | 2026-01-13 | OAuth認証時はalertで理由を伝えるルール追加 |
 | v4.11 | 2026-01-12 | スピードより確認の正確さを優先するルール追加 |
@@ -390,12 +416,15 @@ chrome-devtools-mcpでリアルタイム調査。静的リファレンスは廃�
 - [ ] TASK-002: 独自オーダーセット選択UI
 - [ ] TASK-003: 病名サジェスト機能
 - [ ] TASK-011: henry_karte_history 処方表示改善（mhlwMedicine対応、medicationTiming用法取得、検体検査フィールド調査）
+- [ ] TASK-013: Tampermonkey更新問題（手動更新でも「更新なし」と表示される。Violentmonkey移行を試す）
+- [ ] TASK-015: 全スクリプトのSPA遷移対応（subscribeNavigation導入）
 
 ### 動作確認待ち
 - [ ] TASK-008: henry_error_logger.user.js v1.0.0
-- [ ] TASK-009: HenryCore v2.10.4 エンドポイント自動復旧機能
 
 ### 完了
+- [x] TASK-014: 画面更新妨害リスク修正（キャプチャフェーズ削除完了）
+- [x] TASK-009: HenryCore v2.10.4 エンドポイント自動復旧機能
 - [x] TASK-007: henry_disease_register.user.js v1.2.1
 - [x] TASK-010: henry_disease_list.user.js v1.0.2
 - [x] TASK-012: henry_disease_register.user.js v2.2.4 検索精度改善（N-gram検索追加）

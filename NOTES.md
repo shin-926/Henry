@@ -290,3 +290,145 @@ await HenryCore.query(MUTATION);  // 変数なし
 
 - `henry_disease_register.user.js` v1.2.1 - 病名登録mutation
 
+
+---
+
+## TASK-014: 画面更新妨害リスク修正
+
+### 問題概要
+
+Henry本体の画面更新（外来待ち患者リストなど）を妨害する可能性のあるTampermonkeyスクリプト実装が複数存在。Henryはおそらく内部でReactを使っており、イベントハンドリングや状態更新が妨害されると画面が更新されなくなる可能性がある。
+
+---
+
+### 背景知識（AI向け）
+
+#### DOMイベントの伝播（Event Propagation）
+
+クリック等のイベントは、3つのフェーズで伝播する：
+
+```
+1. キャプチャフェーズ（親→子）: window → document → body → div → button
+2. ターゲットフェーズ: button（クリックされた本人）
+3. バブリングフェーズ（子→親）: button → div → body → document → window
+```
+
+#### キャプチャ vs バブリング
+
+```javascript
+// バブリング（デフォルト）- 子の処理が先、親は後
+element.addEventListener('click', handler);
+
+// キャプチャ（第3引数 true）- 親の処理が先、子は後
+element.addEventListener('click', handler, true);
+```
+
+- **Reactはバブリングフェーズでイベントを処理する**
+- キャプチャフェーズでイベントを止めると、Reactに届かなくなる
+
+#### イベント伝播の停止メソッド
+
+| メソッド | 効果 |
+|---------|------|
+| `stopPropagation()` | 親/子への伝播を停止（同一要素の他リスナーは動く） |
+| `stopImmediatePropagation()` | 伝播停止＋同一要素の他リスナーも全て停止 |
+| `preventDefault()` | デフォルト動作（リンク遷移等）を停止 |
+
+`stopImmediatePropagation()` が最も危険。Henry本体のリスナーも止めてしまう。
+
+#### MutationObserverの問題
+
+- `document.body` 全体を監視すると、Reactの仮想DOM更新にも反応してしまう
+- 監視対象のDOMを変更すると、自分のコールバックが再度トリガーされる（無限ループの危険）
+
+---
+
+### 修正対象
+
+#### ✅ CRITICAL（完了）- キャプチャフェーズの削除
+
+| スクリプト | バージョン | 修正内容 |
+|-----------|-----------|---------|
+| henry_search_focus.user.js | 1.5.2 | keydown イベントからキャプチャフェーズ削除 |
+| henry_rad_order_auto_printer.user.js | 4.0.2 | click イベントからキャプチャフェーズ削除 |
+| henry_login_helper.user.js | 6.9.2 | scroll イベントからキャプチャフェーズ削除（バグ修正も兼ねる） |
+
+**備考**: henry_login_helper.js の scroll キャプチャは、ドロップダウン内スクロールで閉じてしまうバグの原因だった
+
+#### ⏭️ 対象外 - イベント抑制（意図的な使用）
+
+| スクリプト | 行番号 | 状況 |
+|-----------|--------|------|
+| henry_google_drive_bridge.user.js | 714-716 | `stopImmediatePropagation()` は意図的な使用 |
+
+**理由**: ファイルダブルクリック時にHenry本体の動作を止めて、Google Drive変換処理に置き換えるため。削除すると二重動作になる。
+
+#### ➡️ TASK-015へ移動 - MutationObserver/リソースクリーンアップ
+
+MutationObserverやsetIntervalのクリーンアップ問題は、より広範な「SPA遷移対応」として TASK-015 で対応。
+
+---
+
+## TASK-015: 全スクリプトのSPA遷移対応
+
+### 問題概要
+
+HenryはSPA（Single Page Application）のため、ページ遷移してもリロードされない。
+`subscribeNavigation` を使わないスクリプトは、遷移後もリソース（Observer, タイマー, リスナー）が残り続ける。
+
+### 対象スクリプト
+
+#### ❌ subscribeNavigation未使用（要対応）
+
+| スクリプト | 必要性 |
+|-----------|--------|
+| henry_login_helper.user.js | 不要（ログインページ専用） |
+| henry_disease_list.user.js | 要確認 |
+| henry_disease_register.user.js | 要確認 |
+| henry_error_logger.user.js | 要確認 |
+| henry_hospitalization_data.user.js | 要確認 |
+| henry_ikensho_form.user.js | 要確認 |
+| henry_karte_history.user.js | 要確認 |
+| henry_memo.user.js | 要確認 |
+| henry_note_reader.user.js | 要確認 |
+| henry_order_history.user.js | 要確認 |
+| henry_rad_order_print_single_page.user.js | 要確認 |
+| henry_reserve_integration.user.js | **必要**（MutationObserver 4つ） |
+| henry_toolbox.user.js | 要確認 |
+
+#### ✅ subscribeNavigation使用中（対応済み）
+
+- henry_auto_approver.user.js
+- henry_google_drive_bridge.user.js
+- henry_imaging_order_helper.user.js
+- henry_rad_order_auto_printer.user.js
+- henry_search_focus.user.js
+- henry_set_search_helper.user.js
+
+### 判断基準
+
+`subscribeNavigation` が必要なのは、以下のリソースを使うスクリプト：
+
+- MutationObserver
+- setInterval / setTimeout
+- addEventListener（document/windowレベル）
+- グローバル変数に状態を保持
+
+### 修正パターン
+
+```javascript
+// Before: クリーンアップなし
+const observer = new MutationObserver(callback);
+observer.observe(document.body, { childList: true, subtree: true });
+
+// After: subscribeNavigationパターン
+const cleaner = HenryCore.utils.createCleaner();
+
+function init() {
+  const observer = new MutationObserver(callback);
+  observer.observe(document.body, { childList: true, subtree: true });
+  cleaner.add(() => observer.disconnect());
+}
+
+HenryCore.utils.subscribeNavigation(cleaner, init);
+```
