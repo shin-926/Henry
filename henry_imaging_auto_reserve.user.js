@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry 照射オーダー自動予約
 // @namespace    https://henry-app.jp/
-// @version      4.0.0
+// @version      4.1.0
 // @description  照射オーダー完了時に未来日付の場合、予約システムで予約を取ってから外来予約を自動作成し、その診療録に照射オーダーを紐づける
 // @match        https://henry-app.jp/*
 // @grant        GM_setValue
@@ -301,7 +301,7 @@
       return;
     }
 
-    log('初期化完了 - フルクエリ方式 v4.0.0 (予約システム連携)');
+    log('初期化完了 - フルクエリ方式 v4.1.0 (予約システム連携)');
 
     // 初期化時に古いコンテキストをクリア
     GM_setValue('imagingOrderContext', null);
@@ -335,6 +335,14 @@
 
                 // 患者情報を取得（予約システムに渡すため）
                 const patientInfo = await getPatientInfo(core, patientUuid);
+
+                // 確認ダイアログ
+                const confirmMessage = `未来日付（${dateObj.year}/${dateObj.month}/${dateObj.day}）の照射オーダーです。\n\n予約システムで予約を取りますか？\n\n患者: ${patientInfo.id} ${patientInfo.name}`;
+                if (!confirm(confirmMessage)) {
+                  // キャンセル時は元のリクエストをそのまま送信（今日の診療録に紐づく）
+                  log('ユーザーが予約システム連携をキャンセル');
+                  return originalFetch.apply(this, args);
+                }
 
                 // 予約システムを開いて予約時間を取得
                 showNotification('予約システムで予約を取ってください', 'info');
