@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         予約システム連携
 // @namespace    https://github.com/shin-926/Henry
-// @version      2.4.1
+// @version      2.5.0
 // @description  Henryカルテと予約システム間の双方向連携（再診予約・患者プレビュー・ページ遷移）
 // @match        https://henry-app.jp/*
 // @match        https://manage-maokahp.reserve.ne.jp/*
@@ -505,8 +505,34 @@
       log.info('ログイン通知バナーを表示');
     }
 
-    const pendingPatient = !isLoginPage ? GM_getValue('pendingPatient', null) : null;
-    const imagingOrderContext = !isLoginPage ? GM_getValue('imagingOrderContext', null) : null;
+    // URLパラメータから照射オーダー情報を取得（別スクリプト間ではGM_*ストレージが共有されないため）
+    const urlParams = new URLSearchParams(location.search);
+    const isImagingOrderFromUrl = urlParams.get('henry_imaging_order') === '1';
+
+    let pendingPatient = null;
+    let imagingOrderContext = null;
+
+    if (isImagingOrderFromUrl) {
+      // URLパラメータから患者情報と照射オーダーコンテキストを構築
+      const patientId = urlParams.get('henry_patient_id');
+      const patientName = urlParams.get('henry_patient_name');
+      const fromDate = urlParams.get('from_date');
+
+      if (patientId && patientName) {
+        pendingPatient = { id: patientId, name: patientName };
+        imagingOrderContext = {
+          patientId: patientId,
+          patientName: patientName,
+          date: fromDate,
+          timestamp: Date.now()
+        };
+        log.info('URLパラメータから照射オーダー情報を取得:', imagingOrderContext);
+      }
+    } else if (!isLoginPage) {
+      // 通常の再診予約（同一スクリプト内のGM_*ストレージ）
+      pendingPatient = GM_getValue('pendingPatient', null);
+      imagingOrderContext = GM_getValue('imagingOrderContext', null);
+    }
 
     // 照射オーダーモードが有効かどうか（排他制御）
     const isImagingOrderMode = imagingOrderContext && imagingOrderContext.patientId;

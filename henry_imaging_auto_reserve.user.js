@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry 照射オーダー自動予約
 // @namespace    https://github.com/shin-926/Henry
-// @version      4.5.2
+// @version      4.6.0
 // @description  照射オーダー完了時に未来日付の場合、予約システムで予約を取ってから外来予約を自動作成し、その診療録に照射オーダーを紐づける
 // @match        https://henry-app.jp/*
 // @grant        GM_setValue
@@ -253,9 +253,17 @@
       });
 
       // 予約システムを開く（指定日付のカレンダーページを直接開く）
+      // 患者情報をURLパラメータで渡す（別スクリプト間ではGM_*ストレージが共有されないため）
       const targetDate = new Date(dateObj.year, dateObj.month - 1, dateObj.day, 9, 0, 0);
       const limit = Math.floor(targetDate.getTime() / 1000);
-      const reserveUrl = `https://manage-maokahp.reserve.ne.jp/manage/calendar.php?from_date=${context.date}&limit=${limit}`;
+      const params = new URLSearchParams({
+        from_date: context.date,
+        limit: limit.toString(),
+        henry_patient_id: patientInfo.id,
+        henry_patient_name: patientInfo.name,
+        henry_imaging_order: '1'  // 照射オーダーからの遷移フラグ
+      });
+      const reserveUrl = `https://manage-maokahp.reserve.ne.jp/manage/calendar.php?${params.toString()}`;
 
       const width = window.screen.availWidth;
       const height = window.screen.availHeight;
