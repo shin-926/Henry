@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry 照射オーダー自動予約
 // @namespace    https://henry-app.jp/
-// @version      4.3.0
+// @version      4.4.0
 // @description  照射オーダー完了時に未来日付の場合、予約システムで予約を取ってから外来予約を自動作成し、その診療録に照射オーダーを紐づける
 // @match        https://henry-app.jp/*
 // @grant        GM_setValue
@@ -220,9 +220,12 @@
       log('患者情報を保存:', patientInfo);
 
       // タイムアウト設定（5分）
+      let windowCheckInterval = null;
       const timeout = setTimeout(() => {
+        if (windowCheckInterval) clearInterval(windowCheckInterval);
         GM_removeValueChangeListener(listenerId);
         GM_setValue('imagingOrderContext', null);
+        GM_setValue('pendingPatient', null);
         reject(new Error('予約システムからの応答がタイムアウトしました'));
       }, 5 * 60 * 1000);
 
@@ -232,6 +235,7 @@
 
         log('予約結果を受信:', newValue);
         clearTimeout(timeout);
+        if (windowCheckInterval) clearInterval(windowCheckInterval);
         GM_removeValueChangeListener(listenerId);
         GM_setValue('imagingOrderContext', null);
         GM_setValue('reservationResult', null);
@@ -251,13 +255,31 @@
       // 予約システムを開く
       const width = window.screen.availWidth;
       const height = window.screen.availHeight;
-      window.open(
+      const reserveWindow = window.open(
         'https://manage-maokahp.reserve.ne.jp/',
         'reserveWindow',
         `width=${width},height=${height},left=0,top=0`
       );
 
       log('予約システムを開きました');
+
+      // ウィンドウが閉じられたかを監視（予約せずに閉じた場合を検知）
+      windowCheckInterval = setInterval(() => {
+        if (reserveWindow && reserveWindow.closed) {
+          clearInterval(windowCheckInterval);
+          clearTimeout(timeout);
+          GM_removeValueChangeListener(listenerId);
+
+          // まだ結果が返ってきていなければキャンセル扱い
+          const currentResult = GM_getValue('reservationResult', null);
+          if (!currentResult || currentResult.timestamp < context.timestamp) {
+            log('予約システムが閉じられました（予約なし）');
+            GM_setValue('imagingOrderContext', null);
+            GM_setValue('pendingPatient', null);
+            reject(new Error('予約システムが閉じられました'));
+          }
+        }
+      }, 500);
     });
   };
 
@@ -308,7 +330,7 @@
       return;
     }
 
-    log('初期化完了 - フルクエリ方式 v4.3.0 (予約システム連携)');
+    log('初期化完了 - フルクエリ方式 v4.4.0 (予約システム連携)');
 
     // 初期化時に古いコンテキストをクリア
     GM_setValue('imagingOrderContext', null);
