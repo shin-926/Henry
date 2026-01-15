@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         予約システム連携
 // @namespace    https://github.com/shin-926/Henry
-// @version      3.3.0
+// @version      3.4.4
 // @description  Henryカルテと予約システム間の双方向連携（再診予約・照射オーダー自動予約・患者プレビュー）
 // @match        https://henry-app.jp/*
 // @match        https://manage-maokahp.reserve.ne.jp/*
@@ -447,12 +447,13 @@
     }
 
     // 予約システムを開いて予約時間を取得
-    function openReserveForImagingOrder(patientInfo, dateObj) {
+    function openReserveForImagingOrder(patientInfo, dateObj, modality = '') {
       return new Promise((resolve, reject) => {
         const context = {
           patientId: patientInfo.id,
           patientName: patientInfo.name,
           date: `${dateObj.year}-${String(dateObj.month).padStart(2, '0')}-${String(dateObj.day).padStart(2, '0')}`,
+          modality: modality,  // CT, MRI等
           timestamp: Date.now()
         };
         GM_setValue('imagingOrderContext', context);
@@ -580,6 +581,33 @@
                   }
                   const patientInfo = { id: patient.serialNumber, name: patient.fullName };
 
+                  // モダリティを取得（「モダリティ」テキストの近くにあるselect要素を探す）
+                  let modality = '';
+                  const modalDialog = document.querySelector('[role="dialog"]');
+                  if (modalDialog) {
+                    // 「モダリティ」というテキストノードを探し、その親要素内のselectを取得
+                    const walker = document.createTreeWalker(modalDialog, NodeFilter.SHOW_TEXT);
+                    let node;
+                    while ((node = walker.nextNode())) {
+                      if (node.textContent.trim() === 'モダリティ') {
+                        // 親を辿ってselectを探す
+                        let parent = node.parentElement;
+                        for (let i = 0; i < 5 && parent; i++) {
+                          const select = parent.querySelector('select');
+                          if (select && select.selectedIndex >= 0) {
+                            modality = select.options[select.selectedIndex]?.text || '';
+                            break;
+                          }
+                          parent = parent.parentElement;
+                        }
+                        break;
+                      }
+                    }
+                    if (modality) {
+                      log.info('モダリティを取得: ' + modality);
+                    }
+                  }
+
                   // 確認ダイアログ
                   const confirmMessage = `未来日付（${dateObj.year}/${dateObj.month}/${dateObj.day}）の照射オーダーです。\n\n予約システムで予約を取りますか？\n\n患者: ${patientInfo.id} ${patientInfo.name}`;
                   if (!confirm(confirmMessage)) {
@@ -589,7 +617,7 @@
 
                   // 予約システムを開いて予約日時を取得
                   showImagingNotification('予約システムで予約を取ってください', 'info');
-                  const reservationResult = await openReserveForImagingOrder(patientInfo, dateObj);
+                  const reservationResult = await openReserveForImagingOrder(patientInfo, dateObj, modality);
                   log.info('予約日時: ' + JSON.stringify(reservationResult));
 
                   // 予約日付を使用
@@ -617,9 +645,13 @@
 
                   const newOptions = { ...options, body: JSON.stringify(body) };
                   log.info('EncounterIDを差し替えてリクエスト送信: ' + newEncounterId);
+
+                  // リクエストを送信し、完了後に画面を更新
+                  const response = await originalFetch.call(this, url, newOptions);
+
                   showImagingNotification(`${actualDateObj.year}/${actualDateObj.month}/${actualDateObj.day} ${reservationResult.time} の外来予約を作成しました`, 'success');
 
-                  // 受付一覧を更新
+                  // 受付一覧を更新（リクエスト完了後）
                   if (unsafeWindow.__APOLLO_CLIENT__) {
                     try {
                       unsafeWindow.__APOLLO_CLIENT__.refetchQueries({ include: ['ListSessions'] });
@@ -629,7 +661,7 @@
                     }
                   }
 
-                  return originalFetch.call(this, url, newOptions);
+                  return response;
 
                 } catch (error) {
                   log.error('自動予約エラー: ' + error.message);
@@ -837,8 +869,8 @@
     // 照射オーダーモードが有効かどうか（排他制御）
     const isImagingOrderMode = imagingOrderContext && imagingOrderContext.patientId;
 
-    // 予約登録ボタンリスナー追加済みフラグ（関数より前に宣言が必要）
-    let reservationButtonListenerAdded = false;
+    // 予約登録ボタンリスナー追加済みの要素を追跡（関数より前に宣言が必要）
+    let trackedReserveButton = null;
 
     // --------------------------------------------
     // 照射オーダーモード（Henry照射オーダーからの予約）
@@ -852,15 +884,17 @@
       // カレンダーの日付を変更
       navigateToDate(imagingOrderContext.date);
 
-      // 予約登録ボタン監視（日時取得用）+ 患者ID自動入力
+      // 予約登録ボタン監視（日時取得用）+ 患者ID自動入力 + モダリティ自動選択
       const imagingDialogObserver = new MutationObserver(() => {
         tryFillDialog(imagingOrderContext.patientId);
         tryFillDateForImaging(imagingOrderContext);
+        trySelectModality(imagingOrderContext.modality);
         setupReservationButtonListener(imagingOrderContext);
       });
       imagingDialogObserver.observe(document.body, { childList: true, subtree: true });
       tryFillDialog(imagingOrderContext.patientId);
       tryFillDateForImaging(imagingOrderContext);
+      trySelectModality(imagingOrderContext.modality);
       setupReservationButtonListener(imagingOrderContext);
     }
 
@@ -970,8 +1004,6 @@
     }
 
     function setupReservationButtonListener(context) {
-      if (reservationButtonListenerAdded) return;
-
       const dialog = document.querySelector('#dialog_reserve_input');
       if (!dialog) return;
 
@@ -980,8 +1012,11 @@
       const reserveBtn = allButtons.find(btn => btn.textContent?.trim() === '予約登録');
       if (!reserveBtn) return;
 
-      reservationButtonListenerAdded = true;
-      log.info('予約登録ボタンを検出');
+      // 同じボタンには重複してリスナーを追加しない
+      if (trackedReserveButton === reserveBtn) return;
+
+      trackedReserveButton = reserveBtn;
+      log.info('予約登録ボタンを検出（新規またはボタン変更）');
 
       // 患者ID検証用のフラグ
       let patientIdVerified = false;
@@ -1112,6 +1147,44 @@
       if (searchBtn) {
         searchBtn.click();
         log.info('検索ボタン自動クリック');
+      }
+    }
+
+    // モダリティ（CT/MRI）を自動選択（照射オーダーモード用）
+    let trackedModalitySelect = null;
+    function trySelectModality(modality) {
+      if (!modality) return;
+
+      const dialog = document.querySelector('#dialog_reserve_input');
+      if (!dialog) return;
+
+      // CTまたはMRIを含むか判定
+      const isCT = modality.includes('CT');
+      const isMRI = modality.includes('MRI');
+      if (!isCT && !isMRI) return;
+
+      // 「診療を選択」がCT/MRIになっているか確認
+      const allSelects = dialog.querySelectorAll('select');
+      for (const select of allSelects) {
+        const options = Array.from(select.options);
+        const optionTexts = options.map(opt => opt.text);
+
+        // CTとMRIのみを持つセレクトを探す（CT/MRI詳細選択）
+        if (optionTexts.length === 2 && optionTexts.includes('CT') && optionTexts.includes('MRI')) {
+          // 同じセレクトには重複して設定しない
+          if (trackedModalitySelect === select) return;
+
+          // テキストからoptionを探してそのvalueを使用
+          const targetText = isMRI ? 'MRI' : 'CT';
+          const targetOption = options.find(opt => opt.text === targetText);
+          if (targetOption) {
+            select.value = targetOption.value;
+            select.dispatchEvent(new Event('change', { bubbles: true }));
+            trackedModalitySelect = select;
+            log.info('モダリティを自動選択:', targetText, '(value=' + targetOption.value + ')');
+          }
+          return;
+        }
       }
     }
 
