@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry 照射オーダー自動予約
 // @namespace    https://henry-app.jp/
-// @version      3.1.0
+// @version      3.2.0
 // @description  照射オーダー完了時に未来日付の場合、外来予約を自動作成し、その診療録に照射オーダーを紐づける
 // @match        https://henry-app.jp/*
 // @grant        none
@@ -101,6 +101,19 @@
     return Math.floor(date.getTime() / 1000);
   };
 
+  // UUID生成（Henry UIと同じ形式でencounterIdを事前生成）
+  const generateUUID = () => {
+    if (typeof crypto !== 'undefined' && crypto.randomUUID) {
+      return crypto.randomUUID();
+    }
+    // フォールバック
+    return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+      const r = Math.random() * 16 | 0;
+      const v = c === 'x' ? r : (r & 0x3 | 0x8);
+      return v.toString(16);
+    });
+  };
+
   // 診療科一覧を取得し、デフォルト（最初）を返す
   const getDefaultPurposeOfVisit = async (core, dateObj) => {
     const result = await graphqlFetch(core, 'ListPurposeOfVisits', {
@@ -120,10 +133,14 @@
   };
 
   // 外来予約を作成し、EncounterIDを取得
+  // NOTE: Henry UIはencounterIdを事前生成してCreateSessionに渡す
+  // encounterIdを渡さないと自動生成されるが、権限が制限される
   const createOutpatientReservationAndGetEncounterId = async (core, patientUuid, doctorUuid, purposeOfVisitUuid, dateObj) => {
     const scheduleTime = dateToTimestamp(dateObj);
+    // Henry UIと同様にencounterIdを事前生成
+    const newEncounterId = generateUUID();
 
-    log('外来予約を作成中...', { date: `${dateObj.year}/${dateObj.month}/${dateObj.day}`, purposeOfVisitUuid });
+    log('外来予約を作成中...', { date: `${dateObj.year}/${dateObj.month}/${dateObj.day}`, purposeOfVisitUuid, encounterId: newEncounterId });
 
     const result = await graphqlFetch(core, 'CreateSession', {
       input: {
@@ -134,7 +151,8 @@
         state: 'BEFORE_CONSULTATION',
         note: '',
         countedInConsultationDays: true,
-        scheduleTime: { seconds: scheduleTime, nanos: 0 }
+        scheduleTime: { seconds: scheduleTime, nanos: 0 },
+        encounterId: { value: newEncounterId }
       }
     });
 
@@ -200,7 +218,7 @@
       return;
     }
 
-    log('初期化完了 - フルクエリ方式 v3.1.0');
+    log('初期化完了 - フルクエリ方式 v3.2.0 (encounterId事前生成)');
 
     // fetchをインターセプト
     const originalFetch = window.fetch;
