@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry 照射オーダー自動予約
 // @namespace    https://henry-app.jp/
-// @version      4.2.0
+// @version      4.3.0
 // @description  照射オーダー完了時に未来日付の場合、予約システムで予約を取ってから外来予約を自動作成し、その診療録に照射オーダーを紐づける
 // @match        https://henry-app.jp/*
 // @grant        GM_setValue
@@ -215,6 +215,10 @@
       GM_setValue('imagingOrderContext', context);
       log('照射オーダーコンテキストを保存:', context);
 
+      // 通常の再診予約と同じく pendingPatient も設定（患者バナー表示・自動入力用）
+      GM_setValue('pendingPatient', { id: patientInfo.id, name: patientInfo.name });
+      log('患者情報を保存:', patientInfo);
+
       // タイムアウト設定（5分）
       const timeout = setTimeout(() => {
         GM_removeValueChangeListener(listenerId);
@@ -304,7 +308,7 @@
       return;
     }
 
-    log('初期化完了 - フルクエリ方式 v4.2.0 (予約システム連携)');
+    log('初期化完了 - フルクエリ方式 v4.3.0 (予約システム連携)');
 
     // 初期化時に古いコンテキストをクリア
     GM_setValue('imagingOrderContext', null);
