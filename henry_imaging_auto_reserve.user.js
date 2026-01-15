@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry 照射オーダー自動予約
 // @namespace    https://henry-app.jp/
-// @version      2.0.1
+// @version      2.0.2
 // @description  照射オーダー完了時に未来日付の場合、外来予約を自動作成し、その診療録に照射オーダーを紐づける
 // @match        https://henry-app.jp/*
 // @grant        none
@@ -58,7 +58,18 @@
     }
   `;
 
-  // GetUser クエリ（部署名取得用）- インライン方式で動的に生成
+  // ListUsers クエリ（部署名取得用）
+  const LIST_USERS = `
+    query ListUsers {
+      listUsers {
+        users {
+          uuid
+          name
+          departmentName
+        }
+      }
+    }
+  `;
 
   // EncountersInPatient クエリ（SessionからEncounterを探す）
   const ENCOUNTERS_IN_PATIENT = `
@@ -76,18 +87,11 @@
 
   // ユーザーの部署名に対応する purposeOfVisit を取得
   const getMatchingPurposeOfVisit = async (core, doctorUuid) => {
-    // インライン方式でGetUserを呼び出し
-    const getUserQuery = `
-      query {
-        getUser(input: { uuid: "${doctorUuid}" }) {
-          uuid
-          name
-          departmentName
-        }
-      }
-    `;
-    const userResult = await core.query(getUserQuery);
-    const departmentName = userResult.data?.getUser?.departmentName;
+    // ListUsersで全ユーザーを取得し、doctorUuidで絞り込み
+    const usersResult = await core.query(LIST_USERS);
+    const users = usersResult.data?.listUsers?.users || [];
+    const user = users.find(u => u.uuid === doctorUuid);
+    const departmentName = user?.departmentName;
 
     if (!departmentName) {
       logError('部署名を取得できませんでした');
