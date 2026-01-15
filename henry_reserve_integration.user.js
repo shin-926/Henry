@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         予約システム連携
 // @namespace    https://github.com/shin-926/Henry
-// @version      2.5.0
-// @description  Henryカルテと予約システム間の双方向連携（再診予約・患者プレビュー・ページ遷移）
+// @version      3.3.0
+// @description  Henryカルテと予約システム間の双方向連携（再診予約・照射オーダー自動予約・患者プレビュー）
 // @match        https://henry-app.jp/*
 // @match        https://manage-maokahp.reserve.ne.jp/*
 // @grant        GM_setValue
@@ -40,6 +40,25 @@
           serialNumber
           fullName
           fullNamePhonetic
+        }
+      }
+    `,
+    ListPurposeOfVisits: `
+      query ListPurposeOfVisits($input: ListPurposeOfVisitRequestInput!) {
+        listPurposeOfVisits(input: $input) {
+          purposeOfVisits {
+            uuid
+            title
+            order { value }
+          }
+        }
+      }
+    `,
+    CreateSession: `
+      mutation CreateSession($input: SessionInput!) {
+        createSession(input: $input) {
+          uuid
+          encounterId { value }
         }
       }
     `,
@@ -282,6 +301,9 @@
     async function openReserve() {
       log.info('再診予約を開く');
 
+      // 既存の照射オーダーコンテキストをクリア（照射オーダーモードで閉じた場合のクリーンアップ）
+      GM_setValue('imagingOrderContext', null);
+
       try {
         const patientData = await getPatientFromAPI();
 
@@ -295,9 +317,10 @@
 
         const width = window.screen.availWidth;
         const height = window.screen.availHeight;
+        // 毎回新しいウィンドウで開く（既存ウィンドウの再利用を防ぐ）
         window.open(
           'https://manage-maokahp.reserve.ne.jp/',
-          'reserveWindow',
+          `reserveWindow_${Date.now()}`,
           `width=${width},height=${height},left=0,top=0`
         );
 
@@ -339,6 +362,298 @@
       } catch (e) {
         log.error('プラグイン登録失敗: ' + e.message);
       }
+    })();
+
+    // --------------------------------------------
+    // 照射オーダー自動予約機能
+    // --------------------------------------------
+
+    // 日付オブジェクトが未来かどうか判定
+    function isFutureDate(dateObj) {
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      const target = new Date(dateObj.year, dateObj.month - 1, dateObj.day);
+      return target > today;
+    }
+
+    // 日付と時間をUnixタイムスタンプ（秒）に変換
+    function dateTimeToTimestamp(dateObj, timeStr) {
+      const [hours, minutes] = timeStr.split(':').map(Number);
+      const date = new Date(dateObj.year, dateObj.month - 1, dateObj.day, hours, minutes, 0);
+      return Math.floor(date.getTime() / 1000);
+    }
+
+    // UUID生成
+    function generateUUID() {
+      if (typeof crypto !== 'undefined' && crypto.randomUUID) {
+        return crypto.randomUUID();
+      }
+      return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+        const r = Math.random() * 16 | 0;
+        const v = c === 'x' ? r : (r & 0x3 | 0x8);
+        return v.toString(16);
+      });
+    }
+
+    // 診療科を取得
+    async function getDefaultPurposeOfVisit(HenryCore, dateObj) {
+      const result = await HenryCore.query(QUERIES.ListPurposeOfVisits, {
+        input: { searchDate: dateObj }
+      });
+
+      const purposeOfVisits = result.data?.listPurposeOfVisits?.purposeOfVisits || [];
+      if (purposeOfVisits.length === 0) {
+        throw new Error('診療科が見つかりません');
+      }
+
+      const defaultPov = purposeOfVisits.find(p => p.order?.value === 1) || purposeOfVisits[0];
+      log.info('診療科: ' + defaultPov.title);
+      return defaultPov;
+    }
+
+    // 外来予約を作成
+    async function createOutpatientReservation(HenryCore, patientUuid, doctorUuid, purposeOfVisitUuid, dateObj, timeStr) {
+      const scheduleTime = dateTimeToTimestamp(dateObj, timeStr);
+      const newEncounterId = generateUUID();
+
+      log.info('外来予約を作成中: ' + dateObj.year + '/' + dateObj.month + '/' + dateObj.day + ' ' + timeStr);
+
+      const result = await HenryCore.query(QUERIES.CreateSession, {
+        input: {
+          uuid: '',
+          patientUuid: { value: patientUuid },
+          doctorUuid: doctorUuid,
+          purposeOfVisitUuid: purposeOfVisitUuid,
+          state: 'BEFORE_CONSULTATION',
+          note: '',
+          countedInConsultationDays: true,
+          scheduleTime: { seconds: scheduleTime, nanos: 0 },
+          encounterId: { value: newEncounterId }
+        }
+      });
+
+      const session = result.data?.createSession;
+      if (!session?.uuid) {
+        throw new Error('外来予約の作成に失敗しました');
+      }
+
+      const encounterId = session.encounterId?.value;
+      if (!encounterId) {
+        throw new Error('診療録IDが取得できませんでした');
+      }
+
+      log.info('外来予約を作成しました: ' + session.uuid);
+      return encounterId;
+    }
+
+    // 予約システムを開いて予約時間を取得
+    function openReserveForImagingOrder(patientInfo, dateObj) {
+      return new Promise((resolve, reject) => {
+        const context = {
+          patientId: patientInfo.id,
+          patientName: patientInfo.name,
+          date: `${dateObj.year}-${String(dateObj.month).padStart(2, '0')}-${String(dateObj.day).padStart(2, '0')}`,
+          timestamp: Date.now()
+        };
+        GM_setValue('imagingOrderContext', context);
+        GM_setValue('pendingPatient', { id: patientInfo.id, name: patientInfo.name });
+        log.info('照射オーダーコンテキストを保存: ' + JSON.stringify(context));
+
+        // タイムアウト設定（5分）
+        const timeout = setTimeout(() => {
+          GM_removeValueChangeListener(listenerId);
+          GM_setValue('imagingOrderContext', null);
+          GM_setValue('pendingPatient', null);
+          reject(new Error('予約システムからの応答がタイムアウトしました'));
+        }, 5 * 60 * 1000);
+
+        // 予約結果を待機
+        const listenerId = GM_addValueChangeListener('reservationResult', (name, oldValue, newValue, remote) => {
+          if (!newValue) return;
+
+          log.info('予約結果を受信: ' + JSON.stringify(newValue));
+          clearTimeout(timeout);
+          GM_removeValueChangeListener(listenerId);
+          GM_setValue('imagingOrderContext', null);
+          GM_setValue('reservationResult', null);
+
+          if (newValue.cancelled) {
+            reject(new Error('予約がキャンセルされました'));
+          } else if (newValue.time && newValue.date) {
+            resolve({ date: newValue.date, time: newValue.time });
+          } else if (newValue.time) {
+            resolve({ date: null, time: newValue.time });
+          } else {
+            reject(new Error('予約時間が取得できませんでした'));
+          }
+        });
+
+        // 予約システムを開く
+        const targetDate = new Date(dateObj.year, dateObj.month - 1, dateObj.day, 9, 0, 0);
+        const limit = Math.floor(targetDate.getTime() / 1000);
+        const reserveUrl = `https://manage-maokahp.reserve.ne.jp/manage/calendar.php?from_date=${context.date}&limit=${limit}`;
+
+        log.info('予約システムを開きます: ' + reserveUrl);
+        const width = window.screen.availWidth;
+        const height = window.screen.availHeight;
+        window.open(reserveUrl, 'reserveWindow', `width=${width},height=${height},left=0,top=0`);
+      });
+    }
+
+    // 通知表示
+    function showImagingNotification(message, type = 'info') {
+      const notification = document.createElement('div');
+      notification.style.cssText = `
+        position: fixed;
+        top: 20px;
+        right: 20px;
+        padding: 16px 24px;
+        border-radius: 8px;
+        color: white;
+        font-size: 14px;
+        font-weight: bold;
+        z-index: 100000;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+        animation: slideIn 0.3s ease;
+        background-color: ${type === 'success' ? '#00cc92' : type === 'error' ? '#e53935' : '#2196f3'};
+      `;
+      notification.textContent = message;
+
+      if (!document.getElementById('imaging-notification-styles')) {
+        const style = document.createElement('style');
+        style.id = 'imaging-notification-styles';
+        style.textContent = `
+          @keyframes slideIn {
+            from { transform: translateX(100%); opacity: 0; }
+            to { transform: translateX(0); opacity: 1; }
+          }
+        `;
+        document.head.appendChild(style);
+      }
+
+      document.body.appendChild(notification);
+
+      setTimeout(() => {
+        notification.style.animation = 'slideIn 0.3s ease reverse';
+        setTimeout(() => notification.remove(), 300);
+      }, 3000);
+    }
+
+    // 照射オーダーfetchインターセプト
+    (async function setupImagingOrderIntercept() {
+      const HenryCore = await waitForHenryCore();
+      if (!HenryCore) return;
+
+      // 初期化時に古いコンテキストをクリア
+      GM_setValue('imagingOrderContext', null);
+      GM_setValue('reservationResult', null);
+
+      const originalFetch = unsafeWindow.fetch;
+      unsafeWindow.fetch = async function(...args) {
+        const [url, options] = args;
+
+        if (typeof url === 'string' && url.includes('/graphql') && options?.body) {
+          try {
+            const body = JSON.parse(options.body);
+
+            if (body.operationName === 'CreateImagingOrder') {
+              const dateObj = body.variables?.input?.date;
+
+              if (dateObj && isFutureDate(dateObj)) {
+                log.info('未来日付の照射オーダーを検出: ' + dateObj.year + '/' + dateObj.month + '/' + dateObj.day);
+
+                try {
+                  const patientUuid = HenryCore.getPatientUuid();
+                  const doctorUuid = await HenryCore.getMyUuid();
+
+                  if (!patientUuid || !doctorUuid) {
+                    throw new Error('患者情報または医師情報を取得できません');
+                  }
+
+                  // 患者情報を取得
+                  const patientResult = await HenryCore.query(QUERIES.GetPatient, {
+                    input: { uuid: patientUuid }
+                  });
+                  const patient = patientResult.data?.getPatient;
+                  if (!patient) {
+                    throw new Error('患者情報が見つかりません');
+                  }
+                  const patientInfo = { id: patient.serialNumber, name: patient.fullName };
+
+                  // 確認ダイアログ
+                  const confirmMessage = `未来日付（${dateObj.year}/${dateObj.month}/${dateObj.day}）の照射オーダーです。\n\n予約システムで予約を取りますか？\n\n患者: ${patientInfo.id} ${patientInfo.name}`;
+                  if (!confirm(confirmMessage)) {
+                    log.info('ユーザーが予約システム連携をキャンセル');
+                    return originalFetch.apply(this, args);
+                  }
+
+                  // 予約システムを開いて予約日時を取得
+                  showImagingNotification('予約システムで予約を取ってください', 'info');
+                  const reservationResult = await openReserveForImagingOrder(patientInfo, dateObj);
+                  log.info('予約日時: ' + JSON.stringify(reservationResult));
+
+                  // 予約日付を使用
+                  let actualDateObj = dateObj;
+                  if (reservationResult.date) {
+                    const [year, month, day] = reservationResult.date.split('-').map(Number);
+                    actualDateObj = { year, month, day };
+                  }
+
+                  // 診療科を取得
+                  const purposeOfVisit = await getDefaultPurposeOfVisit(HenryCore, actualDateObj);
+
+                  // 外来予約を作成
+                  const newEncounterId = await createOutpatientReservation(
+                    HenryCore, patientUuid, doctorUuid, purposeOfVisit.uuid, actualDateObj, reservationResult.time
+                  );
+
+                  // リクエストボディのencounterIdを差し替え
+                  body.variables.input.encounterId = { value: newEncounterId };
+
+                  // 日付も更新
+                  if (reservationResult.date) {
+                    body.variables.input.date = actualDateObj;
+                  }
+
+                  const newOptions = { ...options, body: JSON.stringify(body) };
+                  log.info('EncounterIDを差し替えてリクエスト送信: ' + newEncounterId);
+                  showImagingNotification(`${actualDateObj.year}/${actualDateObj.month}/${actualDateObj.day} ${reservationResult.time} の外来予約を作成しました`, 'success');
+
+                  // 受付一覧を更新
+                  if (unsafeWindow.__APOLLO_CLIENT__) {
+                    try {
+                      unsafeWindow.__APOLLO_CLIENT__.refetchQueries({ include: ['ListSessions'] });
+                      log.info('受付一覧を更新しました');
+                    } catch (e) {
+                      log.warn('受付一覧の更新に失敗: ' + e.message);
+                    }
+                  }
+
+                  return originalFetch.call(this, url, newOptions);
+
+                } catch (error) {
+                  log.error('自動予約エラー: ' + error.message);
+
+                  const proceed = confirm(`外来予約の自動作成に失敗しました:\n${error.message}\n\n現在の診療録に照射オーダーを保存しますか？`);
+
+                  if (!proceed) {
+                    return new Response(JSON.stringify({ data: null, errors: [{ message: 'ユーザーによりキャンセルされました' }] }), {
+                      status: 200,
+                      headers: { 'Content-Type': 'application/json' }
+                    });
+                  }
+                }
+              }
+            }
+          } catch (e) {
+            // JSONパース失敗等は無視
+          }
+        }
+
+        return originalFetch.apply(this, args);
+      };
+
+      log.info('照射オーダーfetchインターセプト設定完了');
     })();
   }
 
@@ -505,37 +820,25 @@
       log.info('ログイン通知バナーを表示');
     }
 
-    // URLパラメータから照射オーダー情報を取得（別スクリプト間ではGM_*ストレージが共有されないため）
-    const urlParams = new URLSearchParams(location.search);
-    const isImagingOrderFromUrl = urlParams.get('henry_imaging_order') === '1';
+    // 同一スクリプト内のGM_*ストレージから取得
+    const pendingPatient = !isLoginPage ? GM_getValue('pendingPatient', null) : null;
+    let imagingOrderContext = !isLoginPage ? GM_getValue('imagingOrderContext', null) : null;
 
-    let pendingPatient = null;
-    let imagingOrderContext = null;
-
-    if (isImagingOrderFromUrl) {
-      // URLパラメータから患者情報と照射オーダーコンテキストを構築
-      const patientId = urlParams.get('henry_patient_id');
-      const patientName = urlParams.get('henry_patient_name');
-      const fromDate = urlParams.get('from_date');
-
-      if (patientId && patientName) {
-        pendingPatient = { id: patientId, name: patientName };
-        imagingOrderContext = {
-          patientId: patientId,
-          patientName: patientName,
-          date: fromDate,
-          timestamp: Date.now()
-        };
-        log.info('URLパラメータから照射オーダー情報を取得:', imagingOrderContext);
+    // 照射オーダーコンテキストが古い場合（5分以上経過）は無効化
+    if (imagingOrderContext && imagingOrderContext.timestamp) {
+      const elapsed = Date.now() - imagingOrderContext.timestamp;
+      if (elapsed > 5 * 60 * 1000) {
+        log.info('照射オーダーコンテキストが古いため無効化:', Math.floor(elapsed / 1000) + '秒経過');
+        GM_setValue('imagingOrderContext', null);
+        imagingOrderContext = null;
       }
-    } else if (!isLoginPage) {
-      // 通常の再診予約（同一スクリプト内のGM_*ストレージ）
-      pendingPatient = GM_getValue('pendingPatient', null);
-      imagingOrderContext = GM_getValue('imagingOrderContext', null);
     }
 
     // 照射オーダーモードが有効かどうか（排他制御）
     const isImagingOrderMode = imagingOrderContext && imagingOrderContext.patientId;
+
+    // 予約登録ボタンリスナー追加済みフラグ（関数より前に宣言が必要）
+    let reservationButtonListenerAdded = false;
 
     // --------------------------------------------
     // 照射オーダーモード（Henry照射オーダーからの予約）
@@ -543,18 +846,20 @@
     if (isImagingOrderMode) {
       log.info('照射オーダーモード起動:', imagingOrderContext);
 
-      // 照射オーダー情報バー表示（日付・キャンセルボタン）
-      showImagingOrderInfoBar(imagingOrderContext);
+      // 統合バナー表示（照射オーダーモード）
+      showModeBanner('imaging', imagingOrderContext.patientId, imagingOrderContext.patientName, imagingOrderContext);
 
       // カレンダーの日付を変更
       navigateToDate(imagingOrderContext.date);
 
-      // 予約登録ボタン監視（日時取得用）
+      // 予約登録ボタン監視（日時取得用）+ 患者ID自動入力
       const imagingDialogObserver = new MutationObserver(() => {
+        tryFillDialog(imagingOrderContext.patientId);
         tryFillDateForImaging(imagingOrderContext);
         setupReservationButtonListener(imagingOrderContext);
       });
       imagingDialogObserver.observe(document.body, { childList: true, subtree: true });
+      tryFillDialog(imagingOrderContext.patientId);
       tryFillDateForImaging(imagingOrderContext);
       setupReservationButtonListener(imagingOrderContext);
     }
@@ -583,51 +888,71 @@
       log.info('既に目的の日付:', dateStr);
     }
 
-    // 照射オーダー情報バー（患者情報は別のバナーで表示されるので、日付とキャンセルボタンのみ）
-    function showImagingOrderInfoBar(context) {
-      if (document.getElementById('henry-imaging-infobar')) return;
+    // 統合バナー表示（照射オーダーモード / 再診予約モード）
+    function showModeBanner(mode, patientId, patientName, context = null) {
+      if (document.getElementById('henry-mode-banner')) return;
 
-      const infobar = document.createElement('div');
-      infobar.id = 'henry-imaging-infobar';
-      infobar.innerHTML = `
-        <span style="margin-right: 12px;">📡</span>
-        <span><strong>照射オーダー予約モード</strong></span>
-        <span style="margin: 0 12px;">|</span>
-        <span>予約日: <strong>${context.date}</strong></span>
-        <button id="henry-imaging-cancel" style="margin-left: auto; padding: 4px 12px; background: #e53935; color: white; border: none; border-radius: 4px; cursor: pointer;">キャンセル</button>
-      `;
-      Object.assign(infobar.style, {
+      const isImagingMode = mode === 'imaging';
+      const banner = document.createElement('div');
+      banner.id = 'henry-mode-banner';
+
+      if (isImagingMode && context) {
+        banner.innerHTML = `
+          <span style="margin-right: 12px;">📡</span>
+          <span><strong>照射オーダー予約</strong></span>
+          <span style="margin: 0 12px; color: rgba(255,255,255,0.5);">|</span>
+          <span>患者: <strong>${patientId}</strong> ${patientName || ''}</span>
+          <span style="margin: 0 12px; color: rgba(255,255,255,0.5);">|</span>
+          <span>予約日: <strong>${context.date}</strong></span>
+          <button id="henry-mode-cancel" style="margin-left: auto; padding: 6px 16px; background: rgba(255,255,255,0.2); color: white; border: 1px solid rgba(255,255,255,0.3); border-radius: 4px; cursor: pointer; font-weight: bold;">キャンセル</button>
+        `;
+        Object.assign(banner.style, {
+          backgroundColor: '#1565C0',
+          color: 'white'
+        });
+      } else {
+        banner.innerHTML = `
+          <span style="margin-right: 12px;">📅</span>
+          <span><strong>再診予約</strong></span>
+          <span style="margin: 0 12px; color: rgba(0,0,0,0.3);">|</span>
+          <span>患者: <strong>${patientId}</strong> ${patientName || ''}</span>
+        `;
+        Object.assign(banner.style, {
+          backgroundColor: '#00897B',
+          color: 'white'
+        });
+      }
+
+      Object.assign(banner.style, {
         position: 'fixed',
         top: '0',
         left: '0',
         right: '0',
-        backgroundColor: '#E3F2FD',
-        color: '#1565C0',
-        padding: '8px 20px',
-        fontSize: '13px',
+        padding: '12px 20px',
+        fontSize: '14px',
         fontFamily: 'sans-serif',
         zIndex: '99998',
         display: 'flex',
         alignItems: 'center',
-        boxShadow: '0 2px 4px rgba(0,0,0,0.1)'
+        boxShadow: '0 2px 8px rgba(0,0,0,0.2)'
       });
 
-      document.body.appendChild(infobar);
+      document.body.appendChild(banner);
+      document.body.style.paddingTop = banner.offsetHeight + 'px';
 
-      // キャンセルボタン
-      document.getElementById('henry-imaging-cancel').addEventListener('click', () => {
-        if (confirm('照射オーダーの予約をキャンセルしますか？')) {
-          GM_setValue('reservationResult', { cancelled: true, timestamp: Date.now() });
-          GM_setValue('imagingOrderContext', null);
-          GM_setValue('pendingPatient', null);
-          infobar.remove();
-          // 患者バナーも削除
-          const patientBanner = document.getElementById('henry-patient-banner');
-          if (patientBanner) patientBanner.remove();
-          document.body.style.paddingTop = '0';
-          log.info('照射オーダーモードをキャンセル');
-        }
-      });
+      // キャンセルボタン（照射オーダーモードのみ）
+      if (isImagingMode) {
+        document.getElementById('henry-mode-cancel').addEventListener('click', () => {
+          if (confirm('照射オーダーの予約をキャンセルしますか？')) {
+            GM_setValue('reservationResult', { cancelled: true, timestamp: Date.now() });
+            GM_setValue('imagingOrderContext', null);
+            GM_setValue('pendingPatient', null);
+            banner.remove();
+            document.body.style.paddingTop = '0';
+            log.info('照射オーダーモードをキャンセル');
+          }
+        });
+      }
     }
 
     // 照射オーダーモード用：日付のみ自動入力（患者IDは pendingPatient で処理）
@@ -644,16 +969,15 @@
       }
     }
 
-    let reservationButtonListenerAdded = false;
-
     function setupReservationButtonListener(context) {
       if (reservationButtonListenerAdded) return;
 
       const dialog = document.querySelector('#dialog_reserve_input');
       if (!dialog) return;
 
-      // 「予約登録」ボタンを探す
-      const reserveBtn = dialog.closest('.ui-dialog')?.querySelector('.ui-dialog-buttonpane button:first-child');
+      // 「予約登録」ボタンをテキストで探す（変更に強いセレクタ）
+      const allButtons = Array.from(document.querySelectorAll('button'));
+      const reserveBtn = allButtons.find(btn => btn.textContent?.trim() === '予約登録');
       if (!reserveBtn) return;
 
       reservationButtonListenerAdded = true;
@@ -664,7 +988,7 @@
       let capturedDate = context.date;
       let capturedTime = '09:00';
 
-      // キャプチャフェーズで患者IDを検証（不一致の場合は予約を阻止）
+      // キャプチャフェーズで患者ID・診療種別を検証（不正の場合は予約を阻止）
       reserveBtn.addEventListener('click', (event) => {
         // 患者IDの一致確認
         const patientIdInput = document.getElementById('multi_record_no[0]');
@@ -679,14 +1003,41 @@
           return;
         }
 
-        // クリック時に日付と時間を取得
-        const dateInput = document.getElementById('reserve_date');
-        const timeInput = document.getElementById('reserve_time');
+        // 診療種別（CT/MRI）の確認
+        // 「診療を選択」ラベルを含む親要素からselect要素を探す（IDに依存しない）
+        const dialogEl = document.querySelector('#dialog_reserve_input');
+        let purposeValue = '';
+        if (dialogEl) {
+          const listItems = dialogEl.querySelectorAll('li');
+          for (const li of listItems) {
+            if (li.textContent?.includes('診療を選択')) {
+              const select = li.querySelector('select');
+              if (select) {
+                purposeValue = select.options[select.selectedIndex]?.text || '';
+                break;
+              }
+            }
+          }
+        }
+
+        // 「診療を選択」がCT/MRIでない場合は警告
+        if (!purposeValue.includes('CT') && !purposeValue.includes('MRI')) {
+          event.preventDefault();
+          event.stopImmediatePropagation();
+          patientIdVerified = false;
+          alert(`照射オーダーの予約は「CT/MRI」で登録してください。\n\n現在の選択: ${purposeValue || '(未選択)'}\n\n「診療を選択」を「CT/MRI」に変更してから予約登録してください。`);
+          log.error('診療種別がCT/MRIではない - 予約を阻止:', { purposeValue });
+          return;
+        }
+
+        // クリック時に日付と時間を取得（name属性で検索 - 変更に強いセレクタ）
+        const dateInput = document.querySelector('input[name="res_date"]');
+        const timeInput = document.querySelector('input[name="res_time"]');
         capturedDate = dateInput?.value || context.date;
         capturedTime = timeInput?.value || '09:00';
         patientIdVerified = true;
 
-        log.info('予約登録ボタンがクリックされました。患者ID確認OK、日付:', capturedDate, '時間:', capturedTime);
+        log.info('予約登録ボタンがクリックされました。患者ID確認OK、診療種別:', purposeValue || '(未取得)', '日付:', capturedDate, '時間:', capturedTime);
       }, { capture: true });
 
       // バブリングフェーズでダイアログ閉じを監視
@@ -706,11 +1057,13 @@
             GM_setValue('pendingPatient', null);
 
             // バナーを削除
-            const infobar = document.getElementById('henry-imaging-infobar');
-            if (infobar) infobar.remove();
-            const patientBanner = document.getElementById('henry-patient-banner');
-            if (patientBanner) patientBanner.remove();
+            const modeBanner = document.getElementById('henry-mode-banner');
+            if (modeBanner) modeBanner.remove();
             document.body.style.paddingTop = '0';
+
+            // 確認メッセージを表示してウィンドウを閉じる
+            alert(`予約を登録しました。\n\n日付: ${capturedDate}\n時間: ${capturedTime}\n\nウィンドウを閉じます。`);
+            window.close();
           }
         }, 100);
 
@@ -719,16 +1072,13 @@
       });
     }
 
-    // 患者情報がある場合（通常の再診予約 または 照射オーダーモード）
-    if (pendingPatient && pendingPatient.id) {
-      // 照射オーダーモードでない場合のみクリア（照射オーダーモードは予約完了時にクリア）
-      if (!isImagingOrderMode) {
-        GM_setValue('pendingPatient', null);
-      }
-      log.info('Henryから遷移 - カルテID:', pendingPatient.id, '患者名:', pendingPatient.name);
+    // 患者情報がある場合（通常の再診予約のみ - 照射オーダーモードは上で処理済み）
+    if (pendingPatient && pendingPatient.id && !isImagingOrderMode) {
+      GM_setValue('pendingPatient', null);
+      log.info('再診予約モード - カルテID:', pendingPatient.id, '患者名:', pendingPatient.name);
 
-      // 患者バナー表示
-      showPatientBanner(pendingPatient.id, pendingPatient.name);
+      // 統合バナー表示（再診予約モード）
+      showModeBanner('revisit', pendingPatient.id, pendingPatient.name);
 
       // ダイアログ自動入力の監視
       const dialogObserver = new MutationObserver(() => {
@@ -737,81 +1087,8 @@
       dialogObserver.observe(document.body, { childList: true, subtree: true });
       tryFillDialog(pendingPatient.id);
 
-    } else {
+    } else if (!isImagingOrderMode) {
       log.info('pendingPatientなし - Henry連携スキップ');
-    }
-
-    function showPatientBanner(patientId, patientName) {
-      if (document.getElementById('henry-patient-banner')) return;
-
-      // 照射オーダー情報バーがある場合、その下に表示
-      const imagingInfobar = document.getElementById('henry-imaging-infobar');
-      const topOffset = imagingInfobar ? imagingInfobar.offsetHeight : 0;
-
-      const banner = document.createElement('div');
-      banner.id = 'henry-patient-banner';
-      banner.innerHTML = `
-        <span style="margin-right: 12px;">📋</span>
-        <span><strong>${patientId}</strong></span>
-        <span style="margin: 0 8px;">|</span>
-        <span><strong>${patientName || '患者名不明'}</strong></span>
-      `;
-      Object.assign(banner.style, {
-        position: 'fixed',
-        top: topOffset + 'px',
-        left: '0',
-        right: '0',
-        backgroundColor: '#E8F5F0',
-        color: '#17181B',
-        padding: '10px 20px',
-        fontSize: '14px',
-        fontFamily: 'sans-serif',
-        zIndex: '99997',
-        display: 'flex',
-        alignItems: 'center',
-        boxShadow: '0 2px 4px rgba(0,0,0,0.1)'
-      });
-
-      document.body.appendChild(banner);
-
-      const totalBannerHeight = topOffset + banner.offsetHeight;
-      document.body.style.paddingTop = totalBannerHeight + 'px';
-
-      // ダイアログ位置調整
-      function adjustDialogPosition() {
-        const dialog = document.querySelector('#dialog_reserve_input')?.closest('.ui-dialog');
-        if (!dialog) return;
-
-        const currentTop = parseInt(dialog.style.top) || 0;
-        if (currentTop < bannerHeight) {
-          dialog.style.top = bannerHeight + 'px';
-        }
-
-        const dialogTop = parseInt(dialog.style.top) || bannerHeight;
-        const maxHeight = window.innerHeight - dialogTop - 10;
-        const currentHeight = dialog.offsetHeight;
-
-        if (currentHeight > maxHeight) {
-          dialog.style.height = maxHeight + 'px';
-
-          const content = dialog.querySelector('.ui-dialog-content');
-          if (content) {
-            const titleBar = dialog.querySelector('.ui-dialog-titlebar');
-            const buttonPane = dialog.querySelector('.ui-dialog-buttonpane');
-            const titleHeight = titleBar ? titleBar.offsetHeight : 0;
-            const buttonHeight = buttonPane ? buttonPane.offsetHeight : 0;
-            const contentMaxHeight = maxHeight - titleHeight - buttonHeight - 20;
-
-            content.style.maxHeight = contentMaxHeight + 'px';
-            content.style.overflowY = 'auto';
-          }
-        }
-      }
-
-      const positionObserver = new MutationObserver(adjustDialogPosition);
-      positionObserver.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['style'] });
-      window.addEventListener('resize', adjustDialogPosition);
-      adjustDialogPosition();
     }
 
     function tryFillDialog(patientId) {

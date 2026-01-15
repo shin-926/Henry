@@ -49,6 +49,44 @@ MCPサーバーが接続されるのを確認（起動時に `chrome-devtools` �
 
 ---
 
+## Apollo Client による画面更新
+
+HenryはReact + Apollo Clientを使用。データ変更後に画面を更新するには `refetchQueries` を使用する。
+
+### 仕組み
+
+```
+Mutation（データ変更）
+    ↓
+refetchQueries({ include: ['クエリ名'] })
+    ↓
+サーバーにクエリを再リクエスト
+    ↓
+Apollo キャッシュ更新
+    ↓
+React が自動的にUI再描画
+```
+
+### 使い方
+
+```javascript
+// グローバルに公開されている Apollo Client インスタンス
+if (unsafeWindow.__APOLLO_CLIENT__) {
+  unsafeWindow.__APOLLO_CLIENT__.refetchQueries({ include: ['ListSessions'] });
+}
+```
+
+### 主要なクエリ名
+
+| クエリ名 | 用途 |
+|---------|------|
+| `ListSessions` | 受付一覧（外来予約リスト） |
+| `ListPatientFiles` | 患者ファイル一覧 |
+
+**注意**: クエリ名はHenryが実際に使っているものを chrome-devtools-mcp で調査して確認すること。
+
+---
+
 ## TASK-002: オーダーセット選択UI
 
 **目的**: 既存のセット選択UIが遅く操作性が悪いため、独自の高速UIを作成する
