@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         予約システム連携
-// @namespace    https://github.com/shin-926/Tampermonkey
-// @version      2.4.0
+// @namespace    https://github.com/shin-926/Henry
+// @version      2.4.1
 // @description  Henryカルテと予約システム間の双方向連携（再診予約・患者プレビュー・ページ遷移）
 // @match        https://henry-app.jp/*
 // @match        https://manage-maokahp.reserve.ne.jp/*
