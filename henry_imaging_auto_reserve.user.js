@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry 照射オーダー自動予約
-// @namespace    https://henry-app.jp/
-// @version      4.5.0
+// @namespace    https://github.com/shin-926/Tampermonkey
+// @version      4.5.1
 // @description  照射オーダー完了時に未来日付の場合、予約システムで予約を取ってから外来予約を自動作成し、その診療録に照射オーダーを紐づける
 // @match        https://henry-app.jp/*
 // @grant        GM_setValue
@@ -334,7 +334,7 @@
       return;
     }
 
-    log('初期化完了 - フルクエリ方式 v4.5.0 (予約システム連携)');
+    log('初期化完了 - フルクエリ方式 v4.5.1 (予約システム連携)');
 
     // 初期化時に古いコンテキストをクリア
     GM_setValue('imagingOrderContext', null);
