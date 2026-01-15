@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry 照射オーダー自動予約
 // @namespace    https://henry-app.jp/
-// @version      3.0.0
+// @version      3.1.0
 // @description  照射オーダー完了時に未来日付の場合、外来予約を自動作成し、その診療録に照射オーダーを紐づける
 // @match        https://henry-app.jp/*
 // @grant        none
@@ -17,10 +17,27 @@
   const log = (...args) => console.log(`[${SCRIPT_NAME}]`, ...args);
   const logError = (...args) => console.error(`[${SCRIPT_NAME}]`, ...args);
 
-  // APQ ハッシュ定数
-  const APQ_HASHES = {
-    ListPurposeOfVisits: '77f4f4540079f300ff2c2ec757e1a301f7b153fe39b06a95350dc54d09ef88bd',
-    CreateSession: '522a869a101be6fe1d999aa8fac8395ec6b55414c4717dcfc9a31e24acbb4f08'
+  // GraphQL クエリ定義（フルクエリ方式）
+  const QUERIES = {
+    ListPurposeOfVisits: `
+      query ListPurposeOfVisits($input: ListPurposeOfVisitRequestInput!) {
+        listPurposeOfVisits(input: $input) {
+          purposeOfVisits {
+            uuid
+            title
+            order { value }
+          }
+        }
+      }
+    `,
+    CreateSession: `
+      mutation CreateSession($input: SessionInput!) {
+        createSession(input: $input) {
+          uuid
+          encounterId { value }
+        }
+      }
+    `
   };
 
   // HenryCore待機
@@ -38,8 +55,8 @@
     }, 10000);
   });
 
-  // APQ方式でGraphQL APIを呼び出す
-  const apqFetch = async (core, operationName, variables) => {
+  // GraphQL APIを呼び出す（フルクエリ方式）
+  const graphqlFetch = async (core, operationName, variables) => {
     const token = await core.getToken();
     const orgUuid = localStorage.getItem('henryOrganizationUuid');
 
@@ -56,13 +73,8 @@
       },
       body: JSON.stringify({
         operationName,
-        variables,
-        extensions: {
-          persistedQuery: {
-            version: 1,
-            sha256Hash: APQ_HASHES[operationName]
-          }
-        }
+        query: QUERIES[operationName],
+        variables
       })
     });
 
@@ -91,7 +103,7 @@
 
   // 診療科一覧を取得し、デフォルト（最初）を返す
   const getDefaultPurposeOfVisit = async (core, dateObj) => {
-    const result = await apqFetch(core, 'ListPurposeOfVisits', {
+    const result = await graphqlFetch(core, 'ListPurposeOfVisits', {
       input: { searchDate: dateObj }
     });
 
@@ -113,7 +125,7 @@
 
     log('外来予約を作成中...', { date: `${dateObj.year}/${dateObj.month}/${dateObj.day}`, purposeOfVisitUuid });
 
-    const result = await apqFetch(core, 'CreateSession', {
+    const result = await graphqlFetch(core, 'CreateSession', {
       input: {
         uuid: '',
         patientUuid: { value: patientUuid },
@@ -188,7 +200,7 @@
       return;
     }
 
-    log('初期化完了 - APQ方式 v3.0.0');
+    log('初期化完了 - フルクエリ方式 v3.1.0');
 
     // fetchをインターセプト
     const originalFetch = window.fetch;
