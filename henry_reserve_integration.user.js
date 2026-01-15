@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         予約システム連携
 // @namespace    https://github.com/shin-926/Tampermonkey
-// @version      2.3.0
+// @version      2.4.0
 // @description  Henryカルテと予約システム間の双方向連携（再診予約・患者プレビュー・ページ遷移）
 // @match        https://henry-app.jp/*
 // @match        https://manage-maokahp.reserve.ne.jp/*
@@ -538,30 +538,23 @@
       // dateStr format: "YYYY-MM-DD"
       const [year, month, day] = dateStr.split('-').map(Number);
 
-      // 方法1: URL パラメータで日付を指定してリロード
+      // 予約システムのURLパラメータ形式: ?from_date=YYYY-MM-DD&limit=<unix_timestamp>
       const currentUrl = new URL(location.href);
-      const currentDate = currentUrl.searchParams.get('date');
+      const currentFromDate = currentUrl.searchParams.get('from_date');
 
-      if (currentDate !== dateStr) {
+      if (currentFromDate !== dateStr) {
         // まだ目的の日付でない場合はリダイレクト
-        currentUrl.searchParams.set('date', dateStr);
+        const targetDate = new Date(year, month - 1, day, 9, 0, 0);
+        const limit = Math.floor(targetDate.getTime() / 1000);
+
+        currentUrl.searchParams.set('from_date', dateStr);
+        currentUrl.searchParams.set('limit', limit.toString());
         log.info('カレンダー日付を変更:', dateStr);
         location.href = currentUrl.toString();
         return;
       }
 
-      // 方法2: 日付入力フィールドを探して変更を試みる
-      setTimeout(() => {
-        // カレンダーの日付入力欄を探す
-        const dateInput = document.querySelector('input[name="date"]') ||
-                          document.querySelector('input.calendar-date') ||
-                          document.querySelector('#calendar_date');
-        if (dateInput) {
-          dateInput.value = dateStr;
-          dateInput.dispatchEvent(new Event('change', { bubbles: true }));
-          log.info('日付入力欄を更新:', dateStr);
-        }
-      }, 500);
+      log.info('既に目的の日付:', dateStr);
     }
 
     // 照射オーダー情報バー（患者情報は別のバナーで表示されるので、日付とキャンセルボタンのみ）

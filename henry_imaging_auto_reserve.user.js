@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry 照射オーダー自動予約
 // @namespace    https://henry-app.jp/
-// @version      4.4.0
+// @version      4.5.0
 // @description  照射オーダー完了時に未来日付の場合、予約システムで予約を取ってから外来予約を自動作成し、その診療録に照射オーダーを紐づける
 // @match        https://henry-app.jp/*
 // @grant        GM_setValue
@@ -252,11 +252,15 @@
         }
       });
 
-      // 予約システムを開く
+      // 予約システムを開く（指定日付のカレンダーページを直接開く）
+      const targetDate = new Date(dateObj.year, dateObj.month - 1, dateObj.day, 9, 0, 0);
+      const limit = Math.floor(targetDate.getTime() / 1000);
+      const reserveUrl = `https://manage-maokahp.reserve.ne.jp/manage/calendar.php?from_date=${context.date}&limit=${limit}`;
+
       const width = window.screen.availWidth;
       const height = window.screen.availHeight;
       const reserveWindow = window.open(
-        'https://manage-maokahp.reserve.ne.jp/',
+        reserveUrl,
         'reserveWindow',
         `width=${width},height=${height},left=0,top=0`
       );
@@ -330,7 +334,7 @@
       return;
     }
 
-    log('初期化完了 - フルクエリ方式 v4.4.0 (予約システム連携)');
+    log('初期化完了 - フルクエリ方式 v4.5.0 (予約システム連携)');
 
     // 初期化時に古いコンテキストをクリア
     GM_setValue('imagingOrderContext', null);
