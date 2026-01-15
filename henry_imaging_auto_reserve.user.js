@@ -1,10 +1,14 @@
 // ==UserScript==
 // @name         Henry 照射オーダー自動予約
 // @namespace    https://henry-app.jp/
-// @version      3.2.0
-// @description  照射オーダー完了時に未来日付の場合、外来予約を自動作成し、その診療録に照射オーダーを紐づける
+// @version      4.0.0
+// @description  照射オーダー完了時に未来日付の場合、予約システムで予約を取ってから外来予約を自動作成し、その診療録に照射オーダーを紐づける
 // @match        https://henry-app.jp/*
-// @grant        none
+// @grant        GM_setValue
+// @grant        GM_getValue
+// @grant        GM_addValueChangeListener
+// @grant        GM_removeValueChangeListener
+// @grant        unsafeWindow
 // @updateURL    https://raw.githubusercontent.com/shin-926/Henry/main/henry_imaging_auto_reserve.user.js
 // @downloadURL  https://raw.githubusercontent.com/shin-926/Henry/main/henry_imaging_auto_reserve.user.js
 // @run-at       document-idle
@@ -16,6 +20,9 @@
   const SCRIPT_NAME = 'ImagingAutoReserve';
   const log = (...args) => console.log(`[${SCRIPT_NAME}]`, ...args);
   const logError = (...args) => console.error(`[${SCRIPT_NAME}]`, ...args);
+
+  // ページウィンドウ参照（GM_*使用時はunsafeWindow経由でHenryCoreにアクセス）
+  const pageWindow = typeof unsafeWindow !== 'undefined' ? unsafeWindow : window;
 
   // GraphQL クエリ定義（フルクエリ方式）
   const QUERIES = {
@@ -37,16 +44,24 @@
           encounterId { value }
         }
       }
+    `,
+    GetPatient: `
+      query GetPatient($input: GetPatientRequestInput!) {
+        getPatient(input: $input) {
+          serialNumber
+          fullName
+        }
+      }
     `
   };
 
   // HenryCore待機
   const waitForCore = () => new Promise((resolve) => {
-    if (window.HenryCore) return resolve(window.HenryCore);
+    if (pageWindow.HenryCore) return resolve(pageWindow.HenryCore);
     const check = setInterval(() => {
-      if (window.HenryCore) {
+      if (pageWindow.HenryCore) {
         clearInterval(check);
-        resolve(window.HenryCore);
+        resolve(pageWindow.HenryCore);
       }
     }, 100);
     setTimeout(() => {
@@ -95,9 +110,10 @@
     return target > today;
   };
 
-  // 日付をUnixタイムスタンプ（秒）に変換（9:00固定）
-  const dateToTimestamp = (dateObj) => {
-    const date = new Date(dateObj.year, dateObj.month - 1, dateObj.day, 9, 0, 0);
+  // 日付と時間をUnixタイムスタンプ（秒）に変換
+  const dateTimeToTimestamp = (dateObj, timeStr) => {
+    const [hours, minutes] = timeStr.split(':').map(Number);
+    const date = new Date(dateObj.year, dateObj.month - 1, dateObj.day, hours, minutes, 0);
     return Math.floor(date.getTime() / 1000);
   };
 
@@ -112,6 +128,23 @@
       const v = c === 'x' ? r : (r & 0x3 | 0x8);
       return v.toString(16);
     });
+  };
+
+  // 患者情報を取得
+  const getPatientInfo = async (core, patientUuid) => {
+    const result = await graphqlFetch(core, 'GetPatient', {
+      input: { uuid: patientUuid }
+    });
+
+    const patient = result.data?.getPatient;
+    if (!patient) {
+      throw new Error('患者情報が見つかりません');
+    }
+
+    return {
+      id: patient.serialNumber,
+      name: patient.fullName
+    };
   };
 
   // 診療科一覧を取得し、デフォルト（最初）を返す
@@ -133,14 +166,12 @@
   };
 
   // 外来予約を作成し、EncounterIDを取得
-  // NOTE: Henry UIはencounterIdを事前生成してCreateSessionに渡す
-  // encounterIdを渡さないと自動生成されるが、権限が制限される
-  const createOutpatientReservationAndGetEncounterId = async (core, patientUuid, doctorUuid, purposeOfVisitUuid, dateObj) => {
-    const scheduleTime = dateToTimestamp(dateObj);
+  const createOutpatientReservationAndGetEncounterId = async (core, patientUuid, doctorUuid, purposeOfVisitUuid, dateObj, timeStr) => {
+    const scheduleTime = dateTimeToTimestamp(dateObj, timeStr);
     // Henry UIと同様にencounterIdを事前生成
     const newEncounterId = generateUUID();
 
-    log('外来予約を作成中...', { date: `${dateObj.year}/${dateObj.month}/${dateObj.day}`, purposeOfVisitUuid, encounterId: newEncounterId });
+    log('外来予約を作成中...', { date: `${dateObj.year}/${dateObj.month}/${dateObj.day}`, time: timeStr, purposeOfVisitUuid, encounterId: newEncounterId });
 
     const result = await graphqlFetch(core, 'CreateSession', {
       input: {
@@ -169,6 +200,58 @@
     log('外来予約を作成しました:', session.uuid);
     log('EncounterIDを取得しました:', encounterId);
     return encounterId;
+  };
+
+  // 予約システムを開いて予約時間を取得
+  const openReserveAndGetTime = (patientInfo, dateObj) => {
+    return new Promise((resolve, reject) => {
+      // 照射オーダーコンテキストを保存
+      const context = {
+        patientId: patientInfo.id,
+        patientName: patientInfo.name,
+        date: `${dateObj.year}-${String(dateObj.month).padStart(2, '0')}-${String(dateObj.day).padStart(2, '0')}`,
+        timestamp: Date.now()
+      };
+      GM_setValue('imagingOrderContext', context);
+      log('照射オーダーコンテキストを保存:', context);
+
+      // タイムアウト設定（5分）
+      const timeout = setTimeout(() => {
+        GM_removeValueChangeListener(listenerId);
+        GM_setValue('imagingOrderContext', null);
+        reject(new Error('予約システムからの応答がタイムアウトしました'));
+      }, 5 * 60 * 1000);
+
+      // 予約結果を待機
+      const listenerId = GM_addValueChangeListener('reservationResult', (name, oldValue, newValue, remote) => {
+        if (!remote || !newValue) return;
+
+        log('予約結果を受信:', newValue);
+        clearTimeout(timeout);
+        GM_removeValueChangeListener(listenerId);
+        GM_setValue('imagingOrderContext', null);
+        GM_setValue('reservationResult', null);
+
+        if (newValue.cancelled) {
+          reject(new Error('予約がキャンセルされました'));
+        } else if (newValue.time) {
+          resolve(newValue.time);
+        } else {
+          reject(new Error('予約時間が取得できませんでした'));
+        }
+      });
+
+      // 予約システムを開く
+      const width = window.screen.availWidth;
+      const height = window.screen.availHeight;
+      window.open(
+        'https://manage-maokahp.reserve.ne.jp/',
+        'reserveWindow',
+        `width=${width},height=${height},left=0,top=0`
+      );
+
+      log('予約システムを開きました');
+    });
   };
 
   // 通知を表示
@@ -218,11 +301,15 @@
       return;
     }
 
-    log('初期化完了 - フルクエリ方式 v3.2.0 (encounterId事前生成)');
+    log('初期化完了 - フルクエリ方式 v4.0.0 (予約システム連携)');
+
+    // 初期化時に古いコンテキストをクリア
+    GM_setValue('imagingOrderContext', null);
+    GM_setValue('reservationResult', null);
 
     // fetchをインターセプト
-    const originalFetch = window.fetch;
-    window.fetch = async function(...args) {
+    const originalFetch = pageWindow.fetch;
+    pageWindow.fetch = async function(...args) {
       const [url, options] = args;
 
       // GraphQLリクエストのみ対象
@@ -246,12 +333,20 @@
                   throw new Error('患者情報または医師情報を取得できません');
                 }
 
+                // 患者情報を取得（予約システムに渡すため）
+                const patientInfo = await getPatientInfo(core, patientUuid);
+
+                // 予約システムを開いて予約時間を取得
+                showNotification('予約システムで予約を取ってください', 'info');
+                const reservationTime = await openReserveAndGetTime(patientInfo, dateObj);
+                log('予約時間:', reservationTime);
+
                 // 診療科を取得
                 const purposeOfVisit = await getDefaultPurposeOfVisit(core, dateObj);
 
                 // 外来予約を作成し、EncounterIDを取得
                 const newEncounterId = await createOutpatientReservationAndGetEncounterId(
-                  core, patientUuid, doctorUuid, purposeOfVisit.uuid, dateObj
+                  core, patientUuid, doctorUuid, purposeOfVisit.uuid, dateObj, reservationTime
                 );
 
                 // リクエストボディのencounterIdを差し替え
@@ -264,7 +359,7 @@
                 };
 
                 log('EncounterIDを差し替えてリクエスト送信:', newEncounterId);
-                showNotification(`${dateObj.year}/${dateObj.month}/${dateObj.day} の外来予約を作成し、照射オーダーを紐づけました`, 'success');
+                showNotification(`${dateObj.year}/${dateObj.month}/${dateObj.day} ${reservationTime} の外来予約を作成し、照射オーダーを紐づけました`, 'success');
 
                 return originalFetch.call(this, url, newOptions);
 
