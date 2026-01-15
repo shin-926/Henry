@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry 照射オーダー自動予約
 // @namespace    https://henry-app.jp/
-// @version      2.0.2
+// @version      3.0.0
 // @description  照射オーダー完了時に未来日付の場合、外来予約を自動作成し、その診療録に照射オーダーを紐づける
 // @match        https://henry-app.jp/*
 // @grant        none
@@ -16,6 +16,12 @@
   const SCRIPT_NAME = 'ImagingAutoReserve';
   const log = (...args) => console.log(`[${SCRIPT_NAME}]`, ...args);
   const logError = (...args) => console.error(`[${SCRIPT_NAME}]`, ...args);
+
+  // APQ ハッシュ定数
+  const APQ_HASHES = {
+    ListPurposeOfVisits: '77f4f4540079f300ff2c2ec757e1a301f7b153fe39b06a95350dc54d09ef88bd',
+    CreateSession: '522a869a101be6fe1d999aa8fac8395ec6b55414c4717dcfc9a31e24acbb4f08'
+  };
 
   // HenryCore待機
   const waitForCore = () => new Promise((resolve) => {
@@ -32,6 +38,43 @@
     }, 10000);
   });
 
+  // APQ方式でGraphQL APIを呼び出す
+  const apqFetch = async (core, operationName, variables) => {
+    const token = await core.getToken();
+    const orgUuid = localStorage.getItem('henryOrganizationUuid');
+
+    if (!token || !orgUuid) {
+      throw new Error('認証情報が取得できません');
+    }
+
+    const response = await fetch('https://henry-app.jp/graphql', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`,
+        'x-auth-organization-uuid': orgUuid
+      },
+      body: JSON.stringify({
+        operationName,
+        variables,
+        extensions: {
+          persistedQuery: {
+            version: 1,
+            sha256Hash: APQ_HASHES[operationName]
+          }
+        }
+      })
+    });
+
+    const json = await response.json();
+
+    if (json.errors && json.errors.length > 0) {
+      throw new Error(json.errors[0].message || 'GraphQL Error');
+    }
+
+    return json;
+  };
+
   // 日付オブジェクトが未来かどうか判定
   const isFutureDate = (dateObj) => {
     const today = new Date();
@@ -46,136 +89,56 @@
     return Math.floor(date.getTime() / 1000);
   };
 
-  // ListPurposeOfVisits クエリ
-  const LIST_PURPOSE_OF_VISITS = `
-    query ListPurposeOfVisits {
-      listPurposeOfVisits {
-        purposeOfVisits {
-          uuid
-          title
-        }
-      }
-    }
-  `;
+  // 診療科一覧を取得し、デフォルト（最初）を返す
+  const getDefaultPurposeOfVisit = async (core, dateObj) => {
+    const result = await apqFetch(core, 'ListPurposeOfVisits', {
+      input: { searchDate: dateObj }
+    });
 
-  // ListUsers クエリ（部署名取得用）
-  const LIST_USERS = `
-    query ListUsers {
-      listUsers {
-        users {
-          uuid
-          name
-          departmentName
-        }
-      }
-    }
-  `;
-
-  // EncountersInPatient クエリ（SessionからEncounterを探す）
-  const ENCOUNTERS_IN_PATIENT = `
-    query EncountersInPatient($patientId: ID!, $pageSize: Int) {
-      encountersInPatient(patientId: $patientId, pageSize: $pageSize) {
-        encounters {
-          id
-          basedOn {
-            uuid
-          }
-        }
-      }
-    }
-  `;
-
-  // ユーザーの部署名に対応する purposeOfVisit を取得
-  const getMatchingPurposeOfVisit = async (core, doctorUuid) => {
-    // ListUsersで全ユーザーを取得し、doctorUuidで絞り込み
-    const usersResult = await core.query(LIST_USERS);
-    const users = usersResult.data?.listUsers?.users || [];
-    const user = users.find(u => u.uuid === doctorUuid);
-    const departmentName = user?.departmentName;
-
-    if (!departmentName) {
-      logError('部署名を取得できませんでした');
-      return null;
+    const purposeOfVisits = result.data?.listPurposeOfVisits?.purposeOfVisits || [];
+    if (purposeOfVisits.length === 0) {
+      throw new Error('診療科が見つかりません');
     }
 
-    log('ユーザー部署:', departmentName);
-
-    const povResult = await core.query(LIST_PURPOSE_OF_VISITS);
-    const purposeOfVisits = povResult.data?.listPurposeOfVisits?.purposeOfVisits || [];
-
-    const matched = purposeOfVisits.find(pov => pov.title === departmentName);
-    if (matched) {
-      log('診療科マッチ:', matched.title, matched.uuid);
-      return matched;
-    }
-
-    const partialMatch = purposeOfVisits.find(pov =>
-      departmentName.includes(pov.title) || pov.title.includes(departmentName)
-    );
-
-    if (partialMatch) {
-      log('診療科部分マッチ:', partialMatch.title, partialMatch.uuid);
-      return partialMatch;
-    }
-
-    logError('一致する診療科が見つかりませんでした');
-    return null;
+    // TODO: ユーザーの部署名とマッチングする機能を追加予定
+    // 現在は最初の診療科（orderが1のもの）を使用
+    const defaultPov = purposeOfVisits.find(p => p.order?.value === 1) || purposeOfVisits[0];
+    log('診療科:', defaultPov.title, defaultPov.uuid);
+    return defaultPov;
   };
 
   // 外来予約を作成し、EncounterIDを取得
   const createOutpatientReservationAndGetEncounterId = async (core, patientUuid, doctorUuid, purposeOfVisitUuid, dateObj) => {
     const scheduleTime = dateToTimestamp(dateObj);
 
-    // CreateSession mutation（インライン方式）
-    const createSessionMutation = `
-      mutation {
-        createSession(input: {
-          uuid: ""
-          patientUuid: { value: "${patientUuid}" }
-          doctorUuid: "${doctorUuid}"
-          purposeOfVisitUuid: "${purposeOfVisitUuid}"
-          state: BEFORE_CONSULTATION
-          note: ""
-          countedInConsultationDays: true
-          scheduleTime: { seconds: ${scheduleTime}, nanos: 0 }
-        }) {
-          uuid
-          state
-        }
-      }
-    `;
-
     log('外来予約を作成中...', { date: `${dateObj.year}/${dateObj.month}/${dateObj.day}`, purposeOfVisitUuid });
 
-    const sessionResult = await core.query(createSessionMutation);
+    const result = await apqFetch(core, 'CreateSession', {
+      input: {
+        uuid: '',
+        patientUuid: { value: patientUuid },
+        doctorUuid: doctorUuid,
+        purposeOfVisitUuid: purposeOfVisitUuid,
+        state: 'BEFORE_CONSULTATION',
+        note: '',
+        countedInConsultationDays: true,
+        scheduleTime: { seconds: scheduleTime, nanos: 0 }
+      }
+    });
 
-    if (!sessionResult.data?.createSession?.uuid) {
+    const session = result.data?.createSession;
+    if (!session?.uuid) {
       throw new Error('外来予約の作成に失敗しました');
     }
 
-    const sessionUuid = sessionResult.data.createSession.uuid;
-    log('外来予約を作成しました:', sessionUuid);
-
-    // 少し待ってからEncounterを取得（Encounterが作成されるまでの遅延対策）
-    await new Promise(resolve => setTimeout(resolve, 500));
-
-    // EncountersInPatientでSessionに紐づくEncounterを探す
-    const encountersResult = await core.query(ENCOUNTERS_IN_PATIENT, {
-      patientId: patientUuid,
-      pageSize: 20
-    });
-
-    const encounters = encountersResult.data?.encountersInPatient?.encounters || [];
-    const matchedEncounter = encounters.find(enc =>
-      enc.basedOn?.some(session => session.uuid === sessionUuid)
-    );
-
-    if (!matchedEncounter) {
-      throw new Error('作成した予約に対応する診療録が見つかりませんでした');
+    const encounterId = session.encounterId?.value;
+    if (!encounterId) {
+      throw new Error('診療録IDが取得できませんでした');
     }
 
-    log('EncounterIDを取得しました:', matchedEncounter.id);
-    return matchedEncounter.id;
+    log('外来予約を作成しました:', session.uuid);
+    log('EncounterIDを取得しました:', encounterId);
+    return encounterId;
   };
 
   // 通知を表示
@@ -225,7 +188,7 @@
       return;
     }
 
-    log('初期化完了 - fetchインターセプト方式');
+    log('初期化完了 - APQ方式 v3.0.0');
 
     // fetchをインターセプト
     const originalFetch = window.fetch;
@@ -254,10 +217,7 @@
                 }
 
                 // 診療科を取得
-                const purposeOfVisit = await getMatchingPurposeOfVisit(core, doctorUuid);
-                if (!purposeOfVisit) {
-                  throw new Error('診療科を特定できません');
-                }
+                const purposeOfVisit = await getDefaultPurposeOfVisit(core, dateObj);
 
                 // 外来予約を作成し、EncounterIDを取得
                 const newEncounterId = await createOutpatientReservationAndGetEncounterId(
