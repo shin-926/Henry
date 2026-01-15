@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry セット展開検索ヘルパー
 // @namespace    https://henry-app.jp/
-// @version      2.1.4
+// @version      2.2.2
 // @description  セット展開画面の検索ボックス上にクイック検索ボタンを追加
 // @match        https://henry-app.jp/*
 // @grant        GM_setValue
@@ -305,7 +305,7 @@
         border-color: #2196f3;
       }
       .hss-edit-popup-items {
-        max-height: 150px;
+        max-height: 300px;
         overflow-y: auto;
       }
       .hss-edit-popup-item {
@@ -313,14 +313,49 @@
         align-items: center;
         gap: 6px;
         padding: 4px 0;
+        border-radius: 4px;
+        transition: background 0.1s ease;
       }
-      .hss-edit-popup-item-text {
+      .hss-edit-popup-item.dragging {
+        opacity: 0.4;
+        background: #e3f2fd;
+      }
+      .hss-edit-popup-item.drag-over {
+        border-top: 2px solid #2196f3;
+        margin-top: -2px;
+      }
+      .hss-drag-handle {
+        cursor: grab;
+        color: #aaa;
+        font-size: 14px;
+        padding: 2px 4px;
+        user-select: none;
+        line-height: 1;
+      }
+      .hss-drag-handle:hover {
+        color: #666;
+      }
+      .hss-drag-handle:active {
+        cursor: grabbing;
+      }
+      .hss-edit-popup-item-input {
         flex: 1;
         font-size: 13px;
         color: #333;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
+        padding: 4px 8px;
+        border: 1px solid transparent;
+        border-radius: 4px;
+        background: transparent;
+        outline: none;
+        min-width: 0;
+      }
+      .hss-edit-popup-item-input:hover {
+        border-color: #e0e0e0;
+        background: #fafafa;
+      }
+      .hss-edit-popup-item-input:focus {
+        border-color: #2196f3;
+        background: #fff;
       }
       .hss-edit-popup-item-delete {
         padding: 2px 6px;
@@ -382,10 +417,26 @@
     });
   }
 
-  // 編集ポップアップを閉じる
+  // 編集ポップアップを閉じる（入力中のテキストがあれば自動追加）
   function closeEditPopup() {
     const popup = document.querySelector('.hss-edit-popup');
-    if (popup) popup.remove();
+    if (popup) {
+      const addInput = popup.querySelector('.hss-edit-popup-add input');
+      const indexAttr = popup.dataset.itemIndex;
+      if (addInput && indexAttr !== undefined) {
+        const val = addInput.value.trim();
+        if (val) {
+          const items = loadItems();
+          const index = parseInt(indexAttr, 10);
+          if (items[index]) {
+            if (!items[index].items) items[index].items = [];
+            items[index].items.push(val);
+            saveItems(items);
+          }
+        }
+      }
+      popup.remove();
+    }
   }
 
   // ボタンコンテナを作成
@@ -497,6 +548,7 @@
       const item = items[index];
       const popup = document.createElement('div');
       popup.className = 'hss-edit-popup';
+      popup.dataset.itemIndex = index;
 
       // 名前編集セクション
       const nameSection = document.createElement('div');
@@ -533,15 +585,73 @@
       const itemsList = document.createElement('div');
       itemsList.className = 'hss-edit-popup-items';
 
+      let draggedSubIndex = null;
+
       function renderItems() {
         itemsList.innerHTML = '';
         const subItems = item.items || [];
         subItems.forEach((subItem, subIndex) => {
             const row = document.createElement('div');
             row.className = 'hss-edit-popup-item';
-            const text = document.createElement('span');
-            text.className = 'hss-edit-popup-item-text';
-            text.textContent = subItem;
+            row.draggable = true;
+            row.dataset.index = subIndex;
+
+            // ドラッグハンドル
+            const handle = document.createElement('span');
+            handle.className = 'hss-drag-handle';
+            handle.textContent = '⋮⋮';
+
+            // ドラッグイベント
+            row.ondragstart = (e) => {
+              draggedSubIndex = subIndex;
+              row.classList.add('dragging');
+              e.dataTransfer.effectAllowed = 'move';
+            };
+            row.ondragend = () => {
+              row.classList.remove('dragging');
+              draggedSubIndex = null;
+              itemsList.querySelectorAll('.drag-over').forEach(el => el.classList.remove('drag-over'));
+            };
+            row.ondragover = (e) => {
+              e.preventDefault();
+              if (draggedSubIndex === null || draggedSubIndex === subIndex) return;
+              row.classList.add('drag-over');
+            };
+            row.ondragleave = () => {
+              row.classList.remove('drag-over');
+            };
+            row.ondrop = (e) => {
+              e.preventDefault();
+              row.classList.remove('drag-over');
+              if (draggedSubIndex === null || draggedSubIndex === subIndex) return;
+              // 順序入れ替え
+              const draggedItem = item.items[draggedSubIndex];
+              item.items.splice(draggedSubIndex, 1);
+              const newIndex = draggedSubIndex < subIndex ? subIndex - 1 : subIndex;
+              item.items.splice(newIndex, 0, draggedItem);
+              saveItems(items);
+              renderItems();
+            };
+
+            const input = document.createElement('input');
+            input.type = 'text';
+            input.className = 'hss-edit-popup-item-input';
+            input.value = subItem;
+            input.onchange = () => {
+              const newValue = input.value.trim();
+              if (newValue && newValue !== subItem) {
+                item.items[subIndex] = newValue;
+                saveItems(items);
+              } else if (!newValue) {
+                input.value = subItem; // 空の場合は元に戻す
+              }
+            };
+            input.onkeydown = (e) => {
+              if (e.key === 'Enter') {
+                e.preventDefault();
+                input.blur();
+              }
+            };
             const deleteBtn = document.createElement('button');
             deleteBtn.className = 'hss-edit-popup-item-delete';
             deleteBtn.textContent = '×';
@@ -550,7 +660,8 @@
               saveItems(items);
               renderItems();
             };
-            row.appendChild(text);
+            row.appendChild(handle);
+            row.appendChild(input);
             row.appendChild(deleteBtn);
             itemsList.appendChild(row);
         });
@@ -558,33 +669,13 @@
       renderItems();
       itemsSection.appendChild(itemsList);
 
-      // 項目追加
+      // 項目追加（入力欄のみ、ポップアップを閉じるときに自動追加）
       const addRow = document.createElement('div');
       addRow.className = 'hss-edit-popup-add';
       const addInput = document.createElement('input');
       addInput.type = 'text';
       addInput.placeholder = '項目を追加...';
-      const addBtn = document.createElement('button');
-      addBtn.textContent = '追加';
-      addBtn.onclick = () => {
-        const val = addInput.value.trim();
-        if (val) {
-          if (!item.items) item.items = [];
-          item.items.push(val);
-          saveItems(items);
-          addInput.value = '';
-          renderItems();
-        }
-      };
-      addInput.onkeydown = (e) => {
-        if (e.isComposing) return;
-        if (e.key === 'Enter') {
-          e.preventDefault();
-          addBtn.click();
-        }
-      };
       addRow.appendChild(addInput);
-      addRow.appendChild(addBtn);
       itemsSection.appendChild(addRow);
       popup.appendChild(itemsSection);
 
