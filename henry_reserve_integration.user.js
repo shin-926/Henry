@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         予約システム連携
 // @namespace    https://github.com/shin-926/Tampermonkey
-// @version      2.1.0
+// @version      2.2.0
 // @description  Henryカルテと予約システム間の双方向連携（再診予約・患者プレビュー・ページ遷移）
 // @match        https://henry-app.jp/*
 // @match        https://manage-maokahp.reserve.ne.jp/*
@@ -660,6 +660,7 @@
 
       // 患者ID検証用のフラグ
       let patientIdVerified = false;
+      let capturedDate = context.date;
       let capturedTime = '09:00';
 
       // キャプチャフェーズで患者IDを検証（不一致の場合は予約を阻止）
@@ -677,12 +678,14 @@
           return;
         }
 
-        // クリック時に時間を取得
+        // クリック時に日付と時間を取得
+        const dateInput = document.getElementById('reserve_date');
         const timeInput = document.getElementById('reserve_time');
+        capturedDate = dateInput?.value || context.date;
         capturedTime = timeInput?.value || '09:00';
         patientIdVerified = true;
 
-        log.info('予約登録ボタンがクリックされました。患者ID確認OK、時間:', capturedTime);
+        log.info('予約登録ボタンがクリックされました。患者ID確認OK、日付:', capturedDate, '時間:', capturedTime);
       }, { capture: true });
 
       // バブリングフェーズでダイアログ閉じを監視
@@ -694,10 +697,10 @@
           const dialogElement = document.querySelector('#dialog_reserve_input');
           if (!dialogElement || dialogElement.closest('.ui-dialog')?.style.display === 'none') {
             clearInterval(checkDialogClosed);
-            log.info('予約登録完了を検出。予約時間を送信:', capturedTime);
+            log.info('予約登録完了を検出。予約日時を送信:', capturedDate, capturedTime);
 
-            // 予約結果をHenryに送信
-            GM_setValue('reservationResult', { time: capturedTime, timestamp: Date.now() });
+            // 予約結果をHenryに送信（日付と時間）
+            GM_setValue('reservationResult', { date: capturedDate, time: capturedTime, timestamp: Date.now() });
             GM_setValue('imagingOrderContext', null);
 
             // バナーを削除

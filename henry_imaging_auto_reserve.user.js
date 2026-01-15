@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry 照射オーダー自動予約
 // @namespace    https://henry-app.jp/
-// @version      4.1.0
+// @version      4.2.0
 // @description  照射オーダー完了時に未来日付の場合、予約システムで予約を取ってから外来予約を自動作成し、その診療録に照射オーダーを紐づける
 // @match        https://henry-app.jp/*
 // @grant        GM_setValue
@@ -234,8 +234,11 @@
 
         if (newValue.cancelled) {
           reject(new Error('予約がキャンセルされました'));
+        } else if (newValue.time && newValue.date) {
+          resolve({ date: newValue.date, time: newValue.time });
         } else if (newValue.time) {
-          resolve(newValue.time);
+          // 日付がない場合は元の日付を使用（後方互換性）
+          resolve({ date: null, time: newValue.time });
         } else {
           reject(new Error('予約時間が取得できませんでした'));
         }
@@ -301,7 +304,7 @@
       return;
     }
 
-    log('初期化完了 - フルクエリ方式 v4.1.0 (予約システム連携)');
+    log('初期化完了 - フルクエリ方式 v4.2.0 (予約システム連携)');
 
     // 初期化時に古いコンテキストをクリア
     GM_setValue('imagingOrderContext', null);
@@ -344,21 +347,37 @@
                   return originalFetch.apply(this, args);
                 }
 
-                // 予約システムを開いて予約時間を取得
+                // 予約システムを開いて予約日時を取得
                 showNotification('予約システムで予約を取ってください', 'info');
-                const reservationTime = await openReserveAndGetTime(patientInfo, dateObj);
-                log('予約時間:', reservationTime);
+                const reservationResult = await openReserveAndGetTime(patientInfo, dateObj);
+                log('予約日時:', reservationResult);
 
-                // 診療科を取得
-                const purposeOfVisit = await getDefaultPurposeOfVisit(core, dateObj);
+                // 予約システムで選択された日付を使用（異なる日付が選ばれた場合に対応）
+                let actualDateObj = dateObj;
+                if (reservationResult.date) {
+                  const [year, month, day] = reservationResult.date.split('-').map(Number);
+                  actualDateObj = { year, month, day };
+                  if (reservationResult.date !== `${dateObj.year}-${String(dateObj.month).padStart(2, '0')}-${String(dateObj.day).padStart(2, '0')}`) {
+                    log('予約日が変更されました:', reservationResult.date);
+                  }
+                }
+
+                // 診療科を取得（予約システムで選択された日付で）
+                const purposeOfVisit = await getDefaultPurposeOfVisit(core, actualDateObj);
 
                 // 外来予約を作成し、EncounterIDを取得
                 const newEncounterId = await createOutpatientReservationAndGetEncounterId(
-                  core, patientUuid, doctorUuid, purposeOfVisit.uuid, dateObj, reservationTime
+                  core, patientUuid, doctorUuid, purposeOfVisit.uuid, actualDateObj, reservationResult.time
                 );
 
                 // リクエストボディのencounterIdを差し替え
                 body.variables.input.encounterId = { value: newEncounterId };
+
+                // 予約システムで日付が変更された場合、照射オーダーの日付も更新
+                if (reservationResult.date && (actualDateObj.year !== dateObj.year || actualDateObj.month !== dateObj.month || actualDateObj.day !== dateObj.day)) {
+                  body.variables.input.date = actualDateObj;
+                  log('照射オーダーの日付も更新:', actualDateObj);
+                }
 
                 // 修正したボディでリクエスト
                 const newOptions = {
@@ -367,7 +386,7 @@
                 };
 
                 log('EncounterIDを差し替えてリクエスト送信:', newEncounterId);
-                showNotification(`${dateObj.year}/${dateObj.month}/${dateObj.day} ${reservationTime} の外来予約を作成し、照射オーダーを紐づけました`, 'success');
+                showNotification(`${actualDateObj.year}/${actualDateObj.month}/${actualDateObj.day} ${reservationResult.time} の外来予約を作成し、照射オーダーを紐づけました`, 'success');
 
                 return originalFetch.call(this, url, newOptions);
 
