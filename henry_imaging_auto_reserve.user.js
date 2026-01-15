@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry 照射オーダー自動予約
 // @namespace    https://henry-app.jp/
-// @version      2.0.0
+// @version      2.0.1
 // @description  照射オーダー完了時に未来日付の場合、外来予約を自動作成し、その診療録に照射オーダーを紐づける
 // @match        https://henry-app.jp/*
 // @grant        none
@@ -58,16 +58,7 @@
     }
   `;
 
-  // GetUser クエリ（部署名取得用）
-  const GET_USER = `
-    query GetUser($input: GetUserRequestInput!) {
-      getUser(input: $input) {
-        uuid
-        name
-        departmentName
-      }
-    }
-  `;
+  // GetUser クエリ（部署名取得用）- インライン方式で動的に生成
 
   // EncountersInPatient クエリ（SessionからEncounterを探す）
   const ENCOUNTERS_IN_PATIENT = `
@@ -85,7 +76,17 @@
 
   // ユーザーの部署名に対応する purposeOfVisit を取得
   const getMatchingPurposeOfVisit = async (core, doctorUuid) => {
-    const userResult = await core.query(GET_USER, { input: { uuid: doctorUuid } });
+    // インライン方式でGetUserを呼び出し
+    const getUserQuery = `
+      query {
+        getUser(input: { uuid: "${doctorUuid}" }) {
+          uuid
+          name
+          departmentName
+        }
+      }
+    `;
+    const userResult = await core.query(getUserQuery);
     const departmentName = userResult.data?.getUser?.departmentName;
 
     if (!departmentName) {
