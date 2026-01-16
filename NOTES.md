@@ -470,3 +470,72 @@ function init() {
 
 HenryCore.utils.subscribeNavigation(cleaner, init);
 ```
+
+---
+
+## MutationObserver 使用状況調査 (2026-01-16)
+
+### 全スクリプトの使用状況
+
+| ファイル名 | 数 | 監視対象 | オプション | 処理内容 |
+|---------|---|---------|-----------|---------|
+| **henry_core.user.js** | 1 | `document.body` または `documentElement` | `childList, subtree` | セレクタ要素の出現待機（waitForElement） |
+| **henry_login_helper.user.js** | 1 | `document.body` | `childList, subtree` | メールアドレス入力フィールド出現検出 |
+| **henry_reserve_integration.user.js** | 4 | `document.body` | `childList, subtree` ※tooltipは`attributes`追加 | ポップアップ削除、ダイアログ検出、患者ID自動入力、ツールチップ拡張 |
+| **henry_set_search_helper.user.js** | 1 | `document.body` | `childList, subtree` | セットパネル開閉検出（debounce 100ms） |
+| **henry_rad_order_auto_printer.user.js** | 2 | `document.body` | `childList, subtree, attributes, characterData` | 要素出現待機＋DOM安定化待機 |
+| **henry_toolbox.user.js** | 1 | `document.body` | `childList, subtree` | ツールボックスUI監視・再構築 |
+| **henry_imaging_order_helper.user.js** | 2 | `document.body` / `modal` | `childList, subtree` | モーダル出現検出＋内部要素変化検出 |
+| **henry_google_drive_bridge.user.js** | 1 | `document.body` | `childList, subtree` | ファイルリストボタン再作成 |
+| **reserve_calendar_ui.user.js** | 1 | `#div_swipe_calendar` | `childList, subtree: false` | カレンダー設定再適用（最適化済み） |
+| **henry_rad_order_print_single_page.user.js** | 1 | `document.body` | `childList, subtree` | iframe出現検出（debounce 500ms） |
+
+### MutationObserver未使用（11ファイル）
+
+henry_auto_approver, henry_note_reader, henry_error_logger, henry_disease_list, henry_karte_history, henry_order_history, henry_hospitalization_data, henry_memo, henry_disease_register, henry_search_focus, henry_ikensho_form
+
+### 統計
+
+- **使用スクリプト**: 10ファイル
+- **全インスタンス数**: 15個
+- **大半が `document.body` + `subtree: true`**: 広範囲監視が多い
+
+---
+
+## MutationObserver コールバック処理コスト（重い順）
+
+| 順位 | スクリプト | コスト | 主な理由 |
+|:---:|-----------|:---:|---------|
+| 1 | **henry_imaging_order_helper.user.js** | 🔴 重 | React Fiber走査（10〜15階層）、querySelectorAll('h2'), querySelectorAll('label')を毎回実行、subtree:true |
+| 2 | **henry_reserve_integration.user.js** | 🔴 重 | 4つのObserver並走、SPA遷移でリーク可能性、複数querySelector |
+| 3 | **henry_rad_order_auto_printer.user.js** | 🔴 重 | querySelectorAll複数、getBoundingClientRect複数、ネストしたObserver |
+| 4 | henry_google_drive_bridge.user.js | 🟡 中 | JSON.parse毎回、配列操作多い（早期リターンで軽減） |
+| 5 | henry_toolbox.user.js | 🟡 中 | querySelector×4、DOM作成（一度作成後はスキップ） |
+| 6 | henry_set_search_helper.user.js | 🟡 中 | 大量DOM作成（debounce 100msで軽減） |
+| 7 | henry_login_helper.user.js | 🟢 軽 | querySelector×1のみ |
+| 8 | reserve_calendar_ui.user.js | 🟢 軽 | subtree:false化済み、早期リターン多い |
+| 9 | henry_core.user.js | 🟢 軽 | イベント発火のみ |
+| 10 | henry_rad_order_print_single_page.user.js | 🟢 軽 | シンプルな検出のみ |
+
+### MutationObserverの発火条件
+
+| オプション | 検出する変化 |
+|-----------|-------------|
+| `childList: true` | 子要素の追加・削除 |
+| `subtree: true` | 上記を子孫全体に適用 |
+| `attributes: true` | 属性の変更（class, style, data-*など） |
+| `characterData: true` | テキストノードの内容変更 |
+
+**発火するもの**: ドロップダウン開閉、モダリティ変更、内容追加、バリデーションエラー、ローディング表示
+
+**発火しないもの**: テキスト入力（valueはプロパティ）、マウスホバー（CSS :hover）、スクロール
+
+### 最適化アプローチ
+
+| 方式 | メリット | デメリット |
+|------|---------|-----------|
+| `subtree: false` | 発火回数激減 | 深い階層の変化を検出できない |
+| debounce追加 | 連続発火を集約 | 遅延が発生 |
+| setIntervalポーリング | 発火頻度が固定（例: 3.3回/秒） | 変化がなくても実行される |
+| 処理済みフラグ | 重複処理を防止 | フラグ管理が必要 |
+| 自前UI | MutationObserver不要 | 開発コスト大 |

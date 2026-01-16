@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         予約システム連携
 // @namespace    https://github.com/shin-926/Henry
-// @version      3.4.4
+// @version      3.4.5
 // @description  Henryカルテと予約システム間の双方向連携（再診予約・照射オーダー自動予約・患者プレビュー）
 // @match        https://henry-app.jp/*
 // @match        https://manage-maokahp.reserve.ne.jp/*
@@ -932,7 +932,6 @@
 
       if (isImagingMode && context) {
         banner.innerHTML = `
-          <span style="margin-right: 12px;">📡</span>
           <span><strong>照射オーダー予約</strong></span>
           <span style="margin: 0 12px; color: rgba(255,255,255,0.5);">|</span>
           <span>患者: <strong>${patientId}</strong> ${patientName || ''}</span>
@@ -946,7 +945,6 @@
         });
       } else {
         banner.innerHTML = `
-          <span style="margin-right: 12px;">📅</span>
           <span><strong>再診予約</strong></span>
           <span style="margin: 0 12px; color: rgba(0,0,0,0.3);">|</span>
           <span>患者: <strong>${patientId}</strong> ${patientName || ''}</span>

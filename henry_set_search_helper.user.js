@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry セット展開検索ヘルパー
 // @namespace    https://henry-app.jp/
-// @version      2.2.2
+// @version      2.2.3
 // @description  セット展開画面の検索ボックス上にクイック検索ボタンを追加
 // @match        https://henry-app.jp/*
 // @grant        GM_setValue
@@ -669,12 +669,31 @@
       renderItems();
       itemsSection.appendChild(itemsList);
 
-      // 項目追加（入力欄のみ、ポップアップを閉じるときに自動追加）
+      // 項目追加（Enterで追加して次の入力欄を作成、閉じるときも自動追加）
       const addRow = document.createElement('div');
       addRow.className = 'hss-edit-popup-add';
       const addInput = document.createElement('input');
       addInput.type = 'text';
       addInput.placeholder = '項目を追加...';
+      addInput.onkeydown = (e) => {
+        if (e.isComposing) return;
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          const val = addInput.value.trim();
+          if (val) {
+            if (!item.items) item.items = [];
+            item.items.push(val);
+            saveItems(items);
+            addInput.value = '';
+            renderItems();
+            // 新しい入力欄にフォーカス
+            setTimeout(() => {
+              const newInput = popup.querySelector('.hss-edit-popup-add input');
+              if (newInput) newInput.focus();
+            }, 0);
+          }
+        }
+      };
       addRow.appendChild(addInput);
       itemsSection.appendChild(addRow);
       popup.appendChild(itemsSection);

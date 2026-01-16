@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         予約システム：カレンダーUIカスタム
 // @namespace    http://tampermonkey.net/
-// @version      2.48.0
+// @version      2.48.1
 // @description  カレンダー縦表示、週ジャンプなど
 // @author       Gemini (with Claude's advice)
 // @match        https://manage-maokahp.reserve.ne.jp/manage/calendar.php*
@@ -331,7 +331,7 @@ ${CONFIG.targetSelector} .ui-datepicker-calendar a.ui-state-active {
             applyCalendarSettings();
             ensureWeeksAfterUI();
           });
-          observer.observe(observerTarget, { childList: true, subtree: true });
+          observer.observe(observerTarget, { childList: true, subtree: false });
         }
       }
     } else {
