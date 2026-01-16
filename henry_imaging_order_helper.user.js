@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         画像オーダー入力支援
 // @namespace    https://henry-app.jp/
-// @version      1.14.5
+// @version      1.14.6
 // @description  画像照射オーダーモーダルに部位・方向選択UIを追加（複数内容対応）
 // @author       Henry UI Lab
 // @match        https://henry-app.jp/*
@@ -341,7 +341,7 @@
     logger = utils.createLogger(CONFIG.SCRIPT_NAME);
     const cleaner = utils.createCleaner();
 
-    logger.info('スクリプト初期化 (v1.14.5)');
+    logger.info('スクリプト初期化 (v1.14.6)');
 
     utils.subscribeNavigation(cleaner, () => {
       logger.info('ページ遷移検出 -> 再セットアップ');
@@ -747,6 +747,7 @@
 
   // ==========================================
   // 体位を「任意」に設定（単純撮影・骨塩定量のとき）
+  // 全ての内容の体位フィールドに対して設定
   // ==========================================
   async function setBodyPositionToArbitrary() {
     logger.info('体位設定: 開始');
@@ -754,16 +755,21 @@
     // DOMの準備を待つ
     await new Promise(r => setTimeout(r, 300));
 
-    const chipInput = document.querySelector('[data-testid="BodyPositionForm__ChipInput"]');
-    logger.info('体位設定: ChipInput =', !!chipInput);
+    // 全ての体位フィールドを取得
+    const allChipInputs = document.querySelectorAll('[data-testid="BodyPositionForm__ChipInput"]');
+    logger.info(`体位設定: ${allChipInputs.length}個のChipInputを検出`);
 
-    if (!chipInput) {
+    if (allChipInputs.length === 0) {
       logger.warn('体位設定: ChipInputが見つかりません');
       return;
     }
 
-    const result = await setBodyPosition(chipInput, 'BODY_POSITION_ANY');
-    logger.info('体位設定: 結果 =', result);
+    // 各体位フィールドに対して設定
+    for (let i = 0; i < allChipInputs.length; i++) {
+      const chipInput = allChipInputs[i];
+      const result = await setBodyPosition(chipInput, 'BODY_POSITION_ANY');
+      logger.info(`体位設定: 内容${i + 1} 結果 =`, result);
+    }
   }
 
   // ==========================================
