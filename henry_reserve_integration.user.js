@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         予約システム連携
 // @namespace    https://github.com/shin-926/Henry
-// @version      3.4.5
+// @version      3.4.6
 // @description  Henryカルテと予約システム間の双方向連携（再診予約・照射オーダー自動予約・患者プレビュー）
 // @match        https://henry-app.jp/*
 // @match        https://manage-maokahp.reserve.ne.jp/*
@@ -351,7 +351,6 @@
         await HenryCore.registerPlugin({
           id: 'reserve-integration',
           name: '再診予約',
-          icon: '📅',
           description: '予約システムを開いて患者情報を自動入力',
           version: '1.3.0',
           order: 30,
