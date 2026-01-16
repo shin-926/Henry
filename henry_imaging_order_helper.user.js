@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         画像オーダー入力支援
 // @namespace    https://henry-app.jp/
-// @version      1.14.3
+// @version      1.14.4
 // @description  画像照射オーダーモーダルに部位・方向選択UIを追加（複数内容対応）
 // @author       Henry UI Lab
 // @match        https://henry-app.jp/*
@@ -341,7 +341,7 @@
     logger = utils.createLogger(CONFIG.SCRIPT_NAME);
     const cleaner = utils.createCleaner();
 
-    logger.info('スクリプト初期化 (v1.14.3)');
+    logger.info('スクリプト初期化 (v1.14.4)');
 
     utils.subscribeNavigation(cleaner, () => {
       logger.info('ページ遷移検出 -> 再セットアップ');
@@ -432,9 +432,9 @@
       }
     }
 
-    // XP/MDの場合、体位を「任意」に設定（内容追加時のリセット対策）
+    // XP/MDの場合、体位を「任意」に設定（内容追加時のリセット対策、遅延実行）
     if (currentModality === 'XP' || currentModality === 'MD') {
-      setBodyPositionToArbitrary();
+      setTimeout(() => setBodyPositionToArbitrary(), 500);
     }
 
     // トグルボタンを追加（まだなければ）
