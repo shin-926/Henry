@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         画像オーダー入力支援
 // @namespace    https://henry-app.jp/
-// @version      1.14.4
+// @version      1.14.5
 // @description  画像照射オーダーモーダルに部位・方向選択UIを追加（複数内容対応）
 // @author       Henry UI Lab
 // @match        https://henry-app.jp/*
@@ -341,7 +341,7 @@
     logger = utils.createLogger(CONFIG.SCRIPT_NAME);
     const cleaner = utils.createCleaner();
 
-    logger.info('スクリプト初期化 (v1.14.4)');
+    logger.info('スクリプト初期化 (v1.14.5)');
 
     utils.subscribeNavigation(cleaner, () => {
       logger.info('ページ遷移検出 -> 再セットアップ');
@@ -708,22 +708,35 @@
       }
 
       // 親を辿ってbodyPositionsとonChangeを持つコンポーネントを探す
-      let target = chipInput[fiberKey]?.return;
-      for (let i = 0; i < 15 && target; i++) {
+      let fiber = chipInput[fiberKey];
+      let target = fiber?.return;
+      let formComponent = null;
+
+      for (let i = 0; i < 20 && target; i++) {
         const props = target.memoizedProps;
         if (props?.bodyPositions !== undefined && props?.onChange) {
+          formComponent = target;
           break;
         }
         target = target.return;
       }
 
-      if (!target?.memoizedProps?.onChange) {
+      if (!formComponent?.memoizedProps?.onChange) {
         logger.warn('体位設定: 親コンポーネントが見つかりません');
         return false;
       }
 
-      // 親コンポーネントのonChangeを直接呼ぶ
-      target.memoizedProps.onChange([positionCode]);
+      // alternateがあれば最新の状態を使う（React Concurrent Mode対策）
+      const currentFiber = formComponent.alternate || formComponent;
+      const onChange = currentFiber.memoizedProps?.onChange || formComponent.memoizedProps.onChange;
+
+      // onChangeを呼ぶ
+      onChange([positionCode]);
+
+      // 強制的にinputイベントを発火してReactに通知
+      chipInput.dispatchEvent(new Event('input', { bubbles: true }));
+      chipInput.dispatchEvent(new Event('change', { bubbles: true }));
+
       logger.info(`体位設定: "${positionCode}" を設定成功`);
       return true;
     } catch (e) {
