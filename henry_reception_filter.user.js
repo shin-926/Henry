@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry 外来受付フィルタ
 // @namespace    https://github.com/shin-926/Henry
-// @version      1.0.0
+// @version      1.1.0
 // @description  外来受付画面で「未完了」（会計待ち・会計済み以外）の患者のみ表示
 // @author       Claude
 // @match        https://henry-app.jp/*
@@ -19,6 +19,27 @@
 
   // フィルタ状態
   let filterEnabled = true;
+
+  /**
+   * Apollo Client で患者リストを再取得
+   */
+  async function refreshPatientList() {
+    const client = window.__APOLLO_CLIENT__;
+    if (!client) {
+      console.warn(`[${SCRIPT_NAME}] Apollo Client が見つかりません`);
+      return false;
+    }
+
+    try {
+      console.log(`[${SCRIPT_NAME}] 患者リストを再取得中...`);
+      await client.refetchQueries({ include: ['listSessions'] });
+      console.log(`[${SCRIPT_NAME}] 患者リストを再取得しました`);
+      return true;
+    } catch (e) {
+      console.error(`[${SCRIPT_NAME}] 再取得エラー:`, e);
+      return false;
+    }
+  }
 
   /**
    * 患者リストにフィルタを適用
@@ -123,7 +144,7 @@
   /**
    * 初期化
    */
-  function init(cleaner) {
+  async function init(cleaner) {
     // 外来受付画面でのみ動作
     if (!location.pathname.startsWith('/reception')) {
       return;
@@ -135,12 +156,17 @@
     filterEnabled = true;
 
     // DOMの準備を待つ
-    const checkReady = setInterval(() => {
+    const checkReady = setInterval(async () => {
       const cards = document.querySelectorAll(PATIENT_CARD_SELECTOR);
       if (cards.length > 0) {
         clearInterval(checkReady);
+
+        // 最新データを取得してからフィルタ適用
+        await refreshPatientList();
+
         addFilterButton();
-        applyFilter();
+        // データ再取得後、少し待ってからフィルタ適用
+        setTimeout(applyFilter, 300);
         observePatientList(cleaner);
       }
     }, 200);
