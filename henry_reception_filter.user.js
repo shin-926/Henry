@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry 外来受付フィルタ
 // @namespace    https://github.com/shin-926/Henry
-// @version      1.2.0
+// @version      1.3.0
 // @description  外来受付画面で「未完了」（会計待ち・会計済み以外）の患者のみ表示
 // @author       Claude
 // @match        https://henry-app.jp/*
@@ -17,6 +17,8 @@
   const FILTER_BUTTON_ID = 'henry-reception-filter-btn';
   const FILTER_LI_ID = 'henry-reception-filter-li';
   const PATIENT_CARD_SELECTOR = 'li[data-mabl-component="patient-list-item"]';
+  // 既存フィルタボタンのID（Henry本体のもの）
+  const EXISTING_FILTER_IDS = ['_all', 'beforeConsultation', 'beforeExamination', 'started', 'beforePayment', 'afterPayment'];
 
   // フィルタ状態
   let filterEnabled = true;
@@ -92,31 +94,47 @@
       filterLi.dataset.selected = 'false';
       Object.assign(filterBtn.style, STYLES.unselected);
     }
+
+    // 既存フィルタボタンのスタイル更新
+    EXISTING_FILTER_IDS.forEach(id => {
+      const btn = document.querySelector(`#${id} button`);
+      if (btn) {
+        if (filterEnabled) {
+          // 「未完了のみ」が有効なら他をグレーアウト
+          btn.style.color = STYLES.unselected.color;
+        } else {
+          // 「未完了のみ」が無効なら元に戻す（Henryのデフォルト）
+          btn.style.color = '';
+        }
+      }
+    });
+  }
+
+  /**
+   * フィルタを解除（カードを全て表示）
+   */
+  function clearFilter() {
+    filterEnabled = false;
+    const cards = document.querySelectorAll(PATIENT_CARD_SELECTOR);
+    cards.forEach(card => card.style.display = '');
+    updateButtonStyles();
+    console.log(`[${SCRIPT_NAME}] フィルタ解除`);
   }
 
   /**
    * 既存のフィルタボタンにイベントリスナーを追加
    */
   function setupExistingFilterButtons() {
-    // 既存のフィルタボタン（li要素）を探す
-    const filterItems = document.querySelectorAll('li[id^="_"]');
+    EXISTING_FILTER_IDS.forEach(id => {
+      const li = document.getElementById(id);
+      if (!li) return;
 
-    filterItems.forEach(li => {
       // 既にリスナーを追加済みならスキップ
       if (li.dataset.customListenerAdded) return;
       li.dataset.customListenerAdded = 'true';
 
-      li.addEventListener('click', () => {
-        // 他のフィルタがクリックされたら「未完了のみ」を解除
-        if (filterEnabled) {
-          filterEnabled = false;
-          // フィルタ解除（全て表示）
-          const cards = document.querySelectorAll(PATIENT_CARD_SELECTOR);
-          cards.forEach(card => card.style.display = '');
-          updateButtonStyles();
-          console.log(`[${SCRIPT_NAME}] フィルタ解除（他のフィルタが選択されました）`);
-        }
-      });
+      // キャプチャフェーズで先に実行（Henryより先に処理）
+      li.addEventListener('click', clearFilter, true);
     });
   }
 
@@ -127,10 +145,9 @@
     // 既に追加済みなら何もしない
     if (document.getElementById(FILTER_LI_ID)) return;
 
-    // 「会計済み」ボタンの親li要素を探す
-    const existingButtons = document.querySelectorAll('li[id^="_"]');
-    const lastLi = existingButtons[existingButtons.length - 1];
-    if (!lastLi) return;
+    // 「すべて」ボタンの親li要素を探す（「未完了のみ」は「すべて」の後に挿入）
+    const allLi = document.getElementById('_all');
+    if (!allLi) return;
 
     // li要素を作成（既存と同じ構造）
     const li = document.createElement('li');
@@ -167,8 +184,8 @@
 
     li.appendChild(btn);
 
-    // 「会計済み」の後に挿入
-    lastLi.parentElement.insertBefore(li, lastLi.nextSibling);
+    // 「すべて」の後に挿入
+    allLi.parentElement.insertBefore(li, allLi.nextSibling);
 
     // 既存ボタンにリスナーを設定
     setupExistingFilterButtons();
