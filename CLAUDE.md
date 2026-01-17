@@ -1,6 +1,6 @@
-# Henry EMR 開発ガイドライン (Core Rules v4.14)
+# Henry EMR 開発ガイドライン (Core Rules v4.15)
 
-<!-- 📝 UPDATED: v4.14 - SPA遷移対応（subscribeNavigation）ルール追加 -->
+<!-- 📝 UPDATED: v4.15 - Gemini MCPモデル指定ルール追加 -->
 
 > このドキュメントはAIアシスタントとの協働開発における必須ルール集です。HenryCore APIの詳細は `henry_core.user.js` 冒頭のAPI目次と実装を参照。
 
@@ -369,6 +369,8 @@ chrome-devtools-mcpでリアルタイム調査。静的リファレンスは廃�
   ```
   - いきなりダイアログを表示するとユーザーが混乱するため、先に理由を伝える
 
+- **YOU MUST**: Gemini MCP（`ask-gemini`）を使用する際は、常に `model: "gemini-3-pro-preview"` を指定すること。
+
 - **IMPORTANT**: GraphQL mutationで変数型（`$input: SomeInput!`）がエラーになる場合は、インライン方式を使うこと：
   ```javascript
   // NG: 変数型（サーバーが型を公開していない場合エラー）
@@ -387,6 +389,7 @@ chrome-devtools-mcpでリアルタイム調査。静的リファレンスは廃�
 
 | Version | Date | Changes |
 |---------|------|---------|
+| v4.15 | 2026-01-17 | Gemini MCPモデル指定ルール追加（gemini-3-pro-preview） |
 | v4.14 | 2026-01-14 | SPA遷移対応（subscribeNavigation）ルール追加 |
 | v4.13 | 2026-01-13 | GraphQL インライン方式ルール追加 |
 | v4.12 | 2026-01-13 | OAuth認証時はalertで理由を伝えるルール追加 |

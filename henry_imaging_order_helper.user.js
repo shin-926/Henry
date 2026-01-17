@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         画像オーダー入力支援
 // @namespace    https://henry-app.jp/
-// @version      1.14.6
+// @version      1.14.7
 // @description  画像照射オーダーモーダルに部位・方向選択UIを追加（複数内容対応）
 // @author       Henry UI Lab
 // @match        https://henry-app.jp/*
@@ -341,7 +341,7 @@
     logger = utils.createLogger(CONFIG.SCRIPT_NAME);
     const cleaner = utils.createCleaner();
 
-    logger.info('スクリプト初期化 (v1.14.6)');
+    logger.info('スクリプト初期化 (v1.14.7)');
 
     utils.subscribeNavigation(cleaner, () => {
       logger.info('ページ遷移検出 -> 再セットアップ');
@@ -630,6 +630,28 @@
     }
     return null;
   }
+
+  // ==========================================
+  // 「側性」セレクトを検出
+  // ==========================================
+  function findLateralitySelect(noteInput) {
+    let parent = noteInput;
+    for (let i = 0; i < 10 && parent; i++) {
+      const lateralitySelect = parent.querySelector('select[name*="laterality"]');
+      if (lateralitySelect) {
+        return lateralitySelect;
+      }
+      parent = parent.parentElement;
+    }
+    return null;
+  }
+
+  // 側性のマッピング（ヘルパーUI → 元フォーム）
+  const LATERALITY_MAP = {
+    '右': 'UNILATERAL_RIGHT',
+    '左': 'UNILATERAL_LEFT',
+    '両': 'BILATERAL'
+  };
 
   // ==========================================
   // 「撮影条件」入力欄を検出
@@ -1360,6 +1382,16 @@
 
     lateralitySelect.addEventListener('change', () => {
       state.laterality = lateralitySelect.value;
+      // 元フォームの側性にも値を設定（動的に出現するので都度検出）
+      if (state.laterality) {
+        const currentLateralitySelect = findLateralitySelect(noteInput);
+        const mappedValue = LATERALITY_MAP[state.laterality];
+        if (currentLateralitySelect && mappedValue) {
+          currentLateralitySelect.value = mappedValue;
+          currentLateralitySelect.dispatchEvent(new Event('change', { bubbles: true }));
+          logger.info(`UI ${index + 1}: 元フォーム側性を ${mappedValue} に設定`);
+        }
+      }
       // 枚数を再計算
       if (filmCountInput && state.directions.length > 0) {
         let count = calculateFilmCount(state.directions);
