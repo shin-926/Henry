@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry 外来受付フィルタ
 // @namespace    https://github.com/shin-926/Henry
-// @version      1.1.0
+// @version      1.2.0
 // @description  外来受付画面で「未完了」（会計待ち・会計済み以外）の患者のみ表示
 // @author       Claude
 // @match        https://henry-app.jp/*
@@ -15,10 +15,23 @@
 
   const SCRIPT_NAME = 'ReceptionFilter';
   const FILTER_BUTTON_ID = 'henry-reception-filter-btn';
+  const FILTER_LI_ID = 'henry-reception-filter-li';
   const PATIENT_CARD_SELECTOR = 'li[data-mabl-component="patient-list-item"]';
 
   // フィルタ状態
   let filterEnabled = true;
+
+  // スタイル定数（Henryのフィルタボタンに合わせる）
+  const STYLES = {
+    selected: {
+      color: 'rgba(0, 0, 0, 0.73)',
+      fontWeight: '600'
+    },
+    unselected: {
+      color: 'rgba(0, 0, 0, 0.4)',
+      fontWeight: '600'
+    }
+  };
 
   /**
    * Apollo Client で患者リストを再取得
@@ -60,62 +73,106 @@
     });
 
     console.log(`[${SCRIPT_NAME}] フィルタ適用: 表示=${shown}, 非表示=${hidden}`);
-    updateButtonState();
+    updateButtonStyles();
   }
 
   /**
-   * ボタンの表示状態を更新
+   * すべてのフィルタボタンのスタイルを更新
    */
-  function updateButtonState() {
-    const btn = document.getElementById(FILTER_BUTTON_ID);
-    if (!btn) return;
+  function updateButtonStyles() {
+    const filterLi = document.getElementById(FILTER_LI_ID);
+    const filterBtn = document.getElementById(FILTER_BUTTON_ID);
+    if (!filterLi || !filterBtn) return;
 
+    // 「未完了のみ」ボタンのスタイル更新
     if (filterEnabled) {
-      btn.textContent = '未完了のみ';
-      btn.style.backgroundColor = '#1976d2';
-      btn.style.color = 'white';
+      filterLi.dataset.selected = 'true';
+      Object.assign(filterBtn.style, STYLES.selected);
     } else {
-      btn.textContent = '未完了のみ';
-      btn.style.backgroundColor = '';
-      btn.style.color = '';
+      filterLi.dataset.selected = 'false';
+      Object.assign(filterBtn.style, STYLES.unselected);
     }
   }
 
   /**
-   * フィルタボタンを追加
+   * 既存のフィルタボタンにイベントリスナーを追加
+   */
+  function setupExistingFilterButtons() {
+    // 既存のフィルタボタン（li要素）を探す
+    const filterItems = document.querySelectorAll('li[id^="_"]');
+
+    filterItems.forEach(li => {
+      // 既にリスナーを追加済みならスキップ
+      if (li.dataset.customListenerAdded) return;
+      li.dataset.customListenerAdded = 'true';
+
+      li.addEventListener('click', () => {
+        // 他のフィルタがクリックされたら「未完了のみ」を解除
+        if (filterEnabled) {
+          filterEnabled = false;
+          // フィルタ解除（全て表示）
+          const cards = document.querySelectorAll(PATIENT_CARD_SELECTOR);
+          cards.forEach(card => card.style.display = '');
+          updateButtonStyles();
+          console.log(`[${SCRIPT_NAME}] フィルタ解除（他のフィルタが選択されました）`);
+        }
+      });
+    });
+  }
+
+  /**
+   * フィルタボタンを追加（既存ボタンと同じデザイン）
    */
   function addFilterButton() {
     // 既に追加済みなら何もしない
-    if (document.getElementById(FILTER_BUTTON_ID)) return;
+    if (document.getElementById(FILTER_LI_ID)) return;
 
-    // 「すべて」ボタンを探す
-    const allButton = Array.from(document.querySelectorAll('button')).find(
-      btn => btn.textContent.includes('すべて')
-    );
-    if (!allButton) return;
+    // 「会計済み」ボタンの親li要素を探す
+    const existingButtons = document.querySelectorAll('li[id^="_"]');
+    const lastLi = existingButtons[existingButtons.length - 1];
+    if (!lastLi) return;
 
-    // ボタンを作成
-    const filterBtn = document.createElement('button');
-    filterBtn.id = FILTER_BUTTON_ID;
-    filterBtn.textContent = '未完了のみ';
-    filterBtn.style.cssText = `
-      margin-left: 8px;
-      padding: 4px 12px;
-      border: 1px solid #1976d2;
-      border-radius: 16px;
-      cursor: pointer;
+    // li要素を作成（既存と同じ構造）
+    const li = document.createElement('li');
+    li.id = FILTER_LI_ID;
+    li.dataset.selected = 'true'; // デフォルトで選択状態
+    li.style.cssText = 'display: flex; align-items: center;';
+
+    // button要素を作成
+    const btn = document.createElement('button');
+    btn.id = FILTER_BUTTON_ID;
+    btn.style.cssText = `
+      background: transparent;
+      border: none;
+      padding: 0 16px;
       font-size: 14px;
-      transition: all 0.2s;
+      font-weight: 600;
+      cursor: pointer;
+      color: ${STYLES.selected.color};
     `;
 
-    filterBtn.addEventListener('click', () => {
-      filterEnabled = !filterEnabled;
-      applyFilter();
+    // span要素を作成（テキスト用）
+    const span = document.createElement('span');
+    span.textContent = '未完了のみ';
+    btn.appendChild(span);
+
+    btn.addEventListener('click', async () => {
+      if (!filterEnabled) {
+        filterEnabled = true;
+        // 最新データを取得してからフィルタ適用
+        await refreshPatientList();
+        setTimeout(applyFilter, 300);
+      }
     });
 
-    // 「すべて」ボタンの後に挿入
-    allButton.parentElement.insertBefore(filterBtn, allButton.nextSibling);
-    updateButtonState();
+    li.appendChild(btn);
+
+    // 「会計済み」の後に挿入
+    lastLi.parentElement.insertBefore(li, lastLi.nextSibling);
+
+    // 既存ボタンにリスナーを設定
+    setupExistingFilterButtons();
+
     console.log(`[${SCRIPT_NAME}] フィルタボタンを追加しました`);
   }
 
@@ -131,7 +188,7 @@
       const hasPatientChange = mutations.some(m =>
         m.addedNodes.length > 0 || m.removedNodes.length > 0
       );
-      if (hasPatientChange) {
+      if (hasPatientChange && filterEnabled) {
         // 少し遅延してフィルタ適用（Reactのレンダリング完了を待つ）
         setTimeout(applyFilter, 100);
       }
@@ -158,7 +215,9 @@
     // DOMの準備を待つ
     const checkReady = setInterval(async () => {
       const cards = document.querySelectorAll(PATIENT_CARD_SELECTOR);
-      if (cards.length > 0) {
+      const existingFilters = document.querySelectorAll('li[id^="_"]');
+
+      if (cards.length > 0 && existingFilters.length > 0) {
         clearInterval(checkReady);
 
         // 最新データを取得してからフィルタ適用
