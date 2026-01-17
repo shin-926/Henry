@@ -539,3 +539,65 @@ henry_auto_approver, henry_note_reader, henry_error_logger, henry_disease_list, 
 | setIntervalポーリング | 発火頻度が固定（例: 3.3回/秒） | 変化がなくても実行される |
 | 処理済みフラグ | 重複処理を防止 | フラグ管理が必要 |
 | 自前UI | MutationObserver不要 | 開発コスト大 |
+
+---
+
+## TASK-016: Henryのリアルタイム同期調査 (2026-01-17)
+
+### 調査結果
+
+HenryはCloud Firestoreを使用してリアルタイム同期を実現している。
+
+### 技術スタック
+
+| コンポーネント | 役割 |
+|---------------|------|
+| **Cloud Firestore** | リアルタイムデータベース |
+| **Long Polling** | `firestore.googleapis.com/.../Listen/channel` で変更を監視 |
+| **Apollo Client** | GraphQLキャッシュでUIのデータ管理 |
+| **React** | UIレンダリング |
+
+### 確認されたエンドポイント
+
+```
+https://firestore.googleapis.com/google.firestore.v1.Firestore/Listen/channel?VER=8&database=project...
+```
+
+複数の接続が確立されており、Long Pollingでリアルタイム更新を受信している。
+
+### データフロー
+
+```
+他ユーザーが患者追加/変更
+        ↓
+   Firestore DB更新
+        ↓
+  Listen/channel で通知（Long Polling）
+        ↓
+[firebase] updatedSessions ログ出力
+        ↓
+  Apollo Cache更新（？）
+        ↓
+     React UIレンダリング
+```
+
+### コンソールログ
+
+```
+[debug] [firebase] updatedSessions: []   // 変更があるとここに配列でデータが来る
+```
+
+### 考察
+
+- Firestoreからの通知自体は動作している（`[firebase] updatedSessions` ログで確認）
+- 「画面更新が行われない問題」がある場合、原因はFirestore→Apollo Cache→Reactの連携部分
+- 具体的には：
+  1. Firestoreの更新がApollo Cacheに反映されていない
+  2. Apollo Cacheは更新されているがReactが再レンダリングしていない
+  3. 特定の条件下でFirestoreリスナーが切断されている
+
+### 今後の調査ポイント
+
+- [ ] 他ユーザーが患者追加したときの `updatedSessions` の中身を確認
+- [ ] Apollo Cache（`window.__APOLLO_CLIENT__.cache`）の更新状況を監視
+- [ ] 問題発生時のFirestore接続状態を確認

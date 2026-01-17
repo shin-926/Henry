@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry 外来受付フィルタ
 // @namespace    https://github.com/shin-926/Henry
-// @version      1.3.0
+// @version      1.3.1
 // @description  外来受付画面で「未完了」（会計待ち・会計済み以外）の患者のみ表示
 // @author       Claude
 // @match        https://henry-app.jp/*
@@ -174,12 +174,10 @@
     btn.appendChild(span);
 
     btn.addEventListener('click', async () => {
-      if (!filterEnabled) {
-        filterEnabled = true;
-        // 最新データを取得してからフィルタ適用
-        await refreshPatientList();
-        setTimeout(applyFilter, 300);
-      }
+      filterEnabled = true;
+      // 最新データを取得してからフィルタ適用
+      await refreshPatientList();
+      setTimeout(applyFilter, 300);
     });
 
     li.appendChild(btn);
