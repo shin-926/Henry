@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         照射オーダー自動印刷
 // @namespace    https://henry-app.jp/
-// @version      5.0.4
+// @version      5.2.0
 // @description  「外来 照射オーダー」の完了時、APIから直接データを取得して印刷ダイアログを表示
 // @author       Henry UI Lab
 // @match        https://henry-app.jp/*
@@ -10,14 +10,14 @@
 // @grant        GM_getValue
 // @grant        GM_info
 // @grant        unsafeWindow
-// @updateURL    https://raw.githubusercontent.com/shin-926/Henry/main/henry_rad_order_auto_printer.user.js
-// @downloadURL  https://raw.githubusercontent.com/shin-926/Henry/main/henry_rad_order_auto_printer.user.js
+// @updateURL    https://raw.githubusercontent.com/shin-926/Henry/main/henry_image_order_auto_printer.user.js
+// @downloadURL  https://raw.githubusercontent.com/shin-926/Henry/main/henry_image_order_auto_printer.user.js
 // ==/UserScript==
 
 (function () {
     'use strict';
 
-    const SCRIPT_NAME = 'RadOrderAutoPrint';
+    const SCRIPT_NAME = 'ImageOrderAutoPrint';
     const VERSION = GM_info.script.version;
 
     // ==========================================
@@ -387,23 +387,80 @@
     };
 
     // ==========================================
-    // データ取得（graphql-v2 直接呼び出し）
+    // データ取得（graphql 直接呼び出し）
     // ==========================================
     const DataFetcher = {
         /**
-         * EncounterEditorQuery で患者情報と診療科を取得
-         * graphql-v2 エンドポイントを使用
+         * GetPatient で患者情報（フリガナ・性別含む）を取得
+         * graphql エンドポイントを使用
          */
-        async getPatientAndEncounter(encounterId) {
-            if (!encounterId) return { patient: null, departmentName: '' };
+        async getPatient(patientUuid) {
+            if (!patientUuid) return null;
 
             if (!AuthCapture.hasAuth()) {
                 Logger.log('認証情報がキャプチャされていません', 'error');
-                return { patient: null, departmentName: '' };
+                return null;
+            }
+
+            // インライン方式（変数型が公開されていないため）
+            const query = `
+                query GetPatient {
+                    getPatient(input: { uuid: "${patientUuid}" }) {
+                        uuid
+                        serialNumber
+                        serialNumberPrefix
+                        fullName
+                        fullNamePhonetic
+                        detail {
+                            sexType
+                            birthDate {
+                                year
+                                month
+                                day
+                            }
+                        }
+                    }
+                }
+            `;
+
+            try {
+                const response = await originalFetch('https://henry-app.jp/graphql', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        ...AuthCapture.getHeaders()
+                    },
+                    credentials: 'include',
+                    body: JSON.stringify({
+                        operationName: 'GetPatient',
+                        query: query
+                    })
+                });
+
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}`);
+                }
+
+                const json = await response.json();
+                return json.data?.getPatient || null;
+            } catch (e) {
+                Logger.log(`患者情報取得エラー: ${e.message}`, 'error');
+                return null;
+            }
+        },
+
+        /**
+         * EncounterEditorQuery で診療科を取得
+         * graphql-v2 エンドポイントを使用
+         */
+        async getDepartmentName(encounterId) {
+            if (!encounterId) return '';
+
+            if (!AuthCapture.hasAuth()) {
+                return '';
             }
 
             try {
-                // graphql-v2 に直接 POST（元のfetchを使用してフックを回避）
                 const response = await originalFetch('https://henry-app.jp/graphql-v2', {
                     method: 'POST',
                     headers: {
@@ -430,45 +487,11 @@
                 const json = await response.json();
                 const encounter = json.data?.encounter;
 
-                if (!encounter) {
-                    Logger.log('EncounterEditorQuery: データなし', 'warn');
-                    return { patient: null, departmentName: '' };
-                }
-
-                // 患者情報を変換
-                const patient = encounter.patient ? {
-                    fullName: encounter.patient.fullName || '',
-                    serialNumber: encounter.patient.serialNumber || '',
-                    serialNumberPrefix: '',
-                    fullNamePhonetic: '',
-                    detail: {
-                        birthDate: this._parseBirthDate(encounter.patient.birthDate),
-                        sexType: null // EncounterEditorQuery には性別がない
-                    }
-                } : null;
-
-                // 診療科を取得（basedOn[0].doctor.departmentName）
-                const departmentName = encounter.basedOn?.[0]?.doctor?.departmentName || '';
-
-                return { patient, departmentName };
+                return encounter?.basedOn?.[0]?.doctor?.departmentName || '';
             } catch (e) {
-                Logger.log(`患者情報取得エラー: ${e.message}`, 'error');
-                return { patient: null, departmentName: '' };
+                Logger.log(`診療科取得エラー: ${e.message}`, 'error');
+                return '';
             }
-        },
-
-        /**
-         * "YYYY-MM-DD" 形式を { year, month, day } に変換
-         */
-        _parseBirthDate(dateStr) {
-            if (!dateStr) return null;
-            const parts = dateStr.split('-');
-            if (parts.length !== 3) return null;
-            return {
-                year: parseInt(parts[0], 10),
-                month: parseInt(parts[1], 10),
-                day: parseInt(parts[2], 10)
-            };
         }
     };
 
@@ -549,17 +572,17 @@
     };
 
     // ==========================================
-    // HTML生成
+    // HTML生成（Henry本体と同じ構造）
     // ==========================================
     const HtmlGenerator = {
-        generate(order, patient, encounter) {
+        generate(order, patient, departmentName) {
             const now = new Date();
             const issueDateTime = `${now.getFullYear()}/${String(now.getMonth() + 1).padStart(2, '0')}/${String(now.getDate()).padStart(2, '0')} ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
 
             const patientId = `${patient.serialNumberPrefix || ''}${patient.serialNumber || ''}`;
+            const fullNamePhonetic = patient.fullNamePhonetic || '';
             const sex = formatSex(patient.detail?.sexType);
             const birthDate = formatBirthDate(patient.detail?.birthDate);
-            const department = encounter?.departmentName || '';
 
             const modality = formatModality(order.detail?.imagingModality);
             const orderDate = formatDate(order.date);
@@ -569,104 +592,251 @@
             // シリーズデータ取得
             const series = this._extractSeries(order.detail?.condition);
 
+            // CSS（Henry本体と同じスタイル）
+            const css = `
+/* CSS Reset */
+html, body, div, span, h1, h2, p, table, caption, tbody, thead, tr, th, td, section {
+    margin: 0;
+    padding: 0;
+    border: 0;
+    font-size: 100%;
+    font: inherit;
+    vertical-align: baseline;
+}
+table {
+    border-collapse: collapse;
+    border-spacing: 0;
+}
+body {
+    font-family: "Noto Sans JP", "Hiragino Sans", "ヒラギノ角ゴシック", sans-serif;
+    font-weight: normal;
+    font-size: 14px;
+    line-height: 24px;
+    color: #000;
+}
+* {
+    box-sizing: border-box;
+    print-color-adjust: exact;
+}
+
+/* Page container */
+.page-container {
+    position: relative;
+}
+.inner {
+    padding: 44pt 48pt;
+}
+
+/* Header */
+.header-row {
+    display: grid;
+    grid-template-columns: auto auto;
+    justify-content: space-between;
+    align-items: flex-start;
+}
+.title {
+    font-size: 20pt;
+    font-weight: 700;
+    line-height: 28pt;
+    color: rgba(0, 0, 0, 0.82);
+}
+.issue-date {
+    font-size: 12pt;
+    font-weight: 700;
+    line-height: 20pt;
+    color: rgba(0, 0, 0, 0.82);
+}
+
+/* Patient section */
+.patient-row {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    justify-content: space-between;
+    align-items: flex-start;
+    margin-top: 8px;
+}
+.patient-label {
+    font-size: 9pt;
+    font-weight: 600;
+    line-height: 15pt;
+    color: rgba(0, 0, 0, 0.82);
+    padding: 4px 0;
+}
+.patient-name {
+    font-size: 12pt;
+    font-weight: 700;
+    line-height: 20pt;
+    color: rgba(0, 0, 0, 0.82);
+}
+.patient-detail {
+    font-size: 9pt;
+    font-weight: 400;
+    line-height: 15pt;
+    color: rgba(0, 0, 0, 0.82);
+}
+
+/* Signature table */
+.signature-table {
+    border: 1px solid #000;
+}
+.signature-table th {
+    font-size: 10.5pt;
+    font-weight: 400;
+    padding: 5px 0 0;
+    text-align: center;
+    vertical-align: baseline;
+    width: 72pt;
+}
+.signature-table td {
+    border: 1px solid #000;
+    width: 72pt;
+    height: 71pt;
+    text-align: center;
+    vertical-align: middle;
+    font-size: 10.5pt;
+}
+
+/* Order info table */
+.order-table {
+    width: 100%;
+    border: 0.5px solid #000;
+    margin-top: 21pt;
+}
+.order-table th {
+    font-size: 10.5pt;
+    font-weight: 700;
+    padding: 3pt 6pt;
+    border: 0.5px solid #000;
+    width: 68pt;
+    text-align: left;
+}
+.order-table td {
+    font-size: 10.5pt;
+    font-weight: 400;
+    padding: 3pt 6pt;
+    border: 0.5px solid #000;
+}
+
+/* Series table */
+.series-table {
+    width: 100%;
+    border: 0.5px solid #000;
+    margin-top: 17pt;
+}
+.series-table thead th {
+    font-size: 10.5pt;
+    font-weight: 700;
+    padding: 3pt 6pt;
+    border: 0.5px solid #000;
+    text-align: center;
+}
+.series-table thead td {
+    font-size: 10.5pt;
+    font-weight: 400;
+    padding: 3pt 6pt;
+    border: 0.5px solid #000;
+    text-align: center;
+}
+.series-table tbody td {
+    font-size: 10.5pt;
+    font-weight: 400;
+    padding: 3pt 6pt;
+    border: 0.5px solid #000;
+    text-align: center;
+}
+
+/* Print styles */
+@media print {
+    @page {
+        size: A4;
+        margin: 10mm;
+    }
+    body {
+        width: 100%;
+    }
+    .page-container {
+        page-break-after: always;
+    }
+}
+            `;
+
             return `
 <!DOCTYPE html>
 <html lang="ja">
 <head>
-    <meta charset="UTF-8">
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>照射録</title>
-    <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-        @page { size: A4; margin: 10mm; }
-        body {
-            font-family: "Yu Gothic", "Hiragino Kaku Gothic ProN", sans-serif;
-            font-size: 11pt;
-            line-height: 1.4;
-            padding: 15px;
-        }
-        .header { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 10px; }
-        .header h1 { font-size: 18pt; margin: 0; }
-        .header .issue-date { font-size: 10pt; }
-        .patient-section { display: flex; justify-content: space-between; margin-bottom: 15px; }
-        .patient-info { flex: 1; }
-        .patient-label { font-size: 9pt; color: #666; }
-        .patient-name { font-size: 14pt; font-weight: bold; margin: 2px 0; }
-        .patient-detail { font-size: 10pt; }
-        .signature-section { display: flex; gap: 10px; }
-        .signature-box { text-align: center; width: 80px; }
-        .signature-label { font-size: 9pt; border: 1px solid #333; border-bottom: none; padding: 2px 5px; }
-        .signature-content { border: 1px solid #333; height: 50px; display: flex; align-items: center; justify-content: center; font-size: 10pt; }
-        .order-info { margin-bottom: 15px; }
-        .order-info table { width: 100%; border-collapse: collapse; }
-        .order-info td { padding: 5px 8px; border: 1px solid #333; }
-        .order-info td:first-child { width: 100px; background: #f5f5f5; font-weight: bold; }
-        .series-header { font-weight: bold; text-align: center; margin: 10px 0 5px; }
-        .series-table { width: 100%; border-collapse: collapse; }
-        .series-table th, .series-table td { border: 1px solid #333; padding: 5px; text-align: center; vertical-align: middle; }
-        .series-table th { background: #e8e8e8; font-weight: normal; }
-        .series-table td.note { text-align: left; }
-        @media print { body { padding: 0; } }
-    </style>
+    <style>${css}</style>
 </head>
 <body>
-    <div class="header">
-        <h1>照射録</h1>
-        <div class="issue-date">発行日時 ${issueDateTime}</div>
-    </div>
+    <div class="page-container">
+        <div class="inner">
+            <section>
+                <!-- ヘッダー: タイトルと発行日時 -->
+                <div class="header-row">
+                    <h1 class="title">照射録</h1>
+                    <h2 class="issue-date">発行日時 ${issueDateTime}</h2>
+                </div>
 
-    <div class="patient-section">
-        <div class="patient-info">
-            <div class="patient-label">患者</div>
-            <div class="patient-name">${patient.fullName || ''}</div>
-            <div class="patient-detail">${patientId} ${patient.fullNamePhonetic || ''} ${sex}</div>
-            <div class="patient-detail">生年月日 ${birthDate}</div>
-            <div class="patient-detail">外来: ${department}</div>
+                <!-- 患者情報と署名欄 -->
+                <div class="patient-row">
+                    <div>
+                        <p class="patient-label">患者</p>
+                        <h2 class="patient-name">${patient.fullName || ''}</h2>
+                        <p class="patient-detail">${patientId} ${fullNamePhonetic} ${sex}</p>
+                        <p class="patient-detail">生年月日 ${birthDate}</p>
+                        <p class="patient-detail">外来: ${departmentName}</p>
+                    </div>
+                    <table class="signature-table">
+                        <tbody>
+                            <tr>
+                                <th>(医師署名)</th>
+                                <th>(技師署名)</th>
+                            </tr>
+                            <tr>
+                                <td>${doctorName}</td>
+                                <td></td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </section>
+
+            <section>
+                <!-- オーダー情報 -->
+                <table class="order-table">
+                    <tbody>
+                        <tr><th>指示医師</th><td>${doctorName}</td></tr>
+                        <tr><th>照射日時</th><td><span>${orderDate}</span></td></tr>
+                        <tr><th>モダリティ</th><td>${modality}</td></tr>
+                        <tr><th>備考</th><td><span>${note}</span></td></tr>
+                    </tbody>
+                </table>
+            </section>
+
+            <section>
+                <!-- 指示内容 -->
+                <table class="series-table">
+                    <thead>
+                        <tr><th colspan="7">指示内容</th></tr>
+                        <tr>
+                            <td style="width: 4%;"></td>
+                            <td style="width: 8%;">部位</td>
+                            <td style="width: 8%;">側性</td>
+                            <td style="width: 16%;">方向</td>
+                            <td style="width: 30%;">撮影条件</td>
+                            <td style="width: 10%;">枚数</td>
+                            <td style="width: 32%;">補足</td>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${this._generateSeriesRows(series)}
+                    </tbody>
+                </table>
+            </section>
         </div>
-        <div class="signature-section">
-            <div class="signature-box">
-                <div class="signature-label">(医師署名)</div>
-                <div class="signature-content">${doctorName}</div>
-            </div>
-            <div class="signature-box">
-                <div class="signature-label">(技師署名)</div>
-                <div class="signature-content"></div>
-            </div>
-        </div>
     </div>
-
-    <div class="order-info">
-        <table>
-            <tr><td>指示医師</td><td>${doctorName}</td></tr>
-            <tr><td>照射日時</td><td>${orderDate}</td></tr>
-            <tr><td>モダリティ</td><td>${modality}</td></tr>
-            <tr><td>備考</td><td>${note}</td></tr>
-        </table>
-    </div>
-
-    <div class="series-header">指示内容</div>
-    <table class="series-table">
-        <thead>
-            <tr>
-                <th style="width: 30px"></th>
-                <th>部位</th>
-                <th>側性</th>
-                <th>方向</th>
-                <th>撮影条件</th>
-                <th>枚数</th>
-                <th>補足</th>
-            </tr>
-        </thead>
-        <tbody>
-            ${this._generateSeriesRows(series)}
-        </tbody>
-    </table>
-
-    <script>
-        // TODO: デバッグ完了後に有効化
-        // window.onload = function() {
-        //     window.print();
-        // };
-    </script>
 </body>
 </html>
             `.trim();
@@ -745,16 +915,15 @@
             for (let i = 0; i < maxRows; i++) {
                 const s = series[i] || {};
                 rows += `
-                    <tr>
-                        <td>${i + 1}</td>
-                        <td>${s.bodySite || ''}</td>
-                        <td>${s.laterality || ''}</td>
-                        <td>${s.bodyPositions || ''}</td>
-                        <td>${s.configuration || ''}</td>
-                        <td>${s.filmCount || ''}</td>
-                        <td class="note">${s.note || ''}</td>
-                    </tr>
-                `;
+                        <tr>
+                            <td style="width: 4%;">${i + 1}</td>
+                            <td style="width: 8%;">${s.bodySite || ''}</td>
+                            <td style="width: 8%;">${s.laterality || ''}</td>
+                            <td style="width: 16%;">${s.bodyPositions || ''}</td>
+                            <td style="width: 30%;">${s.configuration || ''}</td>
+                            <td style="width: 10%;">${s.filmCount || ''}</td>
+                            <td style="width: 32%;">${s.note || ''}</td>
+                        </tr>`;
             }
 
             return rows;
@@ -762,7 +931,7 @@
     };
 
     // ==========================================
-    // 印刷実行
+    // 印刷実行（iframe方式）
     // ==========================================
     const Printer = {
         /**
@@ -772,9 +941,15 @@
         async print(orderData) {
             Logger.log(`印刷開始: orderUuid=${orderData.uuid?.substring(0, 8)}...`);
 
-            // 患者情報と診療科を取得（graphql-v2）
+            // 患者UUID と encounterID を取得
+            const patientUuid = orderData.patientUuid;
             const encounterId = orderData.encounterId?.value;
-            const { patient, departmentName } = await DataFetcher.getPatientAndEncounter(encounterId);
+
+            // 患者情報と診療科を並列で取得
+            const [patient, departmentName] = await Promise.all([
+                DataFetcher.getPatient(patientUuid),
+                DataFetcher.getDepartmentName(encounterId)
+            ]);
 
             if (!patient) {
                 Logger.log('患者情報の取得に失敗しました', 'error');
@@ -784,25 +959,34 @@
 
             Logger.log('データ取得完了');
 
-            // encounter オブジェクトを作成（HtmlGenerator 用）
-            const encounter = { departmentName };
-
             // HTML生成（orderData を直接使用）
-            const html = HtmlGenerator.generate(orderData, patient, encounter);
+            const html = HtmlGenerator.generate(orderData, patient, departmentName);
 
-            // 新しいウィンドウで印刷
-            const printWindow = window.open('', '_blank', 'width=800,height=600');
-            if (!printWindow) {
-                Logger.log('ポップアップがブロックされました', 'error');
-                FailureManager.register('ポップアップブロック');
-                return;
-            }
+            // iframe方式で印刷（URLが正しく表示される）
+            const iframe = document.createElement('iframe');
+            iframe.style.cssText = 'position: fixed; top: -10000px; left: -10000px; width: 0; height: 0;';
+            document.body.appendChild(iframe);
 
-            printWindow.document.write(html);
-            printWindow.document.close();
+            iframe.contentDocument.open();
+            iframe.contentDocument.write(html);
+            iframe.contentDocument.close();
 
-            FailureManager.recordSuccess();
-            Logger.log('✓ 印刷ダイアログを表示しました', 'success');
+            // iframeの読み込み完了を待ってから印刷
+            iframe.onload = () => {
+                try {
+                    iframe.contentWindow.print();
+                    FailureManager.recordSuccess();
+                    Logger.log('✓ 印刷ダイアログを表示しました', 'success');
+                } catch (e) {
+                    Logger.log(`印刷エラー: ${e.message}`, 'error');
+                    FailureManager.register('印刷失敗');
+                } finally {
+                    // 印刷後にiframeを削除（少し遅延させる）
+                    setTimeout(() => {
+                        iframe.remove();
+                    }, 1000);
+                }
+            };
         },
     };
 
