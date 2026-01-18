@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         予約システム連携
 // @namespace    https://github.com/shin-926/Henry
-// @version      3.4.6
+// @version      3.5.1
 // @description  Henryカルテと予約システム間の双方向連携（再診予約・照射オーダー自動予約・患者プレビュー）
 // @match        https://henry-app.jp/*
 // @match        https://manage-maokahp.reserve.ne.jp/*
@@ -23,12 +23,21 @@
 
   const SCRIPT_NAME = 'HenryReserveIntegration';
   const CONFIG = {
+    // API
     ORG_UUID: 'ce6b556b-2a8d-4fce-b8dd-89ba638fc825',
     HENRY_GRAPHQL: 'https://henry-app.jp/graphql',
     HENRY_GRAPHQL_V2: 'https://henry-app.jp/graphql-v2',
     HENRY_PATIENT_URL: 'https://henry-app.jp/patients/',
-    HOVER_DELAY: 0,
+    // タイムアウト
+    HENRY_CORE_TIMEOUT: 5000,
+    TOKEN_REQUEST_TIMEOUT: 3000,
+    OBSERVER_TIMEOUT: 10000,
+    CONTEXT_EXPIRY: 5 * 60 * 1000,
+    // UI
+    POLLING_INTERVAL: 100,
+    HOVER_DELAY: 150,
     CLOSE_DELAY: 300,
+    NOTIFICATION_DURATION: 3000,
     PREVIEW_COUNT: 3
   };
 
@@ -164,11 +173,11 @@
     // --------------------------------------------
     const HENRY_CORE_URL = 'https://raw.githubusercontent.com/shin-926/Henry/main/henry_core.user.js';
 
-    async function waitForHenryCore(timeout = 5000) {
+    async function waitForHenryCore(timeout = CONFIG.HENRY_CORE_TIMEOUT) {
       let waited = 0;
       while (!unsafeWindow.HenryCore) {
-        await new Promise(r => setTimeout(r, 100));
-        waited += 100;
+        await new Promise(r => setTimeout(r, CONFIG.POLLING_INTERVAL));
+        waited += CONFIG.POLLING_INTERVAL;
         if (waited > timeout) {
           return null;
         }
@@ -245,11 +254,9 @@
     }
 
     async function waitAndClickOutpatient() {
-      const maxWait = 5000;
-      const interval = 100;
       let waited = 0;
 
-      while (waited < maxWait) {
+      while (waited < CONFIG.HENRY_CORE_TIMEOUT) {
         const btn = document.querySelector('#outpatientCf4 button');
         if (btn) {
           btn.click();
@@ -258,8 +265,8 @@
           history.replaceState(null, '', cleanUrl);
           return;
         }
-        await new Promise(r => setTimeout(r, interval));
-        waited += interval;
+        await new Promise(r => setTimeout(r, CONFIG.POLLING_INTERVAL));
+        waited += CONFIG.POLLING_INTERVAL;
       }
       log.warn('外来ボタンが見つかりませんでした');
     }
@@ -465,7 +472,7 @@
           GM_setValue('imagingOrderContext', null);
           GM_setValue('pendingPatient', null);
           reject(new Error('予約システムからの応答がタイムアウトしました'));
-        }, 5 * 60 * 1000);
+        }, CONFIG.CONTEXT_EXPIRY);
 
         // 予約結果を待機
         const listenerId = GM_addValueChangeListener('reservationResult', (name, oldValue, newValue, remote) => {
@@ -535,8 +542,8 @@
 
       setTimeout(() => {
         notification.style.animation = 'slideIn 0.3s ease reverse';
-        setTimeout(() => notification.remove(), 300);
-      }, 3000);
+        setTimeout(() => notification.remove(), CONFIG.CLOSE_DELAY);
+      }, CONFIG.NOTIFICATION_DURATION);
     }
 
     // 照射オーダーfetchインターセプト
@@ -717,10 +724,10 @@
         popupObserver.disconnect();
       }
     });
-    popupObserver.observe(document.body, { childList: true, subtree: true });
+    popupObserver.observe(document.documentElement, { childList: true, subtree: false });
 
     // 10秒後に監視を停止（無駄なリソース消費を防ぐ）
-    setTimeout(() => popupObserver.disconnect(), 10000);
+    setTimeout(() => popupObserver.disconnect(), CONFIG.OBSERVER_TIMEOUT);
 
     // --------------------------------------------
     // カルテ情報キャッシュ（タブを閉じるまで保持）
@@ -730,7 +737,7 @@
     // --------------------------------------------
     // トークンリクエスト（Henry側に依頼して最新トークンを取得）
     // --------------------------------------------
-    function requestToken(timeout = 3000) {
+    function requestToken(timeout = CONFIG.TOKEN_REQUEST_TIMEOUT) {
       return new Promise((resolve) => {
         const timeoutId = setTimeout(() => {
           log.warn('トークンリクエストタイムアウト');
@@ -855,10 +862,10 @@
     const pendingPatient = !isLoginPage ? GM_getValue('pendingPatient', null) : null;
     let imagingOrderContext = !isLoginPage ? GM_getValue('imagingOrderContext', null) : null;
 
-    // 照射オーダーコンテキストが古い場合（5分以上経過）は無効化
+    // 照射オーダーコンテキストが古い場合は無効化
     if (imagingOrderContext && imagingOrderContext.timestamp) {
       const elapsed = Date.now() - imagingOrderContext.timestamp;
-      if (elapsed > 5 * 60 * 1000) {
+      if (elapsed > CONFIG.CONTEXT_EXPIRY) {
         log.info('照射オーダーコンテキストが古いため無効化:', Math.floor(elapsed / 1000) + '秒経過');
         GM_setValue('imagingOrderContext', null);
         imagingOrderContext = null;
@@ -890,7 +897,7 @@
         trySelectModality(imagingOrderContext.modality);
         setupReservationButtonListener(imagingOrderContext);
       });
-      imagingDialogObserver.observe(document.body, { childList: true, subtree: true });
+      imagingDialogObserver.observe(document.body, { childList: true, subtree: false });
       tryFillDialog(imagingOrderContext.patientId);
       tryFillDateForImaging(imagingOrderContext);
       trySelectModality(imagingOrderContext.modality);
@@ -1097,10 +1104,10 @@
             alert(`予約を登録しました。\n\n日付: ${capturedDate}\n時間: ${capturedTime}\n\nウィンドウを閉じます。`);
             window.close();
           }
-        }, 100);
+        }, CONFIG.POLLING_INTERVAL);
 
-        // 10秒でタイムアウト
-        setTimeout(() => clearInterval(checkDialogClosed), 10000);
+        // タイムアウト
+        setTimeout(() => clearInterval(checkDialogClosed), CONFIG.OBSERVER_TIMEOUT);
       });
     }
 
@@ -1116,7 +1123,7 @@
       const dialogObserver = new MutationObserver(() => {
         tryFillDialog(pendingPatient.id);
       });
-      dialogObserver.observe(document.body, { childList: true, subtree: true });
+      dialogObserver.observe(document.body, { childList: true, subtree: false });
       tryFillDialog(pendingPatient.id);
 
     } else if (!isImagingOrderMode) {
@@ -1254,7 +1261,7 @@
         addKarteButtonToTooltip(tooltip);
       }
     });
-    tooltipObserver.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['style'] });
+    tooltipObserver.observe(document.body, { childList: true, subtree: false });
 
     // 初回チェック
     const initialTooltip = document.getElementById('div_reserve_copy');
@@ -1324,7 +1331,7 @@
       div.addEventListener('mouseleave', () => {
         closeTimeout = setTimeout(() => {
           hidePreview();
-        }, 300);
+        }, CONFIG.CLOSE_DELAY);
       });
 
       document.body.appendChild(div);
@@ -1539,7 +1546,7 @@
         }
         currentPatientUuid = uuid;
         await fetchAndShowEncounter(uuid);
-      }, 150);
+      }, CONFIG.HOVER_DELAY);
     });
 
     // 予約枠からマウスが離れたら閉じるタイマーを開始
@@ -1552,7 +1559,7 @@
         if (previewWindow && !previewWindow.matches(':hover')) {
           hidePreview();
         }
-      }, 300);
+      }, CONFIG.CLOSE_DELAY);
     });
 
   }
