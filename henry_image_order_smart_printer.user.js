@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         照射オーダー自動印刷
 // @namespace    https://henry-app.jp/
-// @version      5.2.0
+// @version      5.2.1
 // @description  「外来 照射オーダー」の完了時、APIから直接データを取得して印刷ダイアログを表示
 // @author       Henry UI Lab
 // @match        https://henry-app.jp/*
@@ -10,14 +10,14 @@
 // @grant        GM_getValue
 // @grant        GM_info
 // @grant        unsafeWindow
-// @updateURL    https://raw.githubusercontent.com/shin-926/Henry/main/henry_image_order_auto_printer.user.js
-// @downloadURL  https://raw.githubusercontent.com/shin-926/Henry/main/henry_image_order_auto_printer.user.js
+// @updateURL    https://raw.githubusercontent.com/shin-926/Henry/main/henry_image_order_smart_printer.user.js
+// @downloadURL  https://raw.githubusercontent.com/shin-926/Henry/main/henry_image_order_smart_printer.user.js
 // ==/UserScript==
 
 (function () {
     'use strict';
 
-    const SCRIPT_NAME = 'ImageOrderAutoPrint';
+    const SCRIPT_NAME = 'ImageOrderSmartPrint';
     const VERSION = GM_info.script.version;
 
     // ==========================================
