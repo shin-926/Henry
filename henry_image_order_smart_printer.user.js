@@ -1,13 +1,15 @@
 // ==UserScript==
 // @name         照射オーダー自動印刷
 // @namespace    https://henry-app.jp/
-// @version      5.2.1
+// @version      5.3.1
 // @description  「外来 照射オーダー」の完了時、APIから直接データを取得して印刷ダイアログを表示
 // @author       Henry UI Lab
 // @match        https://henry-app.jp/*
 // @run-at       document-idle
 // @grant        GM_setValue
 // @grant        GM_getValue
+// @grant        GM_addValueChangeListener
+// @grant        GM_removeValueChangeListener
 // @grant        GM_info
 // @grant        unsafeWindow
 // @updateURL    https://raw.githubusercontent.com/shin-926/Henry/main/henry_image_order_smart_printer.user.js
@@ -1065,6 +1067,13 @@ body {
             state.lastTriggerTime = now;
             Logger.log('照射オーダー作成を検出');
 
+            // 予約システム連携中は印刷を遅延
+            if (GM_getValue('skipAutoPrint', false)) {
+                Logger.log('予約システム連携中のため印刷を遅延', 'info');
+                GM_setValue('deferredOrderData', orderData);
+                return;
+            }
+
             // 少し待ってから印刷（UIの更新を待つ）
             setTimeout(() => {
                 Printer.print(orderData);
@@ -1078,11 +1087,31 @@ body {
     const cleaner = utils.createCleaner();
 
     const init = () => {
+        // 前回の残骸をクリア（ブラウザを閉じた場合などに残る可能性がある）
+        GM_setValue('skipAutoPrint', false);
+        GM_setValue('deferredOrderData', null);
+
         Dashboard.init();
         Dashboard.updateStatus();
 
         FetchHook.install();
         cleaner.add(() => FetchHook.uninstall());
+
+        // 予約システム連携完了後の遅延印刷を監視
+        const listenerId = GM_addValueChangeListener('skipAutoPrint', (name, oldValue, newValue, remote) => {
+            // falseになった時（予約完了時）に遅延していた印刷を実行
+            if (newValue === false && oldValue === true) {
+                const deferredData = GM_getValue('deferredOrderData', null);
+                if (deferredData) {
+                    Logger.log('予約完了後の遅延印刷を実行');
+                    GM_setValue('deferredOrderData', null);
+                    setTimeout(() => {
+                        Printer.print(deferredData);
+                    }, CONFIG.printDelayMs);
+                }
+            }
+        });
+        cleaner.add(() => GM_removeValueChangeListener(listenerId));
 
         cleaner.add(() => Dashboard.destroy());
     };
