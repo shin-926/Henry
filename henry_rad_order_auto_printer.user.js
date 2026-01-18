@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         照射オーダー自動印刷
 // @namespace    https://henry-app.jp/
-// @version      4.0.2
-// @description  「外来 照射オーダー」の完了時、入力内容と一致するオーダーを特定して印刷ダイアログを開き、印刷ボタンを自動クリック
+// @version      5.0.4
+// @description  「外来 照射オーダー」の完了時、APIから直接データを取得して印刷ダイアログを表示
 // @author       Henry UI Lab
 // @match        https://henry-app.jp/*
 // @run-at       document-idle
@@ -60,6 +60,11 @@
     const { utils } = HenryCore;
 
     // ==========================================
+    // 元の fetch を保存（フック前、DataFetcherで使用）
+    // ==========================================
+    const originalFetch = pageWindow.fetch.bind(pageWindow);
+
+    // ==========================================
     // 多重起動ガード
     // ==========================================
     const GLOBAL_KEY = '__henry_autoPrint_radiationOrder__';
@@ -70,34 +75,12 @@
     // 設定 & 定数
     // ==========================================
     const CONFIG = Object.freeze({
-        targetTitle: '外来 照射オーダー',
-        printMenuText: '照射オーダーを印刷',
-        printDialogTitle: '照射オーダーを印刷',
-        submitButtonText: '完了',
-        printButtonText: '印刷',
-        recordBaseSelector: '[data-mabl-component="encounter-editor-record-base"]',
         cooldownMs: 3000,
-        waitTimeoutMs: 15000,
-        renderWaitMs: 1500,
-        settleTimeoutMs: 350,
-        settleHardExtraMs: 1500,
         maxFailureScore: 5,
-        printDialogWaitMs: 500,
-        onePageWaitMs: 1500,
-    });
-
-    const FAILURE_WEIGHTS = Object.freeze({
-        '例外': 2,
-        '一致レコード未検出': 1,
-        '印刷メニュー項目未検出': 1,
-        '印刷ボタン未検出': 1,
-        '印刷ダイアログボタン未検出': 1,
-        'クリック失敗': 2,
-        'Observer失敗': 2,
+        printDelayMs: 500,
     });
 
     const THEME = Object.freeze({
-        primary: '#0066cc',
         bg: 'rgba(255, 255, 255, 0.97)',
         text: '#333',
         border: '#ddd',
@@ -109,52 +92,10 @@
     // 状態管理
     // ==========================================
     const state = {
-        pendingKeywords: [],
         lastTriggerTime: 0,
         failureCount: 0,
         failureScore: 0,
         isDisabled: false,
-    };
-
-    // ==========================================
-    // ユーティリティ
-    // ==========================================
-    const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-    const textOf = (el) => el?.textContent?.trim() ?? '';
-
-    const isVisible = (el) => {
-        if (!el) return false;
-        const style = getComputedStyle(el);
-        if (style.visibility === 'hidden' || style.display === 'none') return false;
-        if (parseFloat(style.opacity || '1') === 0) return false;
-        const rect = el.getBoundingClientRect();
-        return rect.width > 0 && rect.height > 0;
-    };
-
-    const getZIndex = (el) => {
-        const z = parseInt(getComputedStyle(el).zIndex, 10);
-        return Number.isFinite(z) ? z : 0;
-    };
-
-    const safeDisconnect = (obs) => {
-        try { obs?.disconnect(); } catch (e) { console.debug(`[${SCRIPT_NAME}] disconnect error:`, e.message); }
-    };
-
-    const safeClearTimeout = (id) => {
-        try { if (id != null) clearTimeout(id); } catch (e) { console.debug(`[${SCRIPT_NAME}] clearTimeout error:`, e.message); }
-    };
-
-    // ==========================================
-    // パフォーマンスモニター
-    // ==========================================
-    const Perf = {
-        marks: new Map(),
-        start(label) { this.marks.set(label, performance.now()); },
-        end(label) {
-            const start = this.marks.get(label);
-            this.marks.delete(label);
-            return start != null ? performance.now() - start : 0;
-        },
     };
 
     // ==========================================
@@ -211,9 +152,7 @@
         register(reason) {
             if (state.isDisabled) return;
 
-            const key = reason.split(':')[0].trim();
-            const weight = FAILURE_WEIGHTS[key] ?? 1;
-            state.failureScore += weight;
+            state.failureScore += 1;
             state.failureCount += 1;
 
             Logger.log(
@@ -231,203 +170,6 @@
         recordSuccess() {
             state.failureScore = Math.max(0, state.failureScore - 1);
         },
-
-        reset() {
-            state.failureScore = 0;
-            state.failureCount = 0;
-            state.isDisabled = false;
-            Logger.log('状態をリセットしました', 'success');
-        },
-    };
-
-    // ==========================================
-    // 安全な非同期実行
-    // ==========================================
-    const safeAsync = async (label, fn) => {
-        try {
-            return await fn();
-        } catch (e) {
-            Logger.log(`エラー [${label}]: ${e?.message ?? e}`, 'error');
-            FailureManager.register(`例外: ${label}`);
-            return null;
-        }
-    };
-
-    // ==========================================
-    // DOM待機ユーティリティ
-    // ==========================================
-    const waitForElement = (finder, { timeoutMs = CONFIG.waitTimeoutMs, root = document.body } = {}) => {
-        return new Promise((resolve) => {
-            let resolved = false;
-            let timer = null;
-            let obs = null;
-
-            const finish = (result) => {
-                if (resolved) return;
-                resolved = true;
-                safeClearTimeout(timer);
-                safeDisconnect(obs);
-                resolve(result);
-            };
-
-            try {
-                const found = finder();
-                if (found) return finish(found);
-            } catch (e) {
-                console.debug(`[${SCRIPT_NAME}] finder error:`, e.message);
-            }
-
-            try {
-                obs = new MutationObserver(() => {
-                    if (resolved) return;
-                    try {
-                        const found = finder();
-                        if (found) finish(found);
-                    } catch (e) {
-                        console.debug(`[${SCRIPT_NAME}] observer finder error:`, e.message);
-                    }
-                });
-                obs.observe(root, {
-                    childList: true,
-                    subtree: true,
-                    attributes: true,
-                    characterData: true,
-                    attributeFilter: ['style', 'class', 'hidden', 'aria-hidden'],
-                });
-            } catch (e) {
-                console.debug(`[${SCRIPT_NAME}] observer setup error:`, e.message);
-                FailureManager.register('Observer失敗');
-                return finish(null);
-            }
-
-            timer = setTimeout(() => finish(null), timeoutMs);
-        });
-    };
-
-    const waitForSettle = (root = document.body, timeoutMs = CONFIG.settleTimeoutMs) => {
-        return new Promise((resolve) => {
-            let done = false;
-            let softTimer = null;
-            let hardTimer = null;
-            let obs = null;
-
-            let rafCompleted = false;
-            let mutationDetected = false;
-            let softTimedOut = false;
-
-            const finish = (hadMutation) => {
-                if (done) return;
-                done = true;
-                safeClearTimeout(softTimer);
-                safeClearTimeout(hardTimer);
-                safeDisconnect(obs);
-                resolve(hadMutation);
-            };
-
-            requestAnimationFrame(() => {
-                requestAnimationFrame(() => {
-                    rafCompleted = true;
-                    if (mutationDetected) return finish(true);
-                    if (softTimedOut) return finish(false);
-                });
-            });
-
-            try {
-                obs = new MutationObserver(() => {
-                    mutationDetected = true;
-                    if (rafCompleted) finish(true);
-                });
-                obs.observe(root, {
-                    childList: true,
-                    subtree: true,
-                    attributes: true,
-                    characterData: true,
-                    attributeFilter: ['style', 'class'],
-                });
-            } catch (e) {
-                console.debug(`[${SCRIPT_NAME}] settle observer error:`, e.message);
-            }
-
-            softTimer = setTimeout(() => {
-                if (rafCompleted) finish(mutationDetected);
-                else softTimedOut = true;
-            }, timeoutMs);
-
-            hardTimer = setTimeout(
-                () => finish(mutationDetected),
-                timeoutMs + CONFIG.settleHardExtraMs
-            );
-        });
-    };
-
-    // ==========================================
-    // DOM操作ユーティリティ
-    // ==========================================
-    const clickElement = (el) => {
-        if (!el) return false;
-
-        try {
-            try {
-                el.scrollIntoView({ behavior: 'auto', block: 'center', inline: 'center' });
-            } catch (e) {
-                console.debug(`[${SCRIPT_NAME}] scrollIntoView error:`, e.message);
-            }
-
-            try { el.focus?.(); } catch (e) {
-                console.debug(`[${SCRIPT_NAME}] focus error:`, e.message);
-            }
-
-            try {
-                el.click();
-                return true;
-            } catch (e) {
-                console.debug(`[${SCRIPT_NAME}] click error:`, e.message);
-            }
-
-            const opts = { bubbles: true, cancelable: true, view: window };
-            let ok = false;
-            for (const type of ['mousedown', 'mouseup', 'click']) {
-                try {
-                    el.dispatchEvent(new MouseEvent(type, opts));
-                    ok = true;
-                } catch (e) {
-                    console.debug(`[${SCRIPT_NAME}] dispatchEvent ${type} error:`, e.message);
-                }
-            }
-            if (!ok) FailureManager.register('クリック失敗');
-            return ok;
-        } catch (e) {
-            console.debug(`[${SCRIPT_NAME}] clickElement error:`, e.message);
-            FailureManager.register('クリック失敗');
-            return false;
-        }
-    };
-
-    const getScrollableAncestor = (el) => {
-        while (el && el !== document.body) {
-            const style = getComputedStyle(el);
-            const isScrollable = style.overflowY === 'auto' || style.overflowY === 'scroll';
-            if (isScrollable && el.scrollHeight > el.clientHeight + 10) return el;
-            el = el.parentElement;
-        }
-        return null;
-    };
-
-    const pickTopmost = (elements) => {
-        const visible = elements.filter(isVisible);
-        if (visible.length === 0) return null;
-        if (visible.length === 1) return visible[0];
-
-        const withZ = visible.map((el) => ({ el, z: getZIndex(el) }));
-        const maxZ = Math.max(...withZ.map((x) => x.z));
-        const topZ = withZ.filter((x) => x.z === maxZ);
-
-        if (topZ.length === 1) return topZ[0].el;
-
-        const allNodes = Array.from(document.querySelectorAll('*'));
-        const indexMap = new Map(allNodes.map((n, i) => [n, i]));
-        topZ.sort((a, b) => (indexMap.get(b.el) ?? 0) - (indexMap.get(a.el) ?? 0));
-        return topZ[0].el;
     };
 
     // ==========================================
@@ -442,7 +184,7 @@
             if (this.el) return;
             this._create();
             Logger.setDashboard(this);
-            Logger.log(`v${VERSION} 起動`, 'info');
+            Logger.log(`v${VERSION} 起動 (直接印刷モード)`, 'info');
         },
 
         _create() {
@@ -585,13 +327,6 @@
             }
         },
 
-        toggle() {
-            if (!this.el) this.init();
-            const isHidden = this.el.style.display === 'none';
-            this.el.style.display = isHidden ? 'flex' : 'none';
-            GM_setValue('dashboardVisible', isHidden);
-        },
-
         destroy() {
             if (this.el) {
                 this.el.remove();
@@ -603,294 +338,539 @@
     };
 
     // ==========================================
-    // キーワード抽出
+    // 認証ヘッダーキャプチャ
     // ==========================================
-    const KeywordExtractor = {
-        extract(dialog) {
-            const keywords = [];
+    const AuthCapture = {
+        authorization: null,
+        organizationUuid: null,
 
-            const add = (val, _source, { minLen = 1 } = {}) => {
-                if (!val || typeof val !== 'string') return false;
-                const v = val.trim();
-                if (v.length < minLen || this._isPlaceholder(v)) return false;
-                keywords.push(v);
-                return true;
-            };
+        /**
+         * リクエストから認証ヘッダーをキャプチャ
+         */
+        capture(args) {
+            try {
+                const options = args[1];
+                if (!options?.headers) return;
 
-            this._extractSite(dialog, add);
-
-            const modSelect = dialog.querySelector('select[name*="Modality"]');
-            if (modSelect?.selectedOptions?.[0]) add(textOf(modSelect.selectedOptions[0]), 'モダリティ');
-
-            const confInput = dialog.querySelector('input[name*="configuration"]');
-            if (confInput) add(confInput.value, '設定');
-
-            dialog.querySelectorAll('select[name*="laterality"], input[name*="laterality"]').forEach((el) => {
-                const val = el.tagName === 'SELECT' ? textOf(el.selectedOptions?.[0]) : el.value;
-                add(val, '側性', { minLen: 1 });
-            });
-
-            dialog.querySelectorAll('input[name*="note"], textarea[name*="note"]').forEach((el) => {
-                add(el.value, '補足');
-            });
-
-            const countEl = dialog.querySelector('input[name*="filmCount"]');
-            if (countEl?.value?.trim()) add(countEl.value, '枚数', { minLen: 1 });
-
-            const posEl = dialog.querySelector('[data-testid="BodyPositionForm__ChipInput"] input');
-            if (posEl) add(posEl.value, '体位', { minLen: 1 });
-
-            const unique = [...new Set(keywords)];
-            Logger.log(
-                `キーワード抽出: ${unique.length}件 [${unique.join(', ')}]`,
-                unique.length > 0 ? 'success' : 'warn'
-            );
-            return unique;
-        },
-
-        _extractSite(dialog, add) {
-            const selectors = [
-                '[data-testid="FilterableSelectBox__DisplayedLabel"]',
-                '[class*="FilterableSelect"] [class*="label"]',
-            ];
-
-            for (const sel of selectors) {
-                const el = dialog.querySelector(sel);
-                if (el && add(textOf(el), '部位')) return;
-            }
-
-            const labels = Array.from(dialog.querySelectorAll('label'));
-            const siteLabel = labels.find((l) => textOf(l).includes('部位'));
-            const target = siteLabel?.nextElementSibling?.querySelector('[role="button"], input, select');
-            if (target) add(textOf(target) || target.value, '部位');
-        },
-
-        _isPlaceholder(val) {
-            const placeholders = ['選択', '未定', '選択してください', '▼'];
-            return placeholders.some((p) => val.includes(p));
-        },
-    };
-
-    // ==========================================
-    // レコード検索
-    // ==========================================
-    const RecordFinder = {
-        getSearchRoot() {
-            const rec = document.querySelector(CONFIG.recordBaseSelector);
-            if (!rec) return document.body;
-
-            const scrollRoot = getScrollableAncestor(rec);
-            if (scrollRoot) return scrollRoot;
-
-            return rec.closest('main, [role="main"]') ?? document.body;
-        },
-
-        findMatchingRecord(root, keywords) {
-            const records = Array.from(root.querySelectorAll(CONFIG.recordBaseSelector));
-            const matches = [];
-
-            for (const record of records) {
-                if (!isVisible(record)) continue;
-
-                const text = textOf(record);
-                if (!text.includes('照射')) continue;
-
-                if (keywords.every((kw) => text.includes(kw))) {
-                    const moreBtn = record.querySelector('button i[name="more_horiz"]')?.closest('button');
-                    if (moreBtn && isVisible(moreBtn)) {
-                        matches.push({ record, btn: moreBtn });
+                // Headers オブジェクトまたはプレーンオブジェクト
+                const headers = options.headers;
+                if (headers instanceof Headers) {
+                    const auth = headers.get('authorization');
+                    const org = headers.get('x-auth-organization-uuid');
+                    if (auth) this.authorization = auth;
+                    if (org) this.organizationUuid = org;
+                } else if (typeof headers === 'object') {
+                    // キー名は大文字小文字を区別しない
+                    for (const [key, value] of Object.entries(headers)) {
+                        if (key.toLowerCase() === 'authorization') this.authorization = value;
+                        if (key.toLowerCase() === 'x-auth-organization-uuid') this.organizationUuid = value;
                     }
                 }
+            } catch (e) {
+                // キャプチャエラーは無視
             }
+        },
 
-            if (matches.length === 0) return null;
+        /**
+         * キャプチャ済みの認証ヘッダーを取得
+         */
+        getHeaders() {
+            const headers = {};
+            if (this.authorization) headers['authorization'] = this.authorization;
+            if (this.organizationUuid) headers['x-auth-organization-uuid'] = this.organizationUuid;
+            return headers;
+        },
 
-            matches.sort((a, b) => {
-                const topA = a.record.getBoundingClientRect().top;
-                const topB = b.record.getBoundingClientRect().top;
-                return topB - topA;
-            });
+        hasAuth() {
+            return !!this.authorization;
+        }
+    };
+
+    // ==========================================
+    // データ取得（graphql-v2 直接呼び出し）
+    // ==========================================
+    const DataFetcher = {
+        /**
+         * EncounterEditorQuery で患者情報と診療科を取得
+         * graphql-v2 エンドポイントを使用
+         */
+        async getPatientAndEncounter(encounterId) {
+            if (!encounterId) return { patient: null, departmentName: '' };
+
+            if (!AuthCapture.hasAuth()) {
+                Logger.log('認証情報がキャプチャされていません', 'error');
+                return { patient: null, departmentName: '' };
+            }
 
             try {
-                matches[0].record.style.outline = '2px solid #3b82f6';
-                setTimeout(() => { matches[0].record.style.outline = ''; }, 1500);
+                // graphql-v2 に直接 POST（元のfetchを使用してフックを回避）
+                const response = await originalFetch('https://henry-app.jp/graphql-v2', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        ...AuthCapture.getHeaders()
+                    },
+                    credentials: 'include',
+                    body: JSON.stringify({
+                        operationName: 'EncounterEditorQuery',
+                        variables: { id: encounterId },
+                        extensions: {
+                            persistedQuery: {
+                                version: 1,
+                                sha256Hash: 'd0b915a8f1fc7508ebd07f1c47a1d804419b4f31668c66363c452c3e14dfe407'
+                            }
+                        }
+                    })
+                });
+
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}`);
+                }
+
+                const json = await response.json();
+                const encounter = json.data?.encounter;
+
+                if (!encounter) {
+                    Logger.log('EncounterEditorQuery: データなし', 'warn');
+                    return { patient: null, departmentName: '' };
+                }
+
+                // 患者情報を変換
+                const patient = encounter.patient ? {
+                    fullName: encounter.patient.fullName || '',
+                    serialNumber: encounter.patient.serialNumber || '',
+                    serialNumberPrefix: '',
+                    fullNamePhonetic: '',
+                    detail: {
+                        birthDate: this._parseBirthDate(encounter.patient.birthDate),
+                        sexType: null // EncounterEditorQuery には性別がない
+                    }
+                } : null;
+
+                // 診療科を取得（basedOn[0].doctor.departmentName）
+                const departmentName = encounter.basedOn?.[0]?.doctor?.departmentName || '';
+
+                return { patient, departmentName };
             } catch (e) {
-                console.debug(`[${SCRIPT_NAME}] highlight error:`, e.message);
+                Logger.log(`患者情報取得エラー: ${e.message}`, 'error');
+                return { patient: null, departmentName: '' };
             }
-
-            return matches[0];
         },
 
-        async searchWithScroll(root, keywords) {
-            const scrollRoot = getScrollableAncestor(root);
-            const originalScrollTop = scrollRoot?.scrollTop ?? 0;
+        /**
+         * "YYYY-MM-DD" 形式を { year, month, day } に変換
+         */
+        _parseBirthDate(dateStr) {
+            if (!dateStr) return null;
+            const parts = dateStr.split('-');
+            if (parts.length !== 3) return null;
+            return {
+                year: parseInt(parts[0], 10),
+                month: parseInt(parts[1], 10),
+                day: parseInt(parts[2], 10)
+            };
+        }
+    };
 
-            let found = this.findMatchingRecord(root, keywords);
-            if (found) return found;
+    // ==========================================
+    // ユーティリティ
+    // ==========================================
+    const formatDate = (date) => {
+        if (!date) return '';
+        const { year, month, day } = date;
+        const d = new Date(year, month - 1, day);
+        const weekdays = ['日', '月', '火', '水', '木', '金', '土'];
+        return `${year}.${String(month).padStart(2, '0')}.${String(day).padStart(2, '0')}（${weekdays[d.getDay()]}）`;
+    };
 
-            if (!scrollRoot) return null;
+    const formatBirthDate = (date) => {
+        if (!date) return '';
+        const { year, month, day } = date;
+        const now = new Date();
+        const birth = new Date(year, month - 1, day);
+        let age = now.getFullYear() - birth.getFullYear();
+        if (now < new Date(now.getFullYear(), month - 1, day)) age--;
 
-            Logger.log('スクロール探索中...', 'info');
+        // 和暦計算
+        let eraName = '';
+        let eraYear = 0;
+        if (year >= 2019) {
+            eraName = 'R';
+            eraYear = year - 2018;
+        } else if (year >= 1989) {
+            eraName = 'H';
+            eraYear = year - 1988;
+        } else if (year >= 1926) {
+            eraName = 'S';
+            eraYear = year - 1925;
+        }
 
-            const scrollPositions = [
-                scrollRoot.scrollHeight,
-                scrollRoot.scrollHeight * 0.75,
-                scrollRoot.scrollHeight * 0.5,
-                scrollRoot.scrollHeight * 0.25,
-                0,
-            ];
+        return `${year}(${eraName}${eraYear})/${String(month).padStart(2, '0')}/${String(day).padStart(2, '0')} ${age}歳`;
+    };
 
-            for (const pos of scrollPositions) {
-                scrollRoot.scrollTop = pos;
-                await waitForSettle(scrollRoot, CONFIG.settleTimeoutMs);
+    const formatSex = (sexType) => {
+        switch (sexType) {
+            case 'SEX_TYPE_MALE': return '男性';
+            case 'SEX_TYPE_FEMALE': return '女性';
+            default: return '';
+        }
+    };
 
-                found = this.findMatchingRecord(root, keywords);
-                if (found) return found;
+    const formatModality = (modality) => {
+        const map = {
+            'IMAGING_MODALITY_PLAIN_RADIOGRAPHY_DIGITAL': '単純撮影デジタル',
+            'IMAGING_MODALITY_PLAIN_RADIOGRAPHY_ANALOG': '単純撮影アナログ',
+            'IMAGING_MODALITY_CT': 'CT',
+            'IMAGING_MODALITY_MRI_ABOVE_1_5_AND_BELOW_3_TESLA': 'MRI（1.5テスラ以上3テスラ未満）',
+            'IMAGING_MODALITY_MD': '骨塩定量検査（MD法）',
+        };
+        return map[modality] || modality || '';
+    };
+
+    const formatLaterality = (laterality) => {
+        const map = {
+            'LATERALITY_LEFT': '左',
+            'LATERALITY_RIGHT': '右',
+            'LATERALITY_BOTH': '両',
+            'LATERALITY_NONE': '任意',
+        };
+        return map[laterality] || '';
+    };
+
+    const formatBodyPosition = (positions) => {
+        if (!positions || positions.length === 0) return '';
+        const map = {
+            'BODY_POSITION_ANY': '任意',
+            'BODY_POSITION_FRONT': '正面',
+            'BODY_POSITION_SIDE': '側面',
+            'BODY_POSITION_OBLIQUE': '斜位',
+        };
+        return positions.map(p => map[p] || p).join('・');
+    };
+
+    // ==========================================
+    // HTML生成
+    // ==========================================
+    const HtmlGenerator = {
+        generate(order, patient, encounter) {
+            const now = new Date();
+            const issueDateTime = `${now.getFullYear()}/${String(now.getMonth() + 1).padStart(2, '0')}/${String(now.getDate()).padStart(2, '0')} ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+
+            const patientId = `${patient.serialNumberPrefix || ''}${patient.serialNumber || ''}`;
+            const sex = formatSex(patient.detail?.sexType);
+            const birthDate = formatBirthDate(patient.detail?.birthDate);
+            const department = encounter?.departmentName || '';
+
+            const modality = formatModality(order.detail?.imagingModality);
+            const orderDate = formatDate(order.date);
+            const doctorName = order.doctor?.name || '';
+            const note = order.detail?.note || '';
+
+            // シリーズデータ取得
+            const series = this._extractSeries(order.detail?.condition);
+
+            return `
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <title>照射録</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        @page { size: A4; margin: 10mm; }
+        body {
+            font-family: "Yu Gothic", "Hiragino Kaku Gothic ProN", sans-serif;
+            font-size: 11pt;
+            line-height: 1.4;
+            padding: 15px;
+        }
+        .header { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 10px; }
+        .header h1 { font-size: 18pt; margin: 0; }
+        .header .issue-date { font-size: 10pt; }
+        .patient-section { display: flex; justify-content: space-between; margin-bottom: 15px; }
+        .patient-info { flex: 1; }
+        .patient-label { font-size: 9pt; color: #666; }
+        .patient-name { font-size: 14pt; font-weight: bold; margin: 2px 0; }
+        .patient-detail { font-size: 10pt; }
+        .signature-section { display: flex; gap: 10px; }
+        .signature-box { text-align: center; width: 80px; }
+        .signature-label { font-size: 9pt; border: 1px solid #333; border-bottom: none; padding: 2px 5px; }
+        .signature-content { border: 1px solid #333; height: 50px; display: flex; align-items: center; justify-content: center; font-size: 10pt; }
+        .order-info { margin-bottom: 15px; }
+        .order-info table { width: 100%; border-collapse: collapse; }
+        .order-info td { padding: 5px 8px; border: 1px solid #333; }
+        .order-info td:first-child { width: 100px; background: #f5f5f5; font-weight: bold; }
+        .series-header { font-weight: bold; text-align: center; margin: 10px 0 5px; }
+        .series-table { width: 100%; border-collapse: collapse; }
+        .series-table th, .series-table td { border: 1px solid #333; padding: 5px; text-align: center; vertical-align: middle; }
+        .series-table th { background: #e8e8e8; font-weight: normal; }
+        .series-table td.note { text-align: left; }
+        @media print { body { padding: 0; } }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>照射録</h1>
+        <div class="issue-date">発行日時 ${issueDateTime}</div>
+    </div>
+
+    <div class="patient-section">
+        <div class="patient-info">
+            <div class="patient-label">患者</div>
+            <div class="patient-name">${patient.fullName || ''}</div>
+            <div class="patient-detail">${patientId} ${patient.fullNamePhonetic || ''} ${sex}</div>
+            <div class="patient-detail">生年月日 ${birthDate}</div>
+            <div class="patient-detail">外来: ${department}</div>
+        </div>
+        <div class="signature-section">
+            <div class="signature-box">
+                <div class="signature-label">(医師署名)</div>
+                <div class="signature-content">${doctorName}</div>
+            </div>
+            <div class="signature-box">
+                <div class="signature-label">(技師署名)</div>
+                <div class="signature-content"></div>
+            </div>
+        </div>
+    </div>
+
+    <div class="order-info">
+        <table>
+            <tr><td>指示医師</td><td>${doctorName}</td></tr>
+            <tr><td>照射日時</td><td>${orderDate}</td></tr>
+            <tr><td>モダリティ</td><td>${modality}</td></tr>
+            <tr><td>備考</td><td>${note}</td></tr>
+        </table>
+    </div>
+
+    <div class="series-header">指示内容</div>
+    <table class="series-table">
+        <thead>
+            <tr>
+                <th style="width: 30px"></th>
+                <th>部位</th>
+                <th>側性</th>
+                <th>方向</th>
+                <th>撮影条件</th>
+                <th>枚数</th>
+                <th>補足</th>
+            </tr>
+        </thead>
+        <tbody>
+            ${this._generateSeriesRows(series)}
+        </tbody>
+    </table>
+
+    <script>
+        // TODO: デバッグ完了後に有効化
+        // window.onload = function() {
+        //     window.print();
+        // };
+    </script>
+</body>
+</html>
+            `.trim();
+        },
+
+        _extractSeries(condition) {
+            if (!condition) return [];
+
+            // Plain Radiography Digital
+            if (condition.plainRadiographyDigital?.series) {
+                return condition.plainRadiographyDigital.series.map(s => ({
+                    bodySite: s.bodySite?.name || '',
+                    laterality: formatLaterality(s.laterality),
+                    bodyPositions: formatBodyPosition(s.bodyPositions),
+                    configuration: s.configuration || '',
+                    filmCount: s.filmCount?.value || '',
+                    note: s.note || '',
+                }));
             }
 
-            try { scrollRoot.scrollTop = originalScrollTop; } catch (e) {
-                console.debug(`[${SCRIPT_NAME}] scroll restore error:`, e.message);
+            // Plain Radiography Analog
+            if (condition.plainRadiographyAnalog?.series) {
+                return condition.plainRadiographyAnalog.series.map(s => ({
+                    bodySite: s.bodySite?.name || '',
+                    laterality: formatLaterality(s.laterality),
+                    bodyPositions: formatBodyPosition(s.bodyPositions),
+                    configuration: s.configuration || '',
+                    filmCount: s.filmCount?.value || '',
+                    note: s.note || '',
+                }));
             }
-            return null;
+
+            // CT
+            if (condition.ct?.series) {
+                return condition.ct.series.map(s => ({
+                    bodySite: s.bodySite?.name || '',
+                    laterality: formatLaterality(s.laterality),
+                    bodyPositions: '',
+                    configuration: '',
+                    filmCount: '',
+                    note: s.note || '',
+                }));
+            }
+
+            // MRI
+            if (condition.mriAbove_1_5AndBelow_3Tesla?.series) {
+                return condition.mriAbove_1_5AndBelow_3Tesla.series.map(s => ({
+                    bodySite: s.bodySite?.name || '',
+                    laterality: formatLaterality(s.laterality),
+                    bodyPositions: '',
+                    configuration: '',
+                    filmCount: '',
+                    note: s.note || '',
+                }));
+            }
+
+            // MD
+            if (condition.md?.bodySites) {
+                return condition.md.bodySites.map(s => ({
+                    bodySite: s.bodySite?.name || '',
+                    laterality: formatLaterality(s.laterality),
+                    bodyPositions: '',
+                    configuration: '',
+                    filmCount: '',
+                    note: condition.md.note || '',
+                }));
+            }
+
+            return [];
+        },
+
+        _generateSeriesRows(series) {
+            const maxRows = 6;
+            let rows = '';
+
+            for (let i = 0; i < maxRows; i++) {
+                const s = series[i] || {};
+                rows += `
+                    <tr>
+                        <td>${i + 1}</td>
+                        <td>${s.bodySite || ''}</td>
+                        <td>${s.laterality || ''}</td>
+                        <td>${s.bodyPositions || ''}</td>
+                        <td>${s.configuration || ''}</td>
+                        <td>${s.filmCount || ''}</td>
+                        <td class="note">${s.note || ''}</td>
+                    </tr>
+                `;
+            }
+
+            return rows;
         },
     };
 
     // ==========================================
-    // メニュー操作
+    // 印刷実行
     // ==========================================
-    const MenuHandler = {
-        findPrintMenuItem() {
-            const menus = Array.from(document.querySelectorAll('[role="menu"]')).filter(isVisible);
-            const menuRoot = pickTopmost(menus);
+    const Printer = {
+        /**
+         * 印刷を実行
+         * @param {Object} orderData - CreateImagingOrder レスポンスデータ
+         */
+        async print(orderData) {
+            Logger.log(`印刷開始: orderUuid=${orderData.uuid?.substring(0, 8)}...`);
 
-            const root = menuRoot ?? document.body;
-            const selector = menuRoot
-                ? '[role="menuitem"], [role="button"], button, li'
-                : '[role="menuitem"], [role="button"], button';
+            // 患者情報と診療科を取得（graphql-v2）
+            const encounterId = orderData.encounterId?.value;
+            const { patient, departmentName } = await DataFetcher.getPatientAndEncounter(encounterId);
 
-            const candidates = Array.from(root.querySelectorAll(selector))
-                .filter((el) => isVisible(el) && textOf(el).includes(CONFIG.printMenuText));
-
-            return pickTopmost(candidates);
-        },
-
-        findPrintDialogButton() {
-            const dialogs = Array.from(document.querySelectorAll('[role="dialog"]')).filter(isVisible);
-            const printDialog = dialogs.find((d) => {
-                const title = d.querySelector('h2');
-                return title && textOf(title) === CONFIG.printDialogTitle;
-            });
-
-            if (!printDialog) return null;
-
-            const buttons = Array.from(printDialog.querySelectorAll('button'));
-            return buttons.find((btn) => textOf(btn) === CONFIG.printButtonText && isVisible(btn));
-        },
-    };
-
-    // ==========================================
-    // メイン印刷シーケンス
-    // ==========================================
-    async function runPrintSequence() {
-        if (state.isDisabled) return;
-
-        Perf.start('autoPrint');
-
-        await safeAsync('printSequence', async () => {
-            Logger.log(`検索キーワード: [${state.pendingKeywords.join(', ')}]`);
-
-            Logger.log('画面更新待機中...');
-            await sleep(CONFIG.renderWaitMs);
-
-            if (state.isDisabled) return;
-
-            const searchRoot = RecordFinder.getSearchRoot();
-            const match = await RecordFinder.searchWithScroll(searchRoot, state.pendingKeywords);
-
-            if (!match) {
-                Logger.log('条件に合うオーダーが見つかりませんでした', 'error');
-                FailureManager.register('一致レコード未検出');
+            if (!patient) {
+                Logger.log('患者情報の取得に失敗しました', 'error');
+                FailureManager.register('データ取得失敗');
                 return;
             }
 
-            Logger.log('メニューボタンをクリック');
-            if (!clickElement(match.btn)) {
-                FailureManager.register('クリック失敗: メニューボタン');
+            Logger.log('データ取得完了');
+
+            // encounter オブジェクトを作成（HtmlGenerator 用）
+            const encounter = { departmentName };
+
+            // HTML生成（orderData を直接使用）
+            const html = HtmlGenerator.generate(orderData, patient, encounter);
+
+            // 新しいウィンドウで印刷
+            const printWindow = window.open('', '_blank', 'width=800,height=600');
+            if (!printWindow) {
+                Logger.log('ポップアップがブロックされました', 'error');
+                FailureManager.register('ポップアップブロック');
                 return;
             }
 
-            const menuItem = await waitForElement(() => MenuHandler.findPrintMenuItem(), { timeoutMs: 5000 });
-            if (!menuItem) {
-                Logger.log('印刷メニュー項目が見つかりません', 'error');
-                FailureManager.register('印刷メニュー項目未検出');
-                return;
-            }
-
-            Logger.log('印刷メニュー項目をクリック');
-            if (!clickElement(menuItem)) {
-                FailureManager.register('クリック失敗: 印刷メニュー');
-                return;
-            }
-
-            Logger.log('印刷ダイアログ表示待機中...');
-            await sleep(CONFIG.printDialogWaitMs);
-
-            const dialogPrintBtn = await waitForElement(
-                () => MenuHandler.findPrintDialogButton(),
-                { timeoutMs: 5000 }
-            );
-
-            if (!dialogPrintBtn) {
-                Logger.log('印刷ダイアログ内の印刷ボタンが見つかりません', 'error');
-                FailureManager.register('印刷ダイアログボタン未検出');
-                return;
-            }
-
-            Logger.log('1ページ化処理待機中...');
-            await sleep(CONFIG.onePageWaitMs);
-
-            Logger.log('印刷ダイアログ内の印刷ボタンをクリック');
-            if (!clickElement(dialogPrintBtn)) {
-                FailureManager.register('クリック失敗: 印刷ダイアログボタン');
-                return;
-            }
+            printWindow.document.write(html);
+            printWindow.document.close();
 
             FailureManager.recordSuccess();
-            const duration = Perf.end('autoPrint');
-            Logger.log(`✓ 印刷シーケンス完了 (${duration.toFixed(0)}ms)`, 'success');
-        });
-    }
-
-    // ==========================================
-    // ダイアログ判定
-    // ==========================================
-    const isTargetOrderDialog = (dialog) => {
-        if (!dialog || dialog.getAttribute('role') !== 'dialog') return false;
-
-        const title = dialog.querySelector('h1, h2, h3, [role="heading"]');
-        if (textOf(title) !== CONFIG.targetTitle) return false;
-
-        const submitBtn = dialog.querySelector('button[type="submit"]');
-        return submitBtn && textOf(submitBtn).includes(CONFIG.submitButtonText);
+            Logger.log('✓ 印刷ダイアログを表示しました', 'success');
+        },
     };
 
     // ==========================================
-    // イベントハンドラ
+    // Fetch フック
     // ==========================================
-    let clickHandler = null;
+    const FetchHook = {
+        installed: false,
 
-    function handleGlobalClick(e) {
-        Dashboard.init();
+        install() {
+            if (this.installed) return;
+            this.installed = true;
+            const self = this;
 
-        if (state.isDisabled) return;
+            pageWindow.fetch = async function(...args) {
+                // GraphQL リクエストをチェック
+                const url = args[0]?.url || args[0];
+                if (typeof url === 'string' && url.includes('/graphql')) {
+                    // 認証ヘッダーをキャプチャ
+                    AuthCapture.capture(args);
+                }
 
-        safeAsync('handleClick', async () => {
-            const btn = e.target?.closest?.('button');
-            if (!btn || btn.getAttribute('type') !== 'submit') return;
-            if (!textOf(btn).includes(CONFIG.submitButtonText)) return;
+                const response = await originalFetch(...args);
 
-            const dialog = btn.closest('[role="dialog"]');
-            if (!isTargetOrderDialog(dialog)) return;
+                if (typeof url === 'string' && url.includes('/graphql')) {
+                    self._handleGraphQLResponse(response.clone(), args);
+                }
+
+                return response;
+            };
+
+            Logger.log('Fetchフックをインストールしました');
+        },
+
+        uninstall() {
+            if (this.installed) {
+                pageWindow.fetch = originalFetch;
+                this.installed = false;
+                Logger.log('Fetchフックをアンインストールしました');
+            }
+        },
+
+        async _handleGraphQLResponse(response, args) {
+            try {
+                const body = args[1]?.body;
+                if (!body) return;
+
+                const parsed = typeof body === 'string' ? JSON.parse(body) : body;
+                const opName = parsed.operationName;
+
+                // CreateImagingOrder または UpsertImagingOrder を検出
+                if (opName === 'CreateImagingOrder' || opName === 'UpsertImagingOrder') {
+                    const json = await response.json();
+                    const orderData = json.data?.createImagingOrder || json.data?.upsertImagingOrder;
+
+                    if (orderData?.uuid && orderData?.isOutpatient) {
+                        this._onOrderCreated(orderData);
+                    }
+                }
+            } catch (e) {
+                // パースエラーは無視
+            }
+        },
+
+        _onOrderCreated(orderData) {
+            Dashboard.init();
+
+            if (state.isDisabled) return;
 
             const now = Date.now();
             if (now - state.lastTriggerTime < CONFIG.cooldownMs) {
@@ -898,32 +878,29 @@
                 return;
             }
 
-            Logger.log('オーダー完了を検知', 'info');
-
-            state.pendingKeywords = KeywordExtractor.extract(dialog);
             state.lastTriggerTime = now;
+            Logger.log('照射オーダー作成を検出');
 
-            setTimeout(() => runPrintSequence(), 100);
-        });
-    }
+            // 少し待ってから印刷（UIの更新を待つ）
+            setTimeout(() => {
+                Printer.print(orderData);
+            }, CONFIG.printDelayMs);
+        },
+    };
 
     // ==========================================
-    // 初期化 (HenryCore subscribeNavigation)
+    // 初期化
     // ==========================================
     const cleaner = utils.createCleaner();
 
     const init = () => {
-        clickHandler = handleGlobalClick;
-        document.addEventListener('click', clickHandler);
-        cleaner.add(() => document.removeEventListener('click', clickHandler));
-
         Dashboard.init();
         Dashboard.updateStatus();
 
-        cleaner.add(() => {
-            Dashboard.destroy();
-            state.pendingKeywords = [];
-        });
+        FetchHook.install();
+        cleaner.add(() => FetchHook.uninstall());
+
+        cleaner.add(() => Dashboard.destroy());
     };
 
     utils.subscribeNavigation(cleaner, init);
