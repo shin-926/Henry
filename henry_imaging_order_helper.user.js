@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         画像オーダー入力支援
 // @namespace    https://henry-app.jp/
-// @version      1.14.7
+// @version      1.22.0
 // @description  画像照射オーダーモーダルに部位・方向選択UIを追加（複数内容対応）
 // @author       Henry UI Lab
 // @match        https://henry-app.jp/*
@@ -324,6 +324,17 @@
   let helperMode = true;
 
   // ==========================================
+  // ユーティリティ: debounce
+  // ==========================================
+  function debounce(fn, delay) {
+    let timerId = null;
+    return (...args) => {
+      if (timerId) clearTimeout(timerId);
+      timerId = setTimeout(() => fn(...args), delay);
+    };
+  }
+
+  // ==========================================
   // メイン処理
   // ==========================================
   async function init() {
@@ -341,7 +352,7 @@
     logger = utils.createLogger(CONFIG.SCRIPT_NAME);
     const cleaner = utils.createCleaner();
 
-    logger.info('スクリプト初期化 (v1.14.7)');
+    logger.info('スクリプト初期化 (v1.22.0)');
 
     utils.subscribeNavigation(cleaner, () => {
       logger.info('ページ遷移検出 -> 再セットアップ');
@@ -356,10 +367,11 @@
   // ==========================================
   // 「補足」ラベルを持つフォームグループ内のinputを検出
   // ==========================================
-  function findNoteInputs() {
+  function findNoteInputs(dialog) {
     const noteInputs = [];
-    // 「補足」というテキストを持つlabelを探す
-    const labels = document.querySelectorAll('label');
+    if (!dialog) return noteInputs;
+    // 「補足」というテキストを持つlabelを探す（dialog内のみ）
+    const labels = dialog.querySelectorAll('label');
     labels.forEach(label => {
       if (label.textContent.trim() === '補足') {
         // labelの親を辿ってフォームグループ全体を探す
@@ -381,26 +393,28 @@
   }
 
   // ==========================================
-  // 照射オーダーモーダルかどうかをチェック
+  // 照射オーダーモーダルを探す（複数dialog対応）
   // ==========================================
-  function isImagingOrderModal() {
-    const h2Elements = document.querySelectorAll('h2');
-    for (const h2 of h2Elements) {
-      const text = h2.textContent || '';
+  function findImagingOrderDialog() {
+    const dialogs = document.querySelectorAll('[role="dialog"]');
+    for (const dialog of dialogs) {
+      const h2 = dialog.querySelector('h2');
+      const text = h2?.textContent || '';
       if (text === '外来 照射オーダー' || text === '入院 照射オーダー') {
-        return true;
+        return dialog;
       }
     }
-    return false;
+    return null;
   }
 
   // ==========================================
   // モーダル内容の処理（モダリティ登録・補足欄検出）
   // ==========================================
   function processModalContent() {
-    if (!isImagingOrderModal()) return;
+    const dialog = findImagingOrderDialog();
+    if (!dialog) return;
 
-    const modalitySelect = document.querySelector(CONFIG.MODALITY_SELECTOR);
+    const modalitySelect = dialog.querySelector(CONFIG.MODALITY_SELECTOR);
     if (!modalitySelect) return;
 
     // モダリティ選択のイベント登録（一度だけ）
@@ -411,41 +425,41 @@
         currentModality = MODALITY_MAP[modalityValue] || '';
         logger.info(`モダリティ変更: ${currentModality}`);
         modalityChangeCallbacks.forEach(cb => cb(currentModality));
-        hideAutoFilledFields();
+        hideAutoFilledFields(dialog);
         if (currentModality === 'XP' || currentModality === 'MD') {
-          await setBodyPositionToArbitrary();
+          await setBodyPositionToArbitrary(dialog);
         }
         if (currentModality === 'MD') {
-          await setBodySiteToForearm();
+          await setBodySiteToForearm(dialog);
         }
       });
 
       // 初期値を設定
       currentModality = MODALITY_MAP[modalitySelect.value] || '';
       logger.info(`初期モダリティ: ${currentModality}`);
-      hideAutoFilledFields();
+      hideAutoFilledFields(dialog);
       if (currentModality === 'XP' || currentModality === 'MD') {
-        setBodyPositionToArbitrary();
+        setBodyPositionToArbitrary(dialog);
       }
       if (currentModality === 'MD') {
-        setBodySiteToForearm();
+        setBodySiteToForearm(dialog);
       }
     }
 
     // XP/MDの場合、体位を「任意」に設定（内容追加時のリセット対策、遅延実行）
     if (currentModality === 'XP' || currentModality === 'MD') {
-      setTimeout(() => setBodyPositionToArbitrary(), 500);
+      setTimeout(() => setBodyPositionToArbitrary(dialog), 500);
     }
 
     // トグルボタンを追加（まだなければ）
-    injectToggleButton();
+    injectToggleButton(dialog);
 
-    // 「補足」ラベルを持つフォームグループ内のinputを検出
-    const noteInputs = findNoteInputs();
+    // 「補足」ラベルを持つフォームグループ内のinputを検出（dialog内のみ）
+    const noteInputs = findNoteInputs(dialog);
     noteInputs.forEach((noteInput, index) => {
       if (!noteInput.dataset.hasHelperUI) {
         logger.info(`補足欄 ${index + 1} を検出 (name=${noteInput.name})`);
-        setTimeout(() => injectHelperUI(noteInput, index), 50);
+        setTimeout(() => injectHelperUI(noteInput, index, dialog), 50);
       }
     });
   }
@@ -453,12 +467,13 @@
   // ==========================================
   // トグルボタン注入
   // ==========================================
-  function injectToggleButton() {
+  function injectToggleButton(dialog) {
+    if (!dialog) return;
     const toggleBtnId = 'henry-imaging-helper-toggle';
-    if (document.getElementById(toggleBtnId)) return;
+    if (dialog.querySelector('#' + toggleBtnId)) return;
 
-    // 「内容」ヘッダー（h4）を探す
-    const h4Elements = document.querySelectorAll('h4');
+    // 「内容」ヘッダー（h4）を探す（dialog内のみ）
+    const h4Elements = dialog.querySelectorAll('h4');
     let contentHeader = null;
     for (const h4 of h4Elements) {
       if (h4.textContent?.includes('内容')) {
@@ -528,23 +543,72 @@
   }
 
   // ==========================================
-  // ページ監視セットアップ
+  // ページ監視セットアップ（2段階監視）
   // ==========================================
   function setupPage(cleaner) {
-    const observer = new MutationObserver(() => {
-      processModalContent();
+    let modalObserver = null;
+    let currentDialog = null;  // 現在監視中のダイアログを保持
+
+    // 監視開始処理を共通化
+    const startObserving = (dialog) => {
+      // 二重起動防止: 既存の監視があれば切断
+      if (modalObserver) {
+        modalObserver.disconnect();
+      }
+
+      logger.info('Stage 2 Observer開始（照射オーダーモーダル検出）');
+      const debouncedProcess = debounce(() => processModalContent(), 100);
+      modalObserver = new MutationObserver(debouncedProcess);
+      modalObserver.observe(dialog, { childList: true, subtree: true });
+      currentDialog = dialog;
+      processModalContent();  // 初回は即時実行
+    };
+
+    // Stage 1: body監視（照射オーダーモーダルの存在チェック）
+    const bodyObserver = new MutationObserver(() => {
+      // すでに監視中のダイアログがDOMに存在しているなら、何もしない（高速リターン）
+      if (currentDialog && currentDialog.isConnected) {
+        return;
+      }
+
+      // ここより下は「ダイアログが閉じた」または「新規に開かれた」場合のみ実行
+      const dialog = findImagingOrderDialog();
+
+      if (!dialog) {
+        // モーダルが閉じたらStage 2を停止
+        if (modalObserver) {
+          modalObserver.disconnect();
+          modalObserver = null;
+          currentDialog = null;
+          logger.info('Stage 2 Observer停止（モーダル閉）');
+        }
+        return;
+      }
+
+      // ダイアログが見つかった（新規に開かれた）
+      startObserving(dialog);
     });
 
-    observer.observe(document.body, { childList: true, subtree: true });
-    cleaner.add(() => observer.disconnect());
+    bodyObserver.observe(document.body, { childList: true, subtree: true });
+    cleaner.add(() => {
+      bodyObserver.disconnect();
+      if (modalObserver) {
+        modalObserver.disconnect();
+        modalObserver = null;
+      }
+      currentDialog = null;
+    });
     cleaner.add(() => {
       removeAllUI();
       modalityChangeCallbacks = [];
       currentModality = '';
     });
 
-    // 初回チェック
-    processModalContent();
+    // 初回チェック（ページロード時に既にモーダルが開いている場合に対応）
+    const initialDialog = findImagingOrderDialog();
+    if (initialDialog) {
+      startObserving(initialDialog);
+    }
   }
 
   // ==========================================
@@ -771,14 +835,16 @@
   // 体位を「任意」に設定（単純撮影・骨塩定量のとき）
   // 全ての内容の体位フィールドに対して設定
   // ==========================================
-  async function setBodyPositionToArbitrary() {
+  async function setBodyPositionToArbitrary(dialog) {
+    if (!dialog) dialog = findImagingOrderDialog();
+    if (!dialog) return;
     logger.info('体位設定: 開始');
 
     // DOMの準備を待つ
     await new Promise(r => setTimeout(r, 300));
 
-    // 全ての体位フィールドを取得
-    const allChipInputs = document.querySelectorAll('[data-testid="BodyPositionForm__ChipInput"]');
+    // 全ての体位フィールドを取得（dialog内のみ）
+    const allChipInputs = dialog.querySelectorAll('[data-testid="BodyPositionForm__ChipInput"]');
     logger.info(`体位設定: ${allChipInputs.length}個のChipInputを検出`);
 
     if (allChipInputs.length === 0) {
@@ -797,13 +863,15 @@
   // ==========================================
   // 部位を「前腕」に設定（骨塩定量検査のとき）
   // ==========================================
-  async function setBodySiteToForearm() {
+  async function setBodySiteToForearm(dialog) {
+    if (!dialog) dialog = findImagingOrderDialog();
+    if (!dialog) return;
     logger.info('部位設定(MD): 開始');
 
     // DOMの準備を待つ
     await new Promise(r => setTimeout(r, 300));
 
-    const bodySiteSelectBox = document.querySelector('[data-testid="BodySiteForm__FilterableSelectBox"]');
+    const bodySiteSelectBox = dialog.querySelector('[data-testid="BodySiteForm__FilterableSelectBox"]');
     logger.info('部位設定(MD): SelectBox =', !!bodySiteSelectBox);
 
     if (!bodySiteSelectBox) {
@@ -819,7 +887,10 @@
   // 自動入力フィールド（部位・体位・枚数・撮影条件）を非表示にする
   // 空白スペース対策: 親4（margin-top: 16px）もJSで非表示にする
   // ==========================================
-  function hideAutoFilledFields() {
+  function hideAutoFilledFields(dialog) {
+    if (!dialog) dialog = findImagingOrderDialog();
+    if (!dialog) return;
+
     const styleId = 'henry-imaging-helper-hide-fields';
 
     // CSS追加（まだなければ）
@@ -843,7 +914,7 @@
 
     // JS側でも親4を非表示にする（CSSが効かない場合のフォールバック）
     const hideParent4 = () => {
-      const bodySiteEl = document.querySelector('[data-testid="BodySiteForm__FilterableSelectBox"]');
+      const bodySiteEl = dialog.querySelector('[data-testid="BodySiteForm__FilterableSelectBox"]');
       if (!bodySiteEl) return false;
 
       let parent = bodySiteEl;
@@ -862,24 +933,22 @@
     // 即座に実行を試みる
     if (hideParent4()) return;
 
-    // まだなければMutationObserverで監視
-    const modal = document.querySelector('dialog');
-    if (!modal) return;
-
+    // まだなければMutationObserverで監視（dialog内のみ）
     const observer = new MutationObserver(() => {
       if (hideParent4()) {
         observer.disconnect();
       }
     });
-    observer.observe(modal, { childList: true, subtree: true });
+    observer.observe(dialog, { childList: true, subtree: true });
     setTimeout(() => observer.disconnect(), 5000);
   }
 
   // ==========================================
   // ヘルパーUI注入（各補足欄ごと）
   // ==========================================
-  function injectHelperUI(noteInput, index) {
+  function injectHelperUI(noteInput, index, dialog) {
     if (noteInput.dataset.hasHelperUI) return;
+    if (!dialog) dialog = findImagingOrderDialog();
     noteInput.dataset.hasHelperUI = 'true';
 
     logger.info(`ヘルパーUI ${index + 1} を注入します`);
@@ -1314,6 +1383,12 @@
         return;
       }
 
+      // 標準UIモードの場合はヘルパーUIを表示しない
+      if (!helperMode) {
+        container.style.display = 'none';
+        return;
+      }
+
       // 骨塩定量の場合は専用UIを表示
       if (modality === 'MD') {
         container.style.display = 'flex';
@@ -1506,7 +1581,7 @@
     }
 
     // 初期状態でモダリティが選択済みの場合（モーダルを開いた時点で選択されている）
-    const modalitySelect = document.querySelector(CONFIG.MODALITY_SELECTOR);
+    const modalitySelect = dialog?.querySelector(CONFIG.MODALITY_SELECTOR);
     if (modalitySelect) {
       const initialModality = MODALITY_MAP[modalitySelect.value] || '';
       logger.info(`UI ${index + 1} 初期モダリティ: ${initialModality}`);

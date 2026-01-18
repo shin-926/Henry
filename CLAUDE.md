@@ -1,6 +1,6 @@
-# Henry EMR 開発ガイドライン (Core Rules v4.15)
+# Henry EMR 開発ガイドライン (Core Rules v4.17)
 
-<!-- 📝 UPDATED: v4.15 - Gemini MCPモデル指定ルール追加 -->
+<!-- 📝 UPDATED: v4.17 - Gemini MCPへのセッションJSONL連携ルール追加 -->
 
 > このドキュメントはAIアシスタントとの協働開発における必須ルール集です。HenryCore APIの詳細は `henry_core.user.js` 冒頭のAPI目次と実装を参照。
 
@@ -371,17 +371,37 @@ chrome-devtools-mcpでリアルタイム調査。静的リファレンスは廃�
 
 - **YOU MUST**: Gemini MCP（`ask-gemini`）を使用する際は、常に `model: "gemini-3-pro-preview"` を指定すること。
 
+- **YOU MUST**: Tampermonkeyスクリプトのバージョンを上げた時は、そのスクリプトファイルの内容を `pbcopy` でクリップボードにコピーすること（ユーザーがTampermonkeyに貼り付けられるように）。
+
 - **IMPORTANT**: GraphQL mutationで変数型（`$input: SomeInput!`）がエラーになる場合は、インライン方式を使うこと：
   ```javascript
   // NG: 変数型（サーバーが型を公開していない場合エラー）
   const MUTATION = `mutation Update($input: UpdateInput!) { update(input: $input) { ... } }`;
   await HenryCore.query(MUTATION, { input: data });
-  
+
   // OK: インライン方式（値を直接埋め込む）
   const MUTATION = `mutation { update(input: { field: "${value}", num: ${num} }) { ... } }`;
   await HenryCore.query(MUTATION);
   ```
   - 詳細は `NOTES.md` の「GraphQL インライン方式」を参照
+
+- **IMPORTANT**: MutationObserverの監視範囲はなるべく狭くすること：
+  - `document.body` 全体を監視するのではなく、対象のコンテナ（モーダル、特定のセクション等）のみを監視する
+  - 2段階監視パターン: Stage 1で対象コンテナの出現を検知 → Stage 2でコンテナ内のみを監視
+  - コールバック内のDOM検索も `document.querySelector` ではなく `container.querySelector` を使う
+  - 高頻度で発火する場合は `debounce` を適用する
+  - **理由**: 監視範囲が広いと、無関係なDOM変更でもコールバックが実行され、パフォーマンスが低下する
+
+- **IMPORTANT**: Gemini MCPにレビューを依頼するときは、セッションのJSONLファイルを渡すこと：
+  - セッション履歴は `~/.claude/projects/-Users-shinichiro-Documents-Henry/<session-id>.jsonl` に保存されている
+  - 最新のセッションファイルは `ls -lt ~/.claude/projects/-Users-shinichiro-Documents-Henry/*.jsonl | head -1` で確認
+  - Geminiへの依頼例：
+    ```
+    @/Users/shinichiro/.claude/projects/-Users-shinichiro-Documents-Henry/<session-id>.jsonl
+    @/Users/shinichiro/Documents/Henry/<対象ファイル>
+    このセッションで行った修正をレビューしてください
+    ```
+  - **理由**: JSONLファイルを渡すことで、Geminiがセッションの文脈を理解した上でレビューできる
 
 ---
 
@@ -389,6 +409,8 @@ chrome-devtools-mcpでリアルタイム調査。静的リファレンスは廃�
 
 | Version | Date | Changes |
 |---------|------|---------|
+| v4.17 | 2026-01-18 | Gemini MCPへのセッションJSONL連携ルール追加 |
+| v4.16 | 2026-01-18 | MutationObserver監視範囲最適化ルール追加 |
 | v4.15 | 2026-01-17 | Gemini MCPモデル指定ルール追加（gemini-3-pro-preview） |
 | v4.14 | 2026-01-14 | SPA遷移対応（subscribeNavigation）ルール追加 |
 | v4.13 | 2026-01-13 | GraphQL インライン方式ルール追加 |
@@ -426,7 +448,7 @@ chrome-devtools-mcpでリアルタイム調査。静的リファレンスは廃�
 - [ ] TASK-017: 主治医意見書スクリプトのOAuthスコープ削減（drive.readonly削除。テンプレート公開+ローカルPDF生成案を検討）
 - [ ] TASK-018: 主治医意見書の下書きインポート/エクスポート機能（PC間でデータ移行可能に）
 - [ ] TASK-020: ログインモーダル表示時にスクリプトUIが上に出る問題（原因特定待ち） [2026-01-15]
-- [ ] TASK-021: MutationObserverコールバック最適化（詳細はNOTES.md参照） [2026-01-16]
+- [ ] TASK-021: MutationObserverコールバック最適化（henry_imaging_order_helper完了、他スクリプト未確認） [2026-01-16]
 
 ### 完了
 - [x] TASK-019: 照射オーダー予約後のHenry側処理（refetchQueries追加で完了）
