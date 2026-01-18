@@ -449,6 +449,7 @@ chrome-devtools-mcpでリアルタイム調査。静的リファレンスは廃�
 - [ ] TASK-018: 主治医意見書の下書きインポート/エクスポート機能（PC間でデータ移行可能に）
 - [ ] TASK-020: ログインモーダル表示時にスクリプトUIが上に出る問題（原因特定待ち） [2026-01-15]
 - [ ] TASK-021: MutationObserverコールバック最適化（henry_imaging_order_helper完了、他スクリプト未確認） [2026-01-16]
+- [ ] TASK-022: henry_imaging_order_helper リファクタリング改善（残りマジックナンバー、スタイル統合、関数分割）[2026-01-18]
 
 ### 完了
 - [x] TASK-019: 照射オーダー予約後のHenry側処理（refetchQueries追加で完了）

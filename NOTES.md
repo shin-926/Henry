@@ -645,3 +645,48 @@ registerPlugin({ id, name, icon?, description?, version?, order?, onClick })
 - **1プラグイン = 1アクション**の形式
 - 複数アクションが必要な場合は、`onClick`内でメニューを表示するか、別プラグインとして登録
 - `await`を付けて呼び出すこと（非同期関数）
+
+---
+
+## TASK-022: henry_imaging_order_helper リファクタリング改善
+
+**対象**: henry_imaging_order_helper.user.js
+**起票日**: 2026-01-18
+**優先度**: 低（現状で十分動作、将来の保守性向上のため）
+
+### 背景
+
+v1.25.0でリファクタリングを実施（マジックナンバー定数化、スタイル定数化、find*Input関数の統合など）。Geminiレビューにより追加の改善点が提案された。
+
+### 改善項目
+
+#### a. 残りのマジックナンバーを定数化
+- `findNoteInputs` の `3`（最小noteInput数）
+- `hideAutoFilledFields` の `4`（自動入力行数）
+
+```javascript
+// 例
+const DOM_SEARCH = {
+  ...
+  MIN_NOTE_INPUTS: 3,      // findNoteInputsで必要な最小数
+  AUTO_FILLED_ROWS: 4      // hideAutoFilledFieldsの自動入力行数
+};
+```
+
+#### b. 追加スタイルをSTYLES定数に統合
+- `injectToggleButton` 内のトグルボタンスタイル
+- `createSelect` 内のセレクト要素スタイル
+
+#### c. injectHelperUI のさらなる分割
+- 現在約650行の大きな関数
+- 行番号指定やMD指定など、論理的なブロックごとに分割可能
+- 優先度低：現状でも動作に問題なし
+
+#### d. リセットロジックの重複解消
+- 各入力フィールドのリセット処理が複数箇所に散在
+- 共通のリセット関数にまとめる
+
+### 実装方針
+
+- 機能追加や大きな変更のタイミングでついでに対応
+- 単独でのリファクタリングは優先度低
