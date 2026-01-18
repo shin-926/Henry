@@ -601,3 +601,47 @@ https://firestore.googleapis.com/google.firestore.v1.Firestore/Listen/channel?VE
 - [ ] 他ユーザーが患者追加したときの `updatedSessions` の中身を確認
 - [ ] Apollo Cache（`window.__APOLLO_CLIENT__.cache`）の更新状況を監視
 - [ ] 問題発生時のFirestore接続状態を確認
+
+---
+
+## HenryCore API よくある間違い
+
+### registerPlugin の正しい使い方
+
+**間違い（サポートされていない形式）:**
+```javascript
+// ❌ actions配列は存在しない
+registerPlugin({
+    id: 'my-plugin',
+    name: 'My Plugin',
+    actions: [
+        { id: 'action1', label: 'Action 1', handler: () => ... }
+    ]
+});
+```
+
+**正しい形式:**
+```javascript
+// ✓ onClick で直接ハンドラーを指定
+await registerPlugin({
+    id: 'my-plugin',
+    name: 'My Plugin',
+    icon: '🔧',           // 省略可
+    description: '説明',   // 省略可
+    version: '1.0.0',     // 省略可
+    order: 100,           // 省略可（表示順序）
+    onClick: () => {
+        // クリック時の処理
+    }
+});
+```
+
+**仕様（henry_core.user.js より）:**
+```
+registerPlugin({ id, name, icon?, description?, version?, order?, onClick })
+```
+
+**ポイント:**
+- **1プラグイン = 1アクション**の形式
+- 複数アクションが必要な場合は、`onClick`内でメニューを表示するか、別プラグインとして登録
+- `await`を付けて呼び出すこと（非同期関数）
