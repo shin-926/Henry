@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         画像オーダー入力支援
 // @namespace    https://henry-app.jp/
-// @version      1.22.0
+// @version      1.25.0
 // @description  画像照射オーダーモーダルに部位・方向選択UIを追加（複数内容対応）
 // @author       Henry UI Lab
 // @match        https://henry-app.jp/*
@@ -17,6 +17,23 @@
     SCRIPT_NAME: 'ImagingOrderHelper',
     MODALITY_SELECTOR: 'select[aria-label="モダリティ"]',
     CONTAINER_CLASS: 'henry-imaging-helper-container'
+  };
+
+  // タイミング定数
+  const TIMING = {
+    DEBOUNCE_DELAY: 100,          // デバウンス遅延(ms)
+    HENRY_CORE_WAIT: 100,         // HenryCore待機間隔(ms)
+    HENRY_CORE_TIMEOUT: 5000,     // HenryCore待機タイムアウト(ms)
+    DOM_READY_WAIT: 300,          // DOM準備待機(ms)
+    BODY_POSITION_DELAY: 500,     // 体位設定遅延(ms)
+    HELPER_UI_DELAY: 50,          // ヘルパーUI注入遅延(ms)
+    OBSERVER_TIMEOUT: 5000        // Observer切断タイムアウト(ms)
+  };
+
+  // DOM探索定数
+  const DOM_SEARCH = {
+    MAX_ANCESTOR_DEPTH: 10,       // 親要素を辿る最大深さ
+    MAX_FIBER_DEPTH: 20           // React Fiber探索最大深さ
   };
 
   // モダリティ値のマッピング
@@ -335,14 +352,82 @@
   }
 
   // ==========================================
+  // ユーティリティ: 親要素を辿ってセレクタに一致する要素を検索
+  // ==========================================
+  function findInAncestors(element, selector, maxDepth = DOM_SEARCH.MAX_ANCESTOR_DEPTH) {
+    let parent = element;
+    for (let i = 0; i < maxDepth && parent; i++) {
+      const found = parent.querySelector(selector);
+      if (found) return found;
+      parent = parent.parentElement;
+    }
+    return null;
+  }
+
+  // ==========================================
+  // スタイル定数
+  // ==========================================
+  const STYLES = {
+    toggleButton: `
+      padding: 4px 16px;
+      font-size: 13px;
+      border: 1px solid var(--henry-border, #ccc);
+      border-radius: var(--henry-radius, 4px);
+      background: var(--henry-bg-base, #fff);
+      color: var(--henry-text-high, #333);
+      cursor: pointer;
+      transition: all 0.15s;
+    `,
+    label: `
+      font-size: 13px;
+      color: var(--henry-text-medium, #666);
+    `,
+    container: `
+      display: none;
+      flex-direction: column;
+      gap: 8px;
+      margin-bottom: 12px;
+      padding: 12px;
+      background: var(--henry-bg-sub, #f5f5f5);
+      border-radius: var(--henry-radius, 4px);
+      border: 1px solid var(--henry-border, #e0e0e0);
+    `,
+    row: 'display: flex; gap: 8px; align-items: center;',
+    rowHidden: 'display: none; align-items: center; gap: 8px;',
+    buttonGroup: 'display: flex; gap: 6px;',
+    flexWrap: 'display: flex; flex-wrap: wrap; gap: 6px;'
+  };
+
+  // ==========================================
+  // ユーティリティ: トグルボタンの選択状態を設定
+  // ==========================================
+  function setButtonSelected(btn, selected) {
+    btn.dataset.selected = String(selected);
+    if (selected) {
+      btn.style.background = 'var(--henry-primary, rgb(0, 204, 146))';
+      btn.style.borderColor = 'var(--henry-primary, rgb(0, 204, 146))';
+      btn.style.color = '#fff';
+    } else {
+      btn.style.background = 'var(--henry-bg-base, #fff)';
+      btn.style.borderColor = 'var(--henry-border, #ccc)';
+      btn.style.color = 'var(--henry-text-high, #333)';
+    }
+  }
+
+  // コンテナ内の全ボタンの選択を解除
+  function clearButtonSelection(container) {
+    container.querySelectorAll('button').forEach(b => setButtonSelected(b, false));
+  }
+
+  // ==========================================
   // メイン処理
   // ==========================================
   async function init() {
     let waited = 0;
     while (!window.HenryCore) {
-      await new Promise(r => setTimeout(r, 100));
-      waited += 100;
-      if (waited > 5000) {
+      await new Promise(r => setTimeout(r, TIMING.HENRY_CORE_WAIT));
+      waited += TIMING.HENRY_CORE_WAIT;
+      if (waited > TIMING.HENRY_CORE_TIMEOUT) {
         console.error('[' + CONFIG.SCRIPT_NAME + '] HenryCore が見つかりません');
         return;
       }
@@ -352,7 +437,7 @@
     logger = utils.createLogger(CONFIG.SCRIPT_NAME);
     const cleaner = utils.createCleaner();
 
-    logger.info('スクリプト初期化 (v1.22.0)');
+    logger.info('スクリプト初期化 (v1.25.0)');
 
     utils.subscribeNavigation(cleaner, () => {
       logger.info('ページ遷移検出 -> 再セットアップ');
@@ -448,7 +533,7 @@
 
     // XP/MDの場合、体位を「任意」に設定（内容追加時のリセット対策、遅延実行）
     if (currentModality === 'XP' || currentModality === 'MD') {
-      setTimeout(() => setBodyPositionToArbitrary(dialog), 500);
+      setTimeout(() => setBodyPositionToArbitrary(dialog), TIMING.BODY_POSITION_DELAY);
     }
 
     // トグルボタンを追加（まだなければ）
@@ -459,7 +544,7 @@
     noteInputs.forEach((noteInput, index) => {
       if (!noteInput.dataset.hasHelperUI) {
         logger.info(`補足欄 ${index + 1} を検出 (name=${noteInput.name})`);
-        setTimeout(() => injectHelperUI(noteInput, index, dialog), 50);
+        setTimeout(() => injectHelperUI(noteInput, index, dialog), TIMING.HELPER_UI_DELAY);
       }
     });
   }
@@ -557,7 +642,7 @@
       }
 
       logger.info('Stage 2 Observer開始（照射オーダーモーダル検出）');
-      const debouncedProcess = debounce(() => processModalContent(), 100);
+      const debouncedProcess = debounce(() => processModalContent(), TIMING.DEBOUNCE_DELAY);
       modalObserver = new MutationObserver(debouncedProcess);
       modalObserver.observe(dialog, { childList: true, subtree: true });
       currentDialog = dialog;
@@ -664,51 +749,19 @@
   }
 
   // ==========================================
-  // 「枚数」入力欄を検出（補足欄と同じ内容セクション内）
+  // フォーム要素検出（findInAncestorsを使用）
   // ==========================================
-  function findFilmCountInput(noteInput) {
-    // 補足欄から親を辿って「内容」セクション全体を探す
-    let parent = noteInput;
-    for (let i = 0; i < 10 && parent; i++) {
-      // filmCount を含む input を探す
-      const filmCountInput = parent.querySelector('input[name*="filmCount"]');
-      if (filmCountInput) {
-        return filmCountInput;
-      }
-      parent = parent.parentElement;
-    }
-    return null;
-  }
+  const findFilmCountInput = (noteInput) =>
+    findInAncestors(noteInput, 'input[name*="filmCount"]');
 
-  // ==========================================
-  // 「部位」FilterableSelectBoxを検出
-  // ==========================================
-  function findBodySiteSelectBox(noteInput) {
-    let parent = noteInput;
-    for (let i = 0; i < 10 && parent; i++) {
-      const selectBox = parent.querySelector('[data-testid="BodySiteForm__FilterableSelectBox"]');
-      if (selectBox) {
-        return selectBox;
-      }
-      parent = parent.parentElement;
-    }
-    return null;
-  }
+  const findBodySiteSelectBox = (noteInput) =>
+    findInAncestors(noteInput, '[data-testid="BodySiteForm__FilterableSelectBox"]');
 
-  // ==========================================
-  // 「側性」セレクトを検出
-  // ==========================================
-  function findLateralitySelect(noteInput) {
-    let parent = noteInput;
-    for (let i = 0; i < 10 && parent; i++) {
-      const lateralitySelect = parent.querySelector('select[name*="laterality"]');
-      if (lateralitySelect) {
-        return lateralitySelect;
-      }
-      parent = parent.parentElement;
-    }
-    return null;
-  }
+  const findLateralitySelect = (noteInput) =>
+    findInAncestors(noteInput, 'select[name*="laterality"]');
+
+  const findConfigurationInput = (noteInput) =>
+    findInAncestors(noteInput, 'input[name*="configuration"]');
 
   // 側性のマッピング（ヘルパーUI → 元フォーム）
   const LATERALITY_MAP = {
@@ -716,21 +769,6 @@
     '左': 'UNILATERAL_LEFT',
     '両': 'BILATERAL'
   };
-
-  // ==========================================
-  // 「撮影条件」入力欄を検出
-  // ==========================================
-  function findConfigurationInput(noteInput) {
-    let parent = noteInput;
-    for (let i = 0; i < 10 && parent; i++) {
-      const configInput = parent.querySelector('input[name*="configuration"]');
-      if (configInput) {
-        return configInput;
-      }
-      parent = parent.parentElement;
-    }
-    return null;
-  }
 
   // ==========================================
   // FilterableSelectBoxに値を入力（React Fiber方式）
@@ -748,7 +786,7 @@
 
       // 親を辿ってonChangeとsearchHandlerを持つコンポーネントを探す
       let target = selectBox[fiberKey]?.return;
-      for (let i = 0; i < 10 && target; i++) {
+      for (let i = 0; i < DOM_SEARCH.MAX_ANCESTOR_DEPTH && target; i++) {
         if (target.memoizedProps?.onChange && target.memoizedProps?.searchHandler) {
           break;
         }
@@ -798,7 +836,7 @@
       let target = fiber?.return;
       let formComponent = null;
 
-      for (let i = 0; i < 20 && target; i++) {
+      for (let i = 0; i < DOM_SEARCH.MAX_FIBER_DEPTH && target; i++) {
         const props = target.memoizedProps;
         if (props?.bodyPositions !== undefined && props?.onChange) {
           formComponent = target;
@@ -841,7 +879,7 @@
     logger.info('体位設定: 開始');
 
     // DOMの準備を待つ
-    await new Promise(r => setTimeout(r, 300));
+    await new Promise(r => setTimeout(r, TIMING.DOM_READY_WAIT));
 
     // 全ての体位フィールドを取得（dialog内のみ）
     const allChipInputs = dialog.querySelectorAll('[data-testid="BodyPositionForm__ChipInput"]');
@@ -869,7 +907,7 @@
     logger.info('部位設定(MD): 開始');
 
     // DOMの準備を待つ
-    await new Promise(r => setTimeout(r, 300));
+    await new Promise(r => setTimeout(r, TIMING.DOM_READY_WAIT));
 
     const bodySiteSelectBox = dialog.querySelector('[data-testid="BodySiteForm__FilterableSelectBox"]');
     logger.info('部位設定(MD): SelectBox =', !!bodySiteSelectBox);
@@ -940,7 +978,7 @@
       }
     });
     observer.observe(dialog, { childList: true, subtree: true });
-    setTimeout(() => observer.disconnect(), 5000);
+    setTimeout(() => observer.disconnect(), TIMING.OBSERVER_TIMEOUT);
   }
 
   // ==========================================
@@ -978,65 +1016,30 @@
     const container = document.createElement('div');
     container.className = CONFIG.CONTAINER_CLASS;
     container.dataset.index = index;
-    container.style.cssText = `
-      display: none;
-      flex-direction: column;
-      gap: 8px;
-      margin-bottom: 12px;
-      padding: 12px;
-      background: var(--henry-bg-sub, #f5f5f5);
-      border-radius: var(--henry-radius, 4px);
-      border: 1px solid var(--henry-border, #e0e0e0);
-    `;
+    container.style.cssText = STYLES.container;
 
     // --- 行MD: 骨塩定量用（右前腕/左前腕） ---
     const rowMD = document.createElement('div');
-    rowMD.style.cssText = `
-      display: none;
-      align-items: center;
-      gap: 8px;
-    `;
+    rowMD.style.cssText = STYLES.rowHidden;
 
     const mdLabel = document.createElement('span');
     mdLabel.textContent = '測定部位:';
-    mdLabel.style.cssText = `
-      font-size: 13px;
-      color: var(--henry-text-medium, #666);
-    `;
+    mdLabel.style.cssText = STYLES.label;
     rowMD.appendChild(mdLabel);
 
     const mdButtonsContainer = document.createElement('div');
-    mdButtonsContainer.style.cssText = 'display: flex; gap: 6px;';
+    mdButtonsContainer.style.cssText = STYLES.buttonGroup;
 
     ['右前腕', '左前腕'].forEach(label => {
       const btn = document.createElement('button');
       btn.type = 'button';
       btn.textContent = label;
       btn.dataset.forearm = label;
-      btn.style.cssText = `
-        padding: 4px 16px;
-        font-size: 13px;
-        border: 1px solid var(--henry-border, #ccc);
-        border-radius: var(--henry-radius, 4px);
-        background: var(--henry-bg-base, #fff);
-        color: var(--henry-text-high, #333);
-        cursor: pointer;
-        transition: all 0.15s;
-      `;
+      btn.style.cssText = STYLES.toggleButton;
 
       btn.addEventListener('click', () => {
-        // 他のボタンの選択を解除
-        mdButtonsContainer.querySelectorAll('button').forEach(b => {
-          b.dataset.selected = 'false';
-          b.style.background = 'var(--henry-bg-base, #fff)';
-          b.style.borderColor = 'var(--henry-border, #ccc)';
-          b.style.color = 'var(--henry-text-high, #333)';
-        });
-        // このボタンを選択
-        btn.dataset.selected = 'true';
-        btn.style.background = 'var(--henry-primary, rgb(0, 204, 146))';
-        btn.style.borderColor = 'var(--henry-primary, rgb(0, 204, 146))';
-        btn.style.color = '#fff';
+        clearButtonSelection(mdButtonsContainer);
+        setButtonSelected(btn, true);
         state.mdForearm = label;
         setNativeValue(noteInput, label);
       });
@@ -1048,7 +1051,7 @@
 
     // --- 行1: 大分類・小分類・サブアイテムドロップダウン ---
     const row1 = document.createElement('div');
-    row1.style.cssText = 'display: flex; gap: 8px; align-items: center; flex-wrap: wrap;';
+    row1.style.cssText = STYLES.row + 'flex-wrap: wrap;';
 
     const majorSelect = createSelect('大分類');
     const minorSelect = createSelect('小分類', true);  // 初期状態で disabled
@@ -1082,15 +1085,11 @@
 
     const directionLabel = document.createElement('span');
     directionLabel.textContent = '方向:';
-    directionLabel.style.cssText = `
-      font-size: 13px;
-      color: var(--henry-text-medium, #666);
-      margin-right: 4px;
-    `;
+    directionLabel.style.cssText = STYLES.label + 'margin-right: 4px;';
     row2.appendChild(directionLabel);
 
     const directionButtonsContainer = document.createElement('div');
-    directionButtonsContainer.style.cssText = 'display: flex; flex-wrap: wrap; gap: 6px;';
+    directionButtonsContainer.style.cssText = STYLES.flexWrap;
     row2.appendChild(directionButtonsContainer);
 
     // --- 行3: 関節選択ラジオボタン ---
@@ -1104,10 +1103,7 @@
 
     const jointLabel = document.createElement('span');
     jointLabel.textContent = '関節:';
-    jointLabel.style.cssText = `
-      font-size: 13px;
-      color: var(--henry-text-medium, #666);
-    `;
+    jointLabel.style.cssText = STYLES.label;
     row3.appendChild(jointLabel);
 
     const jointRadiosContainer = document.createElement('div');
@@ -1200,42 +1196,19 @@
         btn.type = 'button';
         btn.textContent = dir;
         btn.dataset.direction = dir;
-        btn.style.cssText = `
-          padding: 4px 10px;
-          font-size: 14px;
-          border: 1px solid var(--henry-border, #ccc);
-          border-radius: var(--henry-radius, 4px);
-          background: var(--henry-bg-base, #fff);
-          color: var(--henry-text-high, #333);
-          cursor: pointer;
-          transition: all 0.15s;
-        `;
+        btn.style.cssText = STYLES.toggleButton;
 
         btn.addEventListener('click', () => {
           const isSelected = btn.dataset.selected === 'true';
           if (isSelected) {
-            // 選択解除
-            btn.dataset.selected = 'false';
-            btn.style.background = 'var(--henry-bg-base, #fff)';
-            btn.style.borderColor = 'var(--henry-border, #ccc)';
-            btn.style.color = 'var(--henry-text-high, #333)';
+            setButtonSelected(btn, false);
             state.directions = state.directions.filter(d => d !== dir);
           } else {
-            // 排他モードの場合、他のボタンの選択を解除
             if (isExclusive) {
-              directionButtonsContainer.querySelectorAll('button').forEach(b => {
-                b.dataset.selected = 'false';
-                b.style.background = 'var(--henry-bg-base, #fff)';
-                b.style.borderColor = 'var(--henry-border, #ccc)';
-                b.style.color = 'var(--henry-text-high, #333)';
-              });
+              clearButtonSelection(directionButtonsContainer);
               state.directions = [];
             }
-            // このボタンを選択
-            btn.dataset.selected = 'true';
-            btn.style.background = 'var(--henry-primary, rgb(0, 204, 146))';
-            btn.style.borderColor = 'var(--henry-primary, rgb(0, 204, 146))';
-            btn.style.color = '#fff';
+            setButtonSelected(btn, true);
             state.directions.push(dir);
           }
           updateNoteInput();
@@ -1355,14 +1328,7 @@
       row3.style.display = 'none';
       directionButtonsContainer.innerHTML = '';
       jointRadiosContainer.innerHTML = '';
-      // MD用ボタンの選択解除
-      mdButtonsContainer.querySelectorAll('button').forEach(b => {
-        b.dataset.selected = 'false';
-        b.style.background = 'var(--henry-bg-base, #fff)';
-        b.style.borderColor = 'var(--henry-border, #ccc)';
-        b.style.color = 'var(--henry-text-high, #333)';
-      });
-      // 枠色を更新
+      clearButtonSelection(mdButtonsContainer);
       updateAllSelectBorders();
     };
 
