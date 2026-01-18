@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         テストヘルパー
 // @namespace    https://henry-app.jp/
-// @version      1.0.0
+// @version      1.0.1
 // @description  照射オーダー等のテストデータを自動入力
 // @author       Henry UI Lab
 // @match        https://henry-app.jp/*
@@ -211,20 +211,15 @@
     // ==========================================
     // Toolbox統合
     // ==========================================
-    function init() {
-        registerPlugin({
+    async function init() {
+        await registerPlugin({
             id: 'test-helper',
             name: 'テストヘルパー',
             icon: '🧪',
             description: 'テストデータを自動入力',
-            actions: [
-                {
-                    id: 'fill-imaging-shoulder',
-                    label: '照射: 肩関節正面',
-                    icon: '📷',
-                    handler: () => fillImagingOrder(TEST_PATTERNS.imaging_shoulder)
-                }
-            ]
+            version: '1.0.0',
+            order: 900,
+            onClick: () => fillImagingOrder(TEST_PATTERNS.imaging_shoulder)
         });
 
         console.log(`[${SCRIPT_NAME}] 初期化完了`);
