@@ -11,6 +11,19 @@
 // @downloadURL  https://raw.githubusercontent.com/shin-926/Henry/main/henry_order_history.user.js
 // ==/UserScript==
 
+/*
+ * 【患者オーダー履歴】
+ *
+ * ■ 使用場面
+ * - 現在開いている患者の過去のオーダー（処方、検査等）を確認したい場合
+ * - ツールボックスの「履歴」ボタンから呼び出し
+ *
+ * ■ 表示内容
+ * - 指定期間内のオーダー一覧
+ * - オーダー種別（処方、検査、処置等）
+ * - オーダー日時、内容
+ */
+
 (function() {
   'use strict';
 

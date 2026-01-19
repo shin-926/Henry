@@ -10,6 +10,23 @@
 // @downloadURL  https://raw.githubusercontent.com/shin-926/Henry/main/henry_memo.user.js
 // ==/UserScript==
 
+/*
+ * 【メモ帳】
+ *
+ * ■ 使用場面
+ * - 診療中にちょっとしたメモを残したい場合
+ * - 患者情報や覚書を一時的に保存したい場合
+ *
+ * ■ 主な機能
+ * - 複数タブ対応（タブを追加・削除可能）
+ * - 自動保存（localStorageに保存）
+ * - ツールボックスの「メモ」ボタンから呼び出し
+ *
+ * ■ データ保存
+ * - ブラウザのlocalStorageに保存
+ * - 患者個人情報は保存しないこと（推奨）
+ */
+
 (function () {
   'use strict';
 

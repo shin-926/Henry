@@ -18,6 +18,23 @@
 // @run-at       document-start
 // ==/UserScript==
 
+/*
+ * 【Henry Core - スクリプト実行基盤】
+ *
+ * ■ 役割
+ * - 他のHenryスクリプトが共通で使用するAPI・ユーティリティを提供
+ * - GraphQL API呼び出し、患者情報取得、SPA遷移対応など
+ * - Google認証（OAuth）機能の統合
+ *
+ * ■ 他スクリプトからの使用方法
+ * - window.HenryCore（またはunsafeWindow.HenryCore）経由でアクセス
+ * - HenryCoreの読み込み完了を待ってから使用すること
+ *
+ * ■ 依存関係
+ * - このスクリプトは他に依存しない（最初に読み込まれる）
+ * - 他のスクリプトはこのスクリプトに依存する（henry_login_helper等一部を除く）
+ */
+
 /**
  * ============================================
  * Henry Core API 目次 (v2.10.3)

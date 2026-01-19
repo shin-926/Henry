@@ -12,6 +12,23 @@
 // @updateURL    https://raw.githubusercontent.com/shin-926/Henry/main/henry_set_search_helper.user.js
 // ==/UserScript==
 
+/*
+ * 【セット展開検索ヘルパー】
+ *
+ * ■ 使用場面
+ * - セット展開画面で、よく使うセットを素早く検索したい場合
+ * - 検索キーワードをボタン化して1クリックで入力したい場合
+ *
+ * ■ 主な機能
+ * 1. クイック検索ボタン
+ *    - 検索ボックス上にボタンを表示
+ *    - クリックで検索キーワードを入力
+ *
+ * 2. ボタンのカスタマイズ
+ *    - 右クリックでボタンの追加・編集・削除
+ *    - 設定はGM_storageに保存
+ */
+
 (function() {
   'use strict';
 

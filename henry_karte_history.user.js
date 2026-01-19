@@ -10,6 +10,21 @@
 // @downloadURL  https://raw.githubusercontent.com/shin-926/Henry/main/henry_karte_history.user.js
 // ==/UserScript==
 
+/*
+ * 【カルテ履歴取得（実験用）】
+ *
+ * ■ 使用場面
+ * - 過去のカルテ記事の内容をまとめて取得したい場合
+ * - デバッグ・開発用途
+ *
+ * ■ 機能
+ * - 過去3ヶ月分のカルテ記事を取得
+ * - コンソールに出力（UIなし）
+ *
+ * ■ 注意
+ * - 実験用スクリプトのため、本番利用は想定していない
+ */
+
 (function() {
   'use strict';
 

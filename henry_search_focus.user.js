@@ -10,6 +10,21 @@
 // @updateURL    https://raw.githubusercontent.com/shin-926/Henry/main/henry_search_focus.user.js
 // ==/UserScript==
 
+/*
+ * 【検索パネルフォーカス】
+ *
+ * ■ 使用場面
+ * - キーボードショートカットで素早く患者検索したい場合
+ *
+ * ■ 機能
+ * - 「/」キーで検索パネルを開く
+ * - 検索ボックスに自動フォーカス
+ * - 「☆」を自動入力（お気に入り患者の検索用）
+ *
+ * ■ 補足
+ * - 「☆」はHenryのお気に入り機能で使用されるプレフィックス
+ */
+
 (function () {
     'use strict';
 

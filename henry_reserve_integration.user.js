@@ -18,6 +18,33 @@
 // @downloadURL  https://raw.githubusercontent.com/shin-926/Henry/main/henry_reserve_integration.user.js
 // ==/UserScript==
 
+/*
+ * 【予約システム連携スクリプト】
+ *
+ * ■ 使用場面
+ * - Henry電子カルテと外部予約システム（reserve.ne.jp）の間でデータ連携が必要な場合
+ * - 照射オーダー（CT/MRI等）を未来日付で登録し、同時に予約も取りたい場合
+ * - 予約システムで患者を選択する際に、Henryのカルテ情報をプレビューしたい場合
+ *
+ * ■ 主な機能
+ * 1. Henry→予約システム（再診予約モード）
+ *    - Henryのツールボックスから予約システムを開く
+ *    - 患者ID・日付を自動入力
+ *
+ * 2. Henry→予約システム（照射オーダーモード）
+ *    - 未来日付の照射オーダー保存時に自動で予約システムを開く
+ *    - 予約完了後、その日付で外来予約を自動作成
+ *    - smart_printerと連携して印刷タイミングを調整
+ *
+ * 3. 予約システム→Henry（患者プレビュー）
+ *    - 予約システムのツールチップに「カルテ」ボタンを追加
+ *    - ホバーで過去のカルテ内容をプレビュー表示
+ *
+ * ■ 関連スクリプト
+ * - henry_core.user.js: API呼び出し、ユーティリティ
+ * - henry_image_order_smart_printer.user.js: 印刷タイミング連携（skipAutoPrintフラグ）
+ */
+
 (function() {
   'use strict';
 

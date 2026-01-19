@@ -17,6 +17,32 @@
 // @downloadURL  https://raw.githubusercontent.com/shin-926/Henry/main/henry_ikensho_form.user.js
 // ==/UserScript==
 
+/*
+ * 【主治医意見書作成フォーム】
+ *
+ * ■ 使用場面
+ * - 介護保険の主治医意見書を作成する場合
+ * - Henryから患者情報を取得してフォームに自動入力したい場合
+ *
+ * ■ 主な機能
+ * 1. 入力フォーム
+ *    - 患者情報（氏名、生年月日、住所等）の自動取得
+ *    - 各項目の入力・選択UI
+ *    - 下書きの自動保存・復元
+ *
+ * 2. Google Docs出力
+ *    - 入力内容をGoogle Docsテンプレートに反映
+ *    - PDFとしてダウンロード可能
+ *
+ * ■ 依存関係
+ * - henry_core.user.js: GoogleAuth API（OAuth認証）
+ * - Google Docs API: 文書の作成・編集
+ *
+ * ■ 初回設定
+ * - Google OAuthの設定が必要
+ * - HenryCoreの設定ダイアログからClient ID/Secretを設定
+ */
+
 (function() {
   'use strict';
 

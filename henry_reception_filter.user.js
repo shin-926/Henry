@@ -10,6 +10,19 @@
 // @downloadURL  https://raw.githubusercontent.com/shin-926/Henry/main/henry_reception_filter.user.js
 // ==/UserScript==
 
+/*
+ * 【外来受付フィルタ】
+ *
+ * ■ 使用場面
+ * - 外来受付画面で、まだ診療が終わっていない患者だけを表示したい場合
+ * - 会計待ち・会計済みの患者を非表示にしたい場合
+ *
+ * ■ 機能
+ * - 「未完了のみ」フィルタボタンを追加
+ * - クリックで会計待ち/会計済み以外の患者のみ表示
+ * - 再クリックでフィルタ解除
+ */
+
 (function() {
   'use strict';
 

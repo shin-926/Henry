@@ -11,6 +11,19 @@
 // @downloadURL  https://raw.githubusercontent.com/shin-926/Henry/main/henry_error_logger.user.js
 // ==/UserScript==
 
+/*
+ * 【エラーログ表示】
+ *
+ * ■ 使用場面
+ * - HenryCoreや各スクリプトで発生したエラーを確認したい場合
+ * - 問題発生時のデバッグ・報告用途
+ *
+ * ■ 機能
+ * - HenryCoreが記録したエラーログを一覧表示
+ * - クリップボードにコピー
+ * - ログのクリア
+ */
+
 (function() {
   'use strict';
 

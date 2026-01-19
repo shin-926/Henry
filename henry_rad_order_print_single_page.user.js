@@ -11,6 +11,22 @@
 // @updateURL    https://raw.githubusercontent.com/shin-926/Henry/main/henry_rad_order_print_single_page.user.js
 // ==/UserScript==
 
+/*
+ * 【照射オーダー印刷1枚化】
+ *
+ * ■ 使用場面
+ * - 照射オーダーの印刷時に2枚に分かれてしまう問題を解決したい場合
+ * - 主にMac環境で発生する問題への対処
+ *
+ * ■ 機能
+ * - 印刷プレビューのCSSを調整
+ * - ページ分割を防止して1枚に収める
+ *
+ * ■ 注意
+ * - 環境によっては不要な場合あり
+ * - smart_printerとは別機能（こちらはHenry標準の印刷を修正）
+ */
+
 (function() {
     'use strict';
 

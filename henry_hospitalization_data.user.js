@@ -11,6 +11,18 @@
 // @downloadURL  https://raw.githubusercontent.com/shin-926/Henry/main/henry_hospitalization_data.user.js
 // ==/UserScript==
 
+/*
+ * 【入院データビューア（実験用）】
+ *
+ * ■ 使用場面
+ * - 入院患者の日々のデータを取得・表示したい場合
+ * - 実験・開発用途
+ *
+ * ■ 注意
+ * - 実験用スクリプトのため、本番利用は想定していない
+ * - 機能が不完全な場合あり
+ */
+
 (function() {
   'use strict';
 

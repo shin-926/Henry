@@ -11,6 +11,29 @@
 // @downloadURL  https://raw.githubusercontent.com/shin-926/Henry/main/reserve_calendar_ui.user.js
 // ==/UserScript==
 
+/*
+ * 【予約システム：カレンダーUIカスタム】
+ *
+ * ■ 使用場面
+ * - 予約システム（reserve.ne.jp）のカレンダー画面を使いやすくしたい場合
+ *
+ * ■ 主な機能
+ * 1. カレンダー縦表示
+ *    - 複数月を縦に並べて表示
+ *    - 一覧性の向上
+ *
+ * 2. 週ジャンプ
+ *    - 「前週」「次週」ボタンで素早く移動
+ *
+ * 3. その他UI改善
+ *    - ヘッダー固定
+ *    - 表示の最適化
+ *
+ * ■ 対象ページ
+ * - reserve.ne.jp のカレンダー画面（calendar.php）のみで動作
+ * - Henryとは独立して動作（HenryCore不要）
+ */
+
 (function() {
   'use strict';
 

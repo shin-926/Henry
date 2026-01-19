@@ -10,6 +10,18 @@
 // @downloadURL  https://raw.githubusercontent.com/shin-926/Henry/main/henry_note_reader.user.js
 // ==/UserScript==
 
+/*
+ * 【カルテ内容リーダー】
+ *
+ * ■ 使用場面
+ * - 現在開いているカルテの内容をテキストで取得したい場合
+ * - デバッグやデータ確認用途
+ *
+ * ■ 機能
+ * - 表示中のカルテ記事を取得
+ * - テキスト形式で表示
+ */
+
 (async function() {
   'use strict';
 

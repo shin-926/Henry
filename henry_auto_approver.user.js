@@ -9,6 +9,22 @@
 // @downloadURL  https://raw.githubusercontent.com/shin-926/Henry/main/henry_auto_approver.user.js
 // ==/UserScript==
 
+/*
+ * 【承認アシスタント】
+ *
+ * ■ 使用場面
+ * - 承認待ちのオーダー（処方、検査等）が溜まっている場合
+ * - 一括で承認処理を行いたい場合
+ *
+ * ■ 主な機能
+ * - 承認待ちオーダーの一覧を取得
+ * - 指定した医師のオーダーを自動で一括承認
+ * - 進捗表示とエラーハンドリング
+ *
+ * ■ 注意事項
+ * - 承認操作は取り消せないため、対象オーダーをよく確認してから実行すること
+ */
+
 (function() {
   'use strict';
 

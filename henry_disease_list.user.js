@@ -11,6 +11,19 @@
 // @downloadURL  https://raw.githubusercontent.com/shin-926/Henry/main/henry_disease_list.user.js
 // ==/UserScript==
 
+/*
+ * 【患者病名一覧】
+ *
+ * ■ 使用場面
+ * - 現在開いている患者の登録済み病名を一覧で確認したい場合
+ * - ツールボックスの「病名」ボタンから呼び出し
+ *
+ * ■ 表示内容
+ * - 病名（ICD-10コード付き）
+ * - 主病名/副病名の区分
+ * - 登録日
+ */
+
 (function() {
   'use strict';
 

@@ -12,6 +12,30 @@
 // @downloadURL  https://raw.githubusercontent.com/shin-926/Henry/main/henry_disease_register.user.js
 // ==/UserScript==
 
+/*
+ * 【高速病名検索・登録】
+ *
+ * ■ 使用場面
+ * - 患者に病名を登録する際に、標準の検索より素早く検索したい場合
+ * - よく使う病名をすぐに呼び出したい場合
+ *
+ * ■ 主な機能
+ * 1. 高速検索
+ *    - ローカルの病名マスタ（henry_disease_data.js）を使用
+ *    - インクリメンタルサーチで即座に候補表示
+ *    - N-gram検索で部分一致にも対応
+ *
+ * 2. 使用頻度学習
+ *    - よく使う病名・修飾語を記憶
+ *    - 次回から上位に表示
+ *
+ * 3. 修飾語対応
+ *    - 「急性」「慢性」「疑い」などの修飾語を追加可能
+ *
+ * ■ 依存ファイル
+ * - henry_disease_data.js: 病名マスタデータ（@require で読み込み）
+ */
+
 (function() {
   'use strict';
 

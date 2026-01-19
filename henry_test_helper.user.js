@@ -11,6 +11,22 @@
 // @downloadURL  https://raw.githubusercontent.com/shin-926/Henry/main/henry_test_helper.user.js
 // ==/UserScript==
 
+/*
+ * 【テストヘルパー】
+ *
+ * ■ 使用場面
+ * - 照射オーダー等の機能をテストする際に、テストデータを素早く入力したい場合
+ * - 開発・デバッグ用途
+ *
+ * ■ 機能
+ * - 照射オーダーのテストデータを自動入力
+ * - ツールボックスの「テスト」ボタンから呼び出し
+ *
+ * ■ 注意
+ * - 開発・テスト用スクリプト
+ * - 本番環境では無効化推奨
+ */
+
 (function () {
     'use strict';
 

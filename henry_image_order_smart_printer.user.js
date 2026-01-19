@@ -16,6 +16,30 @@
 // @downloadURL  https://raw.githubusercontent.com/shin-926/Henry/main/henry_image_order_smart_printer.user.js
 // ==/UserScript==
 
+/*
+ * 【照射オーダー自動印刷スクリプト】
+ *
+ * ■ 使用場面
+ * - 外来で照射オーダー（CT/MRI等）を登録した際に、自動で印刷したい場合
+ * - 印刷ボタンを押す手間を省きたい場合
+ *
+ * ■ 動作の流れ
+ * 1. GraphQL API（CreateImagingOrder/UpsertImagingOrder）のレスポンスを監視
+ * 2. 外来（isOutpatient=true）の照射オーダー作成を検出
+ * 3. APIから患者情報・オーダー内容を取得
+ * 4. 印刷用HTMLを生成してiframeで印刷ダイアログを表示
+ *
+ * ■ 予約システム連携との協調
+ * - 未来日付の照射オーダーは、予約システム連携（henry_reserve_integration）が先に処理
+ * - このスクリプトは「未来日付」を検出したら印刷を保留（skipAutoPrint/deferredOrderData）
+ * - 予約完了後にreserve_integrationがフラグを解除 → 遅延印刷を実行
+ * - 60秒タイムアウトのフォールバックあり（reserve_integrationが動作しなかった場合）
+ *
+ * ■ 設定
+ * - 画面右上のダッシュボードから有効/無効を切り替え可能
+ * - 設定はlocalStorageに保存（複数タブ間で共有）
+ */
+
 (function () {
     'use strict';
 

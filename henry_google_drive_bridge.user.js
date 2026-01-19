@@ -24,6 +24,25 @@
 // @downloadURL  https://raw.githubusercontent.com/shin-926/Henry/main/henry_google_drive_bridge.user.js
 // ==/UserScript==
 
+/*
+ * 【Google Drive連携】
+ *
+ * ■ 使用場面
+ * - HenryのファイルをGoogle Driveに保存・編集したい場合
+ * - Google Docs形式に変換したい場合
+ *
+ * ■ 主な機能
+ * - Google Drive APIへの直接アクセス（GAS不要）
+ * - ファイルのアップロード・ダウンロード
+ * - Google Docs形式への変換
+ *
+ * ■ 依存関係
+ * - henry_core.user.js: GoogleAuth API（OAuth認証）
+ *
+ * ■ 初回設定
+ * - Google OAuthの設定が必要
+ */
+
 (function() {
   'use strict';
 

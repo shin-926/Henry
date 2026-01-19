@@ -14,6 +14,26 @@
 // @downloadURL  https://raw.githubusercontent.com/shin-926/Henry/main/henry_toolbox.user.js
 // ==/UserScript==
 
+/*
+ * 【ツールボックス - プラグインUI】
+ *
+ * ■ 役割
+ * - 画面右下に表示されるツールボックスUI
+ * - 各スクリプトの機能ボタンを集約して表示
+ *
+ * ■ プラグイン登録
+ * - 各スクリプトはHenryCore.registerPlugin()でボタンを登録
+ * - ツールボックスが自動的にボタンを表示
+ *
+ * ■ 機能
+ * - ドラッグ＆ドロップでボタンの並び替え
+ * - 並び順はlocalStorageに保存
+ * - 折りたたみ可能
+ *
+ * ■ 依存関係
+ * - henry_core.user.js: registerPlugin API を使用
+ */
+
 (function () {
   'use strict';
 
