@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         予約システム連携
 // @namespace    https://github.com/shin-926/Henry
-// @version      3.7.0
+// @version      3.11.0
 // @description  Henryカルテと予約システム間の双方向連携（再診予約・照射オーダー自動予約・患者プレビュー）
 // @match        https://henry-app.jp/*
 // @match        https://manage-maokahp.reserve.ne.jp/*
@@ -33,16 +33,90 @@
     TOKEN_REQUEST_TIMEOUT: 3000,
     OBSERVER_TIMEOUT: 10000,
     CONTEXT_EXPIRY: 5 * 60 * 1000,
+    POST_MESSAGE_TIMEOUT: 1000,
+    WINDOW_CHECK_INTERVAL: 500,
+    TRANSITION_DURATION: 200,
     // UI
     POLLING_INTERVAL: 100,
     HOVER_DELAY: 150,
     CLOSE_DELAY: 300,
     NOTIFICATION_DURATION: 3000,
-    PREVIEW_COUNT: 3
+    PREVIEW_COUNT: 3,
+    PLUGIN_ORDER: 30,
+    DEFAULT_TIME: '09:00',
+    // z-index
+    Z_INDEX_OVERLAY: 100000,
+    Z_INDEX_POPUP: 100001
   };
 
-  // 予約システムウィンドウの参照（古いウィンドウを閉じるため）
-  let reserveWindowRef = null;
+  // スタイル定数
+  const STYLES = {
+    overlay: `
+      position: fixed;
+      top: 0; left: 0; right: 0; bottom: 0;
+      background: rgba(0, 0, 0, 0.7);
+      z-index: ${CONFIG.Z_INDEX_OVERLAY};
+      display: none;
+      justify-content: center;
+      align-items: center;
+      opacity: 0;
+      transition: opacity 0.15s ease-out;
+    `,
+    messageBox: `
+      background: white;
+      border-radius: 12px;
+      padding: 32px 48px;
+      text-align: center;
+      font-family: sans-serif;
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+    `,
+    title: 'font-size: 18px; font-weight: bold; color: #1565C0; margin-bottom: 16px;',
+    message: 'font-size: 14px; color: #666; margin-bottom: 24px;',
+    cancelBtn: `
+      padding: 10px 32px;
+      font-size: 14px;
+      background: #f5f5f5;
+      border: 1px solid #ddd;
+      border-radius: 6px;
+      cursor: pointer;
+      color: #333;
+    `,
+    notification: (type) => `
+      position: fixed;
+      top: 20px;
+      right: 20px;
+      padding: 16px 24px;
+      border-radius: 8px;
+      color: white;
+      font-size: 14px;
+      font-weight: bold;
+      z-index: ${CONFIG.Z_INDEX_OVERLAY};
+      box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+      animation: slideIn 0.3s ease;
+      background-color: ${type === 'success' ? '#00cc92' : type === 'error' ? '#e53935' : '#2196f3'};
+    `,
+    previewWindow: `
+      position: fixed;
+      background: #fff;
+      border: 1px solid #ccc;
+      border-radius: 8px;
+      box-shadow: 0 4px 20px rgba(0,0,0,0.15);
+      padding: 12px;
+      z-index: ${CONFIG.Z_INDEX_POPUP};
+      overflow-y: auto;
+      font-family: 'Noto Sans JP', sans-serif;
+      font-size: 13px;
+      display: none;
+      box-sizing: border-box;
+    `,
+    karteInfo: `
+      background-color: #f0f8ff;
+      padding: 10px;
+      margin-top: 10px;
+      border-top: 2px solid #4682B4;
+      font-size: 12px;
+    `
+  };
 
   // GraphQL クエリ定義（フルクエリ方式）
   const QUERIES = {
@@ -127,6 +201,136 @@
   function escapeHtml(str) {
     if (!str) return '';
     return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  }
+
+  // ==========================================
+  // ブロッキングオーバーレイ（Henry側で使用）
+  // ==========================================
+
+  let blockingOverlay = null;
+  let reserveWindowRef = null;
+
+  function createBlockingOverlay() {
+    if (blockingOverlay) return blockingOverlay;
+
+    // オーバーレイ
+    const overlay = document.createElement('div');
+    overlay.id = 'henry-reserve-blocking-overlay';
+    overlay.style.cssText = STYLES.overlay;
+
+    // メッセージボックス
+    const messageBox = document.createElement('div');
+    messageBox.style.cssText = STYLES.messageBox;
+
+    const title = document.createElement('div');
+    title.id = 'henry-blocking-title';
+    title.style.cssText = STYLES.title;
+    title.textContent = '予約システム';
+
+    const message = document.createElement('div');
+    message.style.cssText = STYLES.message;
+    message.textContent = '予約システムで操作してください。\n完了したらこの画面に戻ります。';
+    message.style.whiteSpace = 'pre-line';
+
+    const cancelBtn = document.createElement('button');
+    cancelBtn.textContent = 'キャンセル';
+    cancelBtn.style.cssText = STYLES.cancelBtn;
+    cancelBtn.addEventListener('click', () => closeBlockingOverlay(true));
+    cancelBtn.addEventListener('mouseenter', () => cancelBtn.style.background = '#e0e0e0');
+    cancelBtn.addEventListener('mouseleave', () => cancelBtn.style.background = '#f5f5f5');
+
+    messageBox.appendChild(title);
+    messageBox.appendChild(message);
+    messageBox.appendChild(cancelBtn);
+    overlay.appendChild(messageBox);
+
+    document.body.appendChild(overlay);
+
+    blockingOverlay = { overlay, title };
+
+    // postMessage を受信（予約システムからの閉じる要求）
+    window.addEventListener('message', (e) => {
+      if (e.origin !== 'https://manage-maokahp.reserve.ne.jp') return;
+      if (e.data?.type === 'overlay-close') {
+        log.info('postMessage受信: オーバーレイを閉じます');
+        closeBlockingOverlay(false);
+        // 閉じたことを予約システムに通知
+        if (e.source) {
+          e.source.postMessage({ type: 'overlay-closed' }, e.origin);
+        }
+      }
+    });
+
+    return blockingOverlay;
+  }
+
+  function openReserveWithOverlay(url, titleText) {
+    const { overlay, title } = createBlockingOverlay();
+
+    title.textContent = titleText || '予約システム';
+
+    // 古いウィンドウがあれば閉じる
+    if (reserveWindowRef && !reserveWindowRef.closed) {
+      reserveWindowRef.close();
+    }
+
+    // 予約システムを別ウィンドウで開く
+    const width = window.screen.availWidth;
+    const height = window.screen.availHeight;
+    reserveWindowRef = window.open(url, 'reserveWindow', `width=${width},height=${height},left=0,top=0`);
+
+    // オーバーレイを表示
+    overlay.style.display = 'flex';
+    overlay.style.pointerEvents = 'auto';
+    // 次フレームで opacity を変更（トランジションを有効にするため）
+    requestAnimationFrame(() => {
+      overlay.style.opacity = '1';
+    });
+
+    // ウィンドウが閉じられたかを監視
+    const checkWindowClosed = setInterval(() => {
+      if (reserveWindowRef && reserveWindowRef.closed) {
+        clearInterval(checkWindowClosed);
+        // ウィンドウが閉じられた場合、キャンセル扱い（予約成功時はGM_valueで先に検知される）
+        const context = GM_getValue('imagingOrderContext', null);
+        if (context) {
+          closeBlockingOverlay(true);
+        } else {
+          closeBlockingOverlay(false);
+        }
+      }
+    }, CONFIG.WINDOW_CHECK_INTERVAL);
+
+    log.info('予約システムを開きました（オーバーレイ表示）:', url);
+  }
+
+  function closeBlockingOverlay(cancelled = false) {
+    if (!blockingOverlay) return;
+
+    const { overlay } = blockingOverlay;
+
+    // キャンセル時
+    if (cancelled) {
+      const context = GM_getValue('imagingOrderContext', null);
+      if (context) {
+        GM_setValue('reservationResult', { cancelled: true, timestamp: Date.now() });
+        GM_setValue('imagingOrderContext', null);
+        log.info('オーバーレイ閉じ - キャンセル結果を送信');
+      }
+      // ウィンドウも閉じる
+      if (reserveWindowRef && !reserveWindowRef.closed) {
+        reserveWindowRef.close();
+      }
+    }
+
+    // 即座に透明化してクリックを透過（display:none より先に）
+    overlay.style.opacity = '0';
+    overlay.style.pointerEvents = 'none';
+    // トランジション完了後に display:none
+    setTimeout(() => {
+      overlay.style.display = 'none';
+    }, CONFIG.TRANSITION_DURATION);
+    log.info('ブロッキングオーバーレイを閉じました');
   }
 
   function callHenryAPI(token, operationName, variables, endpoint) {
@@ -325,18 +529,10 @@
 
         GM_setValue('pendingPatient', { id: patientId, name: patientData.name || '' });
 
-        // 古い予約システムウィンドウが開いていれば閉じる
-        if (reserveWindowRef && !reserveWindowRef.closed) {
-          log.info('古い予約システムウィンドウを閉じます');
-          reserveWindowRef.close();
-        }
-
-        const width = window.screen.availWidth;
-        const height = window.screen.availHeight;
-        reserveWindowRef = window.open(
+        // オーバーレイ付きで予約システムを開く
+        openReserveWithOverlay(
           'https://manage-maokahp.reserve.ne.jp/',
-          'reserveWindow',
-          `width=${width},height=${height},left=0,top=0`
+          `再診予約 - ${patientId} ${patientData.name || ''}`
         );
 
       } catch (e) {
@@ -368,7 +564,7 @@
           name: '再診予約',
           description: '予約システムを開いて患者情報を自動入力',
           version: '1.3.0',
-          order: 30,
+          order: CONFIG.PLUGIN_ORDER,
           onClick: openReserve
         });
 
@@ -492,6 +688,9 @@
           GM_setValue('imagingOrderContext', null);
           GM_setValue('reservationResult', null);
 
+          // オーバーレイを閉じる
+          closeBlockingOverlay(false);
+
           if (newValue.cancelled) {
             reject(new Error('予約がキャンセルされました'));
           } else if (newValue.time && newValue.date) {
@@ -508,36 +707,18 @@
         const limit = Math.floor(targetDate.getTime() / 1000);
         const reserveUrl = `https://manage-maokahp.reserve.ne.jp/manage/calendar.php?from_date=${context.date}&limit=${limit}`;
 
-        // 古い予約システムウィンドウが開いていれば閉じる
-        if (reserveWindowRef && !reserveWindowRef.closed) {
-          log.info('古い予約システムウィンドウを閉じます');
-          reserveWindowRef.close();
-        }
-
-        log.info('予約システムを開きます: ' + reserveUrl);
-        const width = window.screen.availWidth;
-        const height = window.screen.availHeight;
-        reserveWindowRef = window.open(reserveUrl, 'reserveWindow', `width=${width},height=${height},left=0,top=0`);
+        // オーバーレイ付きで予約システムを開く
+        openReserveWithOverlay(
+          reserveUrl,
+          `照射オーダー予約 - ${patientInfo.id} ${patientInfo.name || ''} - ${context.date}`
+        );
       });
     }
 
     // 通知表示
     function showImagingNotification(message, type = 'info') {
       const notification = document.createElement('div');
-      notification.style.cssText = `
-        position: fixed;
-        top: 20px;
-        right: 20px;
-        padding: 16px 24px;
-        border-radius: 8px;
-        color: white;
-        font-size: 14px;
-        font-weight: bold;
-        z-index: 100000;
-        box-shadow: 0 4px 12px rgba(0,0,0,0.3);
-        animation: slideIn 0.3s ease;
-        background-color: ${type === 'success' ? '#00cc92' : type === 'error' ? '#e53935' : '#2196f3'};
-      `;
+      notification.style.cssText = STYLES.notification(type);
       notification.textContent = message;
 
       if (!document.getElementById('imaging-notification-styles')) {
@@ -558,6 +739,54 @@
         notification.style.animation = 'slideIn 0.3s ease reverse';
         setTimeout(() => notification.remove(), CONFIG.CLOSE_DELAY);
       }, CONFIG.NOTIFICATION_DURATION);
+    }
+
+    // モダリティ（CT/MRI等）をダイアログから取得
+    function getModalityFromDialog() {
+      const modalDialog = document.querySelector('[role="dialog"]');
+      if (!modalDialog) return '';
+
+      // 「モダリティ」というテキストノードを探し、その親要素内のselectを取得
+      const walker = document.createTreeWalker(modalDialog, NodeFilter.SHOW_TEXT);
+      let node;
+      while ((node = walker.nextNode())) {
+        if (node.textContent.trim() === 'モダリティ') {
+          // 親を辿ってselectを探す
+          let parent = node.parentElement;
+          for (let i = 0; i < 5 && parent; i++) {
+            const select = parent.querySelector('select');
+            if (select && select.selectedIndex >= 0) {
+              return select.options[select.selectedIndex]?.text || '';
+            }
+            parent = parent.parentElement;
+          }
+          break;
+        }
+      }
+      return '';
+    }
+
+    // 受付一覧を更新
+    function refreshSessionList() {
+      if (!unsafeWindow.__APOLLO_CLIENT__) return;
+      try {
+        unsafeWindow.__APOLLO_CLIENT__.refetchQueries({ include: ['ListSessions'] });
+        log.info('受付一覧を更新しました');
+      } catch (e) {
+        log.warn('受付一覧の更新に失敗: ' + e.message);
+      }
+    }
+
+    // 患者情報を取得
+    async function getPatientInfo(HenryCore, patientUuid) {
+      const patientResult = await HenryCore.query(QUERIES.GetPatient, {
+        input: { uuid: patientUuid }
+      });
+      const patient = patientResult.data?.getPatient;
+      if (!patient) {
+        throw new Error('患者情報が見つかりません');
+      }
+      return { id: patient.serialNumber, name: patient.fullName };
     }
 
     // 照射オーダーfetchインターセプト
@@ -596,40 +825,12 @@
                   }
 
                   // 患者情報を取得
-                  const patientResult = await HenryCore.query(QUERIES.GetPatient, {
-                    input: { uuid: patientUuid }
-                  });
-                  const patient = patientResult.data?.getPatient;
-                  if (!patient) {
-                    throw new Error('患者情報が見つかりません');
-                  }
-                  const patientInfo = { id: patient.serialNumber, name: patient.fullName };
+                  const patientInfo = await getPatientInfo(HenryCore, patientUuid);
 
-                  // モダリティを取得（「モダリティ」テキストの近くにあるselect要素を探す）
-                  let modality = '';
-                  const modalDialog = document.querySelector('[role="dialog"]');
-                  if (modalDialog) {
-                    // 「モダリティ」というテキストノードを探し、その親要素内のselectを取得
-                    const walker = document.createTreeWalker(modalDialog, NodeFilter.SHOW_TEXT);
-                    let node;
-                    while ((node = walker.nextNode())) {
-                      if (node.textContent.trim() === 'モダリティ') {
-                        // 親を辿ってselectを探す
-                        let parent = node.parentElement;
-                        for (let i = 0; i < 5 && parent; i++) {
-                          const select = parent.querySelector('select');
-                          if (select && select.selectedIndex >= 0) {
-                            modality = select.options[select.selectedIndex]?.text || '';
-                            break;
-                          }
-                          parent = parent.parentElement;
-                        }
-                        break;
-                      }
-                    }
-                    if (modality) {
-                      log.info('モダリティを取得: ' + modality);
-                    }
+                  // モダリティを取得
+                  const modality = getModalityFromDialog();
+                  if (modality) {
+                    log.info('モダリティを取得: ' + modality);
                   }
 
                   // 確認ダイアログ
@@ -676,15 +877,8 @@
 
                   showImagingNotification(`${actualDateObj.year}/${actualDateObj.month}/${actualDateObj.day} ${reservationResult.time} の外来予約を作成しました`, 'success');
 
-                  // 受付一覧を更新（リクエスト完了後）
-                  if (unsafeWindow.__APOLLO_CLIENT__) {
-                    try {
-                      unsafeWindow.__APOLLO_CLIENT__.refetchQueries({ include: ['ListSessions'] });
-                      log.info('受付一覧を更新しました');
-                    } catch (e) {
-                      log.warn('受付一覧の更新に失敗: ' + e.message);
-                    }
-                  }
+                  // 受付一覧を更新
+                  refreshSessionList();
 
                   // 自動印刷の遅延フラグをクリア（smart_printerが印刷を実行する）
                   GM_setValue('skipAutoPrint', false);
@@ -927,17 +1121,13 @@
       navigateToDate(imagingOrderContext.date);
 
       // 予約登録ボタン監視（日時取得用）+ 患者ID自動入力 + モダリティ自動選択
-      const imagingDialogObserver = new MutationObserver(() => {
+      // 2段階監視パターンで、ダイアログの追加と再表示の両方を検知
+      setupDialogObserver(() => {
         tryFillDialog(imagingOrderContext.patientId);
         tryFillDateForImaging(imagingOrderContext);
         trySelectModality(imagingOrderContext.modality);
         setupReservationButtonListener(imagingOrderContext);
       });
-      imagingDialogObserver.observe(document.body, { childList: true, subtree: false });
-      tryFillDialog(imagingOrderContext.patientId);
-      tryFillDateForImaging(imagingOrderContext);
-      trySelectModality(imagingOrderContext.modality);
-      setupReservationButtonListener(imagingOrderContext);
     }
 
     // カレンダーの日付を変更する
@@ -1054,7 +1244,7 @@
       // 患者ID検証用のフラグ
       let patientIdVerified = false;
       let capturedDate = context.date;
-      let capturedTime = '09:00';
+      let capturedTime = CONFIG.DEFAULT_TIME;
 
       // キャプチャフェーズで患者ID・診療種別を検証（不正の場合は予約を阻止）
       reserveBtn.addEventListener('click', (event) => {
@@ -1102,7 +1292,7 @@
         const dateInput = document.querySelector('input[name="res_date"]');
         const timeInput = document.querySelector('input[name="res_time"]');
         capturedDate = dateInput?.value || context.date;
-        capturedTime = timeInput?.value || '09:00';
+        capturedTime = timeInput?.value || CONFIG.DEFAULT_TIME;
         patientIdVerified = true;
 
         log.info('予約登録ボタンがクリックされました。患者ID確認OK、診療種別:', purposeValue || '(未取得)', '日付:', capturedDate, '時間:', capturedTime);
@@ -1135,9 +1325,35 @@
             if (modeBanner) modeBanner.remove();
             document.body.style.paddingTop = '0';
 
-            // 確認メッセージを表示してウィンドウを閉じる
-            alert(`予約を登録しました。\n\n日付: ${capturedDate}\n時間: ${capturedTime}\n\nウィンドウを閉じます。`);
-            window.close();
+            // Henry側のオーバーレイを先に閉じて、応答を待ってからウィンドウを閉じる
+            const closeWindow = () => {
+              alert(`予約を登録しました。\n\n日付: ${capturedDate}\n時間: ${capturedTime}`);
+              window.close();
+            };
+
+            if (window.opener) {
+              // 応答を待つリスナーを設定
+              const onOverlayClosed = (e) => {
+                if (e.origin !== 'https://henry-app.jp') return;
+                if (e.data?.type === 'overlay-closed') {
+                  window.removeEventListener('message', onOverlayClosed);
+                  // 描画完了を待ってからウィンドウを閉じる
+                  setTimeout(closeWindow, CONFIG.POLLING_INTERVAL);
+                }
+              };
+              window.addEventListener('message', onOverlayClosed);
+
+              // タイムアウト（応答がない場合）
+              setTimeout(() => {
+                window.removeEventListener('message', onOverlayClosed);
+                closeWindow();
+              }, CONFIG.POST_MESSAGE_TIMEOUT);
+
+              // オーバーレイを閉じる要求を送信
+              window.opener.postMessage({ type: 'overlay-close' }, 'https://henry-app.jp');
+            } else {
+              closeWindow();
+            }
           }
         });
         dialogCloseObserver.observe(uiDialog, { attributes: true, attributeFilter: ['style'] });
@@ -1155,15 +1371,82 @@
       // 統合バナー表示（再診予約モード）
       showModeBanner('revisit', pendingPatient.id, pendingPatient.name);
 
-      // ダイアログ自動入力の監視
-      const dialogObserver = new MutationObserver(() => {
+      // ダイアログ自動入力の監視（2段階監視パターン）
+      setupDialogObserver(() => {
         tryFillDialog(pendingPatient.id);
       });
-      dialogObserver.observe(document.body, { childList: true, subtree: false });
-      tryFillDialog(pendingPatient.id);
 
     } else if (!isImagingOrderMode) {
       log.info('pendingPatientなし - Henry連携スキップ');
+    }
+
+    // --------------------------------------------
+    // 2段階監視パターン: ダイアログの表示を監視
+    // Stage 1: body監視で .ui-dialog の追加を検知
+    // Stage 2: .ui-dialog の style 監視で表示を検知
+    // --------------------------------------------
+    function setupDialogObserver(onDialogVisible) {
+      let uiDialogObserver = null;
+      let currentUiDialog = null;
+
+      // Stage 2: .ui-dialog の style を監視
+      function startStage2(uiDialog) {
+        if (uiDialogObserver) {
+          uiDialogObserver.disconnect();
+        }
+        currentUiDialog = uiDialog;
+
+        uiDialogObserver = new MutationObserver(() => {
+          const display = window.getComputedStyle(uiDialog).display;
+          if (display !== 'none') {
+            onDialogVisible();
+          }
+        });
+        uiDialogObserver.observe(uiDialog, { attributes: true, attributeFilter: ['style'] });
+        log.info('Stage 2 Observer開始（ダイアログ style 監視）');
+
+        // 現在表示中なら即時実行
+        if (window.getComputedStyle(uiDialog).display !== 'none') {
+          onDialogVisible();
+        }
+      }
+
+      // Stage 1: body の childList を監視
+      const bodyObserver = new MutationObserver((mutations) => {
+        // 既に監視中の .ui-dialog がDOMに存在していれば何もしない
+        if (currentUiDialog && currentUiDialog.isConnected) {
+          return;
+        }
+
+        // .ui-dialog が追加されたか確認
+        for (const mutation of mutations) {
+          for (const node of mutation.addedNodes) {
+            if (node.nodeType !== Node.ELEMENT_NODE) continue;
+
+            // 追加されたノードが .ui-dialog か、その中に .ui-dialog があるか
+            const uiDialog = node.classList?.contains('ui-dialog')
+              ? node
+              : node.querySelector?.('.ui-dialog');
+
+            if (uiDialog && uiDialog.querySelector('#dialog_reserve_input')) {
+              startStage2(uiDialog);
+              return;
+            }
+          }
+        }
+      });
+
+      bodyObserver.observe(document.body, { childList: true, subtree: false });
+      log.info('Stage 1 Observer開始（ダイアログ追加監視）');
+
+      // 既にダイアログが存在する場合は Stage 2 を開始
+      const existingDialog = document.querySelector('.ui-dialog');
+      if (existingDialog && existingDialog.querySelector('#dialog_reserve_input')) {
+        startStage2(existingDialog);
+      } else {
+        // ダイアログがない場合でも初回チェック
+        onDialogVisible();
+      }
     }
 
     function tryFillDialog(patientId) {
@@ -1342,20 +1625,7 @@
     function createPreviewWindow() {
       const div = document.createElement('div');
       div.id = 'henry-preview-window';
-      div.style.cssText = `
-        position: fixed;
-        background: #fff;
-        border: 1px solid #ccc;
-        border-radius: 8px;
-        box-shadow: 0 4px 20px rgba(0,0,0,0.15);
-        padding: 12px;
-        z-index: 100001;
-        overflow-y: auto;
-        font-family: 'Noto Sans JP', sans-serif;
-        font-size: 13px;
-        display: none;
-        box-sizing: border-box;
-      `;
+      div.style.cssText = STYLES.previewWindow;
 
       div.addEventListener('mouseenter', () => {
         if (closeTimeout) {
@@ -1420,13 +1690,7 @@
       // カルテ情報を追加
       const karteDiv = document.createElement('div');
       karteDiv.id = 'henry-karte-info';
-      karteDiv.style.cssText = `
-        background-color: #f0f8ff;
-        padding: 10px;
-        margin-top: 10px;
-        border-top: 2px solid #4682B4;
-        font-size: 12px;
-      `;
+      karteDiv.style.cssText = STYLES.karteInfo;
       karteDiv.innerHTML = content;
       previewWindow.appendChild(karteDiv);
 

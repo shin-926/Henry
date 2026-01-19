@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         照射オーダー自動印刷
 // @namespace    https://henry-app.jp/
-// @version      5.3.1
+// @version      5.4.0
 // @description  「外来 照射オーダー」の完了時、APIから直接データを取得して印刷ダイアログを表示
 // @author       Henry UI Lab
 // @match        https://henry-app.jp/*
@@ -1045,12 +1045,36 @@ body {
                     const orderData = json.data?.createImagingOrder || json.data?.upsertImagingOrder;
 
                     if (orderData?.uuid && orderData?.isOutpatient) {
+                        // 未来日付かどうかを判定（予約システム連携の対象）
+                        const dateObj = parsed.variables?.input?.date;
+                        if (dateObj && this._isFutureDate(dateObj)) {
+                            Logger.log('未来日付の照射オーダー - 予約システム連携を待機', 'info');
+                            GM_setValue('skipAutoPrint', true);
+                            GM_setValue('deferredOrderData', orderData);
+
+                            // 60秒後にまだ待機中なら印刷を実行（reserve_integrationが動作しなかった場合のフォールバック）
+                            setTimeout(() => {
+                                if (GM_getValue('skipAutoPrint', false)) {
+                                    Logger.log('予約システム連携タイムアウト - 印刷を実行', 'warn');
+                                    GM_setValue('skipAutoPrint', false);
+                                }
+                            }, 60000);
+                            return;
+                        }
+
                         this._onOrderCreated(orderData);
                     }
                 }
             } catch (e) {
                 // パースエラーは無視
             }
+        },
+
+        _isFutureDate(dateObj) {
+            const today = new Date();
+            today.setHours(0, 0, 0, 0);
+            const target = new Date(dateObj.year, dateObj.month - 1, dateObj.day);
+            return target > today;
         },
 
         _onOrderCreated(orderData) {
