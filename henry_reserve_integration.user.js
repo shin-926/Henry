@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         予約システム連携
 // @namespace    https://github.com/shin-926/Henry
-// @version      4.1.3
+// @version      4.1.4
 // @description  Henryカルテと予約システム間の双方向連携（再診予約・照射オーダー自動予約・自動印刷・患者プレビュー）
 // @match        https://henry-app.jp/*
 // @match        https://manage-maokahp.reserve.ne.jp/*
@@ -1489,8 +1489,13 @@ body {
       // 確認ダイアログ
       const confirmMessage = `未来日付（${dateObj.year}/${dateObj.month}/${dateObj.day}）の照射オーダーです。\n\n予約システムで予約を取りますか？\n\n患者: ${patientInfo.id} ${patientInfo.name}`;
       if (!confirm(confirmMessage)) {
-        log.info('ユーザーが予約システム連携をキャンセル - 印刷なしで保存');
-        return originalFetch.apply(fetchContext, [url, options]);
+        log.info('ユーザーが予約システム連携をキャンセル - オーダー保存せず終了');
+        showImagingNotification('キャンセルしました', 'info');
+        // オーダーを保存せずにエラーレスポンスを返す（ダイアログは開いたまま）
+        return new Response(JSON.stringify({ data: null, errors: [{ message: 'キャンセルされました' }] }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' }
+        });
       }
 
       // 予約システムを開いて予約日時を取得
