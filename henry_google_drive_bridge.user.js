@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Google Drive連携
 // @namespace    https://henry-app.jp/
-// @version      2.2.6
+// @version      2.2.8
 // @description  HenryのファイルをGoogle Drive APIで直接変換・編集。GAS不要版。
 // @match        https://henry-app.jp/*
 // @match        https://docs.google.com/*
@@ -86,6 +86,15 @@
 
   function debugError(context, ...args) {
     console.error(`[DriveDirect:${context}]`, ...args);
+  }
+
+  // debounce: 連続呼び出しを抑制
+  function debounce(fn, delay) {
+    let timer = null;
+    return function(...args) {
+      clearTimeout(timer);
+      timer = setTimeout(() => fn.apply(this, args), delay);
+    };
   }
 
   // ==========================================
@@ -1277,13 +1286,35 @@
     // 初期化
     checkAndCreateButton();
 
-    const observer = new MutationObserver(() => {
+    // 2段階監視パターン: banner要素のみを監視（パフォーマンス最適化）
+    const DEBOUNCE_DELAY = 100;
+
+    // debounce済みのボタン再作成チェック
+    const debouncedCheck = debounce(() => {
       if (!document.getElementById('drive-direct-save-container')) {
         checkAndCreateButton();
       }
-    });
+    }, DEBOUNCE_DELAY);
 
-    observer.observe(document.body, { childList: true, subtree: true });
+    const banner = document.querySelector('[role="banner"]');
+    if (banner) {
+      // Stage 2: banner内のみを監視
+      const observer = new MutationObserver(debouncedCheck);
+      observer.observe(banner, { childList: true, subtree: true });
+    } else {
+      // Stage 1: bannerが見つからない場合はbodyを監視してbannerの出現を待つ
+      const bodyObserver = new MutationObserver(() => {
+        const foundBanner = document.querySelector('[role="banner"]');
+        if (foundBanner) {
+          bodyObserver.disconnect();
+          checkAndCreateButton();
+          // banner内のみを監視
+          const bannerObserver = new MutationObserver(debouncedCheck);
+          bannerObserver.observe(foundBanner, { childList: true, subtree: true });
+        }
+      });
+      bodyObserver.observe(document.body, { childList: true, subtree: true });
+    }
   }
 
 })();

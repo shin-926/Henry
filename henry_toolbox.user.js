@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         ツールボックス
 // @namespace    https://haru-chan.example
-// @version      5.1.4
+// @version      5.1.5
 // @description  プラグイン方式。シンプルUI、Noto Sans JP、ドラッグ＆ドロップ並び替え対応。HenryCore v2.7.0 対応。
 // @match        https://henry-app.jp/*
 // @match        https://*.henry-app.jp/*
@@ -399,18 +399,25 @@
 
   function init() {
     const nav = document.querySelector('nav');
-    if (!nav) return;
+    if (!nav) return false;
     const ul = nav.querySelector('ul');
-    if (!ul) return;
+    if (!ul) return false;
     const sampleBtn = ul.querySelector('button');
-    if (!sampleBtn) return;
+    if (!sampleBtn) return false;
 
     addToolboxIcon(ul, sampleBtn);
+    return true;
   }
 
-  const observer = new MutationObserver(init);
+  const observer = new MutationObserver(() => {
+    if (init()) {
+      observer.disconnect();
+    }
+  });
   observer.observe(document.body, { childList: true, subtree: true });
-  init();
+  if (init()) {
+    observer.disconnect();
+  }
 
-  console.log('[Toolbox] UIコントローラー v5.1.0 (Simple/ToolboxIcon) 起動');
+  console.log('[Toolbox] UIコントローラー v5.1.5 起動');
 })();

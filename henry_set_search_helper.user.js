@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry セット展開検索ヘルパー
 // @namespace    https://henry-app.jp/
-// @version      2.2.3
+// @version      2.3.3
 // @description  セット展開画面の検索ボックス上にクイック検索ボタンを追加
 // @match        https://henry-app.jp/*
 // @grant        GM_setValue
@@ -91,27 +91,15 @@
     input.dispatchEvent(new Event('input', { bubbles: true }));
   }
 
-  // セット展開画面かどうか判定
-  function isSetPanel() {
-    const title = document.querySelector('h4[data-title-text="true"]');
-    return title && title.textContent.trim() === 'セット';
+  // 検索ボックスを取得（パネル要素を引数で受け取る）
+  function getSearchInput(panel) {
+    if (!panel) return null;
+    return panel.querySelector('input[placeholder="検索"]');
   }
 
-  // 検索ボックスを取得
-  function getSearchInput() {
-    const title = document.querySelector('h4[data-title-text="true"]');
-    if (!title || title.textContent.trim() !== 'セット') return null;
-
-    const panel = title.closest('[data-popover]');
-    if (panel) {
-      return panel.querySelector('input[placeholder="検索"]');
-    }
-    return document.querySelector('input[placeholder="検索"]');
-  }
-
-  // 検索ボックスのコンテナを取得
-  function getSearchContainer() {
-    const searchInput = getSearchInput();
+  // 検索ボックスのコンテナを取得（パネル要素を引数で受け取る）
+  function getSearchContainer(panel) {
+    const searchInput = getSearchInput(panel);
     if (!searchInput) return null;
     return searchInput.closest('div')?.parentElement;
   }
@@ -456,8 +444,8 @@
     }
   }
 
-  // ボタンコンテナを作成
-  function createButtonContainer() {
+  // ボタンコンテナを作成（パネル要素を引数で受け取る）
+  function createButtonContainer(panel) {
     let items = loadItems();
     const container = document.createElement('div');
     container.className = 'hss-button-container';
@@ -473,7 +461,6 @@
     let longPressStartY = 0;
     let longPressTargetIndex = null;
     let longPressTargetText = '';
-    let popupShowedDuringThisPress = false; // ポップアップ表示中はドラッグ無効
     let ghost = null;
     let trashZone = null;
     let overTrash = false;
@@ -582,7 +569,7 @@
         if (newText && newText !== item.text) {
           item.text = newText;
           saveItems(items);
-          refreshButtons();
+          refreshButtons(panel);
         }
       };
       nameInput.onkeydown = (e) => {
@@ -832,7 +819,7 @@
 
       // データは既に更新済みなので再描画
       removeButtons();
-      insertButtons();
+      insertButtons(panel);
 
       // Last: 新しい位置を取得してアニメーション
       const newContainer = document.getElementById('hss-button-container');
@@ -904,7 +891,6 @@
         longPressTimer = null;
       }
       longPressTargetIndex = null;
-      popupShowedDuringThisPress = false; // 次のmousedownでドラッグ可能に
 
       if (dragMode && draggedIndex !== null) {
         // ゴミ箱にドロップ → 削除
@@ -912,7 +898,7 @@
           items.splice(draggedIndex, 1);
           saveItems(items);
           exitDragMode();
-          refreshButtons();
+          refreshButtons(panel);
           return;
         }
 
@@ -948,7 +934,6 @@
 
         longPressTimer = setTimeout(() => {
           longPressTimer = null;
-          popupShowedDuringThisPress = true; // このmousedown中はドラッグ無効
           // 長押し完了 → ポップアップ表示
           showEditPopup(element, index);
         }, LONG_PRESS_DURATION);
@@ -985,7 +970,7 @@
           menuItem.onclick = (e) => {
             e.stopPropagation();
             if (dragMode) return;
-            const searchInput = getSearchInput();
+            const searchInput = getSearchInput(panel);
             if (searchInput) {
               setInputValueReactSafe(searchInput, subItem + ' ');
               searchInput.focus();
@@ -1021,7 +1006,7 @@
           if (dragMode) return;
           // ポップアップが表示中なら何もしない（長押し後のclickを無視）
           if (document.querySelector('.hss-edit-popup')) return;
-          const searchInput = getSearchInput();
+          const searchInput = getSearchInput(panel);
           if (searchInput) {
             setInputValueReactSafe(searchInput, item.text + ' ');
             searchInput.focus();
@@ -1042,7 +1027,7 @@
       closeEditPopup();
       items.push({ type: 'button', text: '新規', items: [] });
       saveItems(items);
-      refreshButtons();
+      refreshButtons(panel);
     };
     container.appendChild(addBtn);
 
@@ -1061,21 +1046,21 @@
     return container;
   }
 
-  // ボタンを挿入
-  function insertButtons() {
+  // ボタンを挿入（パネル要素を引数で受け取る）
+  function insertButtons(panel) {
     if (document.getElementById('hss-button-container')) return;
 
-    const searchContainer = getSearchContainer();
+    const searchContainer = getSearchContainer(panel);
     if (!searchContainer) return;
 
-    const buttonContainer = createButtonContainer();
+    const buttonContainer = createButtonContainer(panel);
     searchContainer.parentElement.insertBefore(buttonContainer, searchContainer);
   }
 
-  // ボタンを再描画
-  function refreshButtons() {
+  // ボタンを再描画（パネル要素を引数で受け取る）
+  function refreshButtons(panel) {
     removeButtons(); // イベントハンドラも含めてクリーンアップ
-    insertButtons();
+    insertButtons(panel);
   }
 
   // ボタンを削除
@@ -1092,33 +1077,74 @@
   }
 
   // セットアップ処理（ナビゲーション時に毎回呼ばれる）
+  //
+  // 【2段階監視パターン】
+  // - Stage 1: パネル出現を検出（#__next を subtree:true で監視）
+  // - Stage 2: パネル削除を検出（removedNodes のみチェック、DOM クエリなし）
+  //
+  // 【Stage 1 で subtree:true を使う理由】
+  // - [data-popover] は body 直下ではなく #__next 内に深くネストされている
+  //   （BODY → #__next → DIV → DIV → ... → [data-popover]）
+  // - そのため subtree:false では検出できず、subtree:true が必要
+  //
+  // 【debounce を使わない理由】
+  // - Stage 1: パネルが開くのはユーザー操作の結果で高頻度発火しない。
+  //            また querySelector 1回だけなので十分高速。
+  // - Stage 2: removedNodes 配列の走査のみで DOM クエリがないため軽量。
+  //            即座に検出したいので遅延は不要。
   function setup(cleaner) {
     injectStyles();
 
-    let wasSetPanelOpen = false;
-    let debounceTimer = null;
+    let currentPanel = null;
+    let stage1Observer = null;
+    let stage2Observer = null;
+    const root = document.getElementById('__next') || document.body;
 
-    function checkAndUpdate() {
-      const isOpen = isSetPanel();
-
-      if (isOpen && !wasSetPanelOpen) {
-        insertButtons();
-        wasSetPanelOpen = true;
-      } else if (!isOpen && wasSetPanelOpen) {
-        removeButtons();
-        wasSetPanelOpen = false;
+    // セットパネルを検索して返す
+    function findSetPanel() {
+      const title = document.querySelector('h4[data-title-text="true"]');
+      if (title && title.textContent.trim() === 'セット') {
+        return title.closest('[data-popover]');
       }
+      return null;
     }
 
-    const observer = new MutationObserver(() => {
-      if (debounceTimer) clearTimeout(debounceTimer);
-      debounceTimer = setTimeout(checkAndUpdate, 100);
-    });
+    // Stage 1: パネル出現を監視
+    function startStage1() {
+      stage1Observer = new MutationObserver(() => {
+        if (currentPanel) return; // 既に検出済み
 
-    observer.observe(document.body, {
-      childList: true,
-      subtree: true
-    });
+        const panel = findSetPanel();
+        if (panel) {
+          currentPanel = panel;
+          insertButtons(panel);
+          stage1Observer.disconnect();
+          startStage2();
+        }
+      });
+
+      stage1Observer.observe(root, { childList: true, subtree: true });
+    }
+
+    // Stage 2: パネル削除を監視（removedNodes のみチェック、DOM クエリなし）
+    function startStage2() {
+      stage2Observer = new MutationObserver((mutations) => {
+        for (const m of mutations) {
+          for (const removed of m.removedNodes) {
+            // 削除されたノードがパネル自体、またはパネルを含む祖先かチェック
+            if (removed === currentPanel || removed.contains?.(currentPanel)) {
+              removeButtons();
+              currentPanel = null;
+              stage2Observer.disconnect();
+              startStage1(); // Stage 1 を再開
+              return;
+            }
+          }
+        }
+      });
+
+      stage2Observer.observe(root, { childList: true, subtree: true });
+    }
 
     // ドキュメントクリックでドロップダウンと編集ポップアップを閉じる
     const handleDocumentClick = (e) => {
@@ -1129,23 +1155,35 @@
         const hadPopup = document.querySelector('.hss-edit-popup');
         closeEditPopup();
         if (hadPopup) {
-          refreshButtons(); // ポップアップを閉じたらボタンを再描画（ドロップダウン切り替え反映）
+          refreshButtons(currentPanel); // ポップアップを閉じたらボタンを再描画（ドロップダウン切り替え反映）
         }
       }
     };
     document.addEventListener('click', handleDocumentClick);
 
     cleaner.add(() => {
-      observer.disconnect();
-      if (debounceTimer) clearTimeout(debounceTimer);
+      if (stage1Observer) stage1Observer.disconnect();
+      if (stage2Observer) stage2Observer.disconnect();
       document.removeEventListener('click', handleDocumentClick);
+      removeButtons(); // 画面遷移時にボタンも削除（残留防止）
     });
 
-    // 初回チェック
-    checkAndUpdate();
+    // 初回チェック: 既にパネルが開いていれば Stage 2 から開始
+    const existingPanel = findSetPanel();
+    if (existingPanel) {
+      currentPanel = existingPanel;
+      insertButtons(currentPanel);
+      startStage2();
+    } else {
+      startStage1();
+    }
   }
 
   // 初期化（1回だけ）
+  //
+  // 【subscribeNavigation の初回実行について】
+  // - subscribeNavigation は登録時に initFn を即時実行する仕様
+  // - そのため setup() を別途呼ぶ必要はない
   async function init() {
     const coreReady = await waitForHenryCore();
     if (!coreReady) return;
