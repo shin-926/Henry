@@ -1,6 +1,6 @@
-# Henry EMR 開発ガイドライン (Core Rules v4.18)
+# Henry EMR 開発ガイドライン (Core Rules v4.19)
 
-<!-- 📝 UPDATED: v4.18 - スクリプト一覧セクション追加 -->
+<!-- 📝 UPDATED: v4.19 - 根本原因調査優先ルール追加 -->
 
 > このドキュメントはAIアシスタントとの協働開発における必須ルール集です。HenryCore APIの詳細は `henry_core.user.js` 冒頭のAPI目次と実装を参照。
 
@@ -300,6 +300,11 @@ const core = pageWindow.HenryCore;
 
 **理由**: 中間推論を明示することで論理の飛躍を防ぎ、手戻りを減らす。
 
+**YOU MUST**: 問題を解決するときは「とりあえず動けばいい」という一時しのぎではなく、原因を理解して根本的に対処すること：
+- 「なぜこうなっているのか」を先に調べる
+- 表面的な症状を消すのではなく、本質的な原因に対処する
+- ワークアラウンドは最終手段。まず正攻法を探す
+
 ---
 
 ## 5. 参照ドキュメント (Reference)
@@ -342,9 +347,8 @@ chrome-devtools-mcpでリアルタイム調査。静的リファレンスは廃�
 | **基盤** | henry_core.user.js | 実行基盤（GoogleAuth統合、API、ユーティリティ） |
 | | henry_toolbox.user.js | プラグインUI（ドラッグ＆ドロップ対応） |
 | **照射オーダー** | henry_imaging_order_helper.user.js | 部位・方向選択UI追加 |
-| | henry_image_order_smart_printer.user.js | 外来照射オーダー自動印刷 |
 | | henry_rad_order_print_single_page.user.js | 印刷を1枚にまとめる（Mac用） |
-| **予約連携** | henry_reserve_integration.user.js | Henry⇔予約システム双方向連携 |
+| **予約連携** | henry_reserve_integration.user.js | Henry⇔予約システム双方向連携（自動印刷含む） |
 | | reserve_calendar_ui.user.js | 予約カレンダーUIカスタム |
 | **病名・オーダー** | henry_disease_register.user.js | 高速病名検索・登録 |
 | | henry_disease_list.user.js | 患者の病名一覧表示 |
@@ -437,6 +441,7 @@ chrome-devtools-mcpでリアルタイム調査。静的リファレンスは廃�
 
 | Version | Date | Changes |
 |---------|------|---------|
+| v4.19 | 2026-01-20 | 根本原因調査優先ルール追加 |
 | v4.18 | 2026-01-19 | スクリプト一覧セクション追加 |
 | v4.17 | 2026-01-18 | Gemini MCPへのセッションJSONL連携ルール追加 |
 | v4.16 | 2026-01-18 | MutationObserver監視範囲最適化ルール追加 |
@@ -480,6 +485,9 @@ chrome-devtools-mcpでリアルタイム調査。静的リファレンスは廃�
 - [ ] TASK-021: MutationObserverコールバック最適化（henry_imaging_order_helper, henry_reserve_integration完了、他スクリプト未確認） [2026-01-16]
 - [ ] TASK-022: henry_imaging_order_helper リファクタリング改善（残りマジックナンバー、スタイル統合、関数分割）[2026-01-18]
 - [ ] TASK-023: 予約システム連携のオーバーレイ閉じ時に一瞬見える問題（postMessage応答待ち+100ms待機でも解決せず。描画タイミングの問題？）[2026-01-19]
+- [x] TASK-024: google-docs-mcp OAuth設定（完了）[2026-01-20]
+- [ ] TASK-025: デバッグ用ChromeにTampermonkey＋Henryスクリプト設定 [2026-01-19]
+- [x] TASK-026: Gemini MCP連携手順（CLAUDE.mdカスタムルールに記載済み）[2026-01-20]
 
 ### 完了
 - [x] TASK-019: 照射オーダー予約後のHenry側処理（refetchQueries追加で完了）
