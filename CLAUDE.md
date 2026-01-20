@@ -482,14 +482,23 @@ chrome-devtools-mcpでリアルタイム調査。静的リファレンスは廃�
 - [ ] TASK-017: 主治医意見書スクリプトのOAuthスコープ削減（drive.readonly削除。テンプレート公開+ローカルPDF生成案を検討）
 - [ ] TASK-018: 主治医意見書の下書きインポート/エクスポート機能（PC間でデータ移行可能に）
 - [ ] TASK-020: ログインモーダル表示時にスクリプトUIが上に出る問題（原因特定待ち） [2026-01-15]
-- [ ] TASK-021: MutationObserverコールバック最適化（henry_imaging_order_helper, henry_reserve_integration完了、他スクリプト未確認） [2026-01-16]
+- [ ] TASK-021: MutationObserver最適化 [2026-01-16]
+  - ✅ henry_imaging_order_helper: OK（2段階監視 + cleaner）
+  - ✅ henry_reserve_integration: OK（debounce + cleaner）
+  - ✅ henry_set_search_helper: 修正済 v2.3.3（2段階監視パターン）
+  - ✅ henry_toolbox: 修正済 v5.1.5（disconnect追加）
+  - ✅ henry_google_drive_bridge: 修正済 v2.2.8（banner監視 + debounce）
+  - ❓ henry_login_helper: 未確認
+  - ❓ henry_rad_order_print_single_page: 未確認
+  - ❓ henry_reception_filter: 未確認
+  - ❓ reserve_calendar_ui: 未確認
 - [ ] TASK-022: henry_imaging_order_helper リファクタリング改善（残りマジックナンバー、スタイル統合、関数分割）[2026-01-18]
-- [ ] TASK-023: 予約システム連携のオーバーレイ閉じ時に一瞬見える問題（postMessage応答待ち+100ms待機でも解決せず。描画タイミングの問題？）[2026-01-19]
 - [x] TASK-024: google-docs-mcp OAuth設定（完了）[2026-01-20]
-- [ ] TASK-025: デバッグ用ChromeにTampermonkey＋Henryスクリプト設定 [2026-01-19]
 - [x] TASK-026: Gemini MCP連携手順（CLAUDE.mdカスタムルールに記載済み）[2026-01-20]
 
 ### 完了
+- [x] TASK-023: 予約システム連携のオーバーレイ閉じ時に一瞬見える問題（対応終了）[2026-01-20]
+- [x] TASK-025: デバッグ用ChromeにTampermonkey＋Henryスクリプト設定（完了）[2026-01-20]
 - [x] TASK-019: 照射オーダー予約後のHenry側処理（refetchQueries追加で完了）
 - [x] TASK-014: 画面更新妨害リスク修正（キャプチャフェーズ削除完了）
 - [x] TASK-009: HenryCore v2.10.4 エンドポイント自動復旧機能

@@ -690,3 +690,46 @@ const DOM_SEARCH = {
 
 - 機能追加や大きな変更のタイミングでついでに対応
 - 単独でのリファクタリングは優先度低
+
+---
+
+## TASK-021: MutationObserver コールバック最適化調査
+
+**調査日**: 2026-01-20
+**ステータス**: 調査完了、レビュー待ち
+
+### 調査対象
+
+MutationObserverを使用している全スクリプトについて、以下の観点で調査:
+1. 監視範囲が適切か（document.body全体 vs 特定コンテナ）
+2. クリーンアップ（disconnect）が行われているか
+3. debounce/早期リターンなどの最適化があるか
+
+### 調査結果
+
+| スクリプト | 状態 | 詳細 |
+|-----------|------|------|
+| henry_core.user.js | ✅ OK | waitForElement内で使用。timeout+disconnect付き |
+| henry_reception_filter.user.js | ✅ OK | 特定コンテナを監視 + cleaner登録 |
+| reserve_calendar_ui.user.js | ✅ OK | 特定ノード、subtree:false |
+| henry_rad_order_print_single_page.user.js | ✅ OK | debounce使用、印刷ページ（短命） |
+| henry_login_helper.user.js | ✅ OK | ログインページ専用（非SPA） |
+| henry_set_search_helper.user.js | ⚠️ 軽微 | debounceあるがbody全体監視 |
+| henry_google_drive_bridge.user.js | ⚠️ 軽微 | body全体監視、disconnectなし |
+| henry_toolbox.user.js | ⚠️ 軽微 | body全体監視、早期リターンあり |
+
+### 完了済み
+
+- henry_imaging_order_helper.user.js - 2段階監視パターン適用済み
+- henry_reserve_integration.user.js - 2段階監視パターン適用済み
+
+### 結論
+
+**緊急度: 低**
+
+⚠️マークの3スクリプトについて:
+- いずれも実害は確認されていない
+- debounceや早期リターンで緩和されている
+- 改善するなら2段階監視パターンを適用
+
+改善の優先度は低いが、機能追加や他の修正のついでに対応することを推奨。
