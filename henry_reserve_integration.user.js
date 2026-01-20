@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         予約システム連携
 // @namespace    https://github.com/shin-926/Henry
-// @version      4.1.4
+// @version      4.1.5
 // @description  Henryカルテと予約システム間の双方向連携（再診予約・照射オーダー自動予約・自動印刷・患者プレビュー）
 // @match        https://henry-app.jp/*
 // @match        https://manage-maokahp.reserve.ne.jp/*
@@ -48,6 +48,13 @@
  *
  * ■ 関連スクリプト
  * - henry_core.user.js: API呼び出し、ユーティリティ
+ *
+ * ■ SPA遷移対応
+ * - subscribeNavigation: 不要
+ * - 理由: 全ページで常に動作するスクリプト
+ *   - fetchインターセプト（照射オーダー検出）は全ページで必要
+ *   - プラグイン登録は一度だけでOK（Toolbox側で管理）
+ *   - トークン同期リスナーも全ページで必要
  */
 
 (function() {

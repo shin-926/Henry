@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         主治医意見書作成フォーム
 // @namespace    https://henry-app.jp/
-// @version      2.6.1
+// @version      2.6.2
 // @description  主治医意見書の入力フォームとGoogle Docs出力（GAS不要版・API直接呼び出し）
 // @author       Henry Team
 // @match        https://henry-app.jp/*
@@ -41,6 +41,12 @@
  * ■ 初回設定
  * - Google OAuthの設定が必要
  * - HenryCoreの設定ダイアログからClient ID/Secretを設定
+ *
+ * ■ SPA遷移対応
+ * - subscribeNavigation: 不要
+ * - 理由: プラグイン登録のみで、ページ固有の状態を持たない
+ *   - フォームUIはToolboxから呼び出し時に動的に生成
+ *   - 閉じればDOM要素ごと削除されるためリソースリーク無し
  */
 
 (function() {

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         ツールボックス
 // @namespace    https://haru-chan.example
-// @version      5.1.5
+// @version      5.1.6
 // @description  プラグイン方式。シンプルUI、Noto Sans JP、ドラッグ＆ドロップ並び替え対応。HenryCore v2.7.0 対応。
 // @match        https://henry-app.jp/*
 // @match        https://*.henry-app.jp/*
@@ -32,6 +32,12 @@
  *
  * ■ 依存関係
  * - henry_core.user.js: registerPlugin API を使用
+ *
+ * ■ SPA遷移対応
+ * - subscribeNavigation: 不要
+ * - 理由: nav要素検出後にMutationObserverを自動disconnect
+ *   - アイコンは一度挿入されれば全ページで有効
+ *   - Henryのnavは全ページ共通のためSPA遷移でも残る
  */
 
 (function () {

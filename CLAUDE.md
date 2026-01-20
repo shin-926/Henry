@@ -477,7 +477,11 @@ chrome-devtools-mcpでリアルタイム調査。静的リファレンスは廃�
 - [ ] TASK-003: 病名サジェスト機能
 - [ ] TASK-011: henry_karte_history 処方表示改善（mhlwMedicine対応、medicationTiming用法取得、検体検査フィールド調査）
 - [ ] TASK-013: Tampermonkey更新問題（手動更新でも「更新なし」と表示される。Violentmonkey移行を試す）
-- [ ] TASK-015: 全スクリプトのSPA遷移対応（subscribeNavigation導入）
+- [x] TASK-015: SPA遷移対応調査完了 - 以下のスクリプトはsubscribeNavigation不要と判断 [2026-01-21]
+  - henry_reserve_integration: 全ページで動作（fetchインターセプト、プラグイン登録）
+  - henry_ikensho_form: プラグイン登録のみ
+  - henry_memo: グローバルイベント、UIは呼び出し時表示
+  - henry_toolbox: nav検出後に自動disconnect
 - [ ] TASK-016: Henry本体の画面更新が行われない問題（他ユーザーの変更が反映されない等。原因特定が必要）
 - [ ] TASK-017: 主治医意見書スクリプトのOAuthスコープ削減（drive.readonly削除。テンプレート公開+ローカルPDF生成案を検討）
 - [ ] TASK-018: 主治医意見書の下書きインポート/エクスポート機能（PC間でデータ移行可能に）

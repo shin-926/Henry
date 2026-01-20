@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         メモ帳
 // @namespace    https://haru-chan.example
-// @version      4.0.7
+// @version      4.0.8
 // @description  ツールボックスから呼び出されるメモ帳機能。タブ管理・保存機能を搭載。
 // @match        https://henry-app.jp/*
 // @grant        none
@@ -25,6 +25,12 @@
  * ■ データ保存
  * - ブラウザのlocalStorageに保存
  * - 患者個人情報は保存しないこと（推奨）
+ *
+ * ■ SPA遷移対応
+ * - subscribeNavigation: 不要
+ * - 理由: グローバルイベントリスナーのみで、ページ固有の状態を持たない
+ *   - メモUIはToolboxから呼び出し時に表示
+ *   - パネルは閉じても非表示になるだけで、再表示可能
  */
 
 (function () {
