@@ -496,7 +496,7 @@ chrome-devtools-mcpでリアルタイム調査。静的リファレンスは廃�
   - ✅ henry_rad_order_print_single_page: OK（デバウンス付き、全ページ監視必要）
   - ✅ henry_reception_filter: OK（main監視 + cleaner）
   - ✅ reserve_calendar_ui: OK（非SPA、subtree:false）
-- [ ] TASK-022: henry_imaging_order_helper リファクタリング改善（残りマジックナンバー、スタイル統合、関数分割）[2026-01-18]
+- [x] TASK-022: henry_imaging_order_helper リファクタリング完了 v1.26.0 [2026-01-21]
 - [x] TASK-024: google-docs-mcp OAuth設定（完了）[2026-01-20]
 - [x] TASK-026: Gemini MCP連携手順（CLAUDE.mdカスタムルールに記載済み）[2026-01-20]
 
