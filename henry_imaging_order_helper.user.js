@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         画像オーダー入力支援
 // @namespace    https://henry-app.jp/
-// @version      1.25.0
+// @version      1.26.0
 // @description  画像照射オーダーモーダルに部位・方向選択UIを追加（複数内容対応）
 // @author       Henry UI Lab
 // @match        https://henry-app.jp/*
@@ -58,7 +58,9 @@
   // DOM探索定数
   const DOM_SEARCH = {
     MAX_ANCESTOR_DEPTH: 10,       // 親要素を辿る最大深さ
-    MAX_FIBER_DEPTH: 20           // React Fiber探索最大深さ
+    MAX_FIBER_DEPTH: 20,          // React Fiber探索最大深さ
+    NOTE_INPUT_PARENT_DEPTH: 3,   // 補足inputを探す際の親要素探索深さ
+    BODY_SITE_PARENT_DEPTH: 4     // BodySiteFormの親要素を辿る深さ（非表示用）
   };
 
   // モダリティ値のマッピング
@@ -403,6 +405,30 @@
       cursor: pointer;
       transition: all 0.15s;
     `,
+    modeToggleButton: `
+      margin-left: 12px;
+      padding: 4px 12px;
+      font-size: 12px;
+      border: 1px solid var(--henry-border, #ccc);
+      border-radius: var(--henry-radius, 4px);
+      background: var(--henry-bg-base, #fff);
+      color: var(--henry-text-medium, #666);
+      cursor: pointer;
+    `,
+    select: `
+      height: 36px;
+      min-width: 100px;
+      flex: 1;
+      max-width: 160px;
+      border-radius: var(--henry-radius, 4px);
+      background-color: var(--henry-bg-base, #fff);
+      color: var(--henry-text-high, #333);
+      font-family: "Noto Sans JP", sans-serif;
+      font-size: 14px;
+      padding: 0 10px;
+      cursor: pointer;
+      outline: none;
+    `,
     label: `
       font-size: 13px;
       color: var(--henry-text-medium, #666);
@@ -462,7 +488,7 @@
     logger = utils.createLogger(CONFIG.SCRIPT_NAME);
     const cleaner = utils.createCleaner();
 
-    logger.info('スクリプト初期化 (v1.25.0)');
+    logger.info('スクリプト初期化 (v1.26.0)');
 
     utils.subscribeNavigation(cleaner, () => {
       logger.info('ページ遷移検出 -> 再セットアップ');
@@ -488,8 +514,8 @@
         // 構造: div.sc-d2f77e68-0 > div.sc-d2f77e68-1 > label
         //                        > div.sc-e5e4d707-0 > input
         let parent = label.parentElement;
-        // 2階層上まで探す
-        for (let i = 0; i < 3 && parent; i++) {
+        // 親要素を辿ってinputを探す
+        for (let i = 0; i < DOM_SEARCH.NOTE_INPUT_PARENT_DEPTH && parent; i++) {
           const input = parent.querySelector('input');
           if (input && !noteInputs.includes(input)) {
             noteInputs.push(input);
@@ -598,16 +624,7 @@
     toggleBtn.id = toggleBtnId;
     toggleBtn.type = 'button';
     toggleBtn.textContent = helperMode ? '標準UIに切替' : 'ヘルパーUIに切替';
-    toggleBtn.style.cssText = `
-      margin-left: 12px;
-      padding: 4px 12px;
-      font-size: 12px;
-      border: 1px solid var(--henry-border, #ccc);
-      border-radius: var(--henry-radius, 4px);
-      background: var(--henry-bg-base, #fff);
-      color: var(--henry-text-medium, #666);
-      cursor: pointer;
-    `;
+    toggleBtn.style.cssText = STYLES.modeToggleButton;
 
     toggleBtn.addEventListener('click', () => {
       toggleHelperMode();
@@ -975,13 +992,13 @@
       logger.info('フィールド非表示CSS: 適用完了');
     }
 
-    // JS側でも親4を非表示にする（CSSが効かない場合のフォールバック）
-    const hideParent4 = () => {
+    // JS側でも親要素を非表示にする（CSSが効かない場合のフォールバック）
+    const hideBodySiteParent = () => {
       const bodySiteEl = dialog.querySelector('[data-testid="BodySiteForm__FilterableSelectBox"]');
       if (!bodySiteEl) return false;
 
       let parent = bodySiteEl;
-      for (let i = 0; i < 4; i++) {
+      for (let i = 0; i < DOM_SEARCH.BODY_SITE_PARENT_DEPTH; i++) {
         parent = parent.parentElement;
         if (!parent) return false;
       }
@@ -994,16 +1011,139 @@
     };
 
     // 即座に実行を試みる
-    if (hideParent4()) return;
+    if (hideBodySiteParent()) return;
 
     // まだなければMutationObserverで監視（dialog内のみ）
     const observer = new MutationObserver(() => {
-      if (hideParent4()) {
+      if (hideBodySiteParent()) {
         observer.disconnect();
       }
     });
     observer.observe(dialog, { childList: true, subtree: true });
     setTimeout(() => observer.disconnect(), TIMING.OBSERVER_TIMEOUT);
+  }
+
+  // ==========================================
+  // UI構築ヘルパー関数
+  // ==========================================
+
+  /**
+   * 骨塩定量用の測定部位行を作成
+   * @param {Function} onSelect - 選択時のコールバック (forearm: string) => void
+   * @returns {{ row: HTMLElement, buttonsContainer: HTMLElement }}
+   */
+  function createMDRow(onSelect) {
+    const row = document.createElement('div');
+    row.style.cssText = STYLES.rowHidden;
+
+    const label = document.createElement('span');
+    label.textContent = '測定部位:';
+    label.style.cssText = STYLES.label;
+    row.appendChild(label);
+
+    const buttonsContainer = document.createElement('div');
+    buttonsContainer.style.cssText = STYLES.buttonGroup;
+
+    ['右前腕', '左前腕'].forEach(forearm => {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.textContent = forearm;
+      btn.dataset.forearm = forearm;
+      btn.style.cssText = STYLES.toggleButton;
+
+      btn.addEventListener('click', () => {
+        clearButtonSelection(buttonsContainer);
+        setButtonSelected(btn, true);
+        onSelect(forearm);
+      });
+
+      buttonsContainer.appendChild(btn);
+    });
+
+    row.appendChild(buttonsContainer);
+    return { row, buttonsContainer };
+  }
+
+  /**
+   * 大分類・小分類・側性・サブアイテムのセレクト行を作成
+   * @returns {{ row: HTMLElement, majorSelect: HTMLSelectElement, minorSelect: HTMLSelectElement, lateralitySelect: HTMLSelectElement, subItemSelect: HTMLSelectElement }}
+   */
+  function createSelectionRow() {
+    const row = document.createElement('div');
+    row.style.cssText = STYLES.row + 'flex-wrap: wrap;';
+
+    const majorSelect = createSelect('大分類');
+    const minorSelect = createSelect('小分類', true);
+
+    const lateralitySelect = createSelect('側性', true);
+    lateralitySelect.innerHTML = `
+      <option value="">側性</option>
+      <option value="右">右</option>
+      <option value="左">左</option>
+      <option value="両">両</option>
+    `;
+    lateralitySelect.style.display = 'none';
+
+    const subItemSelect = createSelect('指/趾', true);
+    subItemSelect.style.display = 'none';
+
+    row.appendChild(majorSelect);
+    row.appendChild(minorSelect);
+    row.appendChild(lateralitySelect);
+    row.appendChild(subItemSelect);
+
+    return { row, majorSelect, minorSelect, lateralitySelect, subItemSelect };
+  }
+
+  /**
+   * 方向ボタン行を作成
+   * @returns {{ row: HTMLElement, buttonsContainer: HTMLElement }}
+   */
+  function createDirectionRow() {
+    const row = document.createElement('div');
+    row.style.cssText = `
+      display: none;
+      flex-wrap: wrap;
+      gap: 6px;
+      padding-top: 8px;
+      border-top: 1px solid var(--henry-border, #e0e0e0);
+    `;
+
+    const label = document.createElement('span');
+    label.textContent = '方向:';
+    label.style.cssText = STYLES.label + 'margin-right: 4px;';
+    row.appendChild(label);
+
+    const buttonsContainer = document.createElement('div');
+    buttonsContainer.style.cssText = STYLES.flexWrap;
+    row.appendChild(buttonsContainer);
+
+    return { row, buttonsContainer };
+  }
+
+  /**
+   * 関節選択ラジオボタン行を作成
+   * @returns {{ row: HTMLElement, radiosContainer: HTMLElement }}
+   */
+  function createJointRow() {
+    const row = document.createElement('div');
+    row.style.cssText = `
+      display: none;
+      align-items: center;
+      gap: 12px;
+      padding-top: 8px;
+    `;
+
+    const label = document.createElement('span');
+    label.textContent = '関節:';
+    label.style.cssText = STYLES.label;
+    row.appendChild(label);
+
+    const radiosContainer = document.createElement('div');
+    radiosContainer.style.cssText = 'display: flex; gap: 12px;';
+    row.appendChild(radiosContainer);
+
+    return { row, radiosContainer };
   }
 
   // ==========================================
@@ -1043,97 +1183,15 @@
     container.dataset.index = index;
     container.style.cssText = STYLES.container;
 
-    // --- 行MD: 骨塩定量用（右前腕/左前腕） ---
-    const rowMD = document.createElement('div');
-    rowMD.style.cssText = STYLES.rowHidden;
-
-    const mdLabel = document.createElement('span');
-    mdLabel.textContent = '測定部位:';
-    mdLabel.style.cssText = STYLES.label;
-    rowMD.appendChild(mdLabel);
-
-    const mdButtonsContainer = document.createElement('div');
-    mdButtonsContainer.style.cssText = STYLES.buttonGroup;
-
-    ['右前腕', '左前腕'].forEach(label => {
-      const btn = document.createElement('button');
-      btn.type = 'button';
-      btn.textContent = label;
-      btn.dataset.forearm = label;
-      btn.style.cssText = STYLES.toggleButton;
-
-      btn.addEventListener('click', () => {
-        clearButtonSelection(mdButtonsContainer);
-        setButtonSelected(btn, true);
-        state.mdForearm = label;
-        setNativeValue(noteInput, label);
-      });
-
-      mdButtonsContainer.appendChild(btn);
+    // --- UI構築（ヘルパー関数を使用） ---
+    const { row: rowMD, buttonsContainer: mdButtonsContainer } = createMDRow((forearm) => {
+      state.mdForearm = forearm;
+      setNativeValue(noteInput, forearm);
     });
 
-    rowMD.appendChild(mdButtonsContainer);
-
-    // --- 行1: 大分類・小分類・サブアイテムドロップダウン ---
-    const row1 = document.createElement('div');
-    row1.style.cssText = STYLES.row + 'flex-wrap: wrap;';
-
-    const majorSelect = createSelect('大分類');
-    const minorSelect = createSelect('小分類', true);  // 初期状態で disabled
-
-    const lateralitySelect = createSelect('側性', true);  // 初期状態で disabled
-    lateralitySelect.innerHTML = `
-      <option value="">側性</option>
-      <option value="右">右</option>
-      <option value="左">左</option>
-      <option value="両">両</option>
-    `;
-    lateralitySelect.style.display = 'none';
-
-    const subItemSelect = createSelect('指/趾', true);  // 初期状態で disabled
-    subItemSelect.style.display = 'none';
-
-    row1.appendChild(majorSelect);
-    row1.appendChild(minorSelect);
-    row1.appendChild(lateralitySelect);
-    row1.appendChild(subItemSelect);
-
-    // --- 行2: 方向ボタン（XPのみ表示） ---
-    const row2 = document.createElement('div');
-    row2.style.cssText = `
-      display: none;
-      flex-wrap: wrap;
-      gap: 6px;
-      padding-top: 8px;
-      border-top: 1px solid var(--henry-border, #e0e0e0);
-    `;
-
-    const directionLabel = document.createElement('span');
-    directionLabel.textContent = '方向:';
-    directionLabel.style.cssText = STYLES.label + 'margin-right: 4px;';
-    row2.appendChild(directionLabel);
-
-    const directionButtonsContainer = document.createElement('div');
-    directionButtonsContainer.style.cssText = STYLES.flexWrap;
-    row2.appendChild(directionButtonsContainer);
-
-    // --- 行3: 関節選択ラジオボタン ---
-    const row3 = document.createElement('div');
-    row3.style.cssText = `
-      display: none;
-      align-items: center;
-      gap: 12px;
-      padding-top: 8px;
-    `;
-
-    const jointLabel = document.createElement('span');
-    jointLabel.textContent = '関節:';
-    jointLabel.style.cssText = STYLES.label;
-    row3.appendChild(jointLabel);
-
-    const jointRadiosContainer = document.createElement('div');
-    jointRadiosContainer.style.cssText = 'display: flex; gap: 12px;';
-    row3.appendChild(jointRadiosContainer);
+    const { row: row1, majorSelect, minorSelect, lateralitySelect, subItemSelect } = createSelectionRow();
+    const { row: row2, buttonsContainer: directionButtonsContainer } = createDirectionRow();
+    const { row: row3, radiosContainer: jointRadiosContainer } = createJointRow();
 
     container.appendChild(rowMD);
     container.appendChild(row1);
@@ -1328,6 +1386,26 @@
       updateAllSelectBorders();
     };
 
+    // 方向・関節行をリセット（共通処理）
+    const resetDirectionAndJointRows = () => {
+      row2.style.display = 'none';
+      row3.style.display = 'none';
+      directionButtonsContainer.innerHTML = '';
+      jointRadiosContainer.innerHTML = '';
+    };
+
+    // 下位セレクト（minor以下）をリセット
+    const resetChildSelects = () => {
+      minorSelect.innerHTML = '<option value="">小分類</option>';
+      minorSelect.disabled = true;
+      lateralitySelect.selectedIndex = 0;
+      lateralitySelect.style.display = 'none';
+      lateralitySelect.disabled = true;
+      subItemSelect.innerHTML = '<option value="">指/趾</option>';
+      subItemSelect.style.display = 'none';
+      subItemSelect.disabled = true;
+    };
+
     const resetUI = () => {
       state.major = '';
       state.minor = '';
@@ -1339,20 +1417,10 @@
       state.mdForearm = '';
       majorSelect.innerHTML = '<option value="">大分類</option>';
       majorSelect.disabled = true;
-      minorSelect.innerHTML = '<option value="">小分類</option>';
-      minorSelect.disabled = true;
-      lateralitySelect.selectedIndex = 0;
-      lateralitySelect.style.display = 'none';
-      lateralitySelect.disabled = true;
-      subItemSelect.innerHTML = '<option value="">指/趾</option>';
-      subItemSelect.style.display = 'none';
-      subItemSelect.disabled = true;
+      resetChildSelects();
       rowMD.style.display = 'none';
       row1.style.display = 'flex';
-      row2.style.display = 'none';
-      row3.style.display = 'none';
-      directionButtonsContainer.innerHTML = '';
-      jointRadiosContainer.innerHTML = '';
+      resetDirectionAndJointRows();
       clearButtonSelection(mdButtonsContainer);
       updateAllSelectBorders();
     };
@@ -1409,18 +1477,8 @@
       state.directions = [];
       state.minorData = null;
 
-      minorSelect.innerHTML = '<option value="">小分類</option>';
-      minorSelect.disabled = true;
-      lateralitySelect.selectedIndex = 0;
-      lateralitySelect.style.display = 'none';
-      lateralitySelect.disabled = true;
-      subItemSelect.innerHTML = '<option value="">指/趾</option>';
-      subItemSelect.style.display = 'none';
-      subItemSelect.disabled = true;
-      row2.style.display = 'none';
-      row3.style.display = 'none';
-      directionButtonsContainer.innerHTML = '';
-      jointRadiosContainer.innerHTML = '';
+      resetChildSelects();
+      resetDirectionAndJointRows();
 
       // 枚数と撮影条件を空欄にする
       if (filmCountInput) setNativeValue(filmCountInput, '');
@@ -1485,10 +1543,7 @@
       // サブアイテム・関節・方向をリセット
       subItemSelect.style.display = 'none';
       subItemSelect.disabled = true;
-      row2.style.display = 'none';
-      row3.style.display = 'none';
-      directionButtonsContainer.innerHTML = '';
-      jointRadiosContainer.innerHTML = '';
+      resetDirectionAndJointRows();
 
       if (!minor) {
         updateNoteInput();
@@ -1533,10 +1588,7 @@
       // 枚数を空欄にする
       if (filmCountInput) setNativeValue(filmCountInput, '');
 
-      row2.style.display = 'none';
-      row3.style.display = 'none';
-      directionButtonsContainer.innerHTML = '';
-      jointRadiosContainer.innerHTML = '';
+      resetDirectionAndJointRows();
 
       if (!subItem || !state.minorData?.subItems) {
         updateNoteInput();
@@ -1595,21 +1647,7 @@
   function createSelect(placeholder, initiallyDisabled = false) {
     const select = document.createElement('select');
     const initialBorder = initiallyDisabled ? NORMAL_BORDER_COLOR : EMPTY_BORDER_COLOR;
-    select.style.cssText = `
-      height: 36px;
-      min-width: 100px;
-      flex: 1;
-      max-width: 160px;
-      border: 1px solid ${initialBorder};
-      border-radius: var(--henry-radius, 4px);
-      background-color: var(--henry-bg-base, #fff);
-      color: var(--henry-text-high, #333);
-      font-family: "Noto Sans JP", sans-serif;
-      font-size: 14px;
-      padding: 0 10px;
-      cursor: pointer;
-      outline: none;
-    `;
+    select.style.cssText = STYLES.select + `border: 1px solid ${initialBorder};`;
     select.disabled = initiallyDisabled;
     const opt = document.createElement('option');
     opt.value = '';
