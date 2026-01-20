@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         ログインヘルパー
 // @namespace    http://tampermonkey.net/
-// @version      6.9.2
+// @version      6.9.3
 // @description  Henry電子カルテのログイン入力補助（React完全対応 + フィルタリング機能）
 // @author       Henry UI Lab
 // @match        https://henry-app.jp/*
@@ -33,6 +33,11 @@
  *    ことを前提としています。ログイン前では、これらの機能は期待通りに動作しません。
  *
  * これらの理由から、Login HelperはHenryCoreに依存せず、独立して動作する設計が最も堅牢かつ適切です。
+ *
+ * ■ MutationObserver
+ * - document.body全体を監視（ログインフォーム検出のため）
+ * - SPA遷移時にfullCleanup()でdisconnect済み
+ * - ログイン後は再開しない設計（ログインフォームが不要なため）
  */
 
 (function() {

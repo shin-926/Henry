@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         照射オーダー印刷を1枚にまとめる
 // @namespace    http://tampermonkey.net/
-// @version      11.0.1
+// @version      11.0.2
 // @description  照射オーダーの印刷が2枚になるのを防ぐ（mac環境で必要だと思われる）
 // @author       You
 // @match        https://henry-app.jp/*
@@ -25,6 +25,11 @@
  * ■ 注意
  * - 環境によっては不要な場合あり
  * - smart_printerとは別機能（こちらはHenry標準の印刷を修正）
+ *
+ * ■ MutationObserver
+ * - document.body全体を監視（印刷プレビューiframe検出のため）
+ * - デバウンス付き（500ms）でパフォーマンス確保
+ * - 全ページで印刷プレビューを監視する必要があるためdisconnectしない
  */
 
 (function() {

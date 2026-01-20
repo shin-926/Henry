@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry 外来受付フィルタ
 // @namespace    https://github.com/shin-926/Henry
-// @version      1.3.1
+// @version      1.3.2
 // @description  外来受付画面で「未完了」（会計待ち・会計済み以外）の患者のみ表示
 // @author       Claude
 // @match        https://henry-app.jp/*
@@ -21,6 +21,10 @@
  * - 「未完了のみ」フィルタボタンを追加
  * - クリックで会計待ち/会計済み以外の患者のみ表示
  * - 再クリックでフィルタ解除
+ *
+ * ■ MutationObserver
+ * - main要素のみを監視（患者リスト変更検出のため）
+ * - cleaner.add()でSPA遷移時にdisconnect
  */
 
 (function() {

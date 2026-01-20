@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         予約システム：カレンダーUIカスタム
 // @namespace    http://tampermonkey.net/
-// @version      2.48.1
+// @version      2.48.2
 // @description  カレンダー縦表示、週ジャンプなど
 // @author       Gemini (with Claude's advice)
 // @match        https://manage-maokahp.reserve.ne.jp/manage/calendar.php*
@@ -32,6 +32,10 @@
  * ■ 対象ページ
  * - reserve.ne.jp のカレンダー画面（calendar.php）のみで動作
  * - Henryとは独立して動作（HenryCore不要）
+ *
+ * ■ MutationObserver
+ * - カレンダー要素のみを監視（subtree:false）
+ * - 非SPAサイトのためdisconnect不要
  */
 
 (function() {
