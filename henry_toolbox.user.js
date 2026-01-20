@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         ツールボックス
 // @namespace    https://haru-chan.example
-// @version      5.1.6
+// @version      5.1.8
 // @description  プラグイン方式。シンプルUI、Noto Sans JP、ドラッグ＆ドロップ並び替え対応。HenryCore v2.7.0 対応。
 // @match        https://henry-app.jp/*
 // @match        https://*.henry-app.jp/*
@@ -406,7 +406,11 @@
   function init() {
     const nav = document.querySelector('nav');
     if (!nav) return false;
-    const ul = nav.querySelector('ul');
+    // 「患者管理」ボタンを含むulを探す（メインメニューのul）
+    const patientBtn = Array.from(nav.querySelectorAll('button')).find(b =>
+      b.getAttribute('aria-label')?.includes('患者')
+    );
+    const ul = patientBtn?.closest('ul');
     if (!ul) return false;
     const sampleBtn = ul.querySelector('button');
     if (!sampleBtn) return false;
@@ -425,5 +429,5 @@
     observer.disconnect();
   }
 
-  console.log('[Toolbox] UIコントローラー v5.1.5 起動');
+  console.log('[Toolbox] UIコントローラー v5.1.8 起動');
 })();
