@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         予約システム連携
 // @namespace    https://github.com/shin-926/Henry
-// @version      3.11.0
-// @description  Henryカルテと予約システム間の双方向連携（再診予約・照射オーダー自動予約・患者プレビュー）
+// @version      4.1.3
+// @description  Henryカルテと予約システム間の双方向連携（再診予約・照射オーダー自動予約・自動印刷・患者プレビュー）
 // @match        https://henry-app.jp/*
 // @match        https://manage-maokahp.reserve.ne.jp/*
 // @grant        GM_setValue
@@ -23,26 +23,31 @@
  *
  * ■ 使用場面
  * - Henry電子カルテと外部予約システム（reserve.ne.jp）の間でデータ連携が必要な場合
- * - 照射オーダー（CT/MRI等）を未来日付で登録し、同時に予約も取りたい場合
+ * - 照射オーダー（CT/MRI等）を登録し、自動で印刷したい場合
+ * - 未来日付の照射オーダーで、予約も同時に取りたい場合
  * - 予約システムで患者を選択する際に、Henryのカルテ情報をプレビューしたい場合
  *
  * ■ 主な機能
- * 1. Henry→予約システム（再診予約モード）
- *    - Henryのツールボックスから予約システムを開く
- *    - 患者ID・日付を自動入力
+ * 1. 照射オーダー自動印刷
+ *    - 外来の照射オーダー作成時に自動で印刷ダイアログを表示
+ *    - 当日の場合: 即座に印刷
+ *    - 未来日付の場合: 予約システム連携後に印刷
  *
  * 2. Henry→予約システム（照射オーダーモード）
  *    - 未来日付の照射オーダー保存時に自動で予約システムを開く
  *    - 予約完了後、その日付で外来予約を自動作成
- *    - smart_printerと連携して印刷タイミングを調整
+ *    - 予約完了後に印刷を実行
  *
- * 3. 予約システム→Henry（患者プレビュー）
+ * 3. Henry→予約システム（再診予約モード）
+ *    - Henryのツールボックスから予約システムを開く
+ *    - 患者ID・日付を自動入力
+ *
+ * 4. 予約システム→Henry（患者プレビュー）
  *    - 予約システムのツールチップに「カルテ」ボタンを追加
  *    - ホバーで過去のカルテ内容をプレビュー表示
  *
  * ■ 関連スクリプト
  * - henry_core.user.js: API呼び出し、ユーティリティ
- * - henry_image_order_smart_printer.user.js: 印刷タイミング連携（skipAutoPrintフラグ）
  */
 
 (function() {
@@ -73,7 +78,13 @@
     DEFAULT_TIME: '09:00',
     // z-index
     Z_INDEX_OVERLAY: 100000,
-    Z_INDEX_POPUP: 100001
+    Z_INDEX_POPUP: 100001,
+    // 印刷
+    PRINT_DELAY_MS: 500,
+    PRINT_COOLDOWN_MS: 3000,
+    PRINT_MAX_SERIES_ROWS: 6,
+    // DOM操作
+    DOM_TRAVERSE_MAX_DEPTH: 5
   };
 
   // スタイル定数
@@ -142,7 +153,39 @@
       margin-top: 10px;
       border-top: 2px solid #4682B4;
       font-size: 12px;
-    `
+    `,
+    // Reserve側バナー共通
+    bannerBase: `
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      padding: 12px 20px;
+      font-size: 14px;
+      font-family: sans-serif;
+      z-index: 999;
+      display: flex;
+      align-items: center;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+    `,
+    // ログイン通知バナー
+    noticeBanner: `
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      background-color: #FFF3CD;
+      color: #856404;
+      padding: 10px 20px;
+      font-size: 14px;
+      font-family: sans-serif;
+      z-index: 999;
+      display: flex;
+      align-items: center;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    `,
+    // カルテボタン
+    karteBtn: 'padding: 5px 14px; margin-left: 12px;'
   };
 
   // GraphQL クエリ定義（フルクエリ方式）
@@ -231,14 +274,605 @@
   }
 
   // ==========================================
+  // 印刷関連ユーティリティ（Henry側で使用）
+  // ==========================================
+
+  const formatPrintDate = (date) => {
+    if (!date) return '';
+    const { year, month, day } = date;
+    const d = new Date(year, month - 1, day);
+    const weekdays = ['日', '月', '火', '水', '木', '金', '土'];
+    return `${year}.${String(month).padStart(2, '0')}.${String(day).padStart(2, '0')}（${weekdays[d.getDay()]}）`;
+  };
+
+  const formatBirthDate = (date) => {
+    if (!date) return '';
+    const { year, month, day } = date;
+    const now = new Date();
+    const birth = new Date(year, month - 1, day);
+    let age = now.getFullYear() - birth.getFullYear();
+    if (now < new Date(now.getFullYear(), month - 1, day)) age--;
+
+    // 和暦計算
+    let eraName = '';
+    let eraYear = 0;
+    if (year >= 2019) {
+      eraName = 'R';
+      eraYear = year - 2018;
+    } else if (year >= 1989) {
+      eraName = 'H';
+      eraYear = year - 1988;
+    } else if (year >= 1926) {
+      eraName = 'S';
+      eraYear = year - 1925;
+    }
+
+    return `${year}(${eraName}${eraYear})/${String(month).padStart(2, '0')}/${String(day).padStart(2, '0')} ${age}歳`;
+  };
+
+  const formatSex = (sexType) => {
+    switch (sexType) {
+      case 'SEX_TYPE_MALE': return '男性';
+      case 'SEX_TYPE_FEMALE': return '女性';
+      default: return '';
+    }
+  };
+
+  const formatModality = (modality) => {
+    const map = {
+      'IMAGING_MODALITY_PLAIN_RADIOGRAPHY_DIGITAL': '単純撮影デジタル',
+      'IMAGING_MODALITY_PLAIN_RADIOGRAPHY_ANALOG': '単純撮影アナログ',
+      'IMAGING_MODALITY_CT': 'CT',
+      'IMAGING_MODALITY_MRI_ABOVE_1_5_AND_BELOW_3_TESLA': 'MRI（1.5テスラ以上3テスラ未満）',
+      'IMAGING_MODALITY_MD': '骨塩定量検査（MD法）',
+    };
+    return map[modality] || modality || '';
+  };
+
+  const formatLaterality = (laterality) => {
+    const map = {
+      'LATERALITY_LEFT': '左',
+      'LATERALITY_RIGHT': '右',
+      'LATERALITY_BOTH': '両',
+      'LATERALITY_NONE': '任意',
+    };
+    return map[laterality] || '';
+  };
+
+  const formatBodyPosition = (positions) => {
+    if (!positions || positions.length === 0) return '';
+    const map = {
+      'BODY_POSITION_ANY': '任意',
+      'BODY_POSITION_FRONT': '正面',
+      'BODY_POSITION_SIDE': '側面',
+      'BODY_POSITION_OBLIQUE': '斜位',
+    };
+    return positions.map(p => map[p] || p).join('・');
+  };
+
+  // ==========================================
+  // 認証ヘッダーキャプチャ（印刷用API呼び出しに使用）
+  // ==========================================
+
+  const AuthCapture = {
+    authorization: null,
+    organizationUuid: null,
+
+    capture(args) {
+      try {
+        const options = args[1];
+        if (!options?.headers) return;
+
+        const headers = options.headers;
+        if (headers instanceof Headers) {
+          const auth = headers.get('authorization');
+          const org = headers.get('x-auth-organization-uuid');
+          if (auth) this.authorization = auth;
+          if (org) this.organizationUuid = org;
+        } else if (typeof headers === 'object') {
+          for (const [key, value] of Object.entries(headers)) {
+            if (key.toLowerCase() === 'authorization') this.authorization = value;
+            if (key.toLowerCase() === 'x-auth-organization-uuid') this.organizationUuid = value;
+          }
+        }
+      } catch (e) {
+        // キャプチャエラーは無視
+      }
+    },
+
+    getHeaders() {
+      const headers = {};
+      if (this.authorization) headers['authorization'] = this.authorization;
+      if (this.organizationUuid) headers['x-auth-organization-uuid'] = this.organizationUuid;
+      return headers;
+    },
+
+    hasAuth() {
+      return !!this.authorization;
+    }
+  };
+
+  // ==========================================
+  // 印刷用データ取得
+  // ==========================================
+
+  const PrintDataFetcher = {
+    originalFetch: null,
+
+    setOriginalFetch(fetch) {
+      this.originalFetch = fetch;
+    },
+
+    async getPatient(patientUuid) {
+      if (!patientUuid || !this.originalFetch) return null;
+
+      if (!AuthCapture.hasAuth()) {
+        log.error('認証情報がキャプチャされていません');
+        return null;
+      }
+
+      const query = `
+        query GetPatient {
+          getPatient(input: { uuid: "${patientUuid}" }) {
+            uuid
+            serialNumber
+            serialNumberPrefix
+            fullName
+            fullNamePhonetic
+            detail {
+              sexType
+              birthDate {
+                year
+                month
+                day
+              }
+            }
+          }
+        }
+      `;
+
+      try {
+        const response = await this.originalFetch(CONFIG.HENRY_GRAPHQL, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            ...AuthCapture.getHeaders()
+          },
+          credentials: 'include',
+          body: JSON.stringify({
+            operationName: 'GetPatient',
+            query: query
+          })
+        });
+
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}`);
+        }
+
+        const json = await response.json();
+        return json.data?.getPatient || null;
+      } catch (e) {
+        log.error(`患者情報取得エラー: ${e.message}`);
+        return null;
+      }
+    },
+
+    async getDepartmentName(encounterId) {
+      if (!encounterId || !this.originalFetch) return '';
+
+      if (!AuthCapture.hasAuth()) {
+        return '';
+      }
+
+      try {
+        const response = await this.originalFetch(CONFIG.HENRY_GRAPHQL_V2, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            ...AuthCapture.getHeaders()
+          },
+          credentials: 'include',
+          body: JSON.stringify({
+            operationName: 'EncounterEditorQuery',
+            variables: { id: encounterId },
+            extensions: {
+              persistedQuery: {
+                version: 1,
+                sha256Hash: 'd0b915a8f1fc7508ebd07f1c47a1d804419b4f31668c66363c452c3e14dfe407'
+              }
+            }
+          })
+        });
+
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}`);
+        }
+
+        const json = await response.json();
+        return json.data?.encounter?.basedOn?.[0]?.doctor?.departmentName || '';
+      } catch (e) {
+        log.error(`診療科取得エラー: ${e.message}`);
+        return '';
+      }
+    }
+  };
+
+  // ==========================================
+  // 印刷用HTML生成
+  // ==========================================
+
+  const HtmlGenerator = {
+    generate(order, patient, departmentName) {
+      const now = new Date();
+      const issueDateTime = `${now.getFullYear()}/${String(now.getMonth() + 1).padStart(2, '0')}/${String(now.getDate()).padStart(2, '0')} ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+
+      const patientId = `${patient.serialNumberPrefix || ''}${patient.serialNumber || ''}`;
+      const fullNamePhonetic = escapeHtml(patient.fullNamePhonetic || '');
+      const sex = formatSex(patient.detail?.sexType);
+      const birthDate = formatBirthDate(patient.detail?.birthDate);
+
+      const modality = formatModality(order.detail?.imagingModality);
+      const orderDate = formatPrintDate(order.date);
+      const doctorName = escapeHtml(order.doctor?.name || '');
+      const note = escapeHtml(order.detail?.note || '');
+
+      const series = this._extractSeries(order.detail?.condition);
+
+      const css = `
+/* CSS Reset */
+html, body, div, span, h1, h2, p, table, caption, tbody, thead, tr, th, td, section {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  font-size: 100%;
+  font: inherit;
+  vertical-align: baseline;
+}
+table {
+  border-collapse: collapse;
+  border-spacing: 0;
+}
+body {
+  font-family: "Noto Sans JP", "Hiragino Sans", "ヒラギノ角ゴシック", sans-serif;
+  font-weight: normal;
+  font-size: 14px;
+  line-height: 24px;
+  color: #000;
+}
+* {
+  box-sizing: border-box;
+  print-color-adjust: exact;
+}
+.page-container {
+  position: relative;
+}
+.inner {
+  padding: 44pt 48pt;
+}
+.header-row {
+  display: grid;
+  grid-template-columns: auto auto;
+  justify-content: space-between;
+  align-items: flex-start;
+}
+.title {
+  font-size: 20pt;
+  font-weight: 700;
+  line-height: 28pt;
+  color: rgba(0, 0, 0, 0.82);
+}
+.issue-date {
+  font-size: 12pt;
+  font-weight: 700;
+  line-height: 20pt;
+  color: rgba(0, 0, 0, 0.82);
+}
+.patient-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-top: 8px;
+}
+.patient-label {
+  font-size: 9pt;
+  font-weight: 600;
+  line-height: 15pt;
+  color: rgba(0, 0, 0, 0.82);
+  padding: 4px 0;
+}
+.patient-name {
+  font-size: 12pt;
+  font-weight: 700;
+  line-height: 20pt;
+  color: rgba(0, 0, 0, 0.82);
+}
+.patient-detail {
+  font-size: 9pt;
+  font-weight: 400;
+  line-height: 15pt;
+  color: rgba(0, 0, 0, 0.82);
+}
+.signature-table {
+  border: 1px solid #000;
+}
+.signature-table th {
+  font-size: 10.5pt;
+  font-weight: 400;
+  padding: 5px 0 0;
+  text-align: center;
+  vertical-align: baseline;
+  width: 72pt;
+}
+.signature-table td {
+  border: 1px solid #000;
+  width: 72pt;
+  height: 71pt;
+  text-align: center;
+  vertical-align: middle;
+  font-size: 10.5pt;
+}
+.order-table {
+  width: 100%;
+  border: 0.5px solid #000;
+  margin-top: 21pt;
+}
+.order-table th {
+  font-size: 10.5pt;
+  font-weight: 700;
+  padding: 3pt 6pt;
+  border: 0.5px solid #000;
+  width: 68pt;
+  text-align: left;
+}
+.order-table td {
+  font-size: 10.5pt;
+  font-weight: 400;
+  padding: 3pt 6pt;
+  border: 0.5px solid #000;
+}
+.series-table {
+  width: 100%;
+  border: 0.5px solid #000;
+  margin-top: 17pt;
+}
+.series-table thead th {
+  font-size: 10.5pt;
+  font-weight: 700;
+  padding: 3pt 6pt;
+  border: 0.5px solid #000;
+  text-align: center;
+}
+.series-table thead td {
+  font-size: 10.5pt;
+  font-weight: 400;
+  padding: 3pt 6pt;
+  border: 0.5px solid #000;
+  text-align: center;
+}
+.series-table tbody td {
+  font-size: 10.5pt;
+  font-weight: 400;
+  padding: 3pt 6pt;
+  border: 0.5px solid #000;
+  text-align: center;
+}
+@media print {
+  @page {
+    size: A4;
+    margin: 10mm;
+  }
+  body {
+    width: 100%;
+  }
+  .page-container {
+    page-break-after: always;
+  }
+}
+      `;
+
+      return `
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>照射録</title>
+  <style>${css}</style>
+</head>
+<body>
+  <div class="page-container">
+    <div class="inner">
+      <section>
+        <div class="header-row">
+          <h1 class="title">照射録</h1>
+          <h2 class="issue-date">発行日時 ${issueDateTime}</h2>
+        </div>
+        <div class="patient-row">
+          <div>
+            <p class="patient-label">患者</p>
+            <h2 class="patient-name">${escapeHtml(patient.fullName || '')}</h2>
+            <p class="patient-detail">${patientId} ${fullNamePhonetic} ${sex}</p>
+            <p class="patient-detail">生年月日 ${birthDate}</p>
+            <p class="patient-detail">外来: ${escapeHtml(departmentName)}</p>
+          </div>
+          <table class="signature-table">
+            <tbody>
+              <tr>
+                <th>(医師署名)</th>
+                <th>(技師署名)</th>
+              </tr>
+              <tr>
+                <td>${doctorName}</td>
+                <td></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+      <section>
+        <table class="order-table">
+          <tbody>
+            <tr><th>指示医師</th><td>${doctorName}</td></tr>
+            <tr><th>照射日時</th><td><span>${orderDate}</span></td></tr>
+            <tr><th>モダリティ</th><td>${escapeHtml(modality)}</td></tr>
+            <tr><th>備考</th><td><span>${note}</span></td></tr>
+          </tbody>
+        </table>
+      </section>
+      <section>
+        <table class="series-table">
+          <thead>
+            <tr><th colspan="7">指示内容</th></tr>
+            <tr>
+              <td style="width: 4%;"></td>
+              <td style="width: 8%;">部位</td>
+              <td style="width: 8%;">側性</td>
+              <td style="width: 16%;">方向</td>
+              <td style="width: 30%;">撮影条件</td>
+              <td style="width: 10%;">枚数</td>
+              <td style="width: 32%;">補足</td>
+            </tr>
+          </thead>
+          <tbody>
+            ${this._generateSeriesRows(series)}
+          </tbody>
+        </table>
+      </section>
+    </div>
+  </div>
+</body>
+</html>
+      `.trim();
+    },
+
+    // 前提: 1オーダー = 1モダリティ（最初に見つかったモダリティのみ返す）
+    // 複数モダリティ対応が必要になった場合は、ループを継続して結果を結合する
+    _extractSeries(condition) {
+      if (!condition) return [];
+
+      // モダリティごとの設定（データ構造の差分を吸収）
+      const modalityConfigs = [
+        // 単純撮影（デジタル/アナログ）: 全フィールド使用
+        { key: 'plainRadiographyDigital', arrayKey: 'series', includeAllFields: true },
+        { key: 'plainRadiographyAnalog', arrayKey: 'series', includeAllFields: true },
+        // CT/MRI: bodySite, laterality, note のみ
+        { key: 'ct', arrayKey: 'series', includeAllFields: false },
+        { key: 'mriAbove_1_5AndBelow_3Tesla', arrayKey: 'series', includeAllFields: false },
+        // MD（骨塩定量）: bodySites を使用、note は親から取得
+        { key: 'md', arrayKey: 'bodySites', includeAllFields: false, noteFromParent: true },
+      ];
+
+      for (const config of modalityConfigs) {
+        const modalityData = condition[config.key];
+        const items = modalityData?.[config.arrayKey];
+        if (!items) continue;
+
+        return items.map(s => ({
+          bodySite: s.bodySite?.name || '',
+          laterality: formatLaterality(s.laterality),
+          bodyPositions: config.includeAllFields ? formatBodyPosition(s.bodyPositions) : '',
+          configuration: config.includeAllFields ? (s.configuration || '') : '',
+          filmCount: config.includeAllFields ? (s.filmCount?.value || '') : '',
+          note: config.noteFromParent ? (modalityData.note || '') : (s.note || ''),
+        }));
+      }
+
+      return [];
+    },
+
+    _generateSeriesRows(series) {
+      const maxRows = CONFIG.PRINT_MAX_SERIES_ROWS;
+      let rows = '';
+
+      for (let i = 0; i < maxRows; i++) {
+        const s = series[i] || {};
+        rows += `
+            <tr>
+              <td style="width: 4%;">${i + 1}</td>
+              <td style="width: 8%;">${escapeHtml(s.bodySite || '')}</td>
+              <td style="width: 8%;">${s.laterality || ''}</td>
+              <td style="width: 16%;">${escapeHtml(s.bodyPositions || '')}</td>
+              <td style="width: 30%;">${escapeHtml(s.configuration || '')}</td>
+              <td style="width: 10%;">${s.filmCount || ''}</td>
+              <td style="width: 32%;">${escapeHtml(s.note || '')}</td>
+            </tr>`;
+      }
+
+      return rows;
+    },
+  };
+
+  // ==========================================
+  // 印刷実行
+  // ==========================================
+
+  const Printer = {
+    lastPrintTime: 0,
+
+    async print(orderData) {
+      // クールダウンチェック
+      const now = Date.now();
+      if (now - this.lastPrintTime < CONFIG.PRINT_COOLDOWN_MS) {
+        log.warn('クールダウン中のため印刷スキップ');
+        return;
+      }
+      this.lastPrintTime = now;
+
+      log.info(`印刷開始: orderUuid=${orderData.uuid?.substring(0, 8)}...`);
+
+      const patientUuid = orderData.patientUuid;
+      const encounterId = orderData.encounterId?.value;
+
+      const [patient, departmentName] = await Promise.all([
+        PrintDataFetcher.getPatient(patientUuid),
+        PrintDataFetcher.getDepartmentName(encounterId)
+      ]);
+
+      if (!patient) {
+        log.error('患者情報の取得に失敗しました');
+        return;
+      }
+
+      log.info('印刷データ取得完了');
+
+      const html = HtmlGenerator.generate(orderData, patient, departmentName);
+
+      const iframe = document.createElement('iframe');
+      iframe.style.cssText = 'position: fixed; top: -10000px; left: -10000px; width: 0; height: 0;';
+      document.body.appendChild(iframe);
+
+      iframe.contentDocument.open();
+      iframe.contentDocument.write(html);
+      iframe.contentDocument.close();
+
+      iframe.onload = () => {
+        try {
+          iframe.contentWindow.print();
+          log.info('印刷ダイアログを表示しました');
+        } catch (e) {
+          log.error(`印刷エラー: ${e.message}`);
+        } finally {
+          setTimeout(() => {
+            iframe.remove();
+          }, 1000);
+        }
+      };
+    },
+  };
+
+  // ==========================================
   // ブロッキングオーバーレイ（Henry側で使用）
   // ==========================================
 
-  let blockingOverlay = null;
-  let reserveWindowRef = null;
+  // オーバーレイ関連の状態を一元管理
+  const OverlayState = {
+    blockingOverlay: null,  // { overlay: HTMLElement, title: HTMLElement }
+    reserveWindowRef: null  // Window reference
+  };
 
   function createBlockingOverlay() {
-    if (blockingOverlay) return blockingOverlay;
+    if (OverlayState.blockingOverlay) return OverlayState.blockingOverlay;
 
     // オーバーレイ
     const overlay = document.createElement('div');
@@ -273,7 +907,7 @@
 
     document.body.appendChild(overlay);
 
-    blockingOverlay = { overlay, title };
+    OverlayState.blockingOverlay = { overlay, title };
 
     // postMessage を受信（予約システムからの閉じる要求）
     window.addEventListener('message', (e) => {
@@ -288,7 +922,7 @@
       }
     });
 
-    return blockingOverlay;
+    return OverlayState.blockingOverlay;
   }
 
   function openReserveWithOverlay(url, titleText) {
@@ -297,14 +931,14 @@
     title.textContent = titleText || '予約システム';
 
     // 古いウィンドウがあれば閉じる
-    if (reserveWindowRef && !reserveWindowRef.closed) {
-      reserveWindowRef.close();
+    if (OverlayState.reserveWindowRef && !OverlayState.reserveWindowRef.closed) {
+      OverlayState.reserveWindowRef.close();
     }
 
     // 予約システムを別ウィンドウで開く
     const width = window.screen.availWidth;
     const height = window.screen.availHeight;
-    reserveWindowRef = window.open(url, 'reserveWindow', `width=${width},height=${height},left=0,top=0`);
+    OverlayState.reserveWindowRef = window.open(url, 'reserveWindow', `width=${width},height=${height},left=0,top=0`);
 
     // オーバーレイを表示
     overlay.style.display = 'flex';
@@ -316,7 +950,7 @@
 
     // ウィンドウが閉じられたかを監視
     const checkWindowClosed = setInterval(() => {
-      if (reserveWindowRef && reserveWindowRef.closed) {
+      if (OverlayState.reserveWindowRef && OverlayState.reserveWindowRef.closed) {
         clearInterval(checkWindowClosed);
         // ウィンドウが閉じられた場合、キャンセル扱い（予約成功時はGM_valueで先に検知される）
         const context = GM_getValue('imagingOrderContext', null);
@@ -332,9 +966,9 @@
   }
 
   function closeBlockingOverlay(cancelled = false) {
-    if (!blockingOverlay) return;
+    if (!OverlayState.blockingOverlay) return;
 
-    const { overlay } = blockingOverlay;
+    const { overlay } = OverlayState.blockingOverlay;
 
     // キャンセル時
     if (cancelled) {
@@ -345,8 +979,8 @@
         log.info('オーバーレイ閉じ - キャンセル結果を送信');
       }
       // ウィンドウも閉じる
-      if (reserveWindowRef && !reserveWindowRef.closed) {
-        reserveWindowRef.close();
+      if (OverlayState.reserveWindowRef && !OverlayState.reserveWindowRef.closed) {
+        OverlayState.reserveWindowRef.close();
       }
     }
 
@@ -780,7 +1414,7 @@
         if (node.textContent.trim() === 'モダリティ') {
           // 親を辿ってselectを探す
           let parent = node.parentElement;
-          for (let i = 0; i < 5 && parent; i++) {
+          for (let i = 0; i < CONFIG.DOM_TRAVERSE_MAX_DEPTH && parent; i++) {
             const select = parent.querySelector('select');
             if (select && select.selectedIndex >= 0) {
               return select.options[select.selectedIndex]?.text || '';
@@ -804,6 +1438,22 @@
       }
     }
 
+    // レスポンスから照射オーダーデータを取得して印刷
+    async function printOrderFromResponse(response, logMessage) {
+      try {
+        const clonedResponse = response.clone();
+        const json = await clonedResponse.json();
+        const orderData = json.data?.createImagingOrder || json.data?.upsertImagingOrder;
+
+        if (orderData?.uuid && orderData?.isOutpatient) {
+          log.info(logMessage);
+          setTimeout(() => Printer.print(orderData), CONFIG.PRINT_DELAY_MS);
+        }
+      } catch (printError) {
+        log.error('印刷データ取得エラー: ' + printError.message);
+      }
+    }
+
     // 患者情報を取得
     async function getPatientInfo(HenryCore, patientUuid) {
       const patientResult = await HenryCore.query(QUERIES.GetPatient, {
@@ -816,7 +1466,117 @@
       return { id: patient.serialNumber, name: patient.fullName };
     }
 
-    // 照射オーダーfetchインターセプト
+    // 未来日付の照射オーダー処理（予約連携）
+    async function handleFutureDateOrder(HenryCore, body, options, url, dateObj, originalFetch, fetchContext) {
+      log.info('未来日付の照射オーダーを検出: ' + dateObj.year + '/' + dateObj.month + '/' + dateObj.day);
+
+      const patientUuid = HenryCore.getPatientUuid();
+      const doctorUuid = await HenryCore.getMyUuid();
+
+      if (!patientUuid || !doctorUuid) {
+        throw new Error('患者情報または医師情報を取得できません');
+      }
+
+      // 患者情報を取得
+      const patientInfo = await getPatientInfo(HenryCore, patientUuid);
+
+      // モダリティを取得
+      const modality = getModalityFromDialog();
+      if (modality) {
+        log.info('モダリティを取得: ' + modality);
+      }
+
+      // 確認ダイアログ
+      const confirmMessage = `未来日付（${dateObj.year}/${dateObj.month}/${dateObj.day}）の照射オーダーです。\n\n予約システムで予約を取りますか？\n\n患者: ${patientInfo.id} ${patientInfo.name}`;
+      if (!confirm(confirmMessage)) {
+        log.info('ユーザーが予約システム連携をキャンセル - 印刷なしで保存');
+        return originalFetch.apply(fetchContext, [url, options]);
+      }
+
+      // 予約システムを開いて予約日時を取得
+      showImagingNotification('予約システムで予約を取ってください', 'info');
+      const reservationResult = await openReserveForImagingOrder(patientInfo, dateObj, modality);
+      log.info('予約日時: ' + JSON.stringify(reservationResult));
+
+      // 予約日付を使用
+      let actualDateObj = dateObj;
+      if (reservationResult.date) {
+        const [year, month, day] = reservationResult.date.split('-').map(Number);
+        actualDateObj = { year, month, day };
+      }
+
+      // 診療科を取得
+      const purposeOfVisit = await getDefaultPurposeOfVisit(HenryCore, actualDateObj);
+
+      // 外来予約を作成
+      const newEncounterId = await createOutpatientReservation(
+        HenryCore, patientUuid, doctorUuid, purposeOfVisit.uuid, actualDateObj, reservationResult.time
+      );
+
+      // リクエストボディのencounterIdを差し替え
+      body.variables.input.encounterId = { value: newEncounterId };
+
+      // 日付も更新
+      if (reservationResult.date) {
+        body.variables.input.date = actualDateObj;
+      }
+
+      const newOptions = { ...options, body: JSON.stringify(body) };
+      log.info('EncounterIDを差し替えてリクエスト送信: ' + newEncounterId);
+
+      // リクエストを送信
+      const response = await originalFetch.call(fetchContext, url, newOptions);
+
+      showImagingNotification(`${actualDateObj.year}/${actualDateObj.month}/${actualDateObj.day} ${reservationResult.time} の外来予約を作成しました`, 'success');
+
+      // 受付一覧を更新
+      refreshSessionList();
+
+      // 印刷実行
+      await printOrderFromResponse(response, '予約完了後の印刷を実行');
+
+      return response;
+    }
+
+    // 当日の照射オーダー処理（印刷のみ）
+    async function handleSameDayOrder(args, originalFetch, fetchContext) {
+      const response = await originalFetch.apply(fetchContext, args);
+
+      // 印刷実行
+      await printOrderFromResponse(response, '当日照射オーダー検出 - 印刷実行');
+
+      return response;
+    }
+
+    // 予約エラー時の処理
+    function handleReservationError(error, args, originalFetch, fetchContext) {
+      log.error('自動予約エラー: ' + error.message);
+
+      // 予約がキャンセルされた場合は、処理を中止してダイアログに戻る
+      if (error.message.includes('キャンセル')) {
+        showImagingNotification('予約がキャンセルされました', 'info');
+        return new Response(JSON.stringify({ data: null, errors: [{ message: '予約がキャンセルされました' }] }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' }
+        });
+      }
+
+      // その他のエラー（タイムアウト等）は確認ダイアログを表示
+      const proceed = confirm(`外来予約の自動作成に失敗しました:\n${error.message}\n\n現在の診療録に照射オーダーを保存しますか？`);
+
+      if (!proceed) {
+        return new Response(JSON.stringify({ data: null, errors: [{ message: 'ユーザーによりキャンセルされました' }] }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' }
+        });
+      }
+
+      // 「はい」を選んだ場合：予約なしで元の日付に保存（印刷もしない）
+      log.info('予約なしで保存（予約エラー後）');
+      return originalFetch.apply(fetchContext, args);
+    }
+
+    // 照射オーダーfetchインターセプト（予約連携 + 自動印刷統合）
     (async function setupImagingOrderIntercept() {
       const HenryCore = await waitForHenryCore();
       if (!HenryCore) return;
@@ -826,107 +1586,38 @@
       GM_setValue('reservationResult', null);
 
       const originalFetch = unsafeWindow.fetch;
+
+      // 印刷用のoriginalFetchを設定
+      PrintDataFetcher.setOriginalFetch(originalFetch);
+
       unsafeWindow.fetch = async function(...args) {
         const [url, options] = args;
+
+        // 認証ヘッダーをキャプチャ（印刷用API呼び出しに使用）
+        if (typeof url === 'string' && url.includes('/graphql')) {
+          AuthCapture.capture(args);
+        }
 
         if (typeof url === 'string' && url.includes('/graphql') && options?.body) {
           try {
             const body = JSON.parse(options.body);
 
-            if (body.operationName === 'CreateImagingOrder') {
+            // CreateImagingOrder または UpsertImagingOrder を検出
+            if (body.operationName === 'CreateImagingOrder' || body.operationName === 'UpsertImagingOrder') {
               const dateObj = body.variables?.input?.date;
 
+              // 未来日付の場合：予約システム連携
               if (dateObj && isFutureDate(dateObj)) {
-                log.info('未来日付の照射オーダーを検出: ' + dateObj.year + '/' + dateObj.month + '/' + dateObj.day);
-
-                // 自動印刷を即座に遅延させる（smart_printerとの競合を防ぐ）
-                GM_setValue('skipAutoPrint', true);
-                log.info('自動印刷を遅延モードに設定（早期）');
-
                 try {
-                  const patientUuid = HenryCore.getPatientUuid();
-                  const doctorUuid = await HenryCore.getMyUuid();
-
-                  if (!patientUuid || !doctorUuid) {
-                    throw new Error('患者情報または医師情報を取得できません');
-                  }
-
-                  // 患者情報を取得
-                  const patientInfo = await getPatientInfo(HenryCore, patientUuid);
-
-                  // モダリティを取得
-                  const modality = getModalityFromDialog();
-                  if (modality) {
-                    log.info('モダリティを取得: ' + modality);
-                  }
-
-                  // 確認ダイアログ
-                  const confirmMessage = `未来日付（${dateObj.year}/${dateObj.month}/${dateObj.day}）の照射オーダーです。\n\n予約システムで予約を取りますか？\n\n患者: ${patientInfo.id} ${patientInfo.name}`;
-                  if (!confirm(confirmMessage)) {
-                    log.info('ユーザーが予約システム連携をキャンセル');
-                    GM_setValue('skipAutoPrint', false);  // キャンセル時はフラグを戻す
-                    return originalFetch.apply(this, args);
-                  }
-
-                  // 予約システムを開いて予約日時を取得
-                  showImagingNotification('予約システムで予約を取ってください', 'info');
-                  const reservationResult = await openReserveForImagingOrder(patientInfo, dateObj, modality);
-                  log.info('予約日時: ' + JSON.stringify(reservationResult));
-
-                  // 予約日付を使用
-                  let actualDateObj = dateObj;
-                  if (reservationResult.date) {
-                    const [year, month, day] = reservationResult.date.split('-').map(Number);
-                    actualDateObj = { year, month, day };
-                  }
-
-                  // 診療科を取得
-                  const purposeOfVisit = await getDefaultPurposeOfVisit(HenryCore, actualDateObj);
-
-                  // 外来予約を作成
-                  const newEncounterId = await createOutpatientReservation(
-                    HenryCore, patientUuid, doctorUuid, purposeOfVisit.uuid, actualDateObj, reservationResult.time
-                  );
-
-                  // リクエストボディのencounterIdを差し替え
-                  body.variables.input.encounterId = { value: newEncounterId };
-
-                  // 日付も更新
-                  if (reservationResult.date) {
-                    body.variables.input.date = actualDateObj;
-                  }
-
-                  const newOptions = { ...options, body: JSON.stringify(body) };
-                  log.info('EncounterIDを差し替えてリクエスト送信: ' + newEncounterId);
-
-                  // リクエストを送信し、完了後に画面を更新
-                  const response = await originalFetch.call(this, url, newOptions);
-
-                  showImagingNotification(`${actualDateObj.year}/${actualDateObj.month}/${actualDateObj.day} ${reservationResult.time} の外来予約を作成しました`, 'success');
-
-                  // 受付一覧を更新
-                  refreshSessionList();
-
-                  // 自動印刷の遅延フラグをクリア（smart_printerが印刷を実行する）
-                  GM_setValue('skipAutoPrint', false);
-                  log.info('自動印刷を再開');
-
-                  return response;
-
+                  return await handleFutureDateOrder(HenryCore, body, options, url, dateObj, originalFetch, this);
                 } catch (error) {
-                  // エラー時もフラグをクリア
-                  GM_setValue('skipAutoPrint', false);
-                  log.error('自動予約エラー: ' + error.message);
-
-                  const proceed = confirm(`外来予約の自動作成に失敗しました:\n${error.message}\n\n現在の診療録に照射オーダーを保存しますか？`);
-
-                  if (!proceed) {
-                    return new Response(JSON.stringify({ data: null, errors: [{ message: 'ユーザーによりキャンセルされました' }] }), {
-                      status: 200,
-                      headers: { 'Content-Type': 'application/json' }
-                    });
-                  }
+                  return handleReservationError(error, args, originalFetch, this);
                 }
+              }
+
+              // 当日の場合：レスポンス監視して印刷
+              if (!dateObj || !isFutureDate(dateObj)) {
+                return await handleSameDayOrder(args, originalFetch, this);
               }
             }
           } catch (e) {
@@ -937,7 +1628,7 @@
         return originalFetch.apply(this, args);
       };
 
-      log.info('照射オーダーfetchインターセプト設定完了');
+      log.info('照射オーダーfetchインターセプト設定完了（予約連携 + 自動印刷統合）');
     })();
   }
 
@@ -1082,21 +1773,7 @@
         <span>Henry連携を使用するには<a href="https://henry-app.jp" target="_blank" style="color:#1a73e8; text-decoration:underline;">Henry</a>にログインしてください</span>
         <button id="henry-notice-close" style="margin-left: auto; background: none; border: none; font-size: 18px; cursor: pointer; color: #666;">×</button>
       `;
-      Object.assign(noticeBanner.style, {
-        position: 'fixed',
-        top: '0',
-        left: '0',
-        right: '0',
-        backgroundColor: '#FFF3CD',
-        color: '#856404',
-        padding: '10px 20px',
-        fontSize: '14px',
-        fontFamily: 'sans-serif',
-        zIndex: '999',
-        display: 'flex',
-        alignItems: 'center',
-        boxShadow: '0 2px 4px rgba(0,0,0,0.1)'
-      });
+      noticeBanner.style.cssText = STYLES.noticeBanner;
       document.body.appendChild(noticeBanner);
       document.getElementById('henry-notice-close').addEventListener('click', () => {
         noticeBanner.remove();
@@ -1189,6 +1866,9 @@
       const banner = document.createElement('div');
       banner.id = 'henry-mode-banner';
 
+      // 共通スタイル適用
+      banner.style.cssText = STYLES.bannerBase;
+
       if (isImagingMode && context) {
         banner.innerHTML = `
           <span><strong>照射オーダー予約</strong></span>
@@ -1197,35 +1877,17 @@
           <span style="margin: 0 12px; color: rgba(255,255,255,0.5);">|</span>
           <span>予約日: <strong>${context.date}</strong></span>
         `;
-        Object.assign(banner.style, {
-          backgroundColor: '#1565C0',
-          color: 'white'
-        });
+        banner.style.backgroundColor = '#1565C0';
+        banner.style.color = 'white';
       } else {
         banner.innerHTML = `
           <span><strong>再診予約</strong></span>
           <span style="margin: 0 12px; color: rgba(0,0,0,0.3);">|</span>
           <span>患者: <strong>${patientId}</strong> ${patientName || ''}</span>
         `;
-        Object.assign(banner.style, {
-          backgroundColor: '#00897B',
-          color: 'white'
-        });
+        banner.style.backgroundColor = '#00897B';
+        banner.style.color = 'white';
       }
-
-      Object.assign(banner.style, {
-        position: 'fixed',
-        top: '0',
-        left: '0',
-        right: '0',
-        padding: '12px 20px',
-        fontSize: '14px',
-        fontFamily: 'sans-serif',
-        zIndex: '999',
-        display: 'flex',
-        alignItems: 'center',
-        boxShadow: '0 2px 8px rgba(0,0,0,0.2)'
-      });
 
       document.body.appendChild(banner);
       document.body.style.paddingTop = banner.offsetHeight + 'px';
@@ -1253,6 +1915,100 @@
       }
     }
 
+    // 予約入力のバリデーション（患者ID、診療種別）
+    function validateReservationInput(context, event) {
+      // 患者IDの一致確認
+      const patientIdInput = document.getElementById('multi_record_no[0]');
+      const inputPatientId = patientIdInput?.value?.trim();
+
+      if (inputPatientId !== context.patientId) {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        alert(`患者IDが一致しません。\n\n期待: ${context.patientId}\n入力: ${inputPatientId || '(空)'}\n\n照射オーダーの患者と同じ患者で予約してください。`);
+        log.error('患者ID不一致 - 予約を阻止:', { expected: context.patientId, actual: inputPatientId });
+        return { valid: false };
+      }
+
+      // 診療種別（CT/MRI）の確認
+      const dialogEl = document.querySelector('#dialog_reserve_input');
+      let purposeValue = '';
+      if (dialogEl) {
+        const listItems = dialogEl.querySelectorAll('li');
+        for (const li of listItems) {
+          if (li.textContent?.includes('診療を選択')) {
+            const select = li.querySelector('select');
+            if (select) {
+              purposeValue = select.options[select.selectedIndex]?.text || '';
+              break;
+            }
+          }
+        }
+      }
+
+      // 「診療を選択」がCT/MRIでない場合は警告
+      if (!purposeValue.includes('CT') && !purposeValue.includes('MRI')) {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        alert(`照射オーダーの予約は「CT/MRI」で登録してください。\n\n現在の選択: ${purposeValue || '(未選択)'}\n\n「診療を選択」を「CT/MRI」に変更してから予約登録してください。`);
+        log.error('診療種別がCT/MRIではない - 予約を阻止:', { purposeValue });
+        return { valid: false };
+      }
+
+      // 日付と時間を取得
+      const dateInput = document.querySelector('input[name="res_date"]');
+      const timeInput = document.querySelector('input[name="res_time"]');
+      const capturedDate = dateInput?.value || context.date;
+      const capturedTime = timeInput?.value || CONFIG.DEFAULT_TIME;
+
+      log.info('予約登録ボタンがクリックされました。患者ID確認OK、診療種別:', purposeValue || '(未取得)', '日付:', capturedDate, '時間:', capturedTime);
+
+      return { valid: true, date: capturedDate, time: capturedTime };
+    }
+
+    // 予約登録完了時の処理（ダイアログ閉じ監視後に実行）
+    function handleReservationComplete(capturedDate, capturedTime) {
+      log.info('予約登録完了を検出。予約日時を送信:', capturedDate, capturedTime);
+
+      // 予約結果をHenryに送信（日付と時間）
+      GM_setValue('reservationResult', { date: capturedDate, time: capturedTime, timestamp: Date.now() });
+      GM_setValue('imagingOrderContext', null);
+      GM_setValue('pendingPatient', null);
+
+      // バナーを削除
+      const modeBanner = document.getElementById('henry-mode-banner');
+      if (modeBanner) modeBanner.remove();
+      document.body.style.paddingTop = '0';
+
+      // Henry側のオーバーレイを先に閉じて、応答を待ってからウィンドウを閉じる
+      const closeWindow = () => {
+        alert(`予約を登録しました。\n\n日付: ${capturedDate}\n時間: ${capturedTime}`);
+        window.close();
+      };
+
+      if (window.opener) {
+        // 応答を待つリスナーを設定
+        const onOverlayClosed = (e) => {
+          if (e.origin !== 'https://henry-app.jp') return;
+          if (e.data?.type === 'overlay-closed') {
+            window.removeEventListener('message', onOverlayClosed);
+            setTimeout(closeWindow, CONFIG.POLLING_INTERVAL);
+          }
+        };
+        window.addEventListener('message', onOverlayClosed);
+
+        // タイムアウト（応答がない場合）
+        setTimeout(() => {
+          window.removeEventListener('message', onOverlayClosed);
+          closeWindow();
+        }, CONFIG.POST_MESSAGE_TIMEOUT);
+
+        // オーバーレイを閉じる要求を送信
+        window.opener.postMessage({ type: 'overlay-close' }, 'https://henry-app.jp');
+      } else {
+        closeWindow();
+      }
+    }
+
     function setupReservationButtonListener(context) {
       const dialog = document.querySelector('#dialog_reserve_input');
       if (!dialog) return;
@@ -1268,66 +2024,17 @@
       trackedReserveButton = reserveBtn;
       log.info('予約登録ボタンを検出（新規またはボタン変更）');
 
-      // 患者ID検証用のフラグ
-      let patientIdVerified = false;
-      let capturedDate = context.date;
-      let capturedTime = CONFIG.DEFAULT_TIME;
+      // 検証結果を保持
+      let validationResult = { valid: false, date: context.date, time: CONFIG.DEFAULT_TIME };
 
       // キャプチャフェーズで患者ID・診療種別を検証（不正の場合は予約を阻止）
       reserveBtn.addEventListener('click', (event) => {
-        // 患者IDの一致確認
-        const patientIdInput = document.getElementById('multi_record_no[0]');
-        const inputPatientId = patientIdInput?.value?.trim();
-
-        if (inputPatientId !== context.patientId) {
-          event.preventDefault();
-          event.stopImmediatePropagation();
-          patientIdVerified = false;
-          alert(`患者IDが一致しません。\n\n期待: ${context.patientId}\n入力: ${inputPatientId || '(空)'}\n\n照射オーダーの患者と同じ患者で予約してください。`);
-          log.error('患者ID不一致 - 予約を阻止:', { expected: context.patientId, actual: inputPatientId });
-          return;
-        }
-
-        // 診療種別（CT/MRI）の確認
-        // 「診療を選択」ラベルを含む親要素からselect要素を探す（IDに依存しない）
-        const dialogEl = document.querySelector('#dialog_reserve_input');
-        let purposeValue = '';
-        if (dialogEl) {
-          const listItems = dialogEl.querySelectorAll('li');
-          for (const li of listItems) {
-            if (li.textContent?.includes('診療を選択')) {
-              const select = li.querySelector('select');
-              if (select) {
-                purposeValue = select.options[select.selectedIndex]?.text || '';
-                break;
-              }
-            }
-          }
-        }
-
-        // 「診療を選択」がCT/MRIでない場合は警告
-        if (!purposeValue.includes('CT') && !purposeValue.includes('MRI')) {
-          event.preventDefault();
-          event.stopImmediatePropagation();
-          patientIdVerified = false;
-          alert(`照射オーダーの予約は「CT/MRI」で登録してください。\n\n現在の選択: ${purposeValue || '(未選択)'}\n\n「診療を選択」を「CT/MRI」に変更してから予約登録してください。`);
-          log.error('診療種別がCT/MRIではない - 予約を阻止:', { purposeValue });
-          return;
-        }
-
-        // クリック時に日付と時間を取得（name属性で検索 - 変更に強いセレクタ）
-        const dateInput = document.querySelector('input[name="res_date"]');
-        const timeInput = document.querySelector('input[name="res_time"]');
-        capturedDate = dateInput?.value || context.date;
-        capturedTime = timeInput?.value || CONFIG.DEFAULT_TIME;
-        patientIdVerified = true;
-
-        log.info('予約登録ボタンがクリックされました。患者ID確認OK、診療種別:', purposeValue || '(未取得)', '日付:', capturedDate, '時間:', capturedTime);
+        validationResult = validateReservationInput(context, event);
       }, { capture: true });
 
       // バブリングフェーズでダイアログ閉じを監視
       reserveBtn.addEventListener('click', () => {
-        if (!patientIdVerified) return;
+        if (!validationResult.valid) return;
 
         // ダイアログが閉じるのを監視（MutationObserverでstyle変更を検知）
         const dialogElement = document.querySelector('#dialog_reserve_input');
@@ -1340,47 +2047,7 @@
         const dialogCloseObserver = new MutationObserver(() => {
           if (uiDialog.style.display === 'none') {
             dialogCloseObserver.disconnect();
-            log.info('予約登録完了を検出。予約日時を送信:', capturedDate, capturedTime);
-
-            // 予約結果をHenryに送信（日付と時間）
-            GM_setValue('reservationResult', { date: capturedDate, time: capturedTime, timestamp: Date.now() });
-            GM_setValue('imagingOrderContext', null);
-            GM_setValue('pendingPatient', null);
-
-            // バナーを削除
-            const modeBanner = document.getElementById('henry-mode-banner');
-            if (modeBanner) modeBanner.remove();
-            document.body.style.paddingTop = '0';
-
-            // Henry側のオーバーレイを先に閉じて、応答を待ってからウィンドウを閉じる
-            const closeWindow = () => {
-              alert(`予約を登録しました。\n\n日付: ${capturedDate}\n時間: ${capturedTime}`);
-              window.close();
-            };
-
-            if (window.opener) {
-              // 応答を待つリスナーを設定
-              const onOverlayClosed = (e) => {
-                if (e.origin !== 'https://henry-app.jp') return;
-                if (e.data?.type === 'overlay-closed') {
-                  window.removeEventListener('message', onOverlayClosed);
-                  // 描画完了を待ってからウィンドウを閉じる
-                  setTimeout(closeWindow, CONFIG.POLLING_INTERVAL);
-                }
-              };
-              window.addEventListener('message', onOverlayClosed);
-
-              // タイムアウト（応答がない場合）
-              setTimeout(() => {
-                window.removeEventListener('message', onOverlayClosed);
-                closeWindow();
-              }, CONFIG.POST_MESSAGE_TIMEOUT);
-
-              // オーバーレイを閉じる要求を送信
-              window.opener.postMessage({ type: 'overlay-close' }, 'https://henry-app.jp');
-            } else {
-              closeWindow();
-            }
+            handleReservationComplete(validationResult.date, validationResult.time);
           }
         });
         dialogCloseObserver.observe(uiDialog, { attributes: true, attributeFilter: ['style'] });
@@ -1555,7 +2222,7 @@
       karteBtn.className = 'button';
       karteBtn.id = 'henry-open-karte-btn';
       karteBtn.value = 'カルテ';
-      karteBtn.style.cssText = 'padding: 5px 14px; margin-left: 12px;';
+      karteBtn.style.cssText = STYLES.karteBtn;
 
       karteBtn.addEventListener('click', async (e) => {
         e.preventDefault();
@@ -1774,7 +2441,7 @@
             <div style="${borderStyle}">
               <div style="margin-bottom:6px; padding-bottom:6px; border-bottom:1px solid #ddd;">
                 <span style="font-weight:bold; color:#333;">${visitDate}</span>
-                <span style="color:#666; margin-left:8px;">${doctorName}</span>
+                <span style="color:#666; margin-left:8px;">${escapeHtml(doctorName)}</span>
               </div>
               <div style="white-space:pre-wrap; color:#333; line-height:1.4;">${escapeHtml(noteText)}</div>
             </div>
