@@ -486,16 +486,16 @@ chrome-devtools-mcpでリアルタイム調査。静的リファレンスは廃�
 - [ ] TASK-017: 主治医意見書スクリプトのOAuthスコープ削減（drive.readonly削除。テンプレート公開+ローカルPDF生成案を検討）
 - [ ] TASK-018: 主治医意見書の下書きインポート/エクスポート機能（PC間でデータ移行可能に）
 - [ ] TASK-020: ログインモーダル表示時にスクリプトUIが上に出る問題（原因特定待ち） [2026-01-15]
-- [ ] TASK-021: MutationObserver最適化 [2026-01-16]
+- [x] TASK-021: MutationObserver最適化 完了 [2026-01-21]
   - ✅ henry_imaging_order_helper: OK（2段階監視 + cleaner）
   - ✅ henry_reserve_integration: OK（debounce + cleaner）
   - ✅ henry_set_search_helper: 修正済 v2.3.3（2段階監視パターン）
   - ✅ henry_toolbox: 修正済 v5.1.5（disconnect追加）
   - ✅ henry_google_drive_bridge: 修正済 v2.2.8（banner監視 + debounce）
-  - ❓ henry_login_helper: 未確認
-  - ❓ henry_rad_order_print_single_page: 未確認
-  - ❓ henry_reception_filter: 未確認
-  - ❓ reserve_calendar_ui: 未確認
+  - ✅ henry_login_helper: OK（SPA遷移時fullCleanupでdisconnect）
+  - ✅ henry_rad_order_print_single_page: OK（デバウンス付き、全ページ監視必要）
+  - ✅ henry_reception_filter: OK（main監視 + cleaner）
+  - ✅ reserve_calendar_ui: OK（非SPA、subtree:false）
 - [ ] TASK-022: henry_imaging_order_helper リファクタリング改善（残りマジックナンバー、スタイル統合、関数分割）[2026-01-18]
 - [x] TASK-024: google-docs-mcp OAuth設定（完了）[2026-01-20]
 - [x] TASK-026: Gemini MCP連携手順（CLAUDE.mdカスタムルールに記載済み）[2026-01-20]
