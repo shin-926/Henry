@@ -174,6 +174,7 @@ const unsafeWindow = window;
   }
 
   async function main() {
+    const startTime = performance.now();
     if (CONFIG.LOCAL_MODE) {
       log('ローダー起動 [ローカルモード]', CONFIG.LOCAL_URL);
     } else {
@@ -199,7 +200,8 @@ const unsafeWindow = window;
         await loadScript(script);
       }
 
-      log('全スクリプト読み込み完了');
+      const elapsed = (performance.now() - startTime).toFixed(0);
+      log(`全スクリプト読み込み完了 (${elapsed}ms)`);
 
     } catch (e) {
       error('ローダーエラー:', e.message);
