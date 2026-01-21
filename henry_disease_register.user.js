@@ -1,9 +1,9 @@
 // ==UserScript==
 // @name         Henry Disease Register
 // @namespace    https://henry-app.jp/
-// @version      2.2.7
-// @description  高速病名検索・登録 | powered by Claude & Gemini
-// @author       sk
+// @version      2.2.8
+// @description  高速病名検索・登録
+// @author       sk powered by Claude & Gemini
 // @match        https://henry-app.jp/*
 // @icon         https://www.google.com/s2/favicons?sz=64&domain=henry-app.jp
 // @grant        none

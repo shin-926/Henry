@@ -1,9 +1,9 @@
 // ==UserScript==
 // @name         検索パネル→検索ボックスにフォーカス＋☆入力
 // @namespace    http://tampermonkey.net/
-// @version      1.5.3
-// @description  「/」で検索パネルを開き、検索ボックスにフォーカス＋☆を入力する（Reactの状態も更新） | powered by Claude & Gemini
-// @author       sk
+// @version      1.5.4
+// @description  「/」で検索パネルを開き、検索ボックスにフォーカス＋☆を入力する（Reactの状態も更新）
+// @author       sk powered by Claude & Gemini
 // @match        https://henry-app.jp/*
 // @run-at       document-idle
 // @grant        none

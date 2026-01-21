@@ -1,9 +1,9 @@
 // ==UserScript==
 // @name         画像オーダー入力支援
 // @namespace    https://henry-app.jp/
-// @version      1.26.1
-// @description  画像照射オーダーモーダルに部位・方向選択UIを追加（複数内容対応） | powered by Claude & Gemini
-// @author       sk
+// @version      1.26.2
+// @description  画像照射オーダーモーダルに部位・方向選択UIを追加（複数内容対応）
+// @author       sk powered by Claude & Gemini
 // @match        https://henry-app.jp/*
 // @grant        none
 // @updateURL    https://raw.githubusercontent.com/shin-926/Henry/main/henry_imaging_order_helper.user.js

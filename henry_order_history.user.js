@@ -1,9 +1,9 @@
 // ==UserScript==
 // @name         Henry Order History
 // @namespace    https://henry-app.jp/
-// @version      1.5.1
-// @description  指定期間内の患者オーダー履歴を表示 | powered by Claude & Gemini
-// @author       sk
+// @version      1.5.2
+// @description  指定期間内の患者オーダー履歴を表示
+// @author       sk powered by Claude & Gemini
 // @match        https://henry-app.jp/*
 // @icon         https://www.google.com/s2/favicons?sz=64&domain=henry-app.jp
 // @grant        none

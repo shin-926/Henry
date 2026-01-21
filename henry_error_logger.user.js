@@ -1,9 +1,9 @@
 // ==UserScript==
 // @name         Henry Error Logger
 // @namespace    https://henry-app.jp/
-// @version      1.0.1
-// @description  HenryCoreのエラーログを表示・コピー・クリア | powered by Claude & Gemini
-// @author       sk
+// @version      1.0.2
+// @description  HenryCoreのエラーログを表示・コピー・クリア
+// @author       sk powered by Claude & Gemini
 // @match        https://henry-app.jp/*
 // @icon         https://www.google.com/s2/favicons?sz=64&domain=henry-app.jp
 // @grant        none

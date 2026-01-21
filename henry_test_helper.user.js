@@ -1,9 +1,9 @@
 // ==UserScript==
 // @name         テストヘルパー
 // @namespace    https://henry-app.jp/
-// @version      1.0.2
-// @description  照射オーダー等のテストデータを自動入力 | powered by Claude & Gemini
-// @author       sk
+// @version      1.0.3
+// @description  照射オーダー等のテストデータを自動入力
+// @author       sk powered by Claude & Gemini
 // @match        https://henry-app.jp/*
 // @run-at       document-idle
 // @grant        unsafeWindow

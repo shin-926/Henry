@@ -1,9 +1,9 @@
 // ==UserScript==
 // @name         照射オーダー印刷を1枚にまとめる
 // @namespace    http://tampermonkey.net/
-// @version      11.0.3
-// @description  照射オーダーの印刷が2枚になるのを防ぐ（mac環境で必要だと思われる） | powered by Claude & Gemini
-// @author       sk
+// @version      11.0.4
+// @description  照射オーダーの印刷が2枚になるのを防ぐ（mac環境で必要だと思われる）
+// @author       sk powered by Claude & Gemini
 // @match        https://henry-app.jp/*
 // @grant        none
 // @icon         https://henry-app.jp/apple-touch-icon.png

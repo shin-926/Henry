@@ -1,9 +1,9 @@
 // ==UserScript==
 // @name         Henry Hospitalization Data Viewer
 // @namespace    https://github.com/shin-926/Henry
-// @version      0.1.1
-// @description  入院患者の日々データを取得・表示（実験） | powered by Claude & Gemini
-// @author       sk
+// @version      0.1.2
+// @description  入院患者の日々データを取得・表示（実験）
+// @author       sk powered by Claude & Gemini
 // @match        https://henry-app.jp/*
 // @grant        none
 // @run-at       document-idle

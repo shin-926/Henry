@@ -1,9 +1,9 @@
 // ==UserScript==
 // @name         ログインヘルパー
 // @namespace    http://tampermonkey.net/
-// @version      6.9.4
-// @description  Henry電子カルテのログイン入力補助（React完全対応 + フィルタリング機能） | powered by Claude & Gemini
-// @author       sk
+// @version      6.9.5
+// @description  Henry電子カルテのログイン入力補助（React完全対応 + フィルタリング機能）
+// @author       sk powered by Claude & Gemini
 // @match        https://henry-app.jp/*
 // @grant        GM_setValue
 // @grant        GM_getValue
