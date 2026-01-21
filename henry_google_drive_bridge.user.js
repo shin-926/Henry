@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Google Drive連携
 // @namespace    https://henry-app.jp/
-// @version      2.3.0
+// @version      2.3.2
 // @description  HenryのファイルをGoogle Drive APIで直接変換・編集。GAS不要版。
 // @author       sk powered by Claude & Gemini
 // @match        https://henry-app.jp/*
@@ -663,49 +663,54 @@
     }
 
     // Fetchインターセプト（ファイル一覧キャッシュ用）
+    // Proxyを使用してネイティブfetchの振る舞いを保持し、FirestoreのWebChannel通信への影響を回避
     function setupFetchIntercept() {
       if (pageWindow._driveDirectHooked) return;
       const originalFetch = pageWindow.fetch;
       pageWindow._driveDirectHooked = true;
 
-      pageWindow.fetch = async function(url, options) {
-        const response = await originalFetch.apply(this, arguments);
+      pageWindow.fetch = new Proxy(originalFetch, {
+        apply: async function(target, thisArg, argumentsList) {
+          const [url, options] = argumentsList;
+          const response = await Reflect.apply(target, thisArg, argumentsList);
 
-        if (!url.includes('/graphql') || !options?.body) return response;
+          // GraphQL以外はそのまま返す
+          if (!url?.includes?.('/graphql') || !options?.body) return response;
 
-        try {
-          const bodyStr = typeof options.body === 'string' ? options.body : null;
-          if (!bodyStr) return response;
+          try {
+            const bodyStr = typeof options.body === 'string' ? options.body : null;
+            if (!bodyStr) return response;
 
-          const requestJson = JSON.parse(bodyStr);
-          if (requestJson.operationName !== 'ListPatientFiles') return response;
+            const requestJson = JSON.parse(bodyStr);
+            if (requestJson.operationName !== 'ListPatientFiles') return response;
 
-          const requestFolderUuid = requestJson.variables?.input?.parentFileFolderUuid?.value ?? null;
-          const pageToken = requestJson.variables?.input?.pageToken ?? '';
-          const clone = response.clone();
-          const json = await clone.json();
-          const patientFiles = json.data?.listPatientFiles?.patientFiles;
+            const requestFolderUuid = requestJson.variables?.input?.parentFileFolderUuid?.value ?? null;
+            const pageToken = requestJson.variables?.input?.pageToken ?? '';
+            const clone = response.clone();
+            const json = await clone.json();
+            const patientFiles = json.data?.listPatientFiles?.patientFiles;
 
-          if (!Array.isArray(patientFiles)) return response;
+            if (!Array.isArray(patientFiles)) return response;
 
-          const folderKey = requestFolderUuid ?? '__root__';
-          const filesWithFolder = patientFiles.map(f => ({
-            ...f,
-            parentFileFolderUuid: requestFolderUuid
-          }));
+            const folderKey = requestFolderUuid ?? '__root__';
+            const filesWithFolder = patientFiles.map(f => ({
+              ...f,
+              parentFileFolderUuid: requestFolderUuid
+            }));
 
-          if (pageToken === '') {
-            cachedFilesByFolder.set(folderKey, filesWithFolder);
-          } else {
-            const existing = cachedFilesByFolder.get(folderKey) || [];
-            cachedFilesByFolder.set(folderKey, [...existing, ...filesWithFolder]);
+            if (pageToken === '') {
+              cachedFilesByFolder.set(folderKey, filesWithFolder);
+            } else {
+              const existing = cachedFilesByFolder.get(folderKey) || [];
+              cachedFilesByFolder.set(folderKey, [...existing, ...filesWithFolder]);
+            }
+          } catch (e) {
+            debugError('Henry', 'Fetch Hook Error:', e.message);
           }
-        } catch (e) {
-          debugError('Henry', 'Fetch Hook Error:', e.message);
-        }
 
-        return response;
-      };
+          return response;
+        }
+      });
     }
 
     // GCSからファイルをダウンロード

@@ -1,6 +1,6 @@
 {
-  "version": "1.0.1-test",
-  "description": "Henryスクリプト動的ローダー用マニフェスト（テスト用：henry_coreのみ有効）",
+  "version": "1.1.0",
+  "description": "Henryスクリプト動的ローダー用マニフェスト",
   "scripts": [
     {
       "name": "henry_core",
@@ -49,7 +49,7 @@
       "file": "henry_disease_register.user.js",
       "match": ["henry-app.jp"],
       "order": 10,
-      "enabled": true
+      "enabled": false
     },
     {
       "name": "henry_disease_list",
