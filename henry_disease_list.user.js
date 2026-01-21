@@ -1,9 +1,9 @@
 // ==UserScript==
 // @name         Henry Disease List
 // @namespace    https://henry-app.jp/
-// @version      1.0.2
-// @description  患者の病名一覧を表示
-// @author       Claude
+// @version      1.0.3
+// @description  患者の病名一覧を表示 | powered by Claude & Gemini
+// @author       sk
 // @match        https://henry-app.jp/*
 // @icon         https://www.google.com/s2/favicons?sz=64&domain=henry-app.jp
 // @grant        none

@@ -1,8 +1,9 @@
 // ==UserScript==
 // @name         ツールボックス
 // @namespace    https://haru-chan.example
-// @version      5.1.9
-// @description  プラグイン方式。シンプルUI、Noto Sans JP、ドラッグ＆ドロップ並び替え対応。HenryCore v2.7.0 対応。
+// @version      5.1.10
+// @description  プラグイン方式。シンプルUI、Noto Sans JP、ドラッグ＆ドロップ並び替え対応。HenryCore v2.7.0 対応。 | powered by Claude & Gemini
+// @author       sk
 // @match        https://henry-app.jp/*
 // @match        https://*.henry-app.jp/*
 // @grant        GM_setValue

@@ -1,8 +1,9 @@
 // ==UserScript==
 // @name         Henry セット展開検索ヘルパー
 // @namespace    https://henry-app.jp/
-// @version      2.3.3
-// @description  セット展開画面の検索ボックス上にクイック検索ボタンを追加
+// @version      2.3.4
+// @description  セット展開画面の検索ボックス上にクイック検索ボタンを追加 | powered by Claude & Gemini
+// @author       sk
 // @match        https://henry-app.jp/*
 // @grant        GM_setValue
 // @grant        GM_getValue

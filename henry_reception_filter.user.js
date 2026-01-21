@@ -1,9 +1,9 @@
 // ==UserScript==
 // @name         Henry 外来受付フィルタ
 // @namespace    https://github.com/shin-926/Henry
-// @version      1.3.2
-// @description  外来受付画面で「未完了」（会計待ち・会計済み以外）の患者のみ表示
-// @author       Claude
+// @version      1.3.3
+// @description  外来受付画面で「未完了」（会計待ち・会計済み以外）の患者のみ表示 | powered by Claude & Gemini
+// @author       sk
 // @match        https://henry-app.jp/*
 // @grant        none
 // @updateURL    https://raw.githubusercontent.com/shin-926/Henry/main/henry_reception_filter.user.js

@@ -1,8 +1,9 @@
 // ==UserScript==
 // @name         Google Drive連携
 // @namespace    https://henry-app.jp/
-// @version      2.2.8
-// @description  HenryのファイルをGoogle Drive APIで直接変換・編集。GAS不要版。
+// @version      2.2.9
+// @description  HenryのファイルをGoogle Drive APIで直接変換・編集。GAS不要版。 | powered by Claude & Gemini
+// @author       sk
 // @match        https://henry-app.jp/*
 // @match        https://docs.google.com/*
 // @grant        GM_xmlhttpRequest

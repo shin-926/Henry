@@ -1,8 +1,9 @@
 // ==UserScript==
 // @name         メモ帳
 // @namespace    https://haru-chan.example
-// @version      4.0.8
-// @description  ツールボックスから呼び出されるメモ帳機能。タブ管理・保存機能を搭載。
+// @version      4.0.9
+// @description  ツールボックスから呼び出されるメモ帳機能。タブ管理・保存機能を搭載。 | powered by Claude & Gemini
+// @author       sk
 // @match        https://henry-app.jp/*
 // @grant        none
 // @run-at       document-idle

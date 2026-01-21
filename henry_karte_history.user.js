@@ -1,8 +1,9 @@
 // ==UserScript==
 // @name         カルテ履歴取得
 // @namespace    https://github.com/shin-926/Henry
-// @version      0.2.0
-// @description  過去3ヶ月分のカルテ記事をコンソールに出力（実験用）
+// @version      0.2.1
+// @description  過去3ヶ月分のカルテ記事をコンソールに出力（実験用） | powered by Claude & Gemini
+// @author       sk
 // @match        https://henry-app.jp/*
 // @grant        unsafeWindow
 // @run-at       document-idle

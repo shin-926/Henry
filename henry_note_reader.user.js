@@ -1,9 +1,9 @@
 // ==UserScript==
 // @name         Henry カルテ内容リーダー
 // @namespace    https://github.com/shin-926/Henry
-// @version      1.0.1
-// @description  現在開いているカルテの内容を表示する
-// @author       shinichiro
+// @version      1.0.2
+// @description  現在開いているカルテの内容を表示する | powered by Claude & Gemini
+// @author       sk
 // @match        https://henry-app.jp/*
 // @grant        unsafeWindow
 // @updateURL    https://raw.githubusercontent.com/shin-926/Henry/main/henry_note_reader.user.js

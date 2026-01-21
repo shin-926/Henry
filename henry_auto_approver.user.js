@@ -1,8 +1,9 @@
 // ==UserScript==
 // @name         承認アシスタント
 // @namespace    http://tampermonkey.net/
-// @version      3.12.0
-// @description  承認待ちオーダーを自動で一括承認する
+// @version      3.12.1
+// @description  承認待ちオーダーを自動で一括承認する | powered by Claude & Gemini
+// @author       sk
 // @match        https://henry-app.jp/*
 // @grant        none
 // @updateURL    https://raw.githubusercontent.com/shin-926/Henry/main/henry_auto_approver.user.js

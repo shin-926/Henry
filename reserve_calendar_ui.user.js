@@ -1,9 +1,9 @@
 // ==UserScript==
 // @name         予約システム：カレンダーUIカスタム
 // @namespace    http://tampermonkey.net/
-// @version      2.48.2
-// @description  カレンダー縦表示、週ジャンプなど
-// @author       Gemini (with Claude's advice)
+// @version      2.48.3
+// @description  カレンダー縦表示、週ジャンプなど | powered by Claude & Gemini
+// @author       sk
 // @match        https://manage-maokahp.reserve.ne.jp/manage/calendar.php*
 // @grant        none
 // @run-at       document-idle
