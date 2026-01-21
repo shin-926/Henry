@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry Loader (Dev)
 // @namespace    https://henry-app.jp/
-// @version      1.0.0
+// @version      1.1.0
 // @description  Henryスクリプトの動的ローダー（開発版）
 // @author       sk powered by Claude
 // @match        https://henry-app.jp/*
@@ -19,6 +19,7 @@
 // @grant        GM_info
 // @grant        GM_registerMenuCommand
 // @grant        unsafeWindow
+// @connect      localhost
 // @connect      raw.githubusercontent.com
 // @connect      googleapis.com
 // @connect      accounts.google.com
@@ -39,8 +40,14 @@
   // 設定
   // ==========================================
   const CONFIG = {
+    // ローカルモード: trueでローカルサーバーから読み込み（即時反映）
+    LOCAL_MODE: true,
+    LOCAL_URL: 'http://localhost:8080',
+
+    // GitHubモード（LOCAL_MODE: falseの場合）
     BRANCH: 'develop',
     BASE_URL: 'https://raw.githubusercontent.com/shin-926/Henry',
+
     MANIFEST_FILE: 'manifest.json',
     DEBUG: true  // 開発版はデバッグログ有効
   };
@@ -77,7 +84,11 @@
   }
 
   function getUrl(file) {
-    // キャッシュバスター付きURL
+    if (CONFIG.LOCAL_MODE) {
+      // ローカルモード: キャッシュバスター付き
+      return `${CONFIG.LOCAL_URL}/${file}?t=${Date.now()}`;
+    }
+    // GitHubモード: キャッシュバスター付きURL
     return `${CONFIG.BASE_URL}/${CONFIG.BRANCH}/${file}?t=${Date.now()}`;
   }
 
@@ -163,7 +174,11 @@ const unsafeWindow = window;
   }
 
   async function main() {
-    log('ローダー起動 (branch:', CONFIG.BRANCH, ')');
+    if (CONFIG.LOCAL_MODE) {
+      log('ローダー起動 [ローカルモード]', CONFIG.LOCAL_URL);
+    } else {
+      log('ローダー起動 [GitHubモード]', CONFIG.BRANCH);
+    }
     log('現在のホスト:', location.host);
 
     try {

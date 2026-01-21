@@ -21,84 +21,84 @@
       "file": "henry_google_drive_bridge.user.js",
       "match": ["henry-app.jp", "docs.google.com"],
       "order": 10,
-      "enabled": false
+      "enabled": true
     },
     {
       "name": "henry_reserve_integration",
       "file": "henry_reserve_integration.user.js",
       "match": ["henry-app.jp", "manage-maokahp.reserve.ne.jp"],
       "order": 10,
-      "enabled": false
+      "enabled": true
     },
     {
       "name": "reserve_calendar_ui",
       "file": "reserve_calendar_ui.user.js",
       "match": ["manage-maokahp.reserve.ne.jp"],
       "order": 10,
-      "enabled": false
+      "enabled": true
     },
     {
       "name": "henry_imaging_order_helper",
       "file": "henry_imaging_order_helper.user.js",
       "match": ["henry-app.jp"],
       "order": 10,
-      "enabled": false
+      "enabled": true
     },
     {
       "name": "henry_disease_register",
       "file": "henry_disease_register.user.js",
       "match": ["henry-app.jp"],
       "order": 10,
-      "enabled": false
+      "enabled": true
     },
     {
       "name": "henry_disease_list",
       "file": "henry_disease_list.user.js",
       "match": ["henry-app.jp"],
       "order": 10,
-      "enabled": false
+      "enabled": true
     },
     {
       "name": "henry_order_history",
       "file": "henry_order_history.user.js",
       "match": ["henry-app.jp"],
       "order": 10,
-      "enabled": false
+      "enabled": true
     },
     {
       "name": "henry_karte_history",
       "file": "henry_karte_history.user.js",
       "match": ["henry-app.jp"],
       "order": 10,
-      "enabled": false
+      "enabled": true
     },
     {
       "name": "henry_note_reader",
       "file": "henry_note_reader.user.js",
       "match": ["henry-app.jp"],
       "order": 10,
-      "enabled": false
+      "enabled": true
     },
     {
       "name": "henry_ikensho_form",
       "file": "henry_ikensho_form.user.js",
       "match": ["henry-app.jp"],
       "order": 10,
-      "enabled": false
+      "enabled": true
     },
     {
       "name": "henry_auto_approver",
       "file": "henry_auto_approver.user.js",
       "match": ["henry-app.jp"],
       "order": 10,
-      "enabled": false
+      "enabled": true
     },
     {
       "name": "henry_login_helper",
       "file": "henry_login_helper.user.js",
       "match": ["henry-app.jp"],
       "order": 10,
-      "enabled": false
+      "enabled": true
     },
     {
       "name": "henry_search_focus",
@@ -112,49 +112,49 @@
       "file": "henry_set_search_helper.user.js",
       "match": ["henry-app.jp"],
       "order": 10,
-      "enabled": false
+      "enabled": true
     },
     {
       "name": "henry_reception_filter",
       "file": "henry_reception_filter.user.js",
       "match": ["henry-app.jp"],
       "order": 10,
-      "enabled": false
+      "enabled": true
     },
     {
       "name": "henry_memo",
       "file": "henry_memo.user.js",
       "match": ["henry-app.jp"],
       "order": 10,
-      "enabled": false
+      "enabled": true
     },
     {
       "name": "henry_rad_order_print_single_page",
       "file": "henry_rad_order_print_single_page.user.js",
       "match": ["henry-app.jp"],
       "order": 10,
-      "enabled": false
+      "enabled": true
     },
     {
       "name": "henry_hospitalization_data",
       "file": "henry_hospitalization_data.user.js",
       "match": ["henry-app.jp"],
       "order": 10,
-      "enabled": false
+      "enabled": true
     },
     {
       "name": "henry_error_logger",
       "file": "henry_error_logger.user.js",
       "match": ["henry-app.jp"],
       "order": 10,
-      "enabled": false
+      "enabled": true
     },
     {
       "name": "henry_test_helper",
       "file": "henry_test_helper.user.js",
       "match": ["henry-app.jp"],
       "order": 10,
-      "enabled": false
+      "enabled": true
     }
   ]
 }
