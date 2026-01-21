@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Google Drive連携
 // @namespace    https://henry-app.jp/
-// @version      2.2.10
+// @version      2.3.0
 // @description  HenryのファイルをGoogle Drive APIで直接変換・編集。GAS不要版。
 // @author       sk powered by Claude & Gemini
 // @match        https://henry-app.jp/*
@@ -54,6 +54,7 @@
     // Google API設定
     DRIVE_API_BASE: 'https://www.googleapis.com/drive/v3',
     DRIVE_UPLOAD_BASE: 'https://www.googleapis.com/upload/drive/v3',
+    TEMP_FOLDER_NAME: 'Henry一時ファイル',
 
     // Henry設定
     HENRYCORE_TIMEOUT: 5000,
@@ -171,7 +172,7 @@
     },
 
     // Multipart Uploadでファイルをアップロード（変換付き）
-    async uploadWithConversion(fileName, fileBlob, sourceMimeType, targetMimeType, properties = {}) {
+    async uploadWithConversion(fileName, fileBlob, sourceMimeType, targetMimeType, properties = {}, parentFolderId = null) {
       const accessToken = await getGoogleAuth().getValidAccessToken();
 
       const boundary = '-------' + Date.now().toString(16);
@@ -182,6 +183,11 @@
         mimeType: targetMimeType,
         properties: properties
       };
+
+      // 親フォルダを指定
+      if (parentFolderId) {
+        metadata.parents = [parentFolderId];
+      }
 
       // Multipartボディを構築
       const metadataPart = JSON.stringify(metadata);
@@ -281,6 +287,36 @@
     async deleteFile(fileId) {
       const url = `${CONFIG.DRIVE_API_BASE}/files/${fileId}`;
       return await this.request('DELETE', url);
+    },
+
+    // フォルダを検索
+    async findFolder(name) {
+      const query = `name='${name}' and mimeType='application/vnd.google-apps.folder' and trashed=false`;
+      const url = `${CONFIG.DRIVE_API_BASE}/files?q=${encodeURIComponent(query)}&fields=files(id,name)`;
+      const result = await this.request('GET', url);
+      return result.files?.[0] || null;
+    },
+
+    // フォルダを作成
+    async createFolder(name) {
+      const url = `${CONFIG.DRIVE_API_BASE}/files`;
+      return await this.request('POST', url, {
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: name,
+          mimeType: 'application/vnd.google-apps.folder'
+        })
+      });
+    },
+
+    // フォルダを取得または作成
+    async getOrCreateFolder(name) {
+      let folder = await this.findFolder(name);
+      if (!folder) {
+        folder = await this.createFolder(name);
+        debugLog('DriveAPI', 'フォルダ作成:', name);
+      }
+      return folder;
     }
   };
 
@@ -785,7 +821,10 @@
         const isDocx = file.fileType === 'FILE_TYPE_DOCX';
         const mimeInfo = isDocx ? MIME_TYPES.docx : MIME_TYPES.xlsx;
 
-        // 3. Google Driveにアップロード（変換付き）
+        // 3. 一時フォルダを取得または作成
+        const tempFolder = await DriveAPI.getOrCreateFolder(CONFIG.TEMP_FOLDER_NAME);
+
+        // 4. Google Driveにアップロード（変換付き）
         const driveFile = await DriveAPI.uploadWithConversion(
           file.title,
           blob,
@@ -796,10 +835,11 @@
             henryFileUuid: patientFileUuid,
             henryFolderUuid: folderUuid || '',
             henrySource: 'drive-direct'
-          }
+          },
+          tempFolder.id
         );
 
-        // 4. Google Docsで開く
+        // 5. Google Docsで開く
         const docType = isDocx ? 'document' : 'spreadsheets';
         const openUrl = `https://docs.google.com/${docType}/d/${driveFile.id}/edit`;
 
