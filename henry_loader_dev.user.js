@@ -172,9 +172,9 @@ const unsafeWindow = window;
       log('マニフェストバージョン:', manifest.version);
       log('スクリプト数:', manifest.scripts.length);
 
-      // 現在のホストにマッチするスクリプトをフィルタ
+      // 現在のホストにマッチするスクリプトをフィルタ（enabled: falseは除外）
       const targetScripts = manifest.scripts
-        .filter(s => matchesHost(s.match))
+        .filter(s => matchesHost(s.match) && s.enabled !== false)
         .sort((a, b) => a.order - b.order);
 
       log('読み込み対象:', targetScripts.map(s => s.name).join(', '));
