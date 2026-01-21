@@ -497,7 +497,7 @@ GitHubから各スクリプトを動的に読み込む仕組み。Tampermonkey�
 - [ ] TASK-002: 独自オーダーセット選択UI
 - [ ] TASK-003: 病名サジェスト機能
 - [ ] TASK-011: henry_karte_history 処方表示改善（mhlwMedicine対応、medicationTiming用法取得、検体検査フィールド調査）
-- [ ] TASK-013: Tampermonkey更新問題（手動更新でも「更新なし」と表示される。Violentmonkey移行を試す）
+- [x] TASK-013: Tampermonkey更新問題 → Henry Loaderで解決（毎回GitHubから最新取得）[2026-01-21]
 - [x] TASK-015: SPA遷移対応調査完了 - 以下のスクリプトはsubscribeNavigation不要と判断 [2026-01-21]
   - henry_reserve_integration: 全ページで動作（fetchインターセプト、プラグイン登録）
   - henry_ikensho_form: プラグイン登録のみ
