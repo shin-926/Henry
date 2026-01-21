@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         予約システム連携
 // @namespace    https://github.com/shin-926/Henry
-// @version      4.1.7
+// @version      4.1.22
 // @description  Henryカルテと予約システム間の双方向連携（再診予約・照射オーダー自動予約・自動印刷・患者プレビュー）
 // @author       sk powered by Claude & Gemini
 // @match        https://henry-app.jp/*
@@ -342,7 +342,7 @@
       'LATERALITY_LEFT': '左',
       'LATERALITY_RIGHT': '右',
       'LATERALITY_BOTH': '両',
-      'LATERALITY_NONE': '任意',
+      // LATERALITY_NONE は空欄（オリジナルに合わせる）
     };
     return map[laterality] || '';
   };
@@ -407,8 +407,9 @@
   const PrintDataFetcher = {
     originalFetch: null,
 
-    setOriginalFetch(fetch) {
-      this.originalFetch = fetch;
+    setOriginalFetch(fetchFn, context) {
+      // fetchはネイティブメソッドなので、正しいコンテキスト（window）にバインドが必要
+      this.originalFetch = fetchFn.bind(context);
     },
 
     async getPatient(patientUuid) {
@@ -526,156 +527,186 @@
 
       const series = this._extractSeries(order.detail?.condition);
 
+      // オリジナルのHenry印刷スタイルをそのまま使用
       const css = `
-/* CSS Reset */
-html, body, div, span, h1, h2, p, table, caption, tbody, thead, tr, th, td, section {
+/* CSS Reset (Henry原版) */
+html, body, div, span, applet, object, iframe, h1, h2, h3, h4, h5, h6, p, blockquote, pre, a, abbr, acronym, address, big, cite, code, del, dfn, em, img, ins, kbd, q, s, samp, small, strike, strong, sub, sup, tt, var, b, u, i, center, dl, dt, dd, menu, ol, ul, li, fieldset, form, label, legend, table, caption, tbody, tfoot, thead, tr, th, td, article, aside, canvas, details, embed, figure, figcaption, footer, header, hgroup, main, menu, nav, output, ruby, section, summary, time, mark, audio, video {
   margin: 0;
   padding: 0;
   border: 0;
-  font-size: 100%;
   font: inherit;
   vertical-align: baseline;
 }
-table {
-  border-collapse: collapse;
-  border-spacing: 0;
-}
+article, aside, details, figcaption, figure, footer, header, hgroup, main, menu, nav, section { display: block; }
+[hidden] { display: none; }
+body { line-height: 1; }
+menu, ol, ul { list-style: none; }
+blockquote, q { quotes: none; }
+blockquote::before, blockquote::after, q::before, q::after { content: none; }
+table { border-collapse: collapse; border-spacing: 0; }
 body {
-  font-family: "Noto Sans JP", "Hiragino Sans", "ヒラギノ角ゴシック", sans-serif;
+  font-family: "Noto Sans JP";
   font-weight: normal;
   font-size: 14px;
   line-height: 24px;
-  color: #000;
+  color: rgb(0, 0, 0);
 }
-* {
-  box-sizing: border-box;
-  print-color-adjust: exact;
+* { box-sizing: border-box; print-color-adjust: exact; }
+a { text-decoration: none; }
+
+/* ページコンテナ */
+.page-container { position: relative; }
+.page {
+  background: rgb(255, 255, 255);
+  box-shadow: rgba(0, 0, 0, 0.13) 0px 1px 5px, rgba(0, 0, 0, 0.03) 0px 3px 4px, rgba(0, 0, 0, 0.06) 0px 2px 4px, rgba(0, 0, 0, 0.06) 0px 0px 1px;
+  min-height: 300pt;
 }
-.page-container {
-  position: relative;
-}
-.inner {
-  padding: 44pt 48pt;
-}
-.header-row {
+
+/* グリッドレイアウト */
+.grid-row {
   display: grid;
-  grid-template-columns: auto auto;
-  justify-content: space-between;
+  column-gap: 0;
+  grid-template-columns: repeat(2, max-content);
   align-items: flex-start;
+  justify-content: space-between;
+  width: auto;
+  height: auto;
 }
+
+/* タイポグラフィ */
 .title {
+  font-family: "Noto Sans JP";
   font-size: 20pt;
-  font-weight: 700;
   line-height: 28pt;
+  font-weight: 700;
   color: rgba(0, 0, 0, 0.82);
 }
 .issue-date {
+  font-family: "Noto Sans JP";
   font-size: 12pt;
-  font-weight: 700;
   line-height: 20pt;
+  font-weight: 700;
   color: rgba(0, 0, 0, 0.82);
-}
-.patient-row {
-  display: grid;
-  grid-template-columns: 1fr auto;
-  justify-content: space-between;
-  align-items: flex-start;
-  margin-top: 8px;
 }
 .patient-label {
+  font-family: "Noto Sans JP";
   font-size: 9pt;
-  font-weight: 600;
   line-height: 15pt;
   color: rgba(0, 0, 0, 0.82);
-  padding: 4px 0;
+  font-weight: 600;
+  padding-top: 4px;
+  padding-bottom: 4px;
 }
 .patient-name {
+  font-family: "Noto Sans JP";
   font-size: 12pt;
-  font-weight: 700;
   line-height: 20pt;
+  font-weight: 700;
   color: rgba(0, 0, 0, 0.82);
 }
 .patient-detail {
+  font-family: "Noto Sans JP";
   font-size: 9pt;
-  font-weight: 400;
   line-height: 15pt;
+  font-weight: 400;
   color: rgba(0, 0, 0, 0.82);
 }
+
+/* 署名テーブル */
 .signature-table {
-  border: 1px solid #000;
+  border-collapse: collapse;
+  border: 1pt solid black;
+}
+.signature-table tr {
+  border-collapse: collapse;
+  border: 1pt solid black;
 }
 .signature-table th {
-  font-size: 10.5pt;
-  font-weight: 400;
-  padding: 5px 0 0;
+  border-bottom: 1pt solid transparent;
+  border-right: 1pt solid black;
+  padding-top: 5pt;
   text-align: center;
-  vertical-align: baseline;
-  width: 72pt;
 }
 .signature-table td {
-  border: 1px solid #000;
   width: 72pt;
-  height: 71pt;
+  border-collapse: collapse;
+  border: 1pt solid black;
   text-align: center;
   vertical-align: middle;
-  font-size: 10.5pt;
+  height: 71pt;
 }
+
+/* オーダー情報テーブル */
 .order-table {
+  border-collapse: collapse;
+  border: 1px solid black;
+  margin-top: 28px;
   width: 100%;
-  border: 0.5px solid #000;
-  margin-top: 21pt;
+}
+.order-table tr {
+  border-collapse: collapse;
+  border: 1px solid black;
 }
 .order-table th {
-  font-size: 10.5pt;
-  font-weight: 700;
-  padding: 3pt 6pt;
-  border: 0.5px solid #000;
-  width: 68pt;
-  text-align: left;
+  border-collapse: collapse;
+  border: 1px solid black;
+  padding: 4px 8px;
+  font-weight: bold;
+  text-align: center;
+  width: 15%;
+  min-width: 90px;
 }
 .order-table td {
-  font-size: 10.5pt;
-  font-weight: 400;
-  padding: 3pt 6pt;
-  border: 0.5px solid #000;
+  border-collapse: collapse;
+  border: 1px solid black;
+  padding: 4px 8px;
+  overflow-wrap: break-word;
+  word-break: break-all;
+  white-space: normal;
+  vertical-align: middle;
 }
+
+/* 指示内容テーブル */
 .series-table {
+  border-collapse: collapse;
+  border: 1px solid black;
+  margin-top: 22px;
   width: 100%;
-  border: 0.5px solid #000;
-  margin-top: 17pt;
 }
-.series-table thead th {
-  font-size: 10.5pt;
-  font-weight: 700;
-  padding: 3pt 6pt;
-  border: 0.5px solid #000;
+.series-table tr {
+  border-collapse: collapse;
+  border: 1px solid black;
+}
+.series-table th {
+  border-collapse: collapse;
+  border: 1px solid black;
+  padding: 4px 8px;
+  font-weight: bold;
+  text-align: center;
+  width: 15%;
+}
+.series-table td {
+  border-collapse: collapse;
+  border: 1px solid black;
+  padding: 4px 8px;
+  overflow-wrap: break-word;
+  word-break: break-all;
+  white-space: normal;
+  vertical-align: middle;
   text-align: center;
 }
-.series-table thead td {
-  font-size: 10.5pt;
-  font-weight: 400;
-  padding: 3pt 6pt;
-  border: 0.5px solid #000;
-  text-align: center;
-}
-.series-table tbody td {
-  font-size: 10.5pt;
-  font-weight: 400;
-  padding: 3pt 6pt;
-  border: 0.5px solid #000;
-  text-align: center;
-}
+
+/* セクション間の余白（overflow: hiddenでマージン相殺を防止） */
+section { overflow: hidden; }
+section + section { margin-top: 16px; }
+
+/* 印刷時のリセット */
+html, body { margin: 0; padding: 0; }
+
 @media print {
-  @page {
-    size: A4;
-    margin: 10mm;
-  }
-  body {
-    width: 100%;
-  }
-  .page-container {
-    page-break-after: always;
-  }
+  @page { size: A4; }
+  body { width: 100%; zoom: 1; margin: 0; padding: 0; }
+  .page { break-after: page; box-shadow: none; margin: 0; }
 }
       `;
 
@@ -685,18 +716,18 @@ body {
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>照射録</title>
+  <title>${escapeHtml(patient.fullName || '')} - 外来カルテ - 医社）弘徳会マオカ病院</title>
   <style>${css}</style>
 </head>
 <body>
   <div class="page-container">
-    <div class="inner">
+    <div class="page">
       <section>
-        <div class="header-row">
+        <div class="grid-row">
           <h1 class="title">照射録</h1>
           <h2 class="issue-date">発行日時 ${issueDateTime}</h2>
         </div>
-        <div class="patient-row">
+        <div class="grid-row">
           <div>
             <p class="patient-label">患者</p>
             <h2 class="patient-name">${escapeHtml(patient.fullName || '')}</h2>
@@ -752,6 +783,8 @@ body {
 </body>
 </html>
       `.trim();
+    // DEBUG: 生成されたHTMLをコンソールに出力（動作確認後に削除）
+    // console.log('[HenryReserveIntegration] Generated HTML:', html);
     },
 
     // 前提: 1オーダー = 1モダリティ（最初に見つかったモダリティのみ返す）
@@ -1600,8 +1633,8 @@ body {
 
       const originalFetch = unsafeWindow.fetch;
 
-      // 印刷用のoriginalFetchを設定
-      PrintDataFetcher.setOriginalFetch(originalFetch);
+      // 印刷用のoriginalFetchを設定（unsafeWindowをコンテキストとしてバインド）
+      PrintDataFetcher.setOriginalFetch(originalFetch, unsafeWindow);
 
       unsafeWindow.fetch = async function(...args) {
         const [url, options] = args;
