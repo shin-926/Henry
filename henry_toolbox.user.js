@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         ツールボックス
 // @namespace    https://haru-chan.example
-// @version      5.1.8
+// @version      5.1.9
 // @description  プラグイン方式。シンプルUI、Noto Sans JP、ドラッグ＆ドロップ並び替え対応。HenryCore v2.7.0 対応。
 // @match        https://henry-app.jp/*
 // @match        https://*.henry-app.jp/*
@@ -35,9 +35,9 @@
  *
  * ■ SPA遷移対応
  * - subscribeNavigation: 不要
- * - 理由: nav要素検出後にMutationObserverを自動disconnect
- *   - アイコンは一度挿入されれば全ページで有効
- *   - Henryのnavは全ページ共通のためSPA遷移でも残る
+ * - 理由: MutationObserverでボタンの存在を継続監視
+ *   - SPA遷移でnavが再レンダリングされてもボタンを再挿入
+ *   - debounce付きでパフォーマンス確保
  */
 
 (function () {
@@ -419,15 +419,19 @@
     return true;
   }
 
+  // SPA遷移でnavが再レンダリングされても対応するため、継続監視（debounce付き）
+  let debounceTimer = null;
   const observer = new MutationObserver(() => {
-    if (init()) {
-      observer.disconnect();
-    }
+    if (debounceTimer) clearTimeout(debounceTimer);
+    debounceTimer = setTimeout(() => {
+      // ボタンが存在しない場合のみ再初期化
+      if (!document.querySelector('button[data-tm-toolbox]')) {
+        init();
+      }
+    }, 200);
   });
   observer.observe(document.body, { childList: true, subtree: true });
-  if (init()) {
-    observer.disconnect();
-  }
+  init();  // 初回実行
 
-  console.log('[Toolbox] UIコントローラー v5.1.8 起動');
+  console.log('[Toolbox] UIコントローラー v5.1.9 起動');
 })();
