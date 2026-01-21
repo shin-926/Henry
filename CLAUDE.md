@@ -455,12 +455,18 @@ GitHubから各スクリプトを動的に読み込む仕組み。Tampermonkey�
     ```
   - **理由**: JSONLファイルを渡すことで、Geminiがセッションの文脈を理解した上でレビューできる
 
+- **IMPORTANT**: fetchインターセプトで問題が起きたらProxy方式を検討すること：
+  - 通常のfetchインターセプト（`originalFetch.apply(this, args)`）はFirestore等の厳格なライブラリと競合することがある
+  - 問題が起きた場合は `Proxy` + `Reflect.apply` 方式に変更する
+  - 詳細は `NOTES.md` の「fetchインターセプトとFirestore競合問題」を参照
+
 ---
 
 ## 変更履歴
 
 | Version | Date | Changes |
 |---------|------|---------|
+| v4.21 | 2026-01-22 | fetchインターセプトProxy方式ルール追加 |
 | v4.20 | 2026-01-21 | 動的スクリプトローダー(Henry Loader)セクション追加 |
 | v4.19 | 2026-01-20 | 根本原因調査優先ルール追加 |
 | v4.18 | 2026-01-19 | スクリプト一覧セクション追加 |

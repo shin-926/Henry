@@ -733,3 +733,71 @@ MutationObserverを使用している全スクリプトについて、以下の�
 - 改善するなら2段階監視パターンを適用
 
 改善の優先度は低いが、機能追加や他の修正のついでに対応することを推奨。
+
+---
+
+## fetchインターセプトとFirestore競合問題
+
+### 背景
+
+`henry_google_drive_bridge.user.js` でfetchをインターセプトしていたところ、HenryのFirestoreでWebChannel接続エラーが頻発した。
+
+```
+@firebase/firestore: WebChannelConnection RPC 'Listen' stream transport errored
+Could not reach Cloud Firestore backend. Connection failed 1 times.
+```
+
+### 原因
+
+通常のfetchインターセプト方式では、`fetch` 関数を完全に置き換えるため、ネイティブ関数の同一性が失われる。
+
+```javascript
+// 問題のあるコード
+const originalFetch = pageWindow.fetch;
+pageWindow.fetch = async function(url, options) {
+  return originalFetch.apply(this, arguments);
+};
+
+// この後、fetch.toString() は "[native code]" を返さなくなる
+// Firestoreのような厳格なライブラリはこれを検出してエラーにする
+```
+
+### 解決策: Proxy方式
+
+`Proxy` を使うことで、元の `fetch` オブジェクトへの参照を保持しつつ、呼び出しをインターセプトできる。
+
+```javascript
+const originalFetch = pageWindow.fetch;
+pageWindow.fetch = new Proxy(originalFetch, {
+  apply: async function(target, thisArg, argumentsList) {
+    // 必要な処理（例: GraphQLレスポンスのキャッシュ）
+    const [url, options] = argumentsList;
+    const response = await Reflect.apply(target, thisArg, argumentsList);
+    
+    if (url?.includes?.('/graphql')) {
+      // GraphQL用の処理
+    }
+    
+    return response;
+  }
+});
+```
+
+### なぜProxyで解決するか
+
+| 項目 | 通常方式 | Proxy方式 |
+|------|---------|-----------|
+| `fetch.toString()` | `"function(url, options) {...}"` | `"function fetch() { [native code] }"` |
+| `fetch.name` | `""` または `"anonymous"` | `"fetch"` |
+| 元オブジェクトの参照 | 失われる | 保持される |
+| 厳格なライブラリとの互換性 | 低い | 高い |
+
+### 適用判断
+
+- **通常は従来方式でOK** - 単純なfetchインターセプトなら問題ない
+- **問題が起きたらProxy方式に変更** - Firestore等との競合が発生した場合
+
+### 関連
+
+- 修正コミット: `16b1813 fix: Firestore WebChannelエラーを修正`
+- 対象ファイル: `henry_google_drive_bridge.user.js` v2.3.2
