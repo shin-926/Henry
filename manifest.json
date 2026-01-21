@@ -14,7 +14,7 @@
       "file": "henry_toolbox.user.js",
       "match": ["henry-app.jp"],
       "order": 2,
-      "enabled": false
+      "enabled": true
     },
     {
       "name": "henry_google_drive_bridge",
