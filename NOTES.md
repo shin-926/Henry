@@ -801,3 +801,85 @@ pageWindow.fetch = new Proxy(originalFetch, {
 
 - 修正コミット: `16b1813 fix: Firestore WebChannelエラーを修正`
 - 対象ファイル: `henry_google_drive_bridge.user.js` v2.3.2
+
+---
+
+## OAuth認証フロー
+
+OAuth認証が必要な場合は、`alert()` で理由を伝えてから設定ダイアログや認証画面を開く。
+
+```javascript
+// OAuth設定が未完了の場合
+if (!googleAuth?.isConfigured()) {
+  alert('OAuth設定が必要です。設定ダイアログを開きます。');
+  googleAuth?.showConfigDialog();
+  return;
+}
+// 認証が未完了の場合
+if (!googleAuth?.isAuthenticated()) {
+  alert('Google認証が必要です。認証画面を開きます。');
+  googleAuth?.startAuth();
+  return;
+}
+```
+
+**理由**: いきなりダイアログを表示するとユーザーが混乱するため、先に理由を伝える。
+
+---
+
+## GraphQL インライン方式
+
+GraphQL mutationで変数型（`$input: SomeInput!`）がエラーになる場合は、インライン方式を使う。
+
+### 問題のあるパターン
+
+```javascript
+// NG: 変数型（サーバーが型を公開していない場合エラー）
+const MUTATION = `mutation Update($input: UpdateInput!) { update(input: $input) { ... } }`;
+await HenryCore.query(MUTATION, { input: data });
+```
+
+### 解決策
+
+```javascript
+// OK: インライン方式（値を直接埋め込む）
+const MUTATION = `mutation { update(input: { field: "${value}", num: ${num} }) { ... } }`;
+await HenryCore.query(MUTATION);
+```
+
+**注意**: 文字列のエスケープに注意。ユーザー入力を直接埋め込む場合はサニタイズが必要。
+
+---
+
+## SPA遷移対応パターン
+
+Henry本体（henry-app.jp）で動作するスクリプトは、`subscribeNavigation` パターンを使用する。
+
+### 基本パターン
+
+```javascript
+const cleaner = HenryCore.utils.createCleaner();
+
+function init() {
+  // リソース作成
+  const observer = new MutationObserver(callback);
+  observer.observe(target, options);
+
+  // クリーンアップ登録
+  cleaner.add(() => observer.disconnect());
+}
+
+HenryCore.utils.subscribeNavigation(cleaner, init);
+```
+
+### 動作フロー
+
+1. `subscribeNavigation` が `henry:navigation` イベントをリッスン
+2. SPA遷移発生時、`cleaner` に登録された関数を全て実行（リソース破棄）
+3. `init()` を再実行（新しいページ用に再初期化）
+
+### 例外（subscribeNavigation不要なケース）
+
+- ログインページ専用スクリプト（henry_login_helper.user.js）
+- 非SPAサイト用スクリプト（reserve_*.user.js）
+- 全ページで継続動作するスクリプト（henry_reserve_integration.user.js のfetchインターセプト）

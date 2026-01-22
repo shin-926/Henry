@@ -1,4 +1,4 @@
-# Henry EMR 開発ガイドライン (Core Rules v4.20)
+# Henry EMR 開発ガイドライン (Core Rules v4.22)
 
 <!-- 📝 UPDATED: v4.20 - 動的スクリプトローダー(Henry Loader)セクション追加 -->
 
@@ -221,26 +221,9 @@ try {
 
 **YOU MUST**: Henry本体（henry-app.jp）で動作するスクリプトは、`subscribeNavigation` パターンを使用すること。
 
-```javascript
-const cleaner = HenryCore.utils.createCleaner();
+**理由**: HenryはSPAのため、ページ遷移してもリロードされない。クリーンアップしないとメモリリークや予期しない動作の原因となる。
 
-function init() {
-  // リソース作成
-  const observer = new MutationObserver(callback);
-  observer.observe(target, options);
-
-  // クリーンアップ登録
-  cleaner.add(() => observer.disconnect());
-}
-
-HenryCore.utils.subscribeNavigation(cleaner, init);
-```
-
-**理由**: HenryはSPAのため、ページ遷移してもリロードされない。クリーンアップしないと、Observer/タイマー/リスナーが残り続け、メモリリークや予期しない動作の原因となる。
-
-**例外**:
-- ログインページ専用スクリプト（henry_login_helper.user.js）
-- 非SPAサイト用スクリプト（reserve_*.user.js）
+詳細とコード例は `NOTES.md` の「SPA遷移対応パターン」を参照。
 
 ### Tampermonkey スクリプト作成
 
@@ -404,37 +387,14 @@ GitHubから各スクリプトを動的に読み込む仕組み。Tampermonkey�
   - HenryCore API → `henry_core.user.js` 冒頭のAPI目次と実装を確認（プロパティ名、関数の有無など）
   - **推測でコードを書かない。スピードより確認の正確さを優先する**
 
-- **YOU MUST**: OAuth認証が必要な場合は、`alert()` で理由を伝えてから設定ダイアログや認証画面を開くこと：
-  ```javascript
-  // OAuth設定が未完了の場合
-  if (!googleAuth?.isConfigured()) {
-    alert('OAuth設定が必要です。設定ダイアログを開きます。');
-    googleAuth?.showConfigDialog();
-    return;
-  }
-  // 認証が未完了の場合
-  if (!googleAuth?.isAuthenticated()) {
-    alert('Google認証が必要です。認証画面を開きます。');
-    googleAuth?.startAuth();
-    return;
-  }
-  ```
-  - いきなりダイアログを表示するとユーザーが混乱するため、先に理由を伝える
+- **YOU MUST**: OAuth認証が必要な場合は、`alert()` で理由を伝えてから設定ダイアログや認証画面を開くこと
+  - 詳細は `NOTES.md` の「OAuth認証フロー」を参照
 
 - **YOU MUST**: Gemini MCP（`ask-gemini`）を使用する際は、常に `model: "gemini-3-pro-preview"` を指定すること。
 
 - **YOU MUST**: Tampermonkeyスクリプトのバージョンを上げた時は、そのスクリプトファイルの内容を `pbcopy` でクリップボードにコピーすること（ユーザーがTampermonkeyに貼り付けられるように）。
 
-- **IMPORTANT**: GraphQL mutationで変数型（`$input: SomeInput!`）がエラーになる場合は、インライン方式を使うこと：
-  ```javascript
-  // NG: 変数型（サーバーが型を公開していない場合エラー）
-  const MUTATION = `mutation Update($input: UpdateInput!) { update(input: $input) { ... } }`;
-  await HenryCore.query(MUTATION, { input: data });
-
-  // OK: インライン方式（値を直接埋め込む）
-  const MUTATION = `mutation { update(input: { field: "${value}", num: ${num} }) { ... } }`;
-  await HenryCore.query(MUTATION);
-  ```
+- **IMPORTANT**: GraphQL mutationで変数型（`$input: SomeInput!`）がエラーになる場合は、インライン方式を使うこと
   - 詳細は `NOTES.md` の「GraphQL インライン方式」を参照
 
 - **IMPORTANT**: MutationObserverの監視範囲はなるべく狭くすること：
@@ -466,6 +426,7 @@ GitHubから各スクリプトを動的に読み込む仕組み。Tampermonkey�
 
 | Version | Date | Changes |
 |---------|------|---------|
+| v4.22 | 2026-01-22 | コード例をNOTES.mdに移動（OAuth、GraphQL、SPA遷移） |
 | v4.21 | 2026-01-22 | fetchインターセプトProxy方式ルール追加 |
 | v4.20 | 2026-01-21 | 動的スクリプトローダー(Henry Loader)セクション追加 |
 | v4.19 | 2026-01-20 | 根本原因調査優先ルール追加 |
