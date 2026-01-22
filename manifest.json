@@ -101,13 +101,6 @@
       "enabled": true
     },
     {
-      "name": "henry_search_focus",
-      "file": "henry_search_focus.user.js",
-      "match": ["henry-app.jp"],
-      "order": 10,
-      "enabled": false
-    },
-    {
       "name": "henry_set_search_helper",
       "file": "henry_set_search_helper.user.js",
       "match": ["henry-app.jp"],

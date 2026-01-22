@@ -361,7 +361,6 @@ GitHubから各スクリプトを動的に読み込む仕組み。Tampermonkey�
 | | henry_hospitalization_data.user.js | 入院データ表示（実験） |
 | **業務効率化** | henry_auto_approver.user.js | 承認待ちオーダー一括承認 |
 | | henry_login_helper.user.js | ログイン入力補助 |
-| | henry_search_focus.user.js | 検索パネルフォーカス＋☆入力 |
 | | henry_set_search_helper.user.js | セット展開クイック検索 |
 | | henry_reception_filter.user.js | 外来受付フィルタ（未完了のみ） |
 | | henry_memo.user.js | メモ帳（タブ管理・保存） |
@@ -475,7 +474,6 @@ GitHubから各スクリプトを動的に読み込む仕組み。Tampermonkey�
 - [ ] TASK-018: 主治医意見書の下書きインポート/エクスポート機能（PC間でデータ移行可能に）
 - [ ] TASK-020: ログインモーダル表示時にスクリプトUIが上に出る問題（原因特定待ち） [2026-01-15]
 - [ ] TASK-027: henry_disease_register Loader経由で初期化エラー（buildSearchIndexで'map'がundefined）[2026-01-21]
-- [ ] TASK-028: henry_search_focus Loader経由でフリーズ（原因調査必要）[2026-01-21]
 - [x] TASK-021: MutationObserver最適化 完了 [2026-01-21]
   - ✅ henry_imaging_order_helper: OK（2段階監視 + cleaner）
   - ✅ henry_reserve_integration: OK（debounce + cleaner）
