@@ -390,7 +390,7 @@ GitHubから各スクリプトを動的に読み込む仕組み。Tampermonkey�
 
 - **YOU MUST**: Gemini MCP（`ask-gemini`）を使用する際は、常に `model: "gemini-3-pro-preview"` を指定すること。
 
-- **YOU MUST**: Tampermonkeyスクリプトのバージョンを上げた時は、そのスクリプトファイルの内容を `pbcopy` でクリップボードにコピーすること（ユーザーがTampermonkeyに貼り付けられるように）。
+- **YOU MUST**: Loader（henry_loader.user.js / henry_loader_dev.user.js）を修正した時は、ファイルの内容を `pbcopy` でクリップボードにコピーすること（ユーザーがTampermonkeyに貼り付けられるように）。他のスクリプトはLoader経由で自動更新されるためコピー不要。
 
 - **IMPORTANT**: GraphQL mutationで変数型（`$input: SomeInput!`）がエラーになる場合は、インライン方式を使うこと
   - 詳細は `NOTES.md` の「GraphQL インライン方式」を参照
@@ -472,6 +472,10 @@ GitHubから各スクリプトを動的に読み込む仕組み。Tampermonkey�
 - [ ] TASK-017: 主治医意見書スクリプトのOAuthスコープ削減（drive.readonly削除。テンプレート公開+ローカルPDF生成案を検討）
 - [ ] TASK-018: 主治医意見書の下書きインポート/エクスポート機能（PC間でデータ移行可能に）
 - [ ] TASK-020: ログインモーダル表示時にスクリプトUIが上に出る問題（原因特定待ち） [2026-01-15]
+- [ ] TASK-028: Miele-LXIV（DICOMビューア）GitHub版ビルド [2026-01-22]
+  - 前提: Xcodeインストール（App Storeから）
+  - 手順: brew install kconfig-frontend wget cmake → miele-lxiv-easy clone → build.sh
+  - 参考: https://github.com/bettar/miele-lxiv-easy
 - [x] TASK-027: henry_disease_register Loader経由で初期化エラー → Loaderに@require対応追加で解決 [2026-01-22]
 - [x] TASK-021: MutationObserver最適化 完了 [2026-01-21]
   - ✅ henry_imaging_order_helper: OK（2段階監視 + cleaner）
