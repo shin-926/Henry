@@ -122,13 +122,6 @@
       "enabled": true
     },
     {
-      "name": "henry_error_logger",
-      "file": "henry_error_logger.user.js",
-      "match": ["henry-app.jp"],
-      "order": 10,
-      "enabled": true
-    },
-    {
       "name": "henry_test_helper",
       "file": "henry_test_helper.user.js",
       "match": ["henry-app.jp"],

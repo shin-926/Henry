@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry Core
 // @namespace    https://henry-app.jp/
-// @version      2.10.8
+// @version      2.11.0
 // @description  Henry スクリプト実行基盤 (GoogleAuth統合 / Google Docs対応)
 // @author       sk powered by Claude & Gemini
 // @match        https://henry-app.jp/*
@@ -51,11 +51,6 @@
  * ■ Plugin Registration
  *   registerPlugin({ id, name, icon?, description?, version?, order?, onClick })
  *   plugins                                      - 登録済みプラグイン配列（読み取り専用）
- *
- * ■ Error Logging
- *   logError({ script?, message, context? })     - エラーログ記録（localStorage、上限50件）
- *   getErrorLog()                                - エラーログ取得
- *   clearErrorLog()                              - エラーログクリア
  *
  * ■ Utilities (utils.*)
  *   createCleaner()                              - クリーンアップ管理 { add(fn), exec() }
@@ -267,30 +262,9 @@
   // ==========================================
   // NOTE: HenryCoreオブジェクト定義前に使用するため、先に定義
 
-  // エラーログ機能（内部関数）
+  // エラーログ機能（コンソール出力のみ）
   const logErrorInternal = ({ script = 'unknown', message, context = {} }) => {
-    const ERROR_LOG_KEY = 'henry_error_log';
-    const MAX_LOGS = 50;
-
-    const entry = {
-      timestamp: new Date().toISOString(),
-      script,
-      message,
-      context
-    };
-
-    try {
-      const logs = JSON.parse(localStorage.getItem(ERROR_LOG_KEY) || '[]');
-      logs.push(entry);
-
-      // 上限チェック
-      const trimmed = logs.length > MAX_LOGS ? logs.slice(-MAX_LOGS) : logs;
-      localStorage.setItem(ERROR_LOG_KEY, JSON.stringify(trimmed));
-
-      console.error(`[${script}]`, message, context);
-    } catch (e) {
-      console.error('[Henry Core] Failed to save error log:', e);
-    }
+    console.error(`[${script}]`, message, Object.keys(context).length > 0 ? context : '');
   };
 
   // GraphQL API呼び出し（内部関数）
@@ -974,24 +948,6 @@
     query: queryInternal,
 
     getMyUuid: Context.getMyUuid,
-
-    // エラーログ機能（内部関数logErrorInternalを公開）
-    logError: logErrorInternal,
-
-    getErrorLog: () => {
-      const ERROR_LOG_KEY = 'henry_error_log';
-      try {
-        return JSON.parse(localStorage.getItem(ERROR_LOG_KEY) || '[]');
-      } catch {
-        return [];
-      }
-    },
-
-    clearErrorLog: () => {
-      const ERROR_LOG_KEY = 'henry_error_log';
-      localStorage.removeItem(ERROR_LOG_KEY);
-      console.log('[Henry Core] Error log cleared');
-    },
 
     registerPlugin: async (options) => {
       // プラグインをレジストリに追加

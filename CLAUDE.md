@@ -1,6 +1,6 @@
-# Henry EMR 開発ガイドライン (Core Rules v4.23)
+# Henry EMR 開発ガイドライン (Core Rules v4.24)
 
-<!-- 📝 UPDATED: v4.23 - GM_info.script.versionパターンルール追加 -->
+<!-- 📝 UPDATED: v4.24 - エラーロガー廃止（MCP直接確認に移行） -->
 
 > このドキュメントはAIアシスタントとの協働開発における必須ルール集です。HenryCore APIの詳細は `henry_core.user.js` 冒頭のAPI目次と実装を参照。
 
@@ -381,8 +381,7 @@ GitHubから各スクリプトを動的に読み込む仕組み。Tampermonkey�
 | | henry_memo.user.js | メモ帳（タブ管理・保存） |
 | **Google連携** | henry_google_drive_bridge.user.js | Google Drive API直接連携 |
 | | henry_ikensho_form.user.js | 主治医意見書作成フォーム |
-| **開発用** | henry_error_logger.user.js | HenryCoreエラーログ表示 |
-| | henry_test_helper.user.js | テストデータ自動入力 |
+| **開発用** | henry_test_helper.user.js | テストデータ自動入力 |
 
 ---
 
@@ -440,6 +439,7 @@ GitHubから各スクリプトを動的に読み込む仕組み。Tampermonkey�
 
 | Version | Date | Changes |
 |---------|------|---------|
+| v4.24 | 2026-01-22 | エラーロガー廃止（henry_error_logger削除、MCP直接確認に移行） |
 | v4.23 | 2026-01-22 | GM_info.script.versionパターンルール追加（バージョン定数） |
 | v4.22 | 2026-01-22 | コード例をNOTES.mdに移動（OAuth、GraphQL、SPA遷移） |
 | v4.21 | 2026-01-22 | fetchインターセプトProxy方式ルール追加 |
@@ -498,6 +498,10 @@ GitHubから各スクリプトを動的に読み込む仕組み。Tampermonkey�
   - DragDropHandler: ドラッグ＆ドロップ関連ロジック
   - EditPopup: 編集ポップアップの生成と管理
   - ButtonRenderer: ボタン/ドロップダウンのDOM生成
+- [ ] TASK-030: henry_google_drive_bridge リファクタリング [2026-01-22]
+  - handleDoubleClick, handleSaveToHenry の関数分割
+  - UI表示ロジック（showToast等）のHenryCore統合検討
+  - GM_xmlhttpRequestラッパーの拡張
 - [x] TASK-027: henry_disease_register Loader経由で初期化エラー → Loaderに@require対応追加で解決 [2026-01-22]
 - [x] TASK-021: MutationObserver最適化 完了 [2026-01-21]
   - ✅ henry_imaging_order_helper: OK（2段階監視 + cleaner）
