@@ -486,7 +486,7 @@ GitHubから各スクリプトを動的に読み込む仕組み。Tampermonkey�
   - henry_memo: グローバルイベント、UIは呼び出し時表示
   - henry_toolbox: MutationObserverで継続監視（debounce付き、ボタン消失時に再挿入）
 - [ ] TASK-016: Henry本体の画面更新が行われない問題（他ユーザーの変更が反映されない等。原因特定が必要）
-- [ ] TASK-017: 主治医意見書スクリプトのOAuthスコープ削減（drive.readonly削除。テンプレート公開+ローカルPDF生成案を検討）
+- [x] TASK-017: 主治医意見書スクリプトのOAuthスコープ削減 → 対応不要と判断（組織内限定、リスク低） [2026-01-22]
 - [ ] TASK-018: 主治医意見書の下書きインポート/エクスポート機能（PC間でデータ移行可能に）
 - [ ] TASK-020: ログインモーダル表示時にスクリプトUIが上に出る問題（原因特定待ち） [2026-01-15]
 - [ ] TASK-028: Miele-LXIV（DICOMビューア）GitHub版ビルド [2026-01-22]
@@ -502,6 +502,7 @@ GitHubから各スクリプトを動的に読み込む仕組み。Tampermonkey�
   - handleDoubleClick, handleSaveToHenry の関数分割
   - UI表示ロジック（showToast等）のHenryCore統合検討
   - GM_xmlhttpRequestラッパーの拡張
+- [ ] TASK-031: henry_ikensho_form: localStorageのPII保存をGoogle DriveのappPropertiesへ移行 [2026-01-22]
 - [x] TASK-027: henry_disease_register Loader経由で初期化エラー → Loaderに@require対応追加で解決 [2026-01-22]
 - [x] TASK-021: MutationObserver最適化 完了 [2026-01-21]
   - ✅ henry_imaging_order_helper: OK（2段階監視 + cleaner）
