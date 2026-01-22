@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry Loader (Dev)
 // @namespace    https://henry-app.jp/
-// @version      1.2.0
+// @version      1.3.0
 // @description  Henryスクリプトの動的ローダー（開発版）
 // @author       sk powered by Claude
 // @match        https://henry-app.jp/*
@@ -246,7 +246,11 @@ const unsafeWindow = window;
     }
   }
 
-  // 起動
-  main();
+  // 起動（DOM準備完了を待つ）
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', main);
+  } else {
+    main();
+  }
 
 })();

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry Loader
 // @namespace    https://henry-app.jp/
-// @version      1.1.0
+// @version      1.2.0
 // @description  Henryスクリプトの動的ローダー（リリース版）
 // @author       sk powered by Claude
 // @match        https://henry-app.jp/*
@@ -210,9 +210,9 @@ const unsafeWindow = window;
       log('マニフェストバージョン:', manifest.version);
       log('スクリプト数:', manifest.scripts.length);
 
-      // 現在のホストにマッチするスクリプトをフィルタ
+      // 現在のホストにマッチするスクリプトをフィルタ（enabled: falseは除外）
       const targetScripts = manifest.scripts
-        .filter(s => matchesHost(s.match))
+        .filter(s => matchesHost(s.match) && s.enabled !== false)
         .sort((a, b) => a.order - b.order);
 
       log('読み込み対象:', targetScripts.map(s => s.name).join(', '));
@@ -229,7 +229,11 @@ const unsafeWindow = window;
     }
   }
 
-  // 起動
-  main();
+  // 起動（DOM準備完了を待つ）
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', main);
+  } else {
+    main();
+  }
 
 })();
