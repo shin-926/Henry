@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry Core
 // @namespace    https://henry-app.jp/
-// @version      2.10.7
+// @version      2.10.8
 // @description  Henry スクリプト実行基盤 (GoogleAuth統合 / Google Docs対応)
 // @author       sk powered by Claude & Gemini
 // @match        https://henry-app.jp/*
@@ -38,7 +38,7 @@
 
 /**
  * ============================================
- * Henry Core API 目次 (v2.10.3)
+ * Henry Core API 目次 (v2.10.8)
  * ============================================
  *
  * ■ Core API
@@ -62,6 +62,7 @@
  *   subscribeNavigation(cleaner, initFn)         - SPA遷移時の自動クリーンアップ
  *   waitForElement(selector, timeout?)           - 要素出現待機
  *   waitForGlobal(key, timeout?)                 - グローバル変数待機
+ *   waitForToolbox(timeout?)                     - HenryToolbox待機（register関数の準備完了まで）
  *   withLock(map, key, generator)                - 重複実行防止
  *   sleep(ms)                                    - 指定時間待機
  *   createLogger(name)                           - ロガー作成 { info, warn, error }
@@ -118,7 +119,7 @@
     GOOGLE_CREDENTIALS_KEY: 'google_oauth_credentials'
   };
 
-  console.log('[Henry Core] Initializing v2.10.0...');
+  console.log('[Henry Core] Initializing v2.10.8...');
 
   // ==========================================
   // 1. Auth Manager (認証トークン)
@@ -143,6 +144,7 @@
   };
 
   const Auth = {
+    // NOTE: Henry本体のFirebase Auth実装に依存（IndexedDB 'firebaseLocalStorageDb' の構造）
     getToken: () => new Promise((resolve) => {
       const req = indexedDB.open('firebaseLocalStorageDb');
       req.onerror = () => resolve(null);
@@ -200,6 +202,7 @@
     _myUuid: null,
 
     // URLからのみ取得（キャッシュ廃止：患者取り違え防止）
+    // NOTE: Henry本体のURL構造に依存（/patients/:uuid 形式）
     getPatientUuid: () => {
       const match = pageWindow.location.pathname.match(/\/patients\/([a-f0-9-]{36})/i);
       return match ? match[1] : null;
@@ -215,7 +218,7 @@
       }
 
       try {
-        const result = await pageWindow.HenryCore.query(`
+        const result = await queryInternal(`
           query ListUsers($input: ListUsersRequestInput!) {
             listUsers(input: $input) {
               users { uuid name }
@@ -256,6 +259,137 @@
   // 3. Original Fetch (query()で使用)
   // ==========================================
   const originalFetch = window.fetch;
+
+  // ==========================================
+  // 3.1 Internal Functions (内部関数)
+  // ==========================================
+  // NOTE: HenryCoreオブジェクト定義前に使用するため、先に定義
+
+  // エラーログ機能（内部関数）
+  const logErrorInternal = ({ script = 'unknown', message, context = {} }) => {
+    const ERROR_LOG_KEY = 'henry_error_log';
+    const MAX_LOGS = 50;
+
+    const entry = {
+      timestamp: new Date().toISOString(),
+      script,
+      message,
+      context
+    };
+
+    try {
+      const logs = JSON.parse(localStorage.getItem(ERROR_LOG_KEY) || '[]');
+      logs.push(entry);
+
+      // 上限チェック
+      const trimmed = logs.length > MAX_LOGS ? logs.slice(-MAX_LOGS) : logs;
+      localStorage.setItem(ERROR_LOG_KEY, JSON.stringify(trimmed));
+
+      console.error(`[${script}]`, message, context);
+    } catch (e) {
+      console.error('[Henry Core] Failed to save error log:', e);
+    }
+  };
+
+  // GraphQL API呼び出し（内部関数）
+  // フルクエリ方式でGraphQL APIを呼び出す（エンドポイント自動学習機能付き）
+  // options.endpoint: 指定すると学習をスキップしてそのエンドポイントを使用
+  // TODO: 将来的にデバッグモードフラグを設け、学習ログ(Learned/Cache cleared)を抑制可能にする
+  const queryInternal = async (queryString, variables = {}, options = {}) => {
+    const token = await Auth.getToken();
+    if (!token) {
+      throw new Error('有効なトークンがありません。再ログインしてください。');
+    }
+
+    const ENDPOINT_CACHE_KEY = 'henry_endpoint_cache';
+
+    // operationNameを抽出
+    const match = queryString.match(/(?:query|mutation)\s+(\w+)/);
+    const operationName = match?.[1] || 'unknown';
+
+    // エンドポイントが明示的に指定されている場合はそれを使う
+    if (options.endpoint) {
+      return await tryQuery(options.endpoint);
+    }
+
+    // キャッシュを確認
+    let cache = JSON.parse(localStorage.getItem(ENDPOINT_CACHE_KEY) || '{}');
+    const cachedEndpoint = cache[operationName];
+
+    // 試すエンドポイントの順序（キャッシュがあっても他のエンドポイントをフォールバックとして追加）
+    const allEndpoints = ['/graphql', '/graphql-v2'];
+    const endpoints = cachedEndpoint
+      ? [cachedEndpoint, ...allEndpoints.filter(e => e !== cachedEndpoint)]
+      : allEndpoints;
+
+    let lastError;
+    for (const endpoint of endpoints) {
+      try {
+        const result = await tryQuery(endpoint);
+        // 成功したらキャッシュに保存（キャッシュと異なる場合も更新）
+        if (operationName !== 'unknown' && cache[operationName] !== endpoint) {
+          cache[operationName] = endpoint;
+          localStorage.setItem(ENDPOINT_CACHE_KEY, JSON.stringify(cache));
+          console.log(`[Henry Core] Learned: ${operationName} → ${endpoint}`);
+        }
+        return result;
+      } catch (e) {
+        lastError = e;
+        // 400/404エラーの場合はキャッシュを削除して次のエンドポイントを試す
+        if (e.message.includes('400') || e.message.includes('404')) {
+          if (cachedEndpoint === endpoint) {
+            delete cache[operationName];
+            localStorage.setItem(ENDPOINT_CACHE_KEY, JSON.stringify(cache));
+            console.log(`[Henry Core] Cache cleared: ${operationName} (was ${endpoint})`);
+          }
+          continue;
+        }
+        // それ以外のエラーは即座にthrow
+        logErrorInternal({
+          script: 'HenryCore',
+          message: e.message,
+          context: { operationName, endpoint }
+        });
+        throw e;
+      }
+    }
+    // 全エンドポイント失敗時
+    logErrorInternal({
+      script: 'HenryCore',
+      message: lastError?.message || 'All endpoints failed',
+      context: { operationName, triedEndpoints: endpoints }
+    });
+    throw lastError;
+
+    // 内部関数：指定エンドポイントでクエリを実行
+    async function tryQuery(endpoint) {
+      const url = CONFIG.BASE_URL + endpoint;
+      const res = await originalFetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+          'x-auth-organization-uuid': CONFIG.ORG_UUID
+        },
+        body: JSON.stringify({
+          query: queryString,
+          variables
+        })
+      });
+
+      if (!res.ok) {
+        throw new Error(`API Error: ${res.status}`);
+      }
+
+      const json = await res.json();
+
+      if (json.errors && json.errors.length > 0) {
+        throw new Error(json.errors[0].message || 'GraphQL Error');
+      }
+
+      return json;
+    }
+  };
 
   // ==========================================
   // 4. Navigation Hook (SPA対応)
@@ -834,131 +968,13 @@
 
     plugins: pluginRegistry,
 
-    // フルクエリ方式でGraphQL APIを呼び出す（エンドポイント自動学習機能付き）
-    // options.endpoint: 指定すると学習をスキップしてそのエンドポイントを使用
-    query: async (queryString, variables = {}, options = {}) => {
-      const token = await Auth.getToken();
-      if (!token) {
-        throw new Error('有効なトークンがありません。再ログインしてください。');
-      }
-
-      const ENDPOINT_CACHE_KEY = 'henry_endpoint_cache';
-
-      // operationNameを抽出
-      const match = queryString.match(/(?:query|mutation)\s+(\w+)/);
-      const operationName = match?.[1] || 'unknown';
-
-      // エンドポイントが明示的に指定されている場合はそれを使う
-      if (options.endpoint) {
-        return await tryQuery(options.endpoint);
-      }
-
-      // キャッシュを確認
-      let cache = JSON.parse(localStorage.getItem(ENDPOINT_CACHE_KEY) || '{}');
-      const cachedEndpoint = cache[operationName];
-
-      // 試すエンドポイントの順序（キャッシュがあっても他のエンドポイントをフォールバックとして追加）
-      const allEndpoints = ['/graphql', '/graphql-v2'];
-      const endpoints = cachedEndpoint
-        ? [cachedEndpoint, ...allEndpoints.filter(e => e !== cachedEndpoint)]
-        : allEndpoints;
-
-      let lastError;
-      for (const endpoint of endpoints) {
-        try {
-          const result = await tryQuery(endpoint);
-          // 成功したらキャッシュに保存（キャッシュと異なる場合も更新）
-          if (operationName !== 'unknown' && cache[operationName] !== endpoint) {
-            cache[operationName] = endpoint;
-            localStorage.setItem(ENDPOINT_CACHE_KEY, JSON.stringify(cache));
-            console.log(`[Henry Core] Learned: ${operationName} → ${endpoint}`);
-          }
-          return result;
-        } catch (e) {
-          lastError = e;
-          // 400/404エラーの場合はキャッシュを削除して次のエンドポイントを試す
-          if (e.message.includes('400') || e.message.includes('404')) {
-            if (cachedEndpoint === endpoint) {
-              delete cache[operationName];
-              localStorage.setItem(ENDPOINT_CACHE_KEY, JSON.stringify(cache));
-              console.log(`[Henry Core] Cache cleared: ${operationName} (was ${endpoint})`);
-            }
-            continue;
-          }
-          // それ以外のエラーは即座にthrow
-          HenryCore.logError({
-            script: 'HenryCore',
-            message: e.message,
-            context: { operationName, endpoint }
-          });
-          throw e;
-        }
-      }
-      // 全エンドポイント失敗時
-      HenryCore.logError({
-        script: 'HenryCore',
-        message: lastError?.message || 'All endpoints failed',
-        context: { operationName, triedEndpoints: endpoints }
-      });
-      throw lastError;
-
-      // 内部関数：指定エンドポイントでクエリを実行
-      async function tryQuery(endpoint) {
-        const url = CONFIG.BASE_URL + endpoint;
-        const res = await originalFetch(url, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${token}`,
-            'x-auth-organization-uuid': CONFIG.ORG_UUID
-          },
-          body: JSON.stringify({
-            query: queryString,
-            variables
-          })
-        });
-
-        if (!res.ok) {
-          throw new Error(`API Error: ${res.status}`);
-        }
-
-        const json = await res.json();
-
-        if (json.errors && json.errors.length > 0) {
-          throw new Error(json.errors[0].message || 'GraphQL Error');
-        }
-
-        return json;
-      }
-    },
+    // GraphQL API呼び出し（内部関数queryInternalを公開）
+    query: queryInternal,
 
     getMyUuid: Context.getMyUuid,
 
-    // エラーログ機能
-    logError: ({ script = 'unknown', message, context = {} }) => {
-      const ERROR_LOG_KEY = 'henry_error_log';
-      const MAX_LOGS = 50;
-
-      const entry = {
-        timestamp: new Date().toISOString(),
-        script,
-        message,
-        context
-      };
-
-      try {
-        const logs = JSON.parse(localStorage.getItem(ERROR_LOG_KEY) || '[]');
-        logs.push(entry);
-
-        // 上限チェック
-        const trimmed = logs.length > MAX_LOGS ? logs.slice(-MAX_LOGS) : logs;
-        localStorage.setItem(ERROR_LOG_KEY, JSON.stringify(trimmed));
-
-        console.error(`[${script}]`, message, context);
-      } catch (e) {
-        console.error('[Henry Core] Failed to save error log:', e);
-      }
-    },
+    // エラーログ機能（内部関数logErrorInternalを公開）
+    logError: logErrorInternal,
 
     getErrorLog: () => {
       const ERROR_LOG_KEY = 'henry_error_log';
@@ -1083,10 +1099,10 @@
       UI.init();
       checkForAuthCode();
     }
-    console.log('[Henry Core] Ready v2.10.0 (Henry mode)');
+    console.log('[Henry Core] Ready v2.10.8 (Henry mode)');
 
   } else if (isGoogleDocs) {
     // Google Docsドメイン：GoogleAuthのみ
-    console.log('[Henry Core] Ready v2.10.0 (Google Docs mode - GoogleAuth only)');
+    console.log('[Henry Core] Ready v2.10.8 (Google Docs mode - GoogleAuth only)');
   }
 })();
