@@ -88,6 +88,8 @@
 (function() {
   'use strict';
 
+  const VERSION = GM_info.script.version;
+
   // ページのwindowを取得（サンドボックス対応）
   const pageWindow = typeof unsafeWindow !== 'undefined' ? unsafeWindow : window;
 
@@ -1099,10 +1101,10 @@
       UI.init();
       checkForAuthCode();
     }
-    console.log('[Henry Core] Ready v2.10.8 (Henry mode)');
+    console.log(`[Henry Core] Ready v${VERSION} (Henry mode)`);
 
   } else if (isGoogleDocs) {
     // Google Docsドメイン：GoogleAuthのみ
-    console.log('[Henry Core] Ready v2.10.8 (Google Docs mode - GoogleAuth only)');
+    console.log(`[Henry Core] Ready v${VERSION} (Google Docs mode - GoogleAuth only)`);
   }
 })();

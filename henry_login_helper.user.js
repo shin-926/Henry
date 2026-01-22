@@ -43,6 +43,7 @@
 (function() {
     'use strict';
 
+    const VERSION = GM_info.script.version;
     const pageWindow = typeof unsafeWindow !== 'undefined' ? unsafeWindow : window;
 
     // --- 設定: スタイル定義 ---
@@ -666,7 +667,7 @@
                 window.removeEventListener('scroll', onScroll);
             });
 
-            console.log('[Henry Helper] 初期化完了 v6.9');
+            console.log(`[Henry Helper] Ready (v${VERSION})`);
 
         } catch (error) {
             console.error('[Henry Helper] 初期化エラー:', error);

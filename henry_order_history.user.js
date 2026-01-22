@@ -27,6 +27,7 @@
 (function() {
   'use strict';
 
+  const VERSION = GM_info.script.version;
   const SCRIPT_NAME = 'OrderHistory';
 
   const QUERY = `
@@ -519,12 +520,12 @@
       name: 'オーダー履歴',
       icon: '📋',
       description: '指定期間内のオーダー履歴を表示',
-      version: '1.5.0',
+      version: VERSION,
       order: 200,
       onClick: showInputModal
     });
 
-    console.log(`[${SCRIPT_NAME}] 初期化完了`);
+    console.log(`[${SCRIPT_NAME}] Ready (v${VERSION})`);
   }
 
   init();

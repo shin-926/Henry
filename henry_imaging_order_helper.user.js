@@ -38,6 +38,8 @@
 (function() {
   'use strict';
 
+  const VERSION = GM_info.script.version;
+
   const CONFIG = {
     SCRIPT_NAME: 'ImagingOrderHelper',
     MODALITY_SELECTOR: 'select[aria-label="モダリティ"]',
@@ -488,7 +490,7 @@
     logger = utils.createLogger(CONFIG.SCRIPT_NAME);
     const cleaner = utils.createCleaner();
 
-    logger.info('スクリプト初期化 (v1.26.0)');
+    logger.info(`Ready (v${VERSION})`);
 
     utils.subscribeNavigation(cleaner, () => {
       logger.info('ページ遷移検出 -> 再セットアップ');
@@ -814,6 +816,9 @@
 
   // ==========================================
   // FilterableSelectBoxに値を入力（React Fiber方式）
+  // NOTE: __reactFiber$ を直接操作するため、Henry側のReactバージョンアップや
+  //       コンポーネント構造変更で動作しなくなる可能性あり（技術的負債）
+  //       HenryのFilterableSelectBoxに公式APIがないため、現状この方式が必要
   // ==========================================
   async function setFilterableSelectBoxValue(selectBox, value) {
     if (!selectBox || !value) return false;
@@ -862,6 +867,7 @@
 
   // ==========================================
   // 体位を設定（React Fiber方式 - 親コンポーネント経由）
+  // NOTE: 同上。__reactFiber$ への依存は技術的負債
   // ==========================================
   async function setBodyPosition(chipInput, positionCode) {
     if (!chipInput || !positionCode) return false;

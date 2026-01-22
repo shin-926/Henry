@@ -47,9 +47,11 @@
 (function() {
   'use strict';
 
-  // ========================================== 
+  const VERSION = GM_info.script.version;
+
+  // ==========================================
   // 設定
-  // ========================================== 
+  // ==========================================
   const CONFIG = {
     // Google API設定
     DRIVE_API_BASE: 'https://www.googleapis.com/drive/v3',
@@ -892,7 +894,7 @@
         const handler = (e) => handleDoubleClick(e);
         document.addEventListener('dblclick', handler, true);
         cleaner.add(() => document.removeEventListener('dblclick', handler, true));
-        log.info('Ready (v1.0.0)');
+        log.info(`Ready (v${VERSION})`);
       });
     }
 

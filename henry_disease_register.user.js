@@ -39,6 +39,7 @@
 (function() {
   'use strict';
 
+  const VERSION = GM_info.script.version;
   const SCRIPT_NAME = 'DiseaseRegister';
   const STORAGE_KEY_DISEASE = 'henry_disease_freq';
   const STORAGE_KEY_MODIFIER = 'henry_modifier_freq';
@@ -1354,6 +1355,10 @@
         return;
       }
 
+      // NOTE: innerHTMLで全置換している理由
+      // - 検索結果は50件に制限済み
+      // - debounce(150ms)で発火頻度を抑制
+      // - この規模では差分更新より全置換の方がシンプルで十分高速
       list.innerHTML = items.map(d => {
         const isRegistered = this.isRegistered(d[2]);
         const registeredBadge = isRegistered ? '<span class="dr-registered-badge">登録済</span>' : '';
@@ -1565,7 +1570,9 @@
       // outcomeは必須、未選択の場合は CONTINUED
       const outcome = outcomeValue || 'CONTINUED';
 
-      // インライン形式でmutationを構築（変数型を使わない）
+      // NOTE: インライン形式でmutationを構築
+      // HenryのGraphQL APIでは変数型（$input: SomeInput!）がエラーになるため
+      // 将来的にAPI側が対応したら変数方式に移行したい
       const MUTATION = `
         mutation {
           updateMultiPatientReceiptDiseases(input: {
@@ -1654,7 +1661,7 @@
       name: '病名登録',
       icon: '🏥',
       description: '高速病名検索・登録',
-      version: '2.2.0',
+      version: VERSION,
       order: 150,
       onClick: () => {
         const patientUuid = HenryCore.getPatientUuid();
@@ -1670,7 +1677,7 @@
       }
     });
 
-    console.log(`[${SCRIPT_NAME}] 初期化完了`);
+    console.log(`[${SCRIPT_NAME}] Ready (v${VERSION})`);
   }
 
   init();

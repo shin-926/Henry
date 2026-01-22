@@ -25,6 +25,7 @@
 (async function() {
   'use strict';
 
+  const VERSION = GM_info.script.version;
   const SCRIPT_NAME = 'NoteReader';
   const pageWindow = typeof unsafeWindow !== 'undefined' ? unsafeWindow : window;
 
@@ -117,5 +118,5 @@
     }
   });
 
-  console.log(`[${SCRIPT_NAME}] 初期化完了`);
+  console.log(`[${SCRIPT_NAME}] Ready (v${VERSION})`);
 })();

@@ -29,6 +29,7 @@
 (function() {
   'use strict';
 
+  const VERSION = GM_info.script.version;
   const SCRIPT_NAME = 'Henry自動承認';
   const PAGE_SIZE = 10;
   const BASE_DELAY = 150;
@@ -769,12 +770,12 @@
       name: '承認',
       icon: '⚡',
       description: '承認待ちオーダーを自動で一括承認',
-      version: '3.12.0',
+      version: VERSION,
       order: 20,
       onClick: main
     });
 
-    console.log(`[${SCRIPT_NAME}] v3.12.0 起動しました`);
+    console.log(`[${SCRIPT_NAME}] Ready (v${VERSION})`);
   }
 
   if (document.readyState === 'loading') {

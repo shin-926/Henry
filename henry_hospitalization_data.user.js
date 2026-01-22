@@ -42,7 +42,7 @@
   'use strict';
 
   const SCRIPT_NAME = 'HospitalizationData';
-  const VERSION = '0.14.0';
+  const VERSION = GM_info.script.version;
 
   // 組織UUID（マオカ病院）
   const ORG_UUID = 'ce6b556b-2a8d-4fce-b8dd-89ba638fc825';
@@ -51,19 +51,18 @@
   const HASHES = {
     LIST_CLINICAL_DOCUMENTS: '1c4cab71733c192c3143f4c25e6040eb6df6d87fc6cda513f6566a75da7d7df0',
     LIST_ORDERS: '8fb50e5d48a0c44a0891e376ddf03dc069b792ea991f62bde9d1e9da63fcb4b3',
-    LIST_REHABILITATION_DOCUMENTS: 'b7a50dc3c27506e9c0fcdb13cb1b504487b8979fdd2ab5a54eaa83a95f907d3e',
-    GET_CLINICAL_CALENDAR_VIEW: '74f284465206f367c4c544c20b020204478fa075a1fd3cb1bf3fd266ced026e1'
+    LIST_REHABILITATION_DOCUMENTS: 'b7a50dc3c27506e9c0fcdb13cb1b504487b8979fdd2ab5a54eaa83a95f907d3e'
   };
 
   // Persisted Query を使用してAPIを呼び出す
-  async function callPersistedQuery(operationName, variables, sha256Hash) {
+  async function callPersistedQuery(operationName, variables, sha256Hash, endpoint = 'graphql') {
     // HenryCoreからトークンを取得
     const token = await window.HenryCore?.getToken();
     if (!token) {
       throw new Error('認証トークンがありません');
     }
 
-    const response = await fetch('https://henry-app.jp/graphql', {
+    const response = await fetch(`https://henry-app.jp/${endpoint}`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -296,7 +295,7 @@
     }
   }
 
-  // カレンダービューデータを取得（GetClinicalCalendarView API）
+  // カレンダービューデータを取得（ClinicalCalendarView v2 API）
   // 過去1週間分の全データを一括取得
   const CALENDAR_RESOURCES = [
     '//henry-app.jp/clinicalResource/vitalSign',
@@ -311,33 +310,31 @@
   async function fetchCalendarData(patientUuid) {
     try {
       const today = new Date();
+      const baseDateStr = `${today.getFullYear()}-${(today.getMonth() + 1).toString().padStart(2, '0')}-${today.getDate().toString().padStart(2, '0')}`;
+
       const result = await callPersistedQuery(
-        'GetClinicalCalendarView',
+        'ClinicalCalendarView',
         {
-          input: {
-            patientUuid,
-            baseDate: {
-              year: today.getFullYear(),
-              month: today.getMonth() + 1,
-              day: today.getDate()
-            },
-            beforeDateSize: 7,  // 過去7日分
-            afterDateSize: 0,
-            clinicalResourceHrns: CALENDAR_RESOURCES,
-            createUserUuids: [],
-            accountingOrderShinryoShikibetsus: []
-          }
+          patientId: patientUuid,
+          baseDate: baseDateStr,
+          beforeDateSize: 7,
+          afterDateSize: 0,
+          clinicalResourceHrns: CALENDAR_RESOURCES,
+          createUserIds: [],
+          accountingOrderShinryoShikibetsus: [],
+          includeRevoked: false
         },
-        HASHES.GET_CLINICAL_CALENDAR_VIEW
+        '76fe89f7c07e56986793133842d73854a2063b39c36c076f4cee4a4588ece59f', // ClinicalCalendarView v2 Hash
+        'graphql-v2'
       );
 
-      const data = result?.data?.getClinicalCalendarView;
-      console.log(`[${SCRIPT_NAME}] GetClinicalCalendarView 生データ:`, data);
+      const data = result?.data?.clinicalCalendarView;
+      console.log(`[${SCRIPT_NAME}] ClinicalCalendarView (v2) 生データ:`, data);
 
       // バイタルサイン
       const vitalSigns = (data?.vitalSigns || []).map(vs => ({
         uuid: vs.uuid,
-        recordTime: vs.recordTime?.seconds ? new Date(vs.recordTime.seconds * 1000) : null,
+        recordTime: vs.recordTime ? new Date(vs.recordTime) : null,
         temperature: vs.temperature?.value ? vs.temperature.value / 10 : null,
         bloodPressureUpper: vs.bloodPressureUpperBound?.value ? vs.bloodPressureUpperBound.value / 10 : null,
         bloodPressureLower: vs.bloodPressureLowerBound?.value ? vs.bloodPressureLowerBound.value / 10 : null,
@@ -350,8 +347,8 @@
 
       // 処方オーダー
       const prescriptionOrders = (data?.prescriptionOrders || []).map(rx => ({
-        uuid: rx.uuid,
-        orderTime: rx.orderTime?.seconds ? new Date(rx.orderTime.seconds * 1000) : null,
+        uuid: rx.id,
+        orderTime: rx.createTime ? new Date(rx.createTime) : null,
         status: formatOrderStatus(rx.orderStatus),
         doctor: rx.doctor?.name || '不明',
         rps: rx.rps || []
@@ -359,36 +356,36 @@
 
       // 注射オーダー
       const injectionOrders = (data?.injectionOrders || []).map(inj => ({
-        uuid: inj.uuid,
-        orderTime: inj.orderTime?.seconds ? new Date(inj.orderTime.seconds * 1000) : null,
+        uuid: inj.id,
+        orderTime: inj.createTime ? new Date(inj.createTime) : null,
         status: formatOrderStatus(inj.orderStatus),
         doctor: inj.doctor?.name || '不明',
-        details: inj.detail || inj
+        details: inj
       }));
 
       // 検査レポート
       const inspectionReports = (data?.inspectionReports || []).map(rep => ({
         uuid: rep.uuid,
-        reportTime: rep.reportTime?.seconds ? new Date(rep.reportTime.seconds * 1000) : null,
+        reportTime: rep.reportTime ? new Date(rep.reportTime) : null,
         title: rep.title || '検査レポート',
-        content: rep.content || rep.editorData ? parseEditorData(rep.editorData) : '',
+        content: rep.editorData ? parseEditorData(rep.editorData) : '',
         author: rep.createUser?.name || '不明'
       }));
 
       // 栄養オーダー
       const nutritionOrders = (data?.nutritionOrders || []).map(nut => ({
-        uuid: nut.uuid,
-        orderTime: nut.orderTime?.seconds ? new Date(nut.orderTime.seconds * 1000) : null,
+        uuid: nut.id,
+        orderTime: nut.createTime ? new Date(nut.createTime) : null,
         status: formatOrderStatus(nut.orderStatus),
-        mealType: nut.mealType || nut.detail?.mealType || '-',
+        mealType: nut.mealType || '-',
         doctor: nut.doctor?.name || '不明',
-        details: nut.detail || nut
+        details: nut
       }));
 
       // ADL評価
       const adlAssessments = (data?.adlAssessments || []).map(adl => ({
         uuid: adl.uuid,
-        assessmentTime: adl.assessmentTime?.seconds ? new Date(adl.assessmentTime.seconds * 1000) : null,
+        assessmentTime: adl.assessmentTime ? new Date(adl.assessmentTime) : null,
         score: adl.totalScore?.value || adl.score || '-',
         author: adl.createUser?.name || '不明',
         details: adl
@@ -397,7 +394,7 @@
       // 看護日誌
       const nursingJournals = (data?.nursingJournals || []).map(nj => ({
         uuid: nj.uuid,
-        recordTime: nj.recordTime?.seconds ? new Date(nj.recordTime.seconds * 1000) : null,
+        recordTime: nj.recordTime ? new Date(nj.recordTime) : null,
         text: nj.editorData ? parseEditorData(nj.editorData) : '',
         author: nj.createUser?.name || '不明'
       })).filter(nj => nj.text);

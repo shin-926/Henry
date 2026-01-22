@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         予約システム：カレンダーUIカスタム
 // @namespace    http://tampermonkey.net/
-// @version      2.48.4
+// @version      2.48.5
 // @description  カレンダー縦表示、週ジャンプなど
 // @author       sk powered by Claude & Gemini
 // @match        https://manage-maokahp.reserve.ne.jp/manage/calendar.php*
@@ -41,6 +41,9 @@
 (function() {
   'use strict';
 
+  const VERSION = GM_info.script.version;
+  const SCRIPT_NAME = 'ReserveCalendarUI';
+
     const CONFIG = {
         targetSelector: '#div_swipe_calendar',        // カレンダー要素のセレクタ
         headerSelector: '#div_header',                 // ヘッダー要素のセレクタ（カレンダーの上端位置の基準）
@@ -50,6 +53,15 @@
         groupPaddingBottom: 10,                        // 各月グループの下部余白（ピクセル）
         arrowSideGap: '12px',                          // 矢印ボタンの左右の余白
         retryIntervalMs: 500,                          // 初期化リトライの間隔（ミリ秒）
+        // タイミング設定
+        layoutUpdateIntervalMs: 1000,                  // レイアウト更新の間隔（ミリ秒）
+        magnificationDelayMs: 500,                     // 初回倍率調整までの待機時間（ミリ秒）
+        resizeDelayMs: 100,                            // リサイズ後の倍率再調整待機（ミリ秒）
+        clickDelayMs: 100,                             // 日付クリック発火までの待機（ミリ秒）
+        initialFocusDelayMs: 200,                      // 初期フォーカスまでの待機（ミリ秒）
+        // レイアウト設定
+        arrowTopOffset: 8,                             // 矢印ボタンの上オフセット（ピクセル）
+        arrowSideOffset: 12,                           // 矢印ボタンの左右オフセット（ピクセル）
         weeksJump: {
             enable: true,                                // 週ジャンプ機能の有効/無効
             reselectAfterJump: true,                     // ジャンプ後に入力欄を再選択するか
@@ -61,6 +73,10 @@
   const BASE_WIDTH_EM = 19;
   // 初期値（後で動的に調整される）
   let currentMagnification = CONFIG.magnification;
+
+  // ローカル状態管理（window汚染を避ける）
+  let isToolbarHidden = false;
+  let layoutSyncInterval = null;
 
   const css = `
     :root {
@@ -249,14 +265,14 @@ ${CONFIG.targetSelector} .ui-datepicker-calendar a.ui-state-active {
       // 左矢印
       const prev = $calendar[0].querySelector('.ui-datepicker-prev');
       if (prev) {
-        prev.style.setProperty('top', (topVal + 8) + 'px', 'important');
-        prev.style.setProperty('left', (calendarRect.left + 12) + 'px', 'important');
+        prev.style.setProperty('top', (topVal + CONFIG.arrowTopOffset) + 'px', 'important');
+        prev.style.setProperty('left', (calendarRect.left + CONFIG.arrowSideOffset) + 'px', 'important');
       }
       // 右矢印
       const next = $calendar[0].querySelector('.ui-datepicker-next');
       if (next) {
-        next.style.setProperty('top', (topVal + 8) + 'px', 'important');
-        next.style.setProperty('right', '12px', 'important');
+        next.style.setProperty('top', (topVal + CONFIG.arrowTopOffset) + 'px', 'important');
+        next.style.setProperty('right', CONFIG.arrowSideOffset + 'px', 'important');
       }
     }
   }
@@ -274,7 +290,10 @@ ${CONFIG.targetSelector} .ui-datepicker-calendar a.ui-state-active {
         $target.datepicker('refresh');
       }
       return true;
-    } catch { return false; }
+    } catch (e) {
+      console.error('[CalendarUI] Datepicker option setting failed:', e);
+      return false;
+    }
   }
 
   function ensureWeeksAfterUI() {
@@ -311,7 +330,7 @@ ${CONFIG.targetSelector} .ui-datepicker-calendar a.ui-state-active {
             if ($cell.length) {
               $cell[0].click(); // クリックイベントを発火
             }
-          }, 100);
+          }, CONFIG.clickDelayMs);
 
           if (CONFIG.weeksJump.reselectAfterJump) {
             setTimeout(() => { input.focus(); input.select(); }, CONFIG.weeksJump.reselectDelayMs);
@@ -319,7 +338,7 @@ ${CONFIG.targetSelector} .ui-datepicker-calendar a.ui-state-active {
         }
       }
     });
-    setTimeout(() => { input.focus(); input.select(); }, 200);
+    setTimeout(() => { input.focus(); input.select(); }, CONFIG.initialFocusDelayMs);
   }
 
   function tick() {
@@ -327,7 +346,7 @@ ${CONFIG.targetSelector} .ui-datepicker-calendar a.ui-state-active {
       ensureWeeksAfterUI();
 
       // ツールバーを自動で隠す（初回のみ）
-      if (!window.toolbarHidden) {
+      if (!isToolbarHidden) {
         const openBtn = document.querySelector('#div_toolbar_hider_open');
         const hideBtn = document.querySelector('#div_toolbar_hider_hide');
         const toolbar = document.querySelector('#div_contents_topmenu');
@@ -335,20 +354,20 @@ ${CONFIG.targetSelector} .ui-datepicker-calendar a.ui-state-active {
           openBtn.style.display = 'block';
           hideBtn.style.display = 'none';
           toolbar.style.display = 'none';
-          window.toolbarHidden = true;
+          isToolbarHidden = true;
         }
       }
 
-      if (!window.layoutSync) {
-        window.layoutSync = setInterval(adjustLayout, 1000);
+      if (!layoutSyncInterval) {
+        layoutSyncInterval = setInterval(adjustLayout, CONFIG.layoutUpdateIntervalMs);
 
         // 初回の倍率調整（少し遅延させて描画完了を待つ）
-        setTimeout(adjustMagnification, 500);
+        setTimeout(adjustMagnification, CONFIG.magnificationDelayMs);
 
         // ウィンドウリサイズ時に倍率を再調整
         window.addEventListener('resize', () => {
           setMagnification(CONFIG.magnification); // 一度リセット
-          setTimeout(adjustMagnification, 100);
+          setTimeout(adjustMagnification, CONFIG.resizeDelayMs);
         });
 
         // 監視範囲の最適化：カレンダー要素のみを監視
@@ -360,6 +379,8 @@ ${CONFIG.targetSelector} .ui-datepicker-calendar a.ui-state-active {
           });
           observer.observe(observerTarget, { childList: true, subtree: false });
         }
+
+        console.log(`[${SCRIPT_NAME}] Ready (v${VERSION})`);
       }
     } else {
       setTimeout(tick, CONFIG.retryIntervalMs);

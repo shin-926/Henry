@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         予約システム連携
 // @namespace    https://github.com/shin-926/Henry
-// @version      4.1.22
+// @version      4.1.24
 // @description  Henryカルテと予約システム間の双方向連携（再診予約・照射オーダー自動予約・自動印刷・患者プレビュー）
 // @author       sk powered by Claude & Gemini
 // @match        https://henry-app.jp/*
@@ -56,11 +56,20 @@
  *   - fetchインターセプト（照射オーダー検出）は全ページで必要
  *   - プラグイン登録は一度だけでOK（Toolbox側で管理）
  *   - トークン同期リスナーも全ページで必要
+ *
+ * ■ ファイル構成について
+ * - 意図的に単一ファイルとしている（分割しない）
+ * - 理由:
+ *   - @require依存関係の管理が複雑になる
+ *   - ローダーでの読み込み順序を考慮する必要がある
+ *   - 複数ファイルのバージョン管理オーバーヘッド
+ *   - 現状でもセクションコメントで十分に整理されている
  */
 
 (function() {
   'use strict';
 
+  const VERSION = GM_info.script.version;
   const SCRIPT_NAME = 'HenryReserveIntegration';
   const CONFIG = {
     // API
@@ -420,9 +429,10 @@
         return null;
       }
 
+      // NOTE: GraphQL変数方式を使用（直接埋め込みはインジェクションリスクあり）
       const query = `
-        query GetPatient {
-          getPatient(input: { uuid: "${patientUuid}" }) {
+        query GetPatient($input: GetPatientRequestInput!) {
+          getPatient(input: $input) {
             uuid
             serialNumber
             serialNumberPrefix
@@ -450,7 +460,8 @@
           credentials: 'include',
           body: JSON.stringify({
             operationName: 'GetPatient',
-            query: query
+            query: query,
+            variables: { input: { uuid: patientUuid } }
           })
         });
 
@@ -783,8 +794,6 @@ html, body { margin: 0; padding: 0; }
 </body>
 </html>
       `.trim();
-    // DEBUG: 生成されたHTMLをコンソールに出力（動作確認後に削除）
-    // console.log('[HenryReserveIntegration] Generated HTML:', html);
     },
 
     // 前提: 1オーダー = 1モダリティ（最初に見つかったモダリティのみ返す）
@@ -1265,12 +1274,12 @@ html, body { margin: 0; padding: 0; }
           id: 'reserve-integration',
           name: '再診予約',
           description: '予約システムを開いて患者情報を自動入力',
-          version: '1.3.0',
+          version: VERSION,
           order: CONFIG.PLUGIN_ORDER,
           onClick: openReserve
         });
 
-        log.info('プラグイン登録完了');
+        log.info(`Ready (v${VERSION})`);
       } catch (e) {
         log.error('プラグイン登録失敗: ' + e.message);
       }
@@ -1444,26 +1453,15 @@ html, body { margin: 0; padding: 0; }
     }
 
     // モダリティ（CT/MRI等）をダイアログから取得
+    // NOTE: henry_imaging_order_helper.user.jsと同じセレクタを使用
     function getModalityFromDialog() {
       const modalDialog = document.querySelector('[role="dialog"]');
       if (!modalDialog) return '';
 
-      // 「モダリティ」というテキストノードを探し、その親要素内のselectを取得
-      const walker = document.createTreeWalker(modalDialog, NodeFilter.SHOW_TEXT);
-      let node;
-      while ((node = walker.nextNode())) {
-        if (node.textContent.trim() === 'モダリティ') {
-          // 親を辿ってselectを探す
-          let parent = node.parentElement;
-          for (let i = 0; i < CONFIG.DOM_TRAVERSE_MAX_DEPTH && parent; i++) {
-            const select = parent.querySelector('select');
-            if (select && select.selectedIndex >= 0) {
-              return select.options[select.selectedIndex]?.text || '';
-            }
-            parent = parent.parentElement;
-          }
-          break;
-        }
+      // aria-labelを使用した安定したセレクタ
+      const select = modalDialog.querySelector('select[aria-label="モダリティ"]');
+      if (select && select.selectedIndex >= 0) {
+        return select.options[select.selectedIndex]?.text || '';
       }
       return '';
     }
@@ -1976,6 +1974,7 @@ html, body { margin: 0; padding: 0; }
       }
 
       // 診療種別（CT/MRI）の確認
+      // NOTE: 外部システム（reserve.ne.jp）のUIのため、テキストベース検索が必要
       const dialogEl = document.querySelector('#dialog_reserve_input');
       let purposeValue = '';
       if (dialogEl) {

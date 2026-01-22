@@ -1,6 +1,6 @@
-# Henry EMR 開発ガイドライン (Core Rules v4.22)
+# Henry EMR 開発ガイドライン (Core Rules v4.23)
 
-<!-- 📝 UPDATED: v4.20 - 動的スクリプトローダー(Henry Loader)セクション追加 -->
+<!-- 📝 UPDATED: v4.23 - GM_info.script.versionパターンルール追加 -->
 
 > このドキュメントはAIアシスタントとの協働開発における必須ルール集です。HenryCore APIの詳細は `henry_core.user.js` 冒頭のAPI目次と実装を参照。
 
@@ -244,6 +244,23 @@ const core = pageWindow.HenryCore;
 
 **YOU MUST**: コミット時は `@version` を更新（バグ修正: パッチ、機能追加: マイナー、破壊的変更: メジャー）
 
+#### バージョン定数
+
+**YOU MUST**: スクリプト内でバージョンを参照する場合は `GM_info.script.version` を使用すること。
+
+```javascript
+const VERSION = GM_info.script.version;
+const SCRIPT_NAME = 'MyScript';
+
+// ... スクリプト処理 ...
+
+console.log(`[${SCRIPT_NAME}] Ready (v${VERSION})`);
+```
+
+**理由**: `@version` メタデータとコード内のバージョン文字列を二重管理すると不整合が起きやすい。`GM_info.script.version` を使うことで、メタデータの `@version` のみを更新すれば自動的にログ出力等にも反映される。
+
+**補足**: `@grant none` でも `GM_info` は利用可能（Tampermonkey標準機能）。
+
 ---
 
 ## 4. デバッグとワークフロー (Debug & Workflow)
@@ -423,6 +440,7 @@ GitHubから各スクリプトを動的に読み込む仕組み。Tampermonkey�
 
 | Version | Date | Changes |
 |---------|------|---------|
+| v4.23 | 2026-01-22 | GM_info.script.versionパターンルール追加（バージョン定数） |
 | v4.22 | 2026-01-22 | コード例をNOTES.mdに移動（OAuth、GraphQL、SPA遷移） |
 | v4.21 | 2026-01-22 | fetchインターセプトProxy方式ルール追加 |
 | v4.20 | 2026-01-21 | 動的スクリプトローダー(Henry Loader)セクション追加 |
@@ -475,6 +493,11 @@ GitHubから各スクリプトを動的に読み込む仕組み。Tampermonkey�
   - 前提: Xcodeインストール（App Storeから）
   - 手順: brew install kconfig-frontend wget cmake → miele-lxiv-easy clone → build.sh
   - 参考: https://github.com/bettar/miele-lxiv-easy
+- [ ] TASK-029: henry_set_search_helper 巨大関数リファクタリング [2026-01-22]
+  - createButtonContainer（400行以上）を責務分割
+  - DragDropHandler: ドラッグ＆ドロップ関連ロジック
+  - EditPopup: 編集ポップアップの生成と管理
+  - ButtonRenderer: ボタン/ドロップダウンのDOM生成
 - [x] TASK-027: henry_disease_register Loader経由で初期化エラー → Loaderに@require対応追加で解決 [2026-01-22]
 - [x] TASK-021: MutationObserver最適化 完了 [2026-01-21]
   - ✅ henry_imaging_order_helper: OK（2段階監視 + cleaner）

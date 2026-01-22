@@ -29,6 +29,7 @@
 (function() {
   'use strict';
 
+  const VERSION = GM_info.script.version;
   const SCRIPT_NAME = 'HenryKarteHistory';
   const PAGE_SIZE = 50;
 
@@ -224,7 +225,7 @@
       onClick: fetchKarteHistory
     });
 
-    log.info('プラグイン登録完了');
+    log.info(`Ready (v${VERSION})`);
   })();
 
 })();

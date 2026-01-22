@@ -1,4 +1,8 @@
 {
+  "model": {
+    "default": "gemini-3-pro-preview"
+  },
+  "enablePreview": true,
   "mcpServers": {
     "chrome-devtools": {
       "command": "npx",
@@ -9,5 +13,21 @@
         "http://127.0.0.1:9222"
       ]
     }
+  },
+  "tools": {
+    "allowed": [
+      "ls -F",
+      "git status",
+      "git diff",
+      "git log",
+      "pwd",
+      "cat",
+      "ls -la",
+      "grep",
+      "find",
+      "head",
+      "tail",
+      "wc"
+    ]
   }
 }

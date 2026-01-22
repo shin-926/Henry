@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry セット展開検索ヘルパー
 // @namespace    https://henry-app.jp/
-// @version      2.3.5
+// @version      2.3.6
 // @description  セット展開画面の検索ボックス上にクイック検索ボタンを追加
 // @author       sk powered by Claude & Gemini
 // @match        https://henry-app.jp/*
@@ -33,8 +33,9 @@
 (function() {
   'use strict';
 
+  const VERSION = GM_info.script.version;
   const pageWindow = typeof unsafeWindow !== 'undefined' ? unsafeWindow : window;
-  const SCRIPT_NAME = 'henry_set_search_helper';
+  const SCRIPT_NAME = 'SetSearchHelper';
   const STORAGE_KEY = 'set_search_buttons';
   const DEFAULT_ITEMS = [
     { type: 'button', text: '処方' },
@@ -42,6 +43,9 @@
     { type: 'button', text: '固定' },
     { type: 'button', text: '注射' }
   ];
+
+  // イベントハンドラのクリーンアップ関数（モジュールレベルで管理）
+  let mouseHandlersCleanup = null;
 
   // 設定の読み込み（後方互換: 文字列配列→オブジェクト配列に変換）
   function loadItems() {
@@ -1042,7 +1046,14 @@
     document.addEventListener('mouseup', handleMouseUp);
     document.addEventListener('mousemove', handleMouseMove);
 
-    container._cleanupHandlers = { handleMouseUp, handleMouseMove };
+    // クリーンアップ関数をモジュールレベル変数に保存
+    // NOTE: cleaner.add() は setup() 毎に1回だけ呼ばれるが、ハンドラは
+    // ボタン再描画のたびに追加/削除される。そのためモジュールレベル変数を使用し、
+    // removeButtons() 内でクリーンアップを行う。cleaner は removeButtons() を呼ぶ。
+    mouseHandlersCleanup = () => {
+      document.removeEventListener('mouseup', handleMouseUp);
+      document.removeEventListener('mousemove', handleMouseMove);
+    };
 
     return container;
   }
@@ -1066,13 +1077,14 @@
 
   // ボタンを削除
   function removeButtons() {
+    // イベントハンドラのクリーンアップ
+    if (mouseHandlersCleanup) {
+      mouseHandlersCleanup();
+      mouseHandlersCleanup = null;
+    }
+
     const existing = document.getElementById('hss-button-container');
     if (existing) {
-      // クリーンアップ
-      if (existing._cleanupHandlers) {
-        document.removeEventListener('mouseup', existing._cleanupHandlers.handleMouseUp);
-        document.removeEventListener('mousemove', existing._cleanupHandlers.handleMouseMove);
-      }
       existing.remove();
     }
   }
@@ -1193,6 +1205,7 @@
     const cleaner = HenryCore.utils.createCleaner();
 
     HenryCore.utils.subscribeNavigation(cleaner, () => setup(cleaner));
+    console.log(`[${SCRIPT_NAME}] Ready (v${VERSION})`);
   }
 
   init();

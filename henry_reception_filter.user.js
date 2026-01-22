@@ -30,6 +30,7 @@
 (function() {
   'use strict';
 
+  const VERSION = GM_info.script.version;
   const SCRIPT_NAME = 'ReceptionFilter';
   const FILTER_BUTTON_ID = 'henry-reception-filter-btn';
   const FILTER_LI_ID = 'henry-reception-filter-li';
@@ -193,6 +194,8 @@
     btn.addEventListener('click', async () => {
       filterEnabled = true;
       // 最新データを取得してからフィルタ適用
+      // NOTE: refreshPatientListが失敗しても続行する（古いデータでフィルタ適用）
+      // 理由: 最悪でもフィルタ機能は動作させたい
       await refreshPatientList();
       setTimeout(applyFilter, 300);
     });
@@ -253,6 +256,7 @@
         clearInterval(checkReady);
 
         // 最新データを取得してからフィルタ適用
+        // NOTE: refreshPatientListが失敗しても続行（古いデータでフィルタ適用）
         await refreshPatientList();
 
         addFilterButton();
@@ -276,7 +280,7 @@
         clearInterval(checkCore);
         const cleaner = HenryCore.utils.createCleaner();
         HenryCore.utils.subscribeNavigation(cleaner, () => init(cleaner));
-        console.log(`[${SCRIPT_NAME}] 初期化完了 (HenryCore使用)`);
+        console.log(`[${SCRIPT_NAME}] Ready (v${VERSION})`);
       }
     }, 100);
 

@@ -44,6 +44,8 @@
 (function () {
   'use strict';
 
+  const VERSION = GM_info.script.version;
+
   // ============================================
   // 1. スタイル定義 (CSS)
   // ============================================
@@ -434,5 +436,5 @@
   observer.observe(document.body, { childList: true, subtree: true });
   init();  // 初回実行
 
-  console.log('[Toolbox] UIコントローラー v5.1.11 起動');
+  console.log(`[Toolbox] Ready v${VERSION}`);
 })();

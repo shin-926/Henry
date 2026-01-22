@@ -30,6 +30,7 @@
 (function () {
     'use strict';
 
+    const VERSION = GM_info.script.version;
     const SCRIPT_NAME = 'TestHelper';
 
     // ==========================================
@@ -238,7 +239,7 @@
             onClick: () => fillImagingOrder(TEST_PATTERNS.imaging_shoulder)
         });
 
-        console.log(`[${SCRIPT_NAME}] 初期化完了`);
+        console.log(`[${SCRIPT_NAME}] Ready (v${VERSION})`);
     }
 
     // 初期化

@@ -27,6 +27,7 @@
 (function() {
   'use strict';
 
+  const VERSION = GM_info.script.version;
   const SCRIPT_NAME = 'ErrorLogger';
 
   // エラーログを整形
@@ -113,7 +114,7 @@
       onClick: showLogModal
     });
 
-    console.log(`[${SCRIPT_NAME}] 初期化完了`);
+    console.log(`[${SCRIPT_NAME}] Ready (v${VERSION})`);
   }
 
   init();
