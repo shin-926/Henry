@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry Loader
 // @namespace    https://henry-app.jp/
-// @version      1.0.0
+// @version      1.1.0
 // @description  Henryスクリプトの動的ローダー（リリース版）
 // @author       sk powered by Claude
 // @match        https://henry-app.jp/*
@@ -94,6 +94,24 @@
     });
   }
 
+  // @requireを解析してURLリストを返す
+  function parseRequires(code) {
+    const requires = [];
+    const metaMatch = code.match(/\/\/ ==UserScript==([\s\S]*?)\/\/ ==\/UserScript==/);
+    if (metaMatch) {
+      const metaBlock = metaMatch[1];
+      const requireRegex = /\/\/\s*@require\s+(\S+)/g;
+      let match;
+      while ((match = requireRegex.exec(metaBlock)) !== null) {
+        requires.push(match[1]);
+      }
+    }
+    return requires;
+  }
+
+  // 読み込み済みの@require URLを記録
+  const loadedRequires = new Set();
+
   // ==========================================
   // スクリプトローダー
   // ==========================================
@@ -144,6 +162,26 @@ const unsafeWindow = window;
     log('スクリプト読み込み:', scriptInfo.name);
 
     const code = await fetchText(url);
+
+    // @requireを解析して先に読み込む
+    const requires = parseRequires(code);
+    for (const reqUrl of requires) {
+      if (!loadedRequires.has(reqUrl)) {
+        log('@require 読み込み:', reqUrl);
+        try {
+          const reqCode = await fetchText(reqUrl);
+          // @requireはグローバルスコープで実行（windowに変数を設定するため）
+          const reqFn = new Function(reqCode);
+          reqFn();
+          loadedRequires.add(reqUrl);
+          log('@require 完了:', reqUrl);
+        } catch (e) {
+          error(`@require エラー (${reqUrl}):`, e.message);
+        }
+      } else {
+        log('@require スキップ（読み込み済み）:', reqUrl);
+      }
+    }
 
     // UserScriptのメタデータブロックを除去
     // (ローダーが既にgrant等を処理しているため)

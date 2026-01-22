@@ -1,5 +1,5 @@
 {
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "Henryスクリプト動的ローダー用マニフェスト",
   "scripts": [
     {
@@ -49,7 +49,7 @@
       "file": "henry_disease_register.user.js",
       "match": ["henry-app.jp"],
       "order": 10,
-      "enabled": false
+      "enabled": true
     },
     {
       "name": "henry_disease_list",
