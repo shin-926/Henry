@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry Disease Register
 // @namespace    https://henry-app.jp/
-// @version      3.1.0
+// @version      3.2.0
 // @description  高速病名検索・登録
 // @author       sk powered by Claude & Gemini
 // @match        https://henry-app.jp/*
@@ -71,6 +71,7 @@
     query ListPatientReceiptDiseases($input: ListPatientReceiptDiseasesRequestInput!) {
       listPatientReceiptDiseases(input: $input) {
         patientReceiptDiseases {
+          startDate
           masterDisease {
             name
           }
@@ -747,6 +748,15 @@
     .dr-registered-item:last-child {
       border-bottom: none;
     }
+    .dr-registered-name {
+      color: #333;
+      line-height: 1.3;
+    }
+    .dr-registered-date {
+      font-size: 10px;
+      color: #888;
+      margin-top: 2px;
+    }
     .dr-registered-empty {
       padding: 16px;
       text-align: center;
@@ -1149,10 +1159,26 @@
       if (diseases.length === 0) {
         container.innerHTML = '<div class="dr-registered-empty">登録済みの病名はありません</div>';
       } else {
-        container.innerHTML = diseases.map(d =>
-          `<div class="dr-registered-item">${d.masterDisease?.name || '（名称なし）'}</div>`
-        ).join('');
+        container.innerHTML = diseases.map(d => {
+          const name = d.masterDisease?.name || '（名称なし）';
+          const date = d.startDate ? this.formatDate(d.startDate) : '';
+          return `<div class="dr-registered-item">
+            <div class="dr-registered-name">${name}</div>
+            ${date ? `<div class="dr-registered-date">${date}</div>` : ''}
+          </div>`;
+        }).join('');
       }
+    }
+
+    // 日付フォーマット（YYYY-MM-DD → M/D）
+    formatDate(dateStr) {
+      if (!dateStr) return '';
+      const match = dateStr.match(/(\d{4})-(\d{2})-(\d{2})/);
+      if (match) {
+        const [, year, month, day] = match;
+        return `${parseInt(month)}/${parseInt(day)}`;
+      }
+      return dateStr;
     }
 
     // 病名が登録済みかチェック
