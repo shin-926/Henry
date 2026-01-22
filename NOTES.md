@@ -367,7 +367,6 @@ registerPlugin({ id, name, icon?, description?, version?, order?, onClick })
 | **henry_imaging_order_helper.user.js** | 2 | `document.body` / `modal` | `childList, subtree` | モーダル出現検出＋内部要素変化検出 |
 | **henry_google_drive_bridge.user.js** | 1 | `document.body` | `childList, subtree` | ファイルリストボタン再作成 |
 | **reserve_calendar_ui.user.js** | 1 | `#div_swipe_calendar` | `childList, subtree: false` | カレンダー設定再適用（最適化済み） |
-| **henry_rad_order_print_single_page.user.js** | 1 | `document.body` | `childList, subtree` | iframe出現検出（debounce 500ms） |
 
 ### MutationObserver未使用（11ファイル）
 
@@ -394,7 +393,6 @@ henry_auto_approver, henry_note_reader, henry_error_logger, henry_disease_list, 
 | 7 | henry_login_helper.user.js | 🟢 軽 | querySelector×1のみ |
 | 8 | reserve_calendar_ui.user.js | 🟢 軽 | subtree:false化済み、早期リターン多い |
 | 9 | henry_core.user.js | 🟢 軽 | イベント発火のみ |
-| 10 | henry_rad_order_print_single_page.user.js | 🟢 軽 | シンプルな検出のみ |
 
 ### 発火条件
 
@@ -440,7 +438,6 @@ MutationObserverを使用している全スクリプトについて、以下の�
 | henry_core.user.js | ✅ OK | waitForElement内で使用。timeout+disconnect付き |
 | henry_reception_filter.user.js | ✅ OK | 特定コンテナを監視 + cleaner登録 |
 | reserve_calendar_ui.user.js | ✅ OK | 特定ノード、subtree:false |
-| henry_rad_order_print_single_page.user.js | ✅ OK | debounce使用、印刷ページ（短命） |
 | henry_login_helper.user.js | ✅ OK | ログインページ専用（非SPA） |
 | henry_set_search_helper.user.js | ⚠️ 軽微 | debounceあるがbody全体監視 |
 | henry_google_drive_bridge.user.js | ⚠️ 軽微 | body全体監視、disconnectなし |
@@ -729,7 +726,6 @@ HenryはSPA（Single Page Application）のため、ページ遷移してもリ�
 | henry_memo.user.js | 要確認 |
 | henry_note_reader.user.js | 要確認 |
 | henry_order_history.user.js | 要確認 |
-| henry_rad_order_print_single_page.user.js | 要確認 |
 | henry_reserve_integration.user.js | **必要**（MutationObserver 4つ） |
 | henry_toolbox.user.js | 要確認 |
 

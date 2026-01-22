@@ -115,13 +115,6 @@
       "enabled": true
     },
     {
-      "name": "henry_rad_order_print_single_page",
-      "file": "henry_rad_order_print_single_page.user.js",
-      "match": ["henry-app.jp"],
-      "order": 10,
-      "enabled": true
-    },
-    {
       "name": "henry_hospitalization_data",
       "file": "henry_hospitalization_data.user.js",
       "match": ["henry-app.jp"],
