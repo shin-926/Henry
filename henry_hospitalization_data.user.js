@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Henry Hospitalization Data Viewer
 // @namespace    https://github.com/shin-926/Henry
-// @version      0.13.0
-// @description  入院患者の日々データを取得・表示（医師・看護師・リハビリ記録・バイタルサイン対応）
+// @version      0.14.0
+// @description  入院患者の日々データを取得・表示（バイタル・処方・注射・検査・栄養・ADL・看護日誌対応）
 // @author       sk powered by Claude & Gemini
 // @match        https://henry-app.jp/*
 // @grant        none
@@ -42,7 +42,7 @@
   'use strict';
 
   const SCRIPT_NAME = 'HospitalizationData';
-  const VERSION = '0.13.0';
+  const VERSION = '0.14.0';
 
   // 組織UUID（マオカ病院）
   const ORG_UUID = 'ce6b556b-2a8d-4fce-b8dd-89ba638fc825';
@@ -296,9 +296,19 @@
     }
   }
 
-  // バイタルサインを取得（GetClinicalCalendarView API）
-  // vitalSign resourceを指定して取得
-  async function fetchVitalSigns(patientUuid) {
+  // カレンダービューデータを取得（GetClinicalCalendarView API）
+  // 過去1週間分の全データを一括取得
+  const CALENDAR_RESOURCES = [
+    '//henry-app.jp/clinicalResource/vitalSign',
+    '//henry-app.jp/clinicalResource/prescriptionOrder',
+    '//henry-app.jp/clinicalResource/injectionOrder',
+    '//henry-app.jp/clinicalResource/inspectionReport',
+    '//henry-app.jp/clinicalResource/nutritionOrder',
+    '//henry-app.jp/clinicalResource/adlAssessment',
+    '//henry-app.jp/clinicalResource/nursingJournal'
+  ];
+
+  async function fetchCalendarData(patientUuid) {
     try {
       const today = new Date();
       const result = await callPersistedQuery(
@@ -313,17 +323,19 @@
             },
             beforeDateSize: 7,  // 過去7日分
             afterDateSize: 0,
-            clinicalResourceHrns: ['//henry-app.jp/clinicalResource/vitalSign'],
-            createUserUuids: [],  // 全ユーザー
+            clinicalResourceHrns: CALENDAR_RESOURCES,
+            createUserUuids: [],
             accountingOrderShinryoShikibetsus: []
           }
         },
         HASHES.GET_CLINICAL_CALENDAR_VIEW
       );
 
-      const vitalSigns = result?.data?.getClinicalCalendarView?.vitalSigns || [];
+      const data = result?.data?.getClinicalCalendarView;
+      console.log(`[${SCRIPT_NAME}] GetClinicalCalendarView 生データ:`, data);
 
-      return vitalSigns.map(vs => ({
+      // バイタルサイン
+      const vitalSigns = (data?.vitalSigns || []).map(vs => ({
         uuid: vs.uuid,
         recordTime: vs.recordTime?.seconds ? new Date(vs.recordTime.seconds * 1000) : null,
         temperature: vs.temperature?.value ? vs.temperature.value / 10 : null,
@@ -336,9 +348,81 @@
         author: vs.createUser?.name || '不明'
       })).filter(vs => vs.recordTime);
 
+      // 処方オーダー
+      const prescriptionOrders = (data?.prescriptionOrders || []).map(rx => ({
+        uuid: rx.uuid,
+        orderTime: rx.orderTime?.seconds ? new Date(rx.orderTime.seconds * 1000) : null,
+        status: formatOrderStatus(rx.orderStatus),
+        doctor: rx.doctor?.name || '不明',
+        rps: rx.rps || []
+      }));
+
+      // 注射オーダー
+      const injectionOrders = (data?.injectionOrders || []).map(inj => ({
+        uuid: inj.uuid,
+        orderTime: inj.orderTime?.seconds ? new Date(inj.orderTime.seconds * 1000) : null,
+        status: formatOrderStatus(inj.orderStatus),
+        doctor: inj.doctor?.name || '不明',
+        details: inj.detail || inj
+      }));
+
+      // 検査レポート
+      const inspectionReports = (data?.inspectionReports || []).map(rep => ({
+        uuid: rep.uuid,
+        reportTime: rep.reportTime?.seconds ? new Date(rep.reportTime.seconds * 1000) : null,
+        title: rep.title || '検査レポート',
+        content: rep.content || rep.editorData ? parseEditorData(rep.editorData) : '',
+        author: rep.createUser?.name || '不明'
+      }));
+
+      // 栄養オーダー
+      const nutritionOrders = (data?.nutritionOrders || []).map(nut => ({
+        uuid: nut.uuid,
+        orderTime: nut.orderTime?.seconds ? new Date(nut.orderTime.seconds * 1000) : null,
+        status: formatOrderStatus(nut.orderStatus),
+        mealType: nut.mealType || nut.detail?.mealType || '-',
+        doctor: nut.doctor?.name || '不明',
+        details: nut.detail || nut
+      }));
+
+      // ADL評価
+      const adlAssessments = (data?.adlAssessments || []).map(adl => ({
+        uuid: adl.uuid,
+        assessmentTime: adl.assessmentTime?.seconds ? new Date(adl.assessmentTime.seconds * 1000) : null,
+        score: adl.totalScore?.value || adl.score || '-',
+        author: adl.createUser?.name || '不明',
+        details: adl
+      }));
+
+      // 看護日誌
+      const nursingJournals = (data?.nursingJournals || []).map(nj => ({
+        uuid: nj.uuid,
+        recordTime: nj.recordTime?.seconds ? new Date(nj.recordTime.seconds * 1000) : null,
+        text: nj.editorData ? parseEditorData(nj.editorData) : '',
+        author: nj.createUser?.name || '不明'
+      })).filter(nj => nj.text);
+
+      return {
+        vitalSigns,
+        prescriptionOrders,
+        injectionOrders,
+        inspectionReports,
+        nutritionOrders,
+        adlAssessments,
+        nursingJournals
+      };
+
     } catch (e) {
-      console.error(`[${SCRIPT_NAME}] バイタルサイン取得エラー:`, e);
-      return [];
+      console.error(`[${SCRIPT_NAME}] カレンダーデータ取得エラー:`, e);
+      return {
+        vitalSigns: [],
+        prescriptionOrders: [],
+        injectionOrders: [],
+        inspectionReports: [],
+        nutritionOrders: [],
+        adlAssessments: [],
+        nursingJournals: []
+      };
     }
   }
 
@@ -463,11 +547,13 @@
 
       // 臨床記録を取得（Persisted Query API）
       const clinicalDocuments = await fetchClinicalDocuments(patientUuid);
-      const nursingJournals = await fetchNursingRecords(patientUuid);
+      const nursingRecords = await fetchNursingRecords(patientUuid);
       const patientProfiles = await fetchPatientProfile(patientUuid);
       const rehabilitationDocuments = await fetchRehabilitationDocuments(patientUuid);
       const rehabilitationOrders = await fetchRehabilitationOrders(patientUuid);
-      const vitalSigns = await fetchVitalSigns(patientUuid);
+
+      // カレンダービューから過去1週間のデータを一括取得
+      const calendarData = await fetchCalendarData(patientUuid);
 
       // 結果を整形
       const result = {
@@ -480,15 +566,25 @@
         },
         allHospitalizations: hospitalizations,
         clinicalDocuments,
-        nursingJournals,
+        nursingRecords,  // SOAP形式の看護記録（CUSTOMドキュメント）
         patientProfiles,
         rehabilitationDocuments,
         rehabilitationOrders,
-        vitalSigns
+        // カレンダービューデータ（過去1週間）
+        vitalSigns: calendarData.vitalSigns,
+        prescriptionOrders: calendarData.prescriptionOrders,
+        injectionOrders: calendarData.injectionOrders,
+        inspectionReports: calendarData.inspectionReports,
+        nutritionOrders: calendarData.nutritionOrders,
+        adlAssessments: calendarData.adlAssessments,
+        nursingJournals: calendarData.nursingJournals
       };
 
       console.log(`[${SCRIPT_NAME}] 入院情報:`, result);
-      console.log(`[${SCRIPT_NAME}] 医師記録: ${clinicalDocuments.length}件, 看護記録: ${nursingJournals.length}件, 患者プロフィール: ${patientProfiles.length}件, リハビリ記録: ${rehabilitationDocuments.length}件, リハビリオーダー: ${rehabilitationOrders.length}件, バイタルサイン: ${vitalSigns.length}件`);
+      console.log(`[${SCRIPT_NAME}] 医師記録: ${clinicalDocuments.length}件, 看護記録(SOAP): ${nursingRecords.length}件, プロフィール: ${patientProfiles.length}件`);
+      console.log(`[${SCRIPT_NAME}] リハビリ記録: ${rehabilitationDocuments.length}件, リハビリオーダー: ${rehabilitationOrders.length}件`);
+      console.log(`[${SCRIPT_NAME}] バイタル: ${calendarData.vitalSigns.length}件, 処方: ${calendarData.prescriptionOrders.length}件, 注射: ${calendarData.injectionOrders.length}件`);
+      console.log(`[${SCRIPT_NAME}] 検査: ${calendarData.inspectionReports.length}件, 栄養: ${calendarData.nutritionOrders.length}件, ADL: ${calendarData.adlAssessments.length}件, 看護日誌: ${calendarData.nursingJournals.length}件`);
 
       // サマリー表示
       showSummary(result);
@@ -681,10 +777,10 @@
           </div>
         ` : '<p>データなし</p>'}
 
-        <h3>看護記録 (${data.nursingJournals?.length || 0}件)</h3>
-        ${data.nursingJournals?.length ? `
+        <h3>看護記録SOAP (${data.nursingRecords?.length || 0}件)</h3>
+        ${data.nursingRecords?.length ? `
           <div class="records-list">
-            ${data.nursingJournals.slice(0, 5).map(journal => `
+            ${data.nursingRecords.slice(0, 5).map(journal => `
               <div class="record-item">
                 <div class="record-header">
                   <span class="record-time">${formatDateTime(journal.eventTime)}</span>
@@ -693,7 +789,7 @@
                 <div class="record-text">${journal.text.replace(/\n/g, '<br>')}</div>
               </div>
             `).join('')}
-            ${data.nursingJournals.length > 5 ? `<p class="more-records">他 ${data.nursingJournals.length - 5}件...</p>` : ''}
+            ${data.nursingRecords.length > 5 ? `<p class="more-records">他 ${data.nursingRecords.length - 5}件...</p>` : ''}
           </div>
         ` : '<p>データなし</p>'}
 
@@ -776,8 +872,132 @@
           </div>
         ` : '<p>データなし</p>'}
 
+        <h3>処方オーダー (${data.prescriptionOrders?.length || 0}件)</h3>
+        ${data.prescriptionOrders?.length ? `
+          <div class="records-list">
+            ${data.prescriptionOrders.slice(0, 10).map(rx => `
+              <div class="record-item" style="border-left-color: #3F51B5;">
+                <div class="record-header">
+                  <span class="record-type" style="background: #e8eaf6; color: #303f9f;">処方</span>
+                  <span class="record-time">${formatDateTime(rx.orderTime)}</span>
+                  <span class="record-author">${rx.doctor}</span>
+                </div>
+                <div class="record-text">
+                  <strong>ステータス:</strong> ${rx.status}<br>
+                  ${rx.rps?.length ? rx.rps.map((rp, i) =>
+                    `<strong>Rp${i+1}:</strong> ${rp.instructions?.map(inst =>
+                      inst.instruction?.medicationDosageInstruction?.localMedicine?.name ||
+                      inst.instruction?.medicationDosageInstruction?.medicine?.name || '不明'
+                    ).join(', ') || '詳細不明'}`
+                  ).join('<br>') : '処方詳細: コンソールで確認'}
+                </div>
+              </div>
+            `).join('')}
+            ${data.prescriptionOrders.length > 10 ? `<p class="more-records">他 ${data.prescriptionOrders.length - 10}件...</p>` : ''}
+          </div>
+        ` : '<p>データなし</p>'}
+
+        <h3>注射オーダー (${data.injectionOrders?.length || 0}件)</h3>
+        ${data.injectionOrders?.length ? `
+          <div class="records-list">
+            ${data.injectionOrders.slice(0, 10).map(inj => `
+              <div class="record-item" style="border-left-color: #009688;">
+                <div class="record-header">
+                  <span class="record-type" style="background: #e0f2f1; color: #00796b;">注射</span>
+                  <span class="record-time">${formatDateTime(inj.orderTime)}</span>
+                  <span class="record-author">${inj.doctor}</span>
+                </div>
+                <div class="record-text">
+                  <strong>ステータス:</strong> ${inj.status}<br>
+                  注射詳細: コンソールで確認
+                </div>
+              </div>
+            `).join('')}
+            ${data.injectionOrders.length > 10 ? `<p class="more-records">他 ${data.injectionOrders.length - 10}件...</p>` : ''}
+          </div>
+        ` : '<p>データなし</p>'}
+
+        <h3>検査レポート (${data.inspectionReports?.length || 0}件)</h3>
+        ${data.inspectionReports?.length ? `
+          <div class="records-list">
+            ${data.inspectionReports.slice(0, 10).map(rep => `
+              <div class="record-item" style="border-left-color: #795548;">
+                <div class="record-header">
+                  <span class="record-type" style="background: #efebe9; color: #5d4037;">検査</span>
+                  <span class="record-time">${formatDateTime(rep.reportTime)}</span>
+                  <span class="record-author">${rep.author}</span>
+                </div>
+                <div class="record-text">
+                  ${rep.title ? `<strong>${rep.title}</strong><br>` : ''}
+                  ${rep.content ? rep.content.replace(/\n/g, '<br>') : '詳細: コンソールで確認'}
+                </div>
+              </div>
+            `).join('')}
+            ${data.inspectionReports.length > 10 ? `<p class="more-records">他 ${data.inspectionReports.length - 10}件...</p>` : ''}
+          </div>
+        ` : '<p>データなし</p>'}
+
+        <h3>栄養オーダー (${data.nutritionOrders?.length || 0}件)</h3>
+        ${data.nutritionOrders?.length ? `
+          <div class="records-list">
+            ${data.nutritionOrders.slice(0, 10).map(nut => `
+              <div class="record-item" style="border-left-color: #8BC34A;">
+                <div class="record-header">
+                  <span class="record-type" style="background: #f1f8e9; color: #689f38;">栄養</span>
+                  <span class="record-time">${formatDateTime(nut.orderTime)}</span>
+                  <span class="record-author">${nut.doctor}</span>
+                </div>
+                <div class="record-text">
+                  <strong>ステータス:</strong> ${nut.status}<br>
+                  <strong>食事種別:</strong> ${nut.mealType}<br>
+                  詳細: コンソールで確認
+                </div>
+              </div>
+            `).join('')}
+            ${data.nutritionOrders.length > 10 ? `<p class="more-records">他 ${data.nutritionOrders.length - 10}件...</p>` : ''}
+          </div>
+        ` : '<p>データなし</p>'}
+
+        <h3>ADL評価 (${data.adlAssessments?.length || 0}件)</h3>
+        ${data.adlAssessments?.length ? `
+          <div class="records-list">
+            ${data.adlAssessments.slice(0, 10).map(adl => `
+              <div class="record-item" style="border-left-color: #607D8B;">
+                <div class="record-header">
+                  <span class="record-type" style="background: #eceff1; color: #455a64;">ADL</span>
+                  <span class="record-time">${formatDateTime(adl.assessmentTime)}</span>
+                  <span class="record-author">${adl.author}</span>
+                </div>
+                <div class="record-text">
+                  <strong>スコア:</strong> ${adl.score}<br>
+                  詳細: コンソールで確認
+                </div>
+              </div>
+            `).join('')}
+            ${data.adlAssessments.length > 10 ? `<p class="more-records">他 ${data.adlAssessments.length - 10}件...</p>` : ''}
+          </div>
+        ` : '<p>データなし</p>'}
+
+        <h3>看護日誌 (${data.nursingJournals?.length || 0}件)</h3>
+        ${data.nursingJournals?.length ? `
+          <div class="records-list">
+            ${data.nursingJournals.slice(0, 10).map(nj => `
+              <div class="record-item" style="border-left-color: #FF5722;">
+                <div class="record-header">
+                  <span class="record-type" style="background: #fbe9e7; color: #e64a19;">日誌</span>
+                  <span class="record-time">${formatDateTime(nj.recordTime)}</span>
+                  <span class="record-author">${nj.author}</span>
+                </div>
+                <div class="record-text">${nj.text.replace(/\n/g, '<br>')}</div>
+              </div>
+            `).join('')}
+            ${data.nursingJournals.length > 10 ? `<p class="more-records">他 ${data.nursingJournals.length - 10}件...</p>` : ''}
+          </div>
+        ` : '<p>データなし</p>'}
+
         <p style="margin-top: 20px; color: #666; font-size: 12px;">
-          ※ コンソールに詳細データが出力されています（F12で確認）
+          ※ コンソールに詳細データが出力されています（F12で確認）<br>
+          ※ 過去1週間のデータを表示しています
         </p>
       </div>
     `;
