@@ -5,6 +5,17 @@
 
 ---
 
+## 目次
+
+1. [ツール・設定](#ツール設定)
+2. [実装パターン](#実装パターン)
+3. [MutationObserver関連](#mutationobserver関連)
+4. [タスク詳細](#タスク詳細)
+
+---
+
+# ツール・設定
+
 ## chrome-devtools-mcp 起動手順
 
 Claude Codeがブラウザを直接操作・監視できるようにするための設定。
@@ -49,6 +60,214 @@ MCPサーバーが接続されるのを確認（起動時に `chrome-devtools` �
 
 ---
 
+## Google Docs連携メタデータ
+
+患者文書を作成・編集するスクリプトでは、以下のメタデータをGoogle Driveのファイルプロパティに設定：
+
+| プロパティ | 説明 |
+|-----------|------|
+| `henryPatientUuid` | 患者UUID（必須） |
+| `henryFileUuid` | ファイルUUID（上書き保存用、新規は空） |
+| `henryFolderUuid` | フォルダUUID（保存先、ルートなら空） |
+| `henrySource` | 作成元識別子（例: `drive-direct`） |
+
+---
+
+# 実装パターン
+
+## OAuth認証フロー
+
+OAuth認証が必要な場合は、`alert()` で理由を伝えてから設定ダイアログや認証画面を開く。
+
+```javascript
+// OAuth設定が未完了の場合
+if (!googleAuth?.isConfigured()) {
+  alert('OAuth設定が必要です。設定ダイアログを開きます。');
+  googleAuth?.showConfigDialog();
+  return;
+}
+// 認証が未完了の場合
+if (!googleAuth?.isAuthenticated()) {
+  alert('Google認証が必要です。認証画面を開きます。');
+  googleAuth?.startAuth();
+  return;
+}
+```
+
+**理由**: いきなりダイアログを表示するとユーザーが混乱するため、先に理由を伝える。
+
+---
+
+## GraphQL インライン方式
+
+GraphQL mutationで変数型（`$input: SomeInput!`）がエラーになる場合は、インライン方式を使う。
+
+### 背景
+
+HenryのGraphQLサーバーは一部のmutationで入力型（例: `UpdateMultiPatientReceiptDiseasesInput`）を公開していない。そのため、変数型を使ったクエリがエラーになる。
+
+### エラー例
+
+```
+Validation error (UnknownType) : Unknown type 'UpdateMultiPatientReceiptDiseasesInput'
+```
+
+### 問題のあるパターン
+
+```javascript
+// NG: 変数型（サーバーが型を公開していない場合エラー）
+const MUTATION = `
+  mutation UpdateMultiPatientReceiptDiseases($input: UpdateMultiPatientReceiptDiseasesInput!) {
+    updateMultiPatientReceiptDiseases(input: $input) {
+      patientReceiptDiseases { uuid }
+    }
+  }
+`;
+await HenryCore.query(MUTATION, { input: data });
+```
+
+### 解決策
+
+```javascript
+// OK: インライン方式（値を直接埋め込む）
+const MUTATION = `
+  mutation {
+    updateMultiPatientReceiptDiseases(input: {
+      records: [{
+        recordOperation: RECORD_OPERATION_CREATE,
+        patientReceiptDisease: {
+          patientUuid: "${patientUuid}",
+          masterDiseaseCode: "${diseaseCode}",
+          isMain: ${isMain},
+          outcome: CONTINUED,
+          startDate: { year: ${year}, month: ${month}, day: ${day} }
+        }
+      }]
+    }) {
+      patientReceiptDiseases { uuid }
+    }
+  }
+`;
+await HenryCore.query(MUTATION);  // 変数なし
+```
+
+### 注意点
+
+1. **文字列はダブルクォートで囲む**: `"${value}"`
+2. **数値・boolean・enumはそのまま**: `${num}`, `${bool}`, `ENUM_VALUE`
+3. **nullはそのまま**: `null`
+4. **配列**: `[${items.map(i => `"${i}"`).join(', ')}]`
+5. **サニタイズ**: ユーザー入力を直接埋め込む場合は注意
+
+### 適用実績
+
+- `henry_disease_register.user.js` v1.2.1 - 病名登録mutation
+
+---
+
+## SPA遷移対応パターン
+
+Henry本体（henry-app.jp）で動作するスクリプトは、`subscribeNavigation` パターンを使用する。
+
+### 基本パターン
+
+```javascript
+const cleaner = HenryCore.utils.createCleaner();
+
+function init() {
+  // リソース作成
+  const observer = new MutationObserver(callback);
+  observer.observe(target, options);
+
+  // クリーンアップ登録
+  cleaner.add(() => observer.disconnect());
+}
+
+HenryCore.utils.subscribeNavigation(cleaner, init);
+```
+
+### 動作フロー
+
+1. `subscribeNavigation` が `henry:navigation` イベントをリッスン
+2. SPA遷移発生時、`cleaner` に登録された関数を全て実行（リソース破棄）
+3. `init()` を再実行（新しいページ用に再初期化）
+
+### 例外（subscribeNavigation不要なケース）
+
+- ログインページ専用スクリプト（henry_login_helper.user.js）
+- 非SPAサイト用スクリプト（reserve_*.user.js）
+- 全ページで継続動作するスクリプト（henry_reserve_integration.user.js のfetchインターセプト）
+
+---
+
+## fetchインターセプトとFirestore競合問題
+
+### 背景
+
+`henry_google_drive_bridge.user.js` でfetchをインターセプトしていたところ、HenryのFirestoreでWebChannel接続エラーが頻発した。
+
+```
+@firebase/firestore: WebChannelConnection RPC 'Listen' stream transport errored
+Could not reach Cloud Firestore backend. Connection failed 1 times.
+```
+
+### 原因
+
+通常のfetchインターセプト方式では、`fetch` 関数を完全に置き換えるため、ネイティブ関数の同一性が失われる。
+
+```javascript
+// 問題のあるコード
+const originalFetch = pageWindow.fetch;
+pageWindow.fetch = async function(url, options) {
+  return originalFetch.apply(this, arguments);
+};
+
+// この後、fetch.toString() は "[native code]" を返さなくなる
+// Firestoreのような厳格なライブラリはこれを検出してエラーにする
+```
+
+### 解決策: Proxy方式
+
+`Proxy` を使うことで、元の `fetch` オブジェクトへの参照を保持しつつ、呼び出しをインターセプトできる。
+
+```javascript
+const originalFetch = pageWindow.fetch;
+pageWindow.fetch = new Proxy(originalFetch, {
+  apply: async function(target, thisArg, argumentsList) {
+    // 必要な処理（例: GraphQLレスポンスのキャッシュ）
+    const [url, options] = argumentsList;
+    const response = await Reflect.apply(target, thisArg, argumentsList);
+
+    if (url?.includes?.('/graphql')) {
+      // GraphQL用の処理
+    }
+
+    return response;
+  }
+});
+```
+
+### なぜProxyで解決するか
+
+| 項目 | 通常方式 | Proxy方式 |
+|------|---------|-----------|
+| `fetch.toString()` | `"function(url, options) {...}"` | `"function fetch() { [native code] }"` |
+| `fetch.name` | `""` または `"anonymous"` | `"fetch"` |
+| 元オブジェクトの参照 | 失われる | 保持される |
+| 厳格なライブラリとの互換性 | 低い | 高い |
+
+### 適用判断
+
+- **通常は従来方式でOK** - 単純なfetchインターセプトなら問題ない
+- **問題が起きたらProxy方式に変更** - Firestore等との競合が発生した場合
+
+### 関連
+
+- 修正コミット: `16b1813 fix: Firestore WebChannelエラーを修正`
+- 対象ファイル: `henry_google_drive_bridge.user.js` v2.3.2
+
+---
+
 ## Apollo Client による画面更新
 
 HenryはReact + Apollo Clientを使用。データ変更後に画面を更新するには `refetchQueries` を使用する。
@@ -84,6 +303,179 @@ if (unsafeWindow.__APOLLO_CLIENT__) {
 | `ListPatientFiles` | 患者ファイル一覧 |
 
 **注意**: クエリ名はHenryが実際に使っているものを chrome-devtools-mcp で調査して確認すること。
+
+---
+
+## HenryCore API よくある間違い
+
+### registerPlugin の正しい使い方
+
+**間違い（サポートされていない形式）:**
+```javascript
+// ❌ actions配列は存在しない
+registerPlugin({
+    id: 'my-plugin',
+    name: 'My Plugin',
+    actions: [
+        { id: 'action1', label: 'Action 1', handler: () => ... }
+    ]
+});
+```
+
+**正しい形式:**
+```javascript
+// ✓ onClick で直接ハンドラーを指定
+await registerPlugin({
+    id: 'my-plugin',
+    name: 'My Plugin',
+    icon: '🔧',           // 省略可
+    description: '説明',   // 省略可
+    version: '1.0.0',     // 省略可
+    order: 100,           // 省略可（表示順序）
+    onClick: () => {
+        // クリック時の処理
+    }
+});
+```
+
+**仕様（henry_core.user.js より）:**
+```
+registerPlugin({ id, name, icon?, description?, version?, order?, onClick })
+```
+
+**ポイント:**
+- **1プラグイン = 1アクション**の形式
+- 複数アクションが必要な場合は、`onClick`内でメニューを表示するか、別プラグインとして登録
+- `await`を付けて呼び出すこと（非同期関数）
+
+---
+
+# MutationObserver関連
+
+## 使用状況調査 (2026-01-16)
+
+### 全スクリプトの使用状況
+
+| ファイル名 | 数 | 監視対象 | オプション | 処理内容 |
+|---------|---|---------|-----------|---------|
+| **henry_core.user.js** | 1 | `document.body` または `documentElement` | `childList, subtree` | セレクタ要素の出現待機（waitForElement） |
+| **henry_login_helper.user.js** | 1 | `document.body` | `childList, subtree` | メールアドレス入力フィールド出現検出 |
+| **henry_reserve_integration.user.js** | 4 | `document.body` | `childList, subtree` ※tooltipは`attributes`追加 | ポップアップ削除、ダイアログ検出、患者ID自動入力、ツールチップ拡張 |
+| **henry_set_search_helper.user.js** | 1 | `document.body` | `childList, subtree` | セットパネル開閉検出（debounce 100ms） |
+| **henry_rad_order_auto_printer.user.js** | 2 | `document.body` | `childList, subtree, attributes, characterData` | 要素出現待機＋DOM安定化待機 |
+| **henry_toolbox.user.js** | 1 | `document.body` | `childList, subtree` | ツールボックスUI監視・再構築 |
+| **henry_imaging_order_helper.user.js** | 2 | `document.body` / `modal` | `childList, subtree` | モーダル出現検出＋内部要素変化検出 |
+| **henry_google_drive_bridge.user.js** | 1 | `document.body` | `childList, subtree` | ファイルリストボタン再作成 |
+| **reserve_calendar_ui.user.js** | 1 | `#div_swipe_calendar` | `childList, subtree: false` | カレンダー設定再適用（最適化済み） |
+| **henry_rad_order_print_single_page.user.js** | 1 | `document.body` | `childList, subtree` | iframe出現検出（debounce 500ms） |
+
+### MutationObserver未使用（11ファイル）
+
+henry_auto_approver, henry_note_reader, henry_error_logger, henry_disease_list, henry_karte_history, henry_order_history, henry_hospitalization_data, henry_memo, henry_disease_register, henry_search_focus, henry_ikensho_form
+
+### 統計
+
+- **使用スクリプト**: 10ファイル
+- **全インスタンス数**: 15個
+- **大半が `document.body` + `subtree: true`**: 広範囲監視が多い
+
+---
+
+## コールバック処理コスト（重い順）
+
+| 順位 | スクリプト | コスト | 主な理由 |
+|:---:|-----------|:---:|---------|
+| 1 | **henry_imaging_order_helper.user.js** | 🔴 重 | React Fiber走査（10〜15階層）、querySelectorAll('h2'), querySelectorAll('label')を毎回実行、subtree:true |
+| 2 | **henry_reserve_integration.user.js** | 🔴 重 | 4つのObserver並走、SPA遷移でリーク可能性、複数querySelector |
+| 3 | **henry_rad_order_auto_printer.user.js** | 🔴 重 | querySelectorAll複数、getBoundingClientRect複数、ネストしたObserver |
+| 4 | henry_google_drive_bridge.user.js | 🟡 中 | JSON.parse毎回、配列操作多い（早期リターンで軽減） |
+| 5 | henry_toolbox.user.js | 🟡 中 | querySelector×4、DOM作成（一度作成後はスキップ） |
+| 6 | henry_set_search_helper.user.js | 🟡 中 | 大量DOM作成（debounce 100msで軽減） |
+| 7 | henry_login_helper.user.js | 🟢 軽 | querySelector×1のみ |
+| 8 | reserve_calendar_ui.user.js | 🟢 軽 | subtree:false化済み、早期リターン多い |
+| 9 | henry_core.user.js | 🟢 軽 | イベント発火のみ |
+| 10 | henry_rad_order_print_single_page.user.js | 🟢 軽 | シンプルな検出のみ |
+
+### 発火条件
+
+| オプション | 検出する変化 |
+|-----------|-------------|
+| `childList: true` | 子要素の追加・削除 |
+| `subtree: true` | 上記を子孫全体に適用 |
+| `attributes: true` | 属性の変更（class, style, data-*など） |
+| `characterData: true` | テキストノードの内容変更 |
+
+**発火するもの**: ドロップダウン開閉、モダリティ変更、内容追加、バリデーションエラー、ローディング表示
+
+**発火しないもの**: テキスト入力（valueはプロパティ）、マウスホバー（CSS :hover）、スクロール
+
+### 最適化アプローチ
+
+| 方式 | メリット | デメリット |
+|------|---------|-----------|
+| `subtree: false` | 発火回数激減 | 深い階層の変化を検出できない |
+| debounce追加 | 連続発火を集約 | 遅延が発生 |
+| setIntervalポーリング | 発火頻度が固定（例: 3.3回/秒） | 変化がなくても実行される |
+| 処理済みフラグ | 重複処理を防止 | フラグ管理が必要 |
+| 自前UI | MutationObserver不要 | 開発コスト大 |
+
+---
+
+## TASK-021: コールバック最適化調査
+
+**調査日**: 2026-01-20
+**ステータス**: 調査完了
+
+### 調査対象
+
+MutationObserverを使用している全スクリプトについて、以下の観点で調査:
+1. 監視範囲が適切か（document.body全体 vs 特定コンテナ）
+2. クリーンアップ（disconnect）が行われているか
+3. debounce/早期リターンなどの最適化があるか
+
+### 調査結果
+
+| スクリプト | 状態 | 詳細 |
+|-----------|------|------|
+| henry_core.user.js | ✅ OK | waitForElement内で使用。timeout+disconnect付き |
+| henry_reception_filter.user.js | ✅ OK | 特定コンテナを監視 + cleaner登録 |
+| reserve_calendar_ui.user.js | ✅ OK | 特定ノード、subtree:false |
+| henry_rad_order_print_single_page.user.js | ✅ OK | debounce使用、印刷ページ（短命） |
+| henry_login_helper.user.js | ✅ OK | ログインページ専用（非SPA） |
+| henry_set_search_helper.user.js | ⚠️ 軽微 | debounceあるがbody全体監視 |
+| henry_google_drive_bridge.user.js | ⚠️ 軽微 | body全体監視、disconnectなし |
+| henry_toolbox.user.js | ⚠️ 軽微 | body全体監視、早期リターンあり |
+
+### 完了済み
+
+- henry_imaging_order_helper.user.js - 2段階監視パターン適用済み
+- henry_reserve_integration.user.js - 2段階監視パターン適用済み
+
+### 結論
+
+**緊急度: 低**
+
+⚠️マークの3スクリプトについて:
+- いずれも実害は確認されていない
+- debounceや早期リターンで緩和されている
+- 改善するなら2段階監視パターンを適用
+
+改善の優先度は低いが、機能追加や他の修正のついでに対応することを推奨。
+
+---
+
+# タスク詳細
+
+## TASK-001: ORDER_STATUS_REVOKED 調査
+
+**問題**: CONFIRM_REVOCATION アクションで処理しているが、承認できずに残るケースがある
+
+**調査方法**: devtoolで手動承認時に飛ぶAPIを確認
+
+**確認ポイント**:
+- operationName
+- orderStatusAction
+- 追加パラメータ
 
 ---
 
@@ -183,19 +575,6 @@ const progressNotes = Object.entries(cache)
 
 ---
 
-## TASK-001: ORDER_STATUS_REVOKED 調査
-
-**問題**: CONFIRM_REVOCATION アクションで処理しているが、承認できずに残るケースがある
-
-**調査方法**: devtoolで手動承認時に飛ぶAPIを確認
-
-**確認ポイント**:
-- operationName
-- orderStatusAction
-- 追加パラメータ
-
----
-
 ## TASK-004/005/006: GraphQL API 未収集リスト（2026-01-12時点）
 
 以下の画面を操作するとAPIを収集できる可能性がある。
@@ -255,89 +634,11 @@ const progressNotes = Object.entries(cache)
 
 ---
 
-## Google Docs連携メタデータ
-
-患者文書を作成・編集するスクリプトでは、以下のメタデータをGoogle Driveのファイルプロパティに設定：
-
-| プロパティ | 説明 |
-|-----------|------|
-| `henryPatientUuid` | 患者UUID（必須） |
-| `henryFileUuid` | ファイルUUID（上書き保存用、新規は空） |
-| `henryFolderUuid` | フォルダUUID（保存先、ルートなら空） |
-| `henrySource` | 作成元識別子（例: `drive-direct`） |
-
-## GraphQL インライン方式
-
-### 背景
-
-HenryのGraphQLサーバーは一部のmutationで入力型（例: `UpdateMultiPatientReceiptDiseasesInput`）を公開していない。そのため、変数型を使ったクエリがエラーになる。
-
-### エラー例
-
-```
-Validation error (UnknownType) : Unknown type 'UpdateMultiPatientReceiptDiseasesInput'
-```
-
-### 解決策: インライン方式
-
-変数型を使わず、値をクエリに直接埋め込む。
-
-**NG: 変数型**
-```javascript
-const MUTATION = `
-  mutation UpdateMultiPatientReceiptDiseases($input: UpdateMultiPatientReceiptDiseasesInput!) {
-    updateMultiPatientReceiptDiseases(input: $input) {
-      patientReceiptDiseases { uuid }
-    }
-  }
-`;
-await HenryCore.query(MUTATION, { input: data });
-```
-
-**OK: インライン方式**
-```javascript
-const MUTATION = `
-  mutation {
-    updateMultiPatientReceiptDiseases(input: {
-      records: [{
-        recordOperation: RECORD_OPERATION_CREATE,
-        patientReceiptDisease: {
-          patientUuid: "${patientUuid}",
-          masterDiseaseCode: "${diseaseCode}",
-          isMain: ${isMain},
-          outcome: CONTINUED,
-          startDate: { year: ${year}, month: ${month}, day: ${day} }
-        }
-      }]
-    }) {
-      patientReceiptDiseases { uuid }
-    }
-  }
-`;
-await HenryCore.query(MUTATION);  // 変数なし
-```
-
-### 注意点
-
-1. **文字列はダブルクォートで囲む**: `"${value}"`
-2. **数値・boolean・enumはそのまま**: `${num}`, `${bool}`, `ENUM_VALUE`
-3. **nullはそのまま**: `null`
-4. **配列**: `[${items.map(i => `"${i}"`).join(', ')}]`
-
-### 適用実績
-
-- `henry_disease_register.user.js` v1.2.1 - 病名登録mutation
-
-
----
-
 ## TASK-014: 画面更新妨害リスク修正
 
 ### 問題概要
 
 Henry本体の画面更新（外来待ち患者リストなど）を妨害する可能性のあるTampermonkeyスクリプト実装が複数存在。Henryはおそらく内部でReactを使っており、イベントハンドリングや状態更新が妨害されると画面が更新されなくなる可能性がある。
-
----
 
 ### 背景知識（AI向け）
 
@@ -378,8 +679,6 @@ element.addEventListener('click', handler, true);
 
 - `document.body` 全体を監視すると、Reactの仮想DOM更新にも反応してしまう
 - 監視対象のDOMを変更すると、自分のコールバックが再度トリガーされる（無限ループの危険）
-
----
 
 ### 修正対象
 
@@ -473,75 +772,6 @@ HenryCore.utils.subscribeNavigation(cleaner, init);
 
 ---
 
-## MutationObserver 使用状況調査 (2026-01-16)
-
-### 全スクリプトの使用状況
-
-| ファイル名 | 数 | 監視対象 | オプション | 処理内容 |
-|---------|---|---------|-----------|---------|
-| **henry_core.user.js** | 1 | `document.body` または `documentElement` | `childList, subtree` | セレクタ要素の出現待機（waitForElement） |
-| **henry_login_helper.user.js** | 1 | `document.body` | `childList, subtree` | メールアドレス入力フィールド出現検出 |
-| **henry_reserve_integration.user.js** | 4 | `document.body` | `childList, subtree` ※tooltipは`attributes`追加 | ポップアップ削除、ダイアログ検出、患者ID自動入力、ツールチップ拡張 |
-| **henry_set_search_helper.user.js** | 1 | `document.body` | `childList, subtree` | セットパネル開閉検出（debounce 100ms） |
-| **henry_rad_order_auto_printer.user.js** | 2 | `document.body` | `childList, subtree, attributes, characterData` | 要素出現待機＋DOM安定化待機 |
-| **henry_toolbox.user.js** | 1 | `document.body` | `childList, subtree` | ツールボックスUI監視・再構築 |
-| **henry_imaging_order_helper.user.js** | 2 | `document.body` / `modal` | `childList, subtree` | モーダル出現検出＋内部要素変化検出 |
-| **henry_google_drive_bridge.user.js** | 1 | `document.body` | `childList, subtree` | ファイルリストボタン再作成 |
-| **reserve_calendar_ui.user.js** | 1 | `#div_swipe_calendar` | `childList, subtree: false` | カレンダー設定再適用（最適化済み） |
-| **henry_rad_order_print_single_page.user.js** | 1 | `document.body` | `childList, subtree` | iframe出現検出（debounce 500ms） |
-
-### MutationObserver未使用（11ファイル）
-
-henry_auto_approver, henry_note_reader, henry_error_logger, henry_disease_list, henry_karte_history, henry_order_history, henry_hospitalization_data, henry_memo, henry_disease_register, henry_search_focus, henry_ikensho_form
-
-### 統計
-
-- **使用スクリプト**: 10ファイル
-- **全インスタンス数**: 15個
-- **大半が `document.body` + `subtree: true`**: 広範囲監視が多い
-
----
-
-## MutationObserver コールバック処理コスト（重い順）
-
-| 順位 | スクリプト | コスト | 主な理由 |
-|:---:|-----------|:---:|---------|
-| 1 | **henry_imaging_order_helper.user.js** | 🔴 重 | React Fiber走査（10〜15階層）、querySelectorAll('h2'), querySelectorAll('label')を毎回実行、subtree:true |
-| 2 | **henry_reserve_integration.user.js** | 🔴 重 | 4つのObserver並走、SPA遷移でリーク可能性、複数querySelector |
-| 3 | **henry_rad_order_auto_printer.user.js** | 🔴 重 | querySelectorAll複数、getBoundingClientRect複数、ネストしたObserver |
-| 4 | henry_google_drive_bridge.user.js | 🟡 中 | JSON.parse毎回、配列操作多い（早期リターンで軽減） |
-| 5 | henry_toolbox.user.js | 🟡 中 | querySelector×4、DOM作成（一度作成後はスキップ） |
-| 6 | henry_set_search_helper.user.js | 🟡 中 | 大量DOM作成（debounce 100msで軽減） |
-| 7 | henry_login_helper.user.js | 🟢 軽 | querySelector×1のみ |
-| 8 | reserve_calendar_ui.user.js | 🟢 軽 | subtree:false化済み、早期リターン多い |
-| 9 | henry_core.user.js | 🟢 軽 | イベント発火のみ |
-| 10 | henry_rad_order_print_single_page.user.js | 🟢 軽 | シンプルな検出のみ |
-
-### MutationObserverの発火条件
-
-| オプション | 検出する変化 |
-|-----------|-------------|
-| `childList: true` | 子要素の追加・削除 |
-| `subtree: true` | 上記を子孫全体に適用 |
-| `attributes: true` | 属性の変更（class, style, data-*など） |
-| `characterData: true` | テキストノードの内容変更 |
-
-**発火するもの**: ドロップダウン開閉、モダリティ変更、内容追加、バリデーションエラー、ローディング表示
-
-**発火しないもの**: テキスト入力（valueはプロパティ）、マウスホバー（CSS :hover）、スクロール
-
-### 最適化アプローチ
-
-| 方式 | メリット | デメリット |
-|------|---------|-----------|
-| `subtree: false` | 発火回数激減 | 深い階層の変化を検出できない |
-| debounce追加 | 連続発火を集約 | 遅延が発生 |
-| setIntervalポーリング | 発火頻度が固定（例: 3.3回/秒） | 変化がなくても実行される |
-| 処理済みフラグ | 重複処理を防止 | フラグ管理が必要 |
-| 自前UI | MutationObserver不要 | 開発コスト大 |
-
----
-
 ## TASK-016: Henryのリアルタイム同期調査 (2026-01-17)
 
 ### 調査結果
@@ -604,50 +834,6 @@ https://firestore.googleapis.com/google.firestore.v1.Firestore/Listen/channel?VE
 
 ---
 
-## HenryCore API よくある間違い
-
-### registerPlugin の正しい使い方
-
-**間違い（サポートされていない形式）:**
-```javascript
-// ❌ actions配列は存在しない
-registerPlugin({
-    id: 'my-plugin',
-    name: 'My Plugin',
-    actions: [
-        { id: 'action1', label: 'Action 1', handler: () => ... }
-    ]
-});
-```
-
-**正しい形式:**
-```javascript
-// ✓ onClick で直接ハンドラーを指定
-await registerPlugin({
-    id: 'my-plugin',
-    name: 'My Plugin',
-    icon: '🔧',           // 省略可
-    description: '説明',   // 省略可
-    version: '1.0.0',     // 省略可
-    order: 100,           // 省略可（表示順序）
-    onClick: () => {
-        // クリック時の処理
-    }
-});
-```
-
-**仕様（henry_core.user.js より）:**
-```
-registerPlugin({ id, name, icon?, description?, version?, order?, onClick })
-```
-
-**ポイント:**
-- **1プラグイン = 1アクション**の形式
-- 複数アクションが必要な場合は、`onClick`内でメニューを表示するか、別プラグインとして登録
-- `await`を付けて呼び出すこと（非同期関数）
-
----
-
 ## TASK-022: henry_imaging_order_helper リファクタリング改善
 
 **対象**: henry_imaging_order_helper.user.js
@@ -690,196 +876,3 @@ const DOM_SEARCH = {
 
 - 機能追加や大きな変更のタイミングでついでに対応
 - 単独でのリファクタリングは優先度低
-
----
-
-## TASK-021: MutationObserver コールバック最適化調査
-
-**調査日**: 2026-01-20
-**ステータス**: 調査完了、レビュー待ち
-
-### 調査対象
-
-MutationObserverを使用している全スクリプトについて、以下の観点で調査:
-1. 監視範囲が適切か（document.body全体 vs 特定コンテナ）
-2. クリーンアップ（disconnect）が行われているか
-3. debounce/早期リターンなどの最適化があるか
-
-### 調査結果
-
-| スクリプト | 状態 | 詳細 |
-|-----------|------|------|
-| henry_core.user.js | ✅ OK | waitForElement内で使用。timeout+disconnect付き |
-| henry_reception_filter.user.js | ✅ OK | 特定コンテナを監視 + cleaner登録 |
-| reserve_calendar_ui.user.js | ✅ OK | 特定ノード、subtree:false |
-| henry_rad_order_print_single_page.user.js | ✅ OK | debounce使用、印刷ページ（短命） |
-| henry_login_helper.user.js | ✅ OK | ログインページ専用（非SPA） |
-| henry_set_search_helper.user.js | ⚠️ 軽微 | debounceあるがbody全体監視 |
-| henry_google_drive_bridge.user.js | ⚠️ 軽微 | body全体監視、disconnectなし |
-| henry_toolbox.user.js | ⚠️ 軽微 | body全体監視、早期リターンあり |
-
-### 完了済み
-
-- henry_imaging_order_helper.user.js - 2段階監視パターン適用済み
-- henry_reserve_integration.user.js - 2段階監視パターン適用済み
-
-### 結論
-
-**緊急度: 低**
-
-⚠️マークの3スクリプトについて:
-- いずれも実害は確認されていない
-- debounceや早期リターンで緩和されている
-- 改善するなら2段階監視パターンを適用
-
-改善の優先度は低いが、機能追加や他の修正のついでに対応することを推奨。
-
----
-
-## fetchインターセプトとFirestore競合問題
-
-### 背景
-
-`henry_google_drive_bridge.user.js` でfetchをインターセプトしていたところ、HenryのFirestoreでWebChannel接続エラーが頻発した。
-
-```
-@firebase/firestore: WebChannelConnection RPC 'Listen' stream transport errored
-Could not reach Cloud Firestore backend. Connection failed 1 times.
-```
-
-### 原因
-
-通常のfetchインターセプト方式では、`fetch` 関数を完全に置き換えるため、ネイティブ関数の同一性が失われる。
-
-```javascript
-// 問題のあるコード
-const originalFetch = pageWindow.fetch;
-pageWindow.fetch = async function(url, options) {
-  return originalFetch.apply(this, arguments);
-};
-
-// この後、fetch.toString() は "[native code]" を返さなくなる
-// Firestoreのような厳格なライブラリはこれを検出してエラーにする
-```
-
-### 解決策: Proxy方式
-
-`Proxy` を使うことで、元の `fetch` オブジェクトへの参照を保持しつつ、呼び出しをインターセプトできる。
-
-```javascript
-const originalFetch = pageWindow.fetch;
-pageWindow.fetch = new Proxy(originalFetch, {
-  apply: async function(target, thisArg, argumentsList) {
-    // 必要な処理（例: GraphQLレスポンスのキャッシュ）
-    const [url, options] = argumentsList;
-    const response = await Reflect.apply(target, thisArg, argumentsList);
-    
-    if (url?.includes?.('/graphql')) {
-      // GraphQL用の処理
-    }
-    
-    return response;
-  }
-});
-```
-
-### なぜProxyで解決するか
-
-| 項目 | 通常方式 | Proxy方式 |
-|------|---------|-----------|
-| `fetch.toString()` | `"function(url, options) {...}"` | `"function fetch() { [native code] }"` |
-| `fetch.name` | `""` または `"anonymous"` | `"fetch"` |
-| 元オブジェクトの参照 | 失われる | 保持される |
-| 厳格なライブラリとの互換性 | 低い | 高い |
-
-### 適用判断
-
-- **通常は従来方式でOK** - 単純なfetchインターセプトなら問題ない
-- **問題が起きたらProxy方式に変更** - Firestore等との競合が発生した場合
-
-### 関連
-
-- 修正コミット: `16b1813 fix: Firestore WebChannelエラーを修正`
-- 対象ファイル: `henry_google_drive_bridge.user.js` v2.3.2
-
----
-
-## OAuth認証フロー
-
-OAuth認証が必要な場合は、`alert()` で理由を伝えてから設定ダイアログや認証画面を開く。
-
-```javascript
-// OAuth設定が未完了の場合
-if (!googleAuth?.isConfigured()) {
-  alert('OAuth設定が必要です。設定ダイアログを開きます。');
-  googleAuth?.showConfigDialog();
-  return;
-}
-// 認証が未完了の場合
-if (!googleAuth?.isAuthenticated()) {
-  alert('Google認証が必要です。認証画面を開きます。');
-  googleAuth?.startAuth();
-  return;
-}
-```
-
-**理由**: いきなりダイアログを表示するとユーザーが混乱するため、先に理由を伝える。
-
----
-
-## GraphQL インライン方式
-
-GraphQL mutationで変数型（`$input: SomeInput!`）がエラーになる場合は、インライン方式を使う。
-
-### 問題のあるパターン
-
-```javascript
-// NG: 変数型（サーバーが型を公開していない場合エラー）
-const MUTATION = `mutation Update($input: UpdateInput!) { update(input: $input) { ... } }`;
-await HenryCore.query(MUTATION, { input: data });
-```
-
-### 解決策
-
-```javascript
-// OK: インライン方式（値を直接埋め込む）
-const MUTATION = `mutation { update(input: { field: "${value}", num: ${num} }) { ... } }`;
-await HenryCore.query(MUTATION);
-```
-
-**注意**: 文字列のエスケープに注意。ユーザー入力を直接埋め込む場合はサニタイズが必要。
-
----
-
-## SPA遷移対応パターン
-
-Henry本体（henry-app.jp）で動作するスクリプトは、`subscribeNavigation` パターンを使用する。
-
-### 基本パターン
-
-```javascript
-const cleaner = HenryCore.utils.createCleaner();
-
-function init() {
-  // リソース作成
-  const observer = new MutationObserver(callback);
-  observer.observe(target, options);
-
-  // クリーンアップ登録
-  cleaner.add(() => observer.disconnect());
-}
-
-HenryCore.utils.subscribeNavigation(cleaner, init);
-```
-
-### 動作フロー
-
-1. `subscribeNavigation` が `henry:navigation` イベントをリッスン
-2. SPA遷移発生時、`cleaner` に登録された関数を全て実行（リソース破棄）
-3. `init()` を再実行（新しいページ用に再初期化）
-
-### 例外（subscribeNavigation不要なケース）
-
-- ログインページ専用スクリプト（henry_login_helper.user.js）
-- 非SPAサイト用スクリプト（reserve_*.user.js）
-- 全ページで継続動作するスクリプト（henry_reserve_integration.user.js のfetchインターセプト）
