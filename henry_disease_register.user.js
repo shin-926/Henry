@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry Disease Register
 // @namespace    https://henry-app.jp/
-// @version      3.2.0
+// @version      3.2.1
 // @description  高速病名検索・登録
 // @author       sk powered by Claude & Gemini
 // @match        https://henry-app.jp/*
@@ -71,7 +71,6 @@
     query ListPatientReceiptDiseases($input: ListPatientReceiptDiseasesRequestInput!) {
       listPatientReceiptDiseases(input: $input) {
         patientReceiptDiseases {
-          startDate
           masterDisease {
             name
           }
@@ -1161,24 +1160,9 @@
       } else {
         container.innerHTML = diseases.map(d => {
           const name = d.masterDisease?.name || '（名称なし）';
-          const date = d.startDate ? this.formatDate(d.startDate) : '';
-          return `<div class="dr-registered-item">
-            <div class="dr-registered-name">${name}</div>
-            ${date ? `<div class="dr-registered-date">${date}</div>` : ''}
-          </div>`;
+          return `<div class="dr-registered-item">${name}</div>`;
         }).join('');
       }
-    }
-
-    // 日付フォーマット（YYYY-MM-DD → M/D）
-    formatDate(dateStr) {
-      if (!dateStr) return '';
-      const match = dateStr.match(/(\d{4})-(\d{2})-(\d{2})/);
-      if (match) {
-        const [, year, month, day] = match;
-        return `${parseInt(month)}/${parseInt(day)}`;
-      }
-      return dateStr;
     }
 
     // 病名が登録済みかチェック
