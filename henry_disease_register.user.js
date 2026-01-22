@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry Disease Register
 // @namespace    https://henry-app.jp/
-// @version      3.3.0
+// @version      3.3.1
 // @description  高速病名検索・登録
 // @author       sk powered by Claude & Gemini
 // @match        https://henry-app.jp/*
@@ -1174,10 +1174,10 @@
       }
     }
 
-    // 日付フォーマット（{year, month, day} → M/D）
+    // 日付フォーマット（{year, month, day} → YYYY/M/D）
     formatDate(dateObj) {
-      if (!dateObj || !dateObj.month || !dateObj.day) return '';
-      return `${dateObj.month}/${dateObj.day}`;
+      if (!dateObj || !dateObj.year || !dateObj.month || !dateObj.day) return '';
+      return `${dateObj.year}/${dateObj.month}/${dateObj.day}`;
     }
 
     // 病名が登録済みかチェック
