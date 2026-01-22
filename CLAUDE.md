@@ -353,8 +353,7 @@ GitHubから各スクリプトを動的に読み込む仕組み。Tampermonkey�
 | | henry_rad_order_print_single_page.user.js | 印刷を1枚にまとめる（Mac用） |
 | **予約連携** | henry_reserve_integration.user.js | Henry⇔予約システム双方向連携（自動印刷含む） |
 | | reserve_calendar_ui.user.js | 予約カレンダーUIカスタム |
-| **病名・オーダー** | henry_disease_register.user.js | 高速病名検索・登録 |
-| | henry_disease_list.user.js | 患者の病名一覧表示 |
+| **病名・オーダー** | henry_disease_register.user.js | 高速病名検索・登録（病名一覧表示統合） |
 | | henry_order_history.user.js | 患者オーダー履歴表示 |
 | **カルテ** | henry_karte_history.user.js | 過去カルテ記事出力（実験） |
 | | henry_note_reader.user.js | カルテ内容リーダー |

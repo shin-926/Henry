@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry Disease Register
 // @namespace    https://henry-app.jp/
-// @version      2.2.8
+// @version      3.0.0
 // @description  高速病名検索・登録
 // @author       sk powered by Claude & Gemini
 // @match        https://henry-app.jp/*
@@ -63,6 +63,37 @@
     { value: 'CANCELLED', label: '中止' },
     { value: 'MOVED', label: '転医' }
   ];
+
+  // ============================================
+  // 登録済み病名取得クエリ
+  // ============================================
+  const FETCH_DISEASES_QUERY = `
+    query ListPatientReceiptDiseases($input: ListPatientReceiptDiseasesRequestInput!) {
+      listPatientReceiptDiseases(input: $input) {
+        patientReceiptDiseases {
+          masterDisease {
+            name
+          }
+        }
+      }
+    }
+  `;
+
+  async function fetchRegisteredDiseases(patientUuid) {
+    try {
+      const result = await HenryCore.query(FETCH_DISEASES_QUERY, {
+        input: {
+          patientUuids: [patientUuid],
+          patientCareType: 'PATIENT_CARE_TYPE_ANY',
+          onlyMain: false
+        }
+      });
+      return result.data?.listPatientReceiptDiseases?.patientReceiptDiseases || [];
+    } catch (e) {
+      console.error(`[${SCRIPT_NAME}]`, e.message);
+      return [];
+    }
+  }
 
   // ============================================
   // 自然言語入力用の修飾語インデックス（事前構築済み）
@@ -675,12 +706,58 @@
     .dr-modal {
       background: white;
       border-radius: 8px;
-      width: 600px;
+      width: 850px;
       max-height: 90vh;
       overflow: hidden;
       display: flex;
       flex-direction: column;
       box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+    }
+    .dr-content {
+      display: flex;
+      flex: 1;
+      overflow: hidden;
+    }
+    .dr-left-panel {
+      width: 200px;
+      border-right: 1px solid #e0e0e0;
+      display: flex;
+      flex-direction: column;
+      background: #fafafa;
+    }
+    .dr-left-panel-header {
+      padding: 12px;
+      font-weight: bold;
+      font-size: 13px;
+      color: #333;
+      border-bottom: 1px solid #e0e0e0;
+      background: #f5f5f5;
+    }
+    .dr-left-panel-body {
+      flex: 1;
+      overflow-y: auto;
+      padding: 8px;
+    }
+    .dr-registered-item {
+      padding: 8px 10px;
+      font-size: 12px;
+      border-bottom: 1px solid #eee;
+      color: #333;
+    }
+    .dr-registered-item:last-child {
+      border-bottom: none;
+    }
+    .dr-registered-empty {
+      padding: 16px;
+      text-align: center;
+      color: #888;
+      font-size: 12px;
+    }
+    .dr-right-panel {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
     }
     .dr-header {
       padding: 16px;
@@ -1029,8 +1106,24 @@
       this.updateDiseaseList('');
       this.updateModifierList('');
 
+      // 登録済み病名を取得・表示
+      this.loadRegisteredDiseases();
+
       // 検索窓にフォーカス
       this.overlay.querySelector('#dr-natural-input').focus();
+    }
+
+    async loadRegisteredDiseases() {
+      const container = this.overlay.querySelector('#dr-registered-diseases');
+      const diseases = await fetchRegisteredDiseases(this.patientUuid);
+
+      if (diseases.length === 0) {
+        container.innerHTML = '<div class="dr-registered-empty">登録済みの病名はありません</div>';
+      } else {
+        container.innerHTML = diseases.map(d =>
+          `<div class="dr-registered-item">${d.masterDisease?.name || '（名称なし）'}</div>`
+        ).join('');
+      }
     }
 
     getModalHTML() {
@@ -1041,88 +1134,100 @@
             <span>病名登録</span>
             <span class="dr-close">&times;</span>
           </div>
-          <div class="dr-body">
-            <!-- タブ切り替え -->
-            <div class="dr-tabs">
-              <div class="dr-tab active" data-tab="natural">自然言語検索</div>
-              <div class="dr-tab" data-tab="classic">従来の検索</div>
-            </div>
-
-            <!-- 自然言語入力 -->
-            <div class="dr-tab-content active" id="dr-tab-natural">
-              <div class="dr-section">
-                <input type="text" class="dr-natural-input" id="dr-natural-input" placeholder="例: 右橈骨遠位端骨折術後">
-                <div class="dr-natural-hint">修飾語（左/右/急性/術後など）を含めて入力すると自動分解します</div>
-                <div class="dr-candidates" id="dr-candidates" style="display:none;"></div>
+          <div class="dr-content">
+            <!-- 左パネル: 登録済み病名 -->
+            <div class="dr-left-panel">
+              <div class="dr-left-panel-header">登録済み病名</div>
+              <div class="dr-left-panel-body" id="dr-registered-diseases">
+                <div class="dr-registered-empty">読み込み中...</div>
               </div>
             </div>
-
-            <!-- 従来の検索 -->
-            <div class="dr-tab-content" id="dr-tab-classic">
-              <!-- 病名検索 -->
-              <div class="dr-section">
-                <div class="dr-section-title">病名検索</div>
-                <input type="text" class="dr-search-input" id="dr-disease-search" placeholder="病名を入力...">
-                <div class="dr-list" id="dr-disease-list"></div>
-                <div class="dr-selected-disease" id="dr-selected-disease" style="display:none;">
-                  <span class="dr-selected-disease-name" id="dr-selected-disease-name"></span>
-                  <span class="dr-clear-btn" id="dr-clear-disease">クリア</span>
+            <!-- 右パネル: 検索・登録 -->
+            <div class="dr-right-panel">
+              <div class="dr-body">
+                <!-- タブ切り替え -->
+                <div class="dr-tabs">
+                  <div class="dr-tab active" data-tab="natural">自然言語検索</div>
+                  <div class="dr-tab" data-tab="classic">従来の検索</div>
                 </div>
-              </div>
 
-              <!-- 修飾語選択 -->
-              <div class="dr-section">
-                <div class="dr-section-title">修飾語（選択順に適用）</div>
-                <input type="text" class="dr-search-input" id="dr-modifier-search" placeholder="修飾語を検索...">
-                <div class="dr-list" id="dr-modifier-list"></div>
-                <div class="dr-modifier-tags" id="dr-modifier-tags">
-                  <span style="color:#888;font-size:12px;">選択した修飾語がここに表示されます</span>
-                </div>
-              </div>
-            </div>
-
-            <!-- プレビュー -->
-            <div class="dr-section">
-              <div class="dr-preview" id="dr-preview" style="display:none;">
-                <div class="dr-preview-label">登録される病名</div>
-                <div class="dr-preview-name" id="dr-preview-name"></div>
-              </div>
-            </div>
-
-            <!-- オプション -->
-            <div class="dr-section">
-              <div class="dr-section-title">オプション</div>
-              <div class="dr-options">
-                <div class="dr-option">
-                  <input type="checkbox" id="dr-is-main">
-                  <label for="dr-is-main">主病名</label>
-                </div>
-                <div class="dr-option">
-                  <input type="checkbox" id="dr-is-suspected">
-                  <label for="dr-is-suspected">疑い</label>
-                </div>
-                <div class="dr-option">
-                  <label>開始日:</label>
-                  <div class="dr-date-inputs">
-                    <input type="text" class="dr-date-input" id="dr-start-year" value="${today.year}" maxlength="4">
-                    <span>/</span>
-                    <input type="text" class="dr-date-input" id="dr-start-month" value="${today.month}" maxlength="2">
-                    <span>/</span>
-                    <input type="text" class="dr-date-input" id="dr-start-day" value="${today.day}" maxlength="2">
+                <!-- 自然言語入力 -->
+                <div class="dr-tab-content active" id="dr-tab-natural">
+                  <div class="dr-section">
+                    <input type="text" class="dr-natural-input" id="dr-natural-input" placeholder="例: 右橈骨遠位端骨折術後">
+                    <div class="dr-natural-hint">修飾語（左/右/急性/術後など）を含めて入力すると自動分解します</div>
+                    <div class="dr-candidates" id="dr-candidates" style="display:none;"></div>
                   </div>
                 </div>
-                <div class="dr-option">
-                  <label>転帰:</label>
-                  <select class="dr-select" id="dr-outcome">
-                    ${OUTCOMES.map(o => `<option value="${o.value}">${o.label}</option>`).join('')}
-                  </select>
+
+                <!-- 従来の検索 -->
+                <div class="dr-tab-content" id="dr-tab-classic">
+                  <!-- 病名検索 -->
+                  <div class="dr-section">
+                    <div class="dr-section-title">病名検索</div>
+                    <input type="text" class="dr-search-input" id="dr-disease-search" placeholder="病名を入力...">
+                    <div class="dr-list" id="dr-disease-list"></div>
+                    <div class="dr-selected-disease" id="dr-selected-disease" style="display:none;">
+                      <span class="dr-selected-disease-name" id="dr-selected-disease-name"></span>
+                      <span class="dr-clear-btn" id="dr-clear-disease">クリア</span>
+                    </div>
+                  </div>
+
+                  <!-- 修飾語選択 -->
+                  <div class="dr-section">
+                    <div class="dr-section-title">修飾語（選択順に適用）</div>
+                    <input type="text" class="dr-search-input" id="dr-modifier-search" placeholder="修飾語を検索...">
+                    <div class="dr-list" id="dr-modifier-list"></div>
+                    <div class="dr-modifier-tags" id="dr-modifier-tags">
+                      <span style="color:#888;font-size:12px;">選択した修飾語がここに表示されます</span>
+                    </div>
+                  </div>
+                </div>
+
+                <!-- プレビュー -->
+                <div class="dr-section">
+                  <div class="dr-preview" id="dr-preview" style="display:none;">
+                    <div class="dr-preview-label">登録される病名</div>
+                    <div class="dr-preview-name" id="dr-preview-name"></div>
+                  </div>
+                </div>
+
+                <!-- オプション -->
+                <div class="dr-section">
+                  <div class="dr-section-title">オプション</div>
+                  <div class="dr-options">
+                    <div class="dr-option">
+                      <input type="checkbox" id="dr-is-main">
+                      <label for="dr-is-main">主病名</label>
+                    </div>
+                    <div class="dr-option">
+                      <input type="checkbox" id="dr-is-suspected">
+                      <label for="dr-is-suspected">疑い</label>
+                    </div>
+                    <div class="dr-option">
+                      <label>開始日:</label>
+                      <div class="dr-date-inputs">
+                        <input type="text" class="dr-date-input" id="dr-start-year" value="${today.year}" maxlength="4">
+                        <span>/</span>
+                        <input type="text" class="dr-date-input" id="dr-start-month" value="${today.month}" maxlength="2">
+                        <span>/</span>
+                        <input type="text" class="dr-date-input" id="dr-start-day" value="${today.day}" maxlength="2">
+                      </div>
+                    </div>
+                    <div class="dr-option">
+                      <label>転帰:</label>
+                      <select class="dr-select" id="dr-outcome">
+                        ${OUTCOMES.map(o => `<option value="${o.value}">${o.label}</option>`).join('')}
+                      </select>
+                    </div>
+                  </div>
                 </div>
               </div>
+              <div class="dr-footer">
+                <button class="dr-btn dr-btn-secondary" id="dr-cancel">キャンセル</button>
+                <button class="dr-btn dr-btn-primary" id="dr-register" disabled>登録</button>
+              </div>
             </div>
-          </div>
-          <div class="dr-footer">
-            <button class="dr-btn dr-btn-secondary" id="dr-cancel">キャンセル</button>
-            <button class="dr-btn dr-btn-primary" id="dr-register" disabled>登録</button>
           </div>
         </div>
       `;
