@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry Disease Register
 // @namespace    https://henry-app.jp/
-// @version      3.0.0
+// @version      3.1.0
 // @description  高速病名検索・登録
 // @author       sk powered by Claude & Gemini
 // @match        https://henry-app.jp/*
@@ -1018,6 +1018,29 @@
       background: #fff3e0;
       color: #e65100;
     }
+    .dr-candidate-tag.registered {
+      background: #ffebee;
+      color: #c62828;
+      font-weight: bold;
+    }
+    .dr-candidate-item.registered {
+      background: #fff8f8;
+    }
+    .dr-candidate-item.registered:hover {
+      background: #ffebee;
+    }
+    .dr-list-item.registered {
+      background: #fff8f8;
+      color: #888;
+    }
+    .dr-registered-badge {
+      font-size: 10px;
+      padding: 2px 6px;
+      background: #ffebee;
+      border-radius: 3px;
+      color: #c62828;
+      margin-left: 8px;
+    }
     .dr-divider {
       display: flex;
       align-items: center;
@@ -1080,6 +1103,7 @@
       this.selectedModifiers = [];
       this.selectedCandidateIndex = null;
       this.overlay = null;
+      this.registeredDiseaseNames = new Set(); // 登録済み病名（重複チェック用）
 
       this.render();
     }
@@ -1117,6 +1141,11 @@
       const container = this.overlay.querySelector('#dr-registered-diseases');
       const diseases = await fetchRegisteredDiseases(this.patientUuid);
 
+      // 登録済み病名をSetに保存（重複チェック用）
+      this.registeredDiseaseNames = new Set(
+        diseases.map(d => d.masterDisease?.name).filter(Boolean)
+      );
+
       if (diseases.length === 0) {
         container.innerHTML = '<div class="dr-registered-empty">登録済みの病名はありません</div>';
       } else {
@@ -1124,6 +1153,11 @@
           `<div class="dr-registered-item">${d.masterDisease?.name || '（名称なし）'}</div>`
         ).join('');
       }
+    }
+
+    // 病名が登録済みかチェック
+    isRegistered(diseaseName) {
+      return this.registeredDiseaseNames.has(diseaseName);
     }
 
     getModalHTML() {
@@ -1295,11 +1329,16 @@
         return;
       }
 
-      list.innerHTML = items.map(d => `
-        <div class="dr-list-item" data-code="${d[0]}" data-name="${d[2]}">
-          ${d[2]} <span style="color:#888;font-size:11px;">(${d[1]})</span>
-        </div>
-      `).join('');
+      list.innerHTML = items.map(d => {
+        const isRegistered = this.isRegistered(d[2]);
+        const registeredBadge = isRegistered ? '<span class="dr-registered-badge">登録済</span>' : '';
+        const registeredClass = isRegistered ? ' registered' : '';
+        return `
+          <div class="dr-list-item${registeredClass}" data-code="${d[0]}" data-name="${d[2]}">
+            ${d[2]}${registeredBadge} <span style="color:#888;font-size:11px;">(${d[1]})</span>
+          </div>
+        `;
+      }).join('');
 
       // クリックイベント
       list.querySelectorAll('.dr-list-item').forEach(item => {
@@ -1403,10 +1442,13 @@
         const suffixTags = c.suffixes.map(s => `<span class="dr-candidate-tag suffix">${s.name}</span>`).join('');
         const allTags = prefixTags + suffixTags;
         const diseaseInfo = `<span style="color:#666;">${c.disease.name} (${c.disease.icd10 || '-'})</span>`;
+        const isRegistered = this.isRegistered(c.disease.name);
+        const registeredBadge = isRegistered ? '<span class="dr-candidate-tag registered">登録済</span>' : '';
+        const registeredClass = isRegistered ? ' registered' : '';
 
         return `
-          <div class="dr-candidate-item" data-index="${i}">
-            <div class="dr-candidate-name">${c.displayName}</div>
+          <div class="dr-candidate-item${registeredClass}" data-index="${i}">
+            <div class="dr-candidate-name">${c.displayName}${registeredBadge}</div>
             <div class="dr-candidate-detail">${allTags ? allTags + ' ' : ''}${diseaseInfo}</div>
           </div>
         `;
