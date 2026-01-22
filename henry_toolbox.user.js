@@ -2,7 +2,7 @@
 // @name         ツールボックス
 // @namespace    https://haru-chan.example
 // @version      5.1.11
-// @description  プラグイン方式。シンプルUI、Noto Sans JP、ドラッグ＆ドロップ並び替え対応。HenryCore v2.7.0 対応。
+// @description  プラグイン方式。シンプルUI、Noto Sans JP、ドラッグ＆ドロップ並び替え対応。
 // @author       sk powered by Claude & Gemini
 // @match        https://henry-app.jp/*
 // @match        https://*.henry-app.jp/*
@@ -434,5 +434,5 @@
   observer.observe(document.body, { childList: true, subtree: true });
   init();  // 初回実行
 
-  console.log('[Toolbox] UIコントローラー v5.1.9 起動');
+  console.log('[Toolbox] UIコントローラー v5.1.11 起動');
 })();

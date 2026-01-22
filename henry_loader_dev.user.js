@@ -36,6 +36,9 @@
 (function() {
   'use strict';
 
+  // TODO: 本番用(henry_loader.user.js)と開発用(henry_loader_dev.user.js)でコードが重複している
+  // 将来的にビルドツール導入を検討し、1ソースから2ファイル生成する構成も可能
+
   // ==========================================
   // 設定
   // ==========================================
@@ -55,6 +58,8 @@
   // ==========================================
   // GM_*関数をグローバルに公開
   // ==========================================
+  // NOTE: GM_WRAPPERがwindow.GM_*を参照するため、グローバル公開は必須
+  // GM_WRAPPERは各スクリプト実行時に先頭に追加され、ローカル変数として注入する
   const pageWindow = typeof unsafeWindow !== 'undefined' ? unsafeWindow : window;
 
   pageWindow.GM_xmlhttpRequest = GM_xmlhttpRequest;
@@ -93,6 +98,7 @@
   }
 
   // 現在のホストがmatchパターンに一致するか
+  // TODO: 正規表現を使った実装に変更すると柔軟性が増す（現状で動作に問題なし）
   function matchesHost(patterns) {
     const host = location.host;
     return patterns.some(pattern => {
@@ -234,6 +240,8 @@ const unsafeWindow = window;
       log('読み込み対象:', targetScripts.map(s => s.name).join(', '));
 
       // 順番に読み込み
+      // TODO: 現状は1つ失敗で全停止（依存関係を考慮した安全な設計）
+      // 「失敗スキップして続行」が必要なら個別try-catchを検討
       for (const script of targetScripts) {
         await loadScript(script);
       }
