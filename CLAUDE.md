@@ -1,6 +1,6 @@
-# Henry EMR 開発ガイドライン (Core Rules v4.24)
+# Henry EMR 開発ガイドライン (Core Rules v4.25)
 
-<!-- 📝 UPDATED: v4.24 - エラーロガー廃止（MCP直接確認に移行） -->
+<!-- 📝 UPDATED: v4.25 - 確認後は返答を待つルール追加 -->
 
 > このドキュメントはAIアシスタントとの協働開発における必須ルール集です。HenryCore APIの詳細は `henry_core.user.js` 冒頭のAPI目次と実装を参照。
 
@@ -433,12 +433,17 @@ GitHubから各スクリプトを動的に読み込む仕組み。Tampermonkey�
   - 問題が起きた場合は `Proxy` + `Reflect.apply` 方式に変更する
   - 詳細は `NOTES.md` の「fetchインターセプトとFirestore競合問題」を参照
 
+- **YOU MUST**: 確認を求めたら（「これで進めてよいですか？」等）、必ずユーザーの返答を待ってから作業を進めること
+  - 確認後に返答を待たずに実装を始めない
+  - 確認が不要な場合は、確認を求めずに直接作業を進める
+
 ---
 
 ## 変更履歴
 
 | Version | Date | Changes |
 |---------|------|---------|
+| v4.25 | 2026-01-23 | 確認後は返答を待つルール追加 |
 | v4.24 | 2026-01-22 | エラーロガー廃止（henry_error_logger削除、MCP直接確認に移行） |
 | v4.23 | 2026-01-22 | GM_info.script.versionパターンルール追加（バージョン定数） |
 | v4.22 | 2026-01-22 | コード例をNOTES.mdに移動（OAuth、GraphQL、SPA遷移） |

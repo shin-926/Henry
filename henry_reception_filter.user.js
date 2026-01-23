@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry 外来受付フィルタ
 // @namespace    https://github.com/shin-926/Henry
-// @version      1.3.4
+// @version      1.3.5
 // @description  外来受付画面で「未完了」（会計待ち・会計済み以外）の患者のみ表示
 // @author       sk powered by Claude & Gemini
 // @match        https://henry-app.jp/*
@@ -55,23 +55,21 @@
 
   /**
    * Apollo Client で患者リストを再取得
+   * 正しいクエリ名: 'ListSessions'（大文字L、大文字S）
+   * 現在は無効化中（必要になったら有効化する）
    */
   async function refreshPatientList() {
-    const client = window.__APOLLO_CLIENT__;
-    if (!client) {
-      console.warn(`[${SCRIPT_NAME}] Apollo Client が見つかりません`);
-      return false;
-    }
-
-    try {
-      console.log(`[${SCRIPT_NAME}] 患者リストを再取得中...`);
-      await client.refetchQueries({ include: ['listSessions'] });
-      console.log(`[${SCRIPT_NAME}] 患者リストを再取得しました`);
-      return true;
-    } catch (e) {
-      console.error(`[${SCRIPT_NAME}] 再取得エラー:`, e);
-      return false;
-    }
+    // 有効化する場合は以下のコメントを解除:
+    // const client = window.__APOLLO_CLIENT__;
+    // if (!client) return false;
+    // try {
+    //   await client.refetchQueries({ include: ['ListSessions'] });
+    //   return true;
+    // } catch (e) {
+    //   console.error(`[${SCRIPT_NAME}] 再取得エラー:`, e);
+    //   return false;
+    // }
+    return true;
   }
 
   /**

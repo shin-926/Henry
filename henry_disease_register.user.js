@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry Disease Register
 // @namespace    https://henry-app.jp/
-// @version      3.3.1
+// @version      3.4.4
 // @description  高速病名検索・登録
 // @author       sk powered by Claude & Gemini
 // @match        https://henry-app.jp/*
@@ -64,6 +64,40 @@
     { value: 'CANCELLED', label: '中止' },
     { value: 'MOVED', label: '転医' }
   ];
+
+  // ============================================
+  // 最終受診日取得クエリ
+  // ============================================
+  const FETCH_LAST_VISIT_QUERY = `
+    query GetPatientWithSchedule($input: GetPatientRequestInput!) {
+      getPatient(input: $input) {
+        patientSessionScheduleTime {
+          previousSessionScheduleTime {
+            scheduleTime { seconds }
+          }
+        }
+      }
+    }
+  `;
+
+  async function fetchLastVisitDate(patientUuid) {
+    try {
+      const result = await HenryCore.query(FETCH_LAST_VISIT_QUERY, {
+        input: { uuid: patientUuid }
+      });
+      const seconds = result.data?.getPatient?.patientSessionScheduleTime?.previousSessionScheduleTime?.scheduleTime?.seconds;
+      if (!seconds) return null;
+      const date = new Date(seconds * 1000);
+      return {
+        year: date.getFullYear(),
+        month: date.getMonth() + 1,
+        day: date.getDate()
+      };
+    } catch (e) {
+      console.error(`[${SCRIPT_NAME}]`, e.message);
+      return null;
+    }
+  }
 
   // ============================================
   // 登録済み病名取得クエリ
@@ -925,6 +959,22 @@
       font-size: 13px;
       text-align: center;
     }
+    .dr-btn-last-visit {
+      padding: 4px 8px;
+      border: 1px solid #ccc;
+      border-radius: 4px;
+      background: #f5f5f5;
+      cursor: pointer;
+      font-size: 14px;
+      margin-left: 4px;
+    }
+    .dr-btn-last-visit:hover {
+      background: #e8e8e8;
+    }
+    .dr-btn-last-visit:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
     .dr-select {
       padding: 4px 8px;
       border: 1px solid #ccc;
@@ -1264,7 +1314,7 @@
                       <input type="checkbox" id="dr-is-suspected">
                       <label for="dr-is-suspected">疑い</label>
                     </div>
-                    <div class="dr-option">
+                    <div class="dr-option" style="grid-column: 1 / -1;">
                       <label>開始日:</label>
                       <div class="dr-date-inputs">
                         <input type="text" class="dr-date-input" id="dr-start-year" value="${today.year}" maxlength="4">
@@ -1273,6 +1323,7 @@
                         <span>/</span>
                         <input type="text" class="dr-date-input" id="dr-start-day" value="${today.day}" maxlength="2">
                       </div>
+                      <button type="button" class="dr-btn-last-visit" id="dr-last-visit-btn">最終受診日に設定</button>
                     </div>
                     <div class="dr-option">
                       <label>転帰:</label>
@@ -1340,6 +1391,26 @@
 
       // 登録ボタン
       this.overlay.querySelector('#dr-register').onclick = () => this.register();
+
+      // 最終受診日ボタン
+      this.overlay.querySelector('#dr-last-visit-btn').onclick = async () => {
+        const btn = this.overlay.querySelector('#dr-last-visit-btn');
+        btn.disabled = true;
+        btn.textContent = '...';
+
+        const lastVisit = await fetchLastVisitDate(this.patientUuid);
+
+        if (lastVisit) {
+          this.overlay.querySelector('#dr-start-year').value = lastVisit.year;
+          this.overlay.querySelector('#dr-start-month').value = lastVisit.month;
+          this.overlay.querySelector('#dr-start-day').value = lastVisit.day;
+        } else {
+          alert('最終受診日が取得できませんでした');
+        }
+
+        btn.disabled = false;
+        btn.textContent = '最終受診日に設定';
+      };
     }
 
     updateDiseaseList(query) {
