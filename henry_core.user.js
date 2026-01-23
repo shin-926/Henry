@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry Core
 // @namespace    https://henry-app.jp/
-// @version      2.11.0
+// @version      2.11.1
 // @description  Henry スクリプト実行基盤 (GoogleAuth統合 / Google Docs対応)
 // @author       sk powered by Claude & Gemini
 // @match        https://henry-app.jp/*
@@ -311,8 +311,11 @@
         return result;
       } catch (e) {
         lastError = e;
-        // 400/404エラーの場合はキャッシュを削除して次のエンドポイントを試す
-        if (e.message.includes('400') || e.message.includes('404')) {
+        // 400/404エラー、またはGraphQL検証エラーの場合はキャッシュを削除して次のエンドポイントを試す
+        // 検証エラー: "Unknown type", "is undefined" などはエンドポイント不一致を示す
+        const isRetryable = e.message.includes('400') || e.message.includes('404') ||
+                            e.message.includes('Unknown type') || e.message.includes('is undefined');
+        if (isRetryable) {
           if (cachedEndpoint === endpoint) {
             delete cache[operationName];
             localStorage.setItem(ENDPOINT_CACHE_KEY, JSON.stringify(cache));

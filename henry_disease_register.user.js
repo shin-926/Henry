@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry Disease Register
 // @namespace    https://henry-app.jp/
-// @version      3.4.4
+// @version      3.8.2
 // @description  高速病名検索・登録
 // @author       sk powered by Claude & Gemini
 // @match        https://henry-app.jp/*
@@ -66,33 +66,104 @@
   ];
 
   // ============================================
-  // 最終受診日取得クエリ
+  // 前回受診日取得（EncountersInPatient使用）
+  // NOTE: startDate/endDateはDate型で変数として渡せないため、インラインでnullを埋め込む
+  // NOTE: ログイン医師が診察した日のみを対象とする
   // ============================================
-  const FETCH_LAST_VISIT_QUERY = `
-    query GetPatientWithSchedule($input: GetPatientRequestInput!) {
-      getPatient(input: $input) {
-        patientSessionScheduleTime {
-          previousSessionScheduleTime {
-            scheduleTime { seconds }
+  const ENCOUNTERS_QUERY = `
+    query EncountersInPatient($patientId: ID!, $pageSize: Int!, $pageToken: String) {
+      encountersInPatient(patientId: $patientId, startDate: null, endDate: null, pageSize: $pageSize, pageToken: $pageToken) {
+        encounters {
+          firstPublishTime
+          basedOn {
+            ... on Session {
+              doctorId
+            }
+          }
+          records(includeDraft: false) {
+            ... on ProgressNote {
+              title
+              editorData
+            }
           }
         }
+        nextPageToken
       }
     }
   `;
 
+  /**
+   * editorData（Draft.js形式）からプレーンテキストを抽出
+   */
+  function extractTextFromEditorData(editorDataJson) {
+    try {
+      const data = JSON.parse(editorDataJson);
+      return data.blocks?.map(b => b.text).filter(t => t).join('\n') || '';
+    } catch {
+      return '';
+    }
+  }
+
+  /**
+   * GraphQL APIで患者のEncounter一覧を取得し、
+   * ログイン医師が診察した日の中で、今日を除く最新の受診日とカルテ内容を返す
+   * NOTE: EncountersInPatientは新しい順で返す
+   */
   async function fetchLastVisitDate(patientUuid) {
     try {
-      const result = await HenryCore.query(FETCH_LAST_VISIT_QUERY, {
-        input: { uuid: patientUuid }
+      const myUuid = await HenryCore.getMyUuid();
+      if (!myUuid) {
+        console.log(`[${SCRIPT_NAME}] ログイン医師のUUIDが取得できません`);
+        return null;
+      }
+
+      const result = await HenryCore.query(ENCOUNTERS_QUERY, {
+        patientId: patientUuid,
+        pageSize: 50,
+        pageToken: null
       });
-      const seconds = result.data?.getPatient?.patientSessionScheduleTime?.previousSessionScheduleTime?.scheduleTime?.seconds;
-      if (!seconds) return null;
-      const date = new Date(seconds * 1000);
-      return {
-        year: date.getFullYear(),
-        month: date.getMonth() + 1,
-        day: date.getDate()
-      };
+
+      const encounters = result.data?.encountersInPatient?.encounters || [];
+      if (encounters.length === 0) {
+        console.log(`[${SCRIPT_NAME}] 受診履歴がありません`);
+        return null;
+      }
+
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+
+      // encountersは新しい順で返されるので、ログイン医師が診察した日の中で今日を除く最初のものを探す
+      for (const enc of encounters) {
+        // ログイン医師が診察した日かチェック
+        const isMyEncounter = enc.basedOn?.some(s => s.doctorId === myUuid);
+        if (!isMyEncounter) continue;
+
+        if (!enc.firstPublishTime) continue;
+        const visitDate = new Date(enc.firstPublishTime);
+        const visitDateOnly = new Date(visitDate);
+        visitDateOnly.setHours(0, 0, 0, 0);
+
+        if (visitDateOnly.getTime() !== today.getTime()) {
+          console.log(`[${SCRIPT_NAME}] 前回受診日（自分が診察）: ${visitDate.toLocaleDateString('ja-JP')}`);
+
+          // カルテ内容を抽出
+          let karteText = '';
+          const progressNote = enc.records?.find(r => r.editorData);
+          if (progressNote?.editorData) {
+            karteText = extractTextFromEditorData(progressNote.editorData);
+          }
+
+          return {
+            year: visitDate.getFullYear(),
+            month: visitDate.getMonth() + 1,
+            day: visitDate.getDate(),
+            karteText: karteText
+          };
+        }
+      }
+
+      console.log(`[${SCRIPT_NAME}] ログイン医師の過去受診日がありません`);
+      return null;
     } catch (e) {
       console.error(`[${SCRIPT_NAME}]`, e.message);
       return null;
@@ -1156,6 +1227,23 @@
     .dr-tab-content.active {
       display: block;
     }
+    /* カスタムツールチップ */
+    .dr-tooltip {
+      position: absolute;
+      background: #333;
+      color: #fff;
+      padding: 10px 12px;
+      border-radius: 6px;
+      font-size: 12px;
+      line-height: 1.5;
+      max-width: 400px;
+      max-height: 300px;
+      overflow-y: auto;
+      white-space: pre-wrap;
+      z-index: 100001;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+      pointer-events: none;
+    }
   `;
 
   // ============================================
@@ -1169,6 +1257,7 @@
       this.selectedCandidateIndex = null;
       this.overlay = null;
       this.registeredDiseaseNames = new Set(); // 登録済み病名（重複チェック用）
+      this.lastVisitData = null; // 前回受診日データ（日付+カルテ内容）
 
       this.render();
     }
@@ -1198,8 +1287,56 @@
       // 登録済み病名を取得・表示
       this.loadRegisteredDiseases();
 
+      // 前回受診日を事前取得（ボタンテキスト・ツールチップ設定）
+      this.loadLastVisitData();
+
       // 検索窓にフォーカス
       this.overlay.querySelector('#dr-natural-input').focus();
+    }
+
+    async loadLastVisitData() {
+      const btn = this.overlay.querySelector('#dr-last-visit-btn');
+      btn.textContent = '前回受診日を取得中...';
+      btn.disabled = true;
+
+      this.lastVisitData = await fetchLastVisitDate(this.patientUuid);
+
+      if (this.lastVisitData) {
+        const dateStr = `${this.lastVisitData.year}/${this.lastVisitData.month}/${this.lastVisitData.day}`;
+        btn.textContent = `前回受診日（${dateStr}）に設定`;
+
+        // カスタムツールチップ用のテキストを保存
+        if (this.lastVisitData.karteText) {
+          this.lastVisitTooltip = `【${dateStr}のカルテ】\n${this.lastVisitData.karteText}`;
+        } else {
+          this.lastVisitTooltip = `${dateStr}（カルテ内容なし）`;
+        }
+      } else {
+        btn.textContent = '前回受診日なし';
+        this.lastVisitTooltip = 'ログイン医師の過去受診日がありません';
+      }
+
+      btn.disabled = false;
+    }
+
+    showTooltip(e, text) {
+      this.hideTooltip();
+      const tooltip = document.createElement('div');
+      tooltip.className = 'dr-tooltip';
+      tooltip.textContent = text;
+      tooltip.id = 'dr-karte-tooltip';
+      document.body.appendChild(tooltip);
+
+      // ボタンの上に配置
+      const rect = e.target.getBoundingClientRect();
+      const tooltipHeight = tooltip.offsetHeight;
+      tooltip.style.left = `${rect.left}px`;
+      tooltip.style.top = `${rect.top - tooltipHeight - 5}px`;
+    }
+
+    hideTooltip() {
+      const existing = document.getElementById('dr-karte-tooltip');
+      if (existing) existing.remove();
     }
 
     async loadRegisteredDiseases() {
@@ -1323,7 +1460,7 @@
                         <span>/</span>
                         <input type="text" class="dr-date-input" id="dr-start-day" value="${today.day}" maxlength="2">
                       </div>
-                      <button type="button" class="dr-btn-last-visit" id="dr-last-visit-btn">最終受診日に設定</button>
+                      <button type="button" class="dr-btn-last-visit" id="dr-last-visit-btn">前回受診日に設定</button>
                     </div>
                     <div class="dr-option">
                       <label>転帰:</label>
@@ -1392,25 +1529,26 @@
       // 登録ボタン
       this.overlay.querySelector('#dr-register').onclick = () => this.register();
 
-      // 最終受診日ボタン
-      this.overlay.querySelector('#dr-last-visit-btn').onclick = async () => {
-        const btn = this.overlay.querySelector('#dr-last-visit-btn');
-        btn.disabled = true;
-        btn.textContent = '...';
+      // 前回受診日ボタン（クリックで日付を設定、データは事前取得済み）
+      const lastVisitBtn = this.overlay.querySelector('#dr-last-visit-btn');
 
-        const lastVisit = await fetchLastVisitDate(this.patientUuid);
-
-        if (lastVisit) {
-          this.overlay.querySelector('#dr-start-year').value = lastVisit.year;
-          this.overlay.querySelector('#dr-start-month').value = lastVisit.month;
-          this.overlay.querySelector('#dr-start-day').value = lastVisit.day;
+      lastVisitBtn.onclick = () => {
+        if (this.lastVisitData) {
+          this.overlay.querySelector('#dr-start-year').value = this.lastVisitData.year;
+          this.overlay.querySelector('#dr-start-month').value = this.lastVisitData.month;
+          this.overlay.querySelector('#dr-start-day').value = this.lastVisitData.day;
         } else {
-          alert('最終受診日が取得できませんでした');
+          alert('前回受診日が取得できませんでした');
         }
-
-        btn.disabled = false;
-        btn.textContent = '最終受診日に設定';
       };
+
+      // カスタムツールチップ（即座に表示）
+      lastVisitBtn.onmouseenter = (e) => {
+        if (this.lastVisitTooltip) {
+          this.showTooltip(e, this.lastVisitTooltip);
+        }
+      };
+      lastVisitBtn.onmouseleave = () => this.hideTooltip();
     }
 
     updateDiseaseList(query) {
@@ -1706,6 +1844,7 @@
     }
 
     close() {
+      this.hideTooltip();
       this.overlay.remove();
     }
   }
