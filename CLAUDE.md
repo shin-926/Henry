@@ -555,6 +555,9 @@ GitHubから各スクリプトを動的に読み込む仕組み。Tampermonkey�
 - [ ] TASK-035: henry_google_drive_bridge: テンプレート開き方変更対応 [2026-01-23]
   - Henry本体が文書テンプレートの開き方を変更（フォルダ経由→直接ダウンロード）
   - 方式検討から必要（詳細はNOTES.md参照）
+- [ ] TASK-036: 新規スクリプト: リハビリオーダー簡略化 [2026-01-23]
+  - カルテのリハビリオーダー入力が煩雑なため、シンプルにするスクリプトを開発
+  - 要件・仕様は未定（着手時に詳細ヒアリング）
 - [x] TASK-027: henry_disease_register Loader経由で初期化エラー → Loaderに@require対応追加で解決 [2026-01-22]
 - [x] TASK-021: MutationObserver最適化 完了 [2026-01-21]
   - ✅ henry_imaging_order_helper: OK（2段階監視 + cleaner）
