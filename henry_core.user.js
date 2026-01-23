@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry Core
 // @namespace    https://henry-app.jp/
-// @version      2.11.1
+// @version      2.12.1
 // @description  Henry スクリプト実行基盤 (GoogleAuth統合 / Google Docs対応)
 // @author       sk powered by Claude & Gemini
 // @match        https://henry-app.jp/*
@@ -197,6 +197,7 @@
   // ==========================================
   const Context = {
     _myUuid: null,
+    _myName: null,
 
     // URLからのみ取得（キャッシュ廃止：患者取り違え防止）
     // NOTE: Henry本体のURL構造に依存（/patients/:uuid 形式）
@@ -205,11 +206,14 @@
       return match ? match[1] : null;
     },
 
-    getMyUuid: async () => {
-      if (Context._myUuid) return Context._myUuid;
+    // 自分のUUIDと名前を取得（内部用、両方キャッシュ）
+    _resolveMe: async () => {
+      if (Context._myUuid && Context._myName) {
+        return { uuid: Context._myUuid, name: Context._myName };
+      }
 
-      const myName = await Auth.getMyNameFromToken();
-      if (!myName) {
+      const firebaseName = await Auth.getMyNameFromToken();
+      if (!firebaseName) {
         console.error('[Henry Core] Firebase から名前を取得できませんでした');
         return null;
       }
@@ -225,7 +229,7 @@
 
         const users = result.data?.listUsers?.users || [];
         const normalize = (s) => s.replace(/\s+/g, '');
-        const normalizedMyName = normalize(myName);
+        const normalizedMyName = normalize(firebaseName);
 
         // 完全一致を試行
         let me = users.find(u => normalize(u.name) === normalizedMyName);
@@ -237,18 +241,29 @@
 
         if (!me) {
           console.error('[Henry Core] 医師一覧に該当ユーザーが見つかりませんでした (Name mismatch)');
-          console.error('[Henry Core] Firebaseの名前:', myName, '→ 正規化:', normalizedMyName);
+          console.error('[Henry Core] Firebaseの名前:', firebaseName, '→ 正規化:', normalizedMyName);
           console.error('[Henry Core] 医師一覧:', users.map(u => `${u.name} → ${normalize(u.name)}`));
           return null;
         }
 
         Context._myUuid = me.uuid;
-        console.log(`[Henry Core] MyUuid resolved: ${me.uuid}`);
-        return me.uuid;
+        Context._myName = me.name;
+        console.log(`[Henry Core] Me resolved: ${me.name} (${me.uuid})`);
+        return { uuid: me.uuid, name: me.name };
       } catch (e) {
-        console.error('[Henry Core] getMyUuid エラー:', e.message);
+        console.error('[Henry Core] _resolveMe エラー:', e.message);
         return null;
       }
+    },
+
+    getMyUuid: async () => {
+      const me = await Context._resolveMe();
+      return me?.uuid || null;
+    },
+
+    getMyName: async () => {
+      const me = await Context._resolveMe();
+      return me?.name || null;
     }
   };
 
@@ -951,6 +966,7 @@
     query: queryInternal,
 
     getMyUuid: Context.getMyUuid,
+    getMyName: Context.getMyName,
 
     registerPlugin: async (options) => {
       // プラグインをレジストリに追加
