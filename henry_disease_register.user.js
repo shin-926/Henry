@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry Disease Register
 // @namespace    https://henry-app.jp/
-// @version      3.8.2
+// @version      3.15.5
 // @description  高速病名検索・登録
 // @author       sk powered by Claude & Gemini
 // @match        https://henry-app.jp/*
@@ -58,11 +58,11 @@
   // 転帰オプション
   // ============================================
   const OUTCOMES = [
-    { value: '', label: '（なし）' },
+    { value: '', label: '継続' },
     { value: 'CURED', label: '治癒' },
-    { value: 'DECEASED', label: '死亡' },
     { value: 'CANCELLED', label: '中止' },
-    { value: 'MOVED', label: '転医' }
+    { value: 'TRANSFERRED', label: '移行' },
+    { value: 'DEAD', label: '死亡' }
   ];
 
   // ============================================
@@ -78,6 +78,9 @@
           basedOn {
             ... on Session {
               doctorId
+              doctor {
+                name
+              }
             }
           }
           records(includeDraft: false) {
@@ -106,16 +109,12 @@
 
   /**
    * GraphQL APIで患者のEncounter一覧を取得し、
-   * ログイン医師が診察した日の中で、今日を除く最新の受診日とカルテ内容を返す
+   * 全体の最後の受診日とログイン医師の最後の受診日を返す
    * NOTE: EncountersInPatientは新しい順で返す
    */
-  async function fetchLastVisitDate(patientUuid) {
+  async function fetchLastVisitDates(patientUuid) {
     try {
       const myUuid = await HenryCore.getMyUuid();
-      if (!myUuid) {
-        console.log(`[${SCRIPT_NAME}] ログイン医師のUUIDが取得できません`);
-        return null;
-      }
 
       const result = await HenryCore.query(ENCOUNTERS_QUERY, {
         patientId: patientUuid,
@@ -132,38 +131,74 @@
       const today = new Date();
       today.setHours(0, 0, 0, 0);
 
-      // encountersは新しい順で返されるので、ログイン医師が診察した日の中で今日を除く最初のものを探す
-      for (const enc of encounters) {
-        // ログイン医師が診察した日かチェック
-        const isMyEncounter = enc.basedOn?.some(s => s.doctorId === myUuid);
-        if (!isMyEncounter) continue;
+      let lastVisit = null;      // 全体の最後の受診日
+      let lastKarteText = '';    // 全体の最後のカルテ内容
+      let lastDoctorName = '';   // 全体の最後の診察医師名
+      let myLastVisit = null;    // ログイン医師の最後の受診日
+      let myLastKarteText = '';  // ログイン医師の最後のカルテ内容
 
+      // encountersは新しい順で返される
+      for (const enc of encounters) {
         if (!enc.firstPublishTime) continue;
         const visitDate = new Date(enc.firstPublishTime);
         const visitDateOnly = new Date(visitDate);
         visitDateOnly.setHours(0, 0, 0, 0);
 
-        if (visitDateOnly.getTime() !== today.getTime()) {
-          console.log(`[${SCRIPT_NAME}] 前回受診日（自分が診察）: ${visitDate.toLocaleDateString('ja-JP')}`);
+        // 今日は除く
+        if (visitDateOnly.getTime() === today.getTime()) continue;
 
-          // カルテ内容を抽出
-          let karteText = '';
+        const dateObj = {
+          year: visitDate.getFullYear(),
+          month: visitDate.getMonth() + 1,
+          day: visitDate.getDate()
+        };
+
+        // カルテ内容を抽出する共通処理
+        const extractKarte = () => {
           const progressNote = enc.records?.find(r => r.editorData);
-          if (progressNote?.editorData) {
-            karteText = extractTextFromEditorData(progressNote.editorData);
-          }
+          return progressNote?.editorData ? extractTextFromEditorData(progressNote.editorData) : '';
+        };
 
-          return {
-            year: visitDate.getFullYear(),
-            month: visitDate.getMonth() + 1,
-            day: visitDate.getDate(),
-            karteText: karteText
-          };
+        // 医師名を取得する共通処理
+        const extractDoctorName = () => {
+          const session = enc.basedOn?.find(s => s.doctor);
+          return session?.doctor?.name || '';
+        };
+
+        // 全体の最後の受診日（まだ見つかっていなければ）
+        if (!lastVisit) {
+          lastVisit = dateObj;
+          lastKarteText = extractKarte();
+          lastDoctorName = extractDoctorName();
+          console.log(`[${SCRIPT_NAME}] 前回受診日（全体）: ${visitDate.toLocaleDateString('ja-JP')} 担当: ${lastDoctorName}`);
         }
+
+        // ログイン医師の最後の受診日（まだ見つかっていなければ）
+        if (!myLastVisit && myUuid) {
+          const isMyEncounter = enc.basedOn?.some(s => s.doctorId === myUuid);
+          if (isMyEncounter) {
+            myLastVisit = dateObj;
+            myLastKarteText = extractKarte();
+            console.log(`[${SCRIPT_NAME}] 前回受診日（自分）: ${visitDate.toLocaleDateString('ja-JP')}`);
+          }
+        }
+
+        // 両方見つかったら終了
+        if (lastVisit && myLastVisit) break;
       }
 
-      console.log(`[${SCRIPT_NAME}] ログイン医師の過去受診日がありません`);
-      return null;
+      if (!lastVisit && !myLastVisit) {
+        console.log(`[${SCRIPT_NAME}] 過去の受診日がありません`);
+        return null;
+      }
+
+      return {
+        lastVisit,
+        lastKarteText,
+        lastDoctorName,
+        myLastVisit,
+        myLastKarteText
+      };
     } catch (e) {
       console.error(`[${SCRIPT_NAME}]`, e.message);
       return null;
@@ -182,8 +217,17 @@
             month
             day
           }
+          outcome
           masterDisease {
             name
+            code
+          }
+          masterModifiers {
+            name
+            position
+          }
+          customDiseaseName {
+            value
           }
         }
       }
@@ -817,12 +861,35 @@
     .dr-modal {
       background: white;
       border-radius: 8px;
-      width: 850px;
+      width: 750px;
+      height: 90vh;
       max-height: 90vh;
       overflow: hidden;
       display: flex;
       flex-direction: column;
       box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+      position: relative;
+    }
+    .dr-success-message {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      background: rgba(40, 167, 69, 0.95);
+      color: white;
+      padding: 16px 32px;
+      border-radius: 8px;
+      font-size: 16px;
+      font-weight: bold;
+      z-index: 100;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+      animation: dr-fade-in-out 2s ease-in-out forwards;
+    }
+    @keyframes dr-fade-in-out {
+      0% { opacity: 0; }
+      15% { opacity: 1; }
+      85% { opacity: 1; }
+      100% { opacity: 0; }
     }
     .dr-content {
       display: flex;
@@ -862,10 +929,15 @@
       color: #333;
       line-height: 1.3;
     }
-    .dr-registered-date {
+    .dr-registered-meta {
+      display: flex;
+      gap: 8px;
       font-size: 10px;
       color: #888;
       margin-top: 2px;
+    }
+    .dr-registered-outcome {
+      color: #666;
     }
     .dr-registered-empty {
       padding: 16px;
@@ -898,11 +970,21 @@
     }
     .dr-body {
       padding: 16px;
-      overflow-y: auto;
+      overflow: hidden;
       flex: 1;
+      display: flex;
+      flex-direction: column;
+      min-height: 0;
     }
     .dr-section {
       margin-bottom: 16px;
+      display: flex;
+      flex-direction: column;
+    }
+    .dr-tab-content .dr-section {
+      flex: 1;
+      min-height: 0;
+      margin-bottom: 8px;
     }
     .dr-section-title {
       font-weight: bold;
@@ -923,7 +1005,8 @@
       border-color: #4a90d9;
     }
     .dr-list {
-      max-height: 150px;
+      flex: 1;
+      min-height: 0;
       overflow-y: auto;
       border: 1px solid #e0e0e0;
       border-radius: 4px;
@@ -1006,8 +1089,8 @@
     }
     .dr-options {
       display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 12px;
+      grid-template-columns: auto auto 1fr;
+      gap: 12px 24px;
     }
     .dr-option {
       display: flex;
@@ -1024,27 +1107,13 @@
     }
     .dr-date-input {
       width: 60px;
-      padding: 4px 8px;
+      height: 26px;
+      padding: 0 8px;
       border: 1px solid #ccc;
       border-radius: 4px;
       font-size: 13px;
       text-align: center;
-    }
-    .dr-btn-last-visit {
-      padding: 4px 8px;
-      border: 1px solid #ccc;
-      border-radius: 4px;
-      background: #f5f5f5;
-      cursor: pointer;
-      font-size: 14px;
-      margin-left: 4px;
-    }
-    .dr-btn-last-visit:hover {
-      background: #e8e8e8;
-    }
-    .dr-btn-last-visit:disabled {
-      opacity: 0.5;
-      cursor: not-allowed;
+      box-sizing: border-box;
     }
     .dr-select {
       padding: 4px 8px;
@@ -1052,12 +1121,26 @@
       border-radius: 4px;
       font-size: 13px;
     }
+    .dr-last-visit-select {
+      margin-left: 8px;
+      min-width: 200px;
+    }
+    .dr-options-section {
+      padding: 12px 16px;
+      border-top: 1px solid #e0e0e0;
+      background: #fafafa;
+      flex-shrink: 0;
+    }
+    .dr-options-section .dr-section-title {
+      margin-bottom: 8px;
+    }
     .dr-footer {
       padding: 16px;
       border-top: 1px solid #e0e0e0;
       display: flex;
       justify-content: flex-end;
       gap: 8px;
+      flex-shrink: 0;
     }
     .dr-btn {
       padding: 8px 16px;
@@ -1111,7 +1194,8 @@
       margin-top: 8px;
       border: 1px solid #e0e0e0;
       border-radius: 4px;
-      max-height: 430px;
+      flex: 1;
+      min-height: 0;
       overflow-y: auto;
     }
     .dr-candidate-item {
@@ -1222,10 +1306,12 @@
     }
     .dr-tab-content {
       display: none;
-      min-height: 510px;
+      flex-direction: column;
+      flex: 1;
+      min-height: 0;
     }
     .dr-tab-content.active {
-      display: block;
+      display: flex;
     }
     /* カスタムツールチップ */
     .dr-tooltip {
@@ -1236,13 +1322,108 @@
       border-radius: 6px;
       font-size: 12px;
       line-height: 1.5;
-      max-width: 400px;
       max-height: 300px;
       overflow-y: auto;
       white-space: pre-wrap;
       z-index: 100001;
       box-shadow: 0 4px 12px rgba(0,0,0,0.3);
       pointer-events: none;
+    }
+    /* カスタムドロップダウン（ネイティブ風） */
+    .dr-custom-dropdown {
+      position: relative;
+      display: inline-block;
+      vertical-align: middle;
+    }
+    .dr-dropdown-toggle {
+      display: block;
+      width: 240px;
+      height: 26px;
+      padding: 0 20px 0 8px;
+      border: 1px solid #ccc;
+      border-radius: 4px;
+      font-size: 13px;
+      line-height: 24px;
+      background: #fff;
+      cursor: pointer;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      color: #333;
+      transition: border-color 0.15s;
+      box-sizing: border-box;
+    }
+    .dr-dropdown-toggle:hover {
+      border-color: #adb5bd;
+    }
+    .dr-dropdown-toggle:focus {
+      outline: none;
+      border-color: #4a90d9;
+      box-shadow: 0 0 0 3px rgba(74,144,217,0.15);
+    }
+    .dr-dropdown-toggle::after {
+      content: '';
+      position: absolute;
+      right: 6px;
+      top: 50%;
+      transform: translateY(-50%);
+      width: 0;
+      height: 0;
+      border-left: 4px solid transparent;
+      border-right: 4px solid transparent;
+      border-top: 4px solid #666;
+    }
+    .dr-dropdown-menu {
+      display: none;
+      position: absolute;
+      top: calc(100% + 4px);
+      left: 0;
+      width: 240px;
+      background: #fff;
+      border: 1px solid #ced4da;
+      border-radius: 6px;
+      box-shadow: 0 6px 16px rgba(0,0,0,0.12);
+      z-index: 10001;
+      max-height: 240px;
+      overflow-y: auto;
+      padding: 4px 0;
+      box-sizing: border-box;
+    }
+    .dr-dropdown-menu.open {
+      display: block;
+      animation: dr-dropdown-fade 0.15s ease-out;
+    }
+    @keyframes dr-dropdown-fade {
+      from { opacity: 0; transform: translateY(-4px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+    .dr-dropdown-item {
+      padding: 3px 6px;
+      cursor: pointer;
+      font-size: 13px;
+      white-space: nowrap;
+      color: #333;
+      transition: background-color 0.1s;
+    }
+    .dr-dropdown-item:hover {
+      background: #f0f4ff;
+    }
+    .dr-dropdown-item.selected {
+      background: #e8f4fd;
+      color: #1a73e8;
+      font-weight: 500;
+    }
+    .dr-dropdown-item.selected::before {
+      content: '✓ ';
+      color: #1a73e8;
+    }
+    .dr-dropdown-item.disabled {
+      color: #adb5bd;
+      cursor: not-allowed;
+      font-style: italic;
+    }
+    .dr-dropdown-item.disabled:hover {
+      background: transparent;
     }
   `;
 
@@ -1295,28 +1476,151 @@
     }
 
     async loadLastVisitData() {
-      const btn = this.overlay.querySelector('#dr-last-visit-btn');
-      btn.textContent = '前回受診日を取得中...';
-      btn.disabled = true;
+      const toggle = this.overlay.querySelector('#dr-dropdown-toggle');
+      const menu = this.overlay.querySelector('#dr-dropdown-menu');
 
-      this.lastVisitData = await fetchLastVisitDate(this.patientUuid);
+      // ログイン医師の名前と前回受診日データを並行取得
+      const [myName, lastVisitData] = await Promise.all([
+        HenryCore.getMyName(),
+        fetchLastVisitDates(this.patientUuid)
+      ]);
+      this.lastVisitData = lastVisitData;
+      // 名字のみ抽出（スペース区切りで最初の部分）+ 「医師」
+      const lastName = myName ? myName.split(/[\s　]+/)[0] : '';
+      const doctorLabel = lastName ? `${lastName}医師` : '自分';
+
+      // 選択肢データを構築
+      const items = [
+        { value: 'today', label: '本日', tooltip: null, disabled: false }
+      ];
 
       if (this.lastVisitData) {
-        const dateStr = `${this.lastVisitData.year}/${this.lastVisitData.month}/${this.lastVisitData.day}`;
-        btn.textContent = `前回受診日（${dateStr}）に設定`;
-
-        // カスタムツールチップ用のテキストを保存
-        if (this.lastVisitData.karteText) {
-          this.lastVisitTooltip = `【${dateStr}のカルテ】\n${this.lastVisitData.karteText}`;
-        } else {
-          this.lastVisitTooltip = `${dateStr}（カルテ内容なし）`;
+        // 全体の前回受診日
+        if (this.lastVisitData.lastVisit) {
+          const d = this.lastVisitData.lastVisit;
+          const dateStr = `${d.year}/${d.month}/${d.day}`;
+          const karteText = this.lastVisitData.lastKarteText;
+          const doctorName = this.lastVisitData.lastDoctorName;
+          const header = doctorName ? `【${dateStr}のカルテ】（${doctorName}）` : `【${dateStr}のカルテ】`;
+          items.push({
+            value: 'last',
+            label: `前回受診日（${dateStr}）`,
+            tooltip: karteText ? `${header}\n${karteText}` : `${dateStr}（カルテ内容なし）`,
+            disabled: false
+          });
         }
-      } else {
-        btn.textContent = '前回受診日なし';
-        this.lastVisitTooltip = 'ログイン医師の過去受診日がありません';
+
+        // ログイン医師の前回受診日
+        if (this.lastVisitData.myLastVisit) {
+          const d = this.lastVisitData.myLastVisit;
+          const dateStr = `${d.year}/${d.month}/${d.day}`;
+          // 全体と同じ日付なら表示しない
+          if (!this.lastVisitData.lastVisit ||
+              d.year !== this.lastVisitData.lastVisit.year ||
+              d.month !== this.lastVisitData.lastVisit.month ||
+              d.day !== this.lastVisitData.lastVisit.day) {
+            const karteText = this.lastVisitData.myLastKarteText;
+            items.push({
+              value: 'myLast',
+              label: `${doctorLabel}前回受診日（${dateStr}）`,
+              tooltip: karteText ? `【${dateStr}のカルテ】\n${karteText}` : `${dateStr}（カルテ内容なし）`,
+              disabled: false
+            });
+          }
+        } else {
+          // ログイン医師の受診歴なし
+          items.push({
+            value: '',
+            label: `${doctorLabel}受診歴なし`,
+            tooltip: null,
+            disabled: true
+          });
+        }
       }
 
-      btn.disabled = false;
+      // 全体の受診歴もない場合
+      if (!this.lastVisitData || !this.lastVisitData.lastVisit) {
+        items.push({
+          value: '',
+          label: '受診歴なし',
+          tooltip: null,
+          disabled: true
+        });
+      }
+
+      // 選択状態
+      this.selectedDateOption = 'today';
+      toggle.textContent = '本日';
+
+      // メニュー構築
+      menu.innerHTML = items.map(item => `
+        <div class="dr-dropdown-item${item.disabled ? ' disabled' : ''}${item.value === this.selectedDateOption ? ' selected' : ''}"
+             data-value="${item.value}"
+             data-tooltip="${item.tooltip ? encodeURIComponent(item.tooltip) : ''}">
+          ${item.label}
+        </div>
+      `).join('');
+
+      // トグルクリック
+      toggle.onclick = () => {
+        menu.classList.toggle('open');
+      };
+
+      // メニュー外クリックで閉じる
+      document.addEventListener('click', (e) => {
+        if (!this.overlay.querySelector('#dr-last-visit-dropdown').contains(e.target)) {
+          menu.classList.remove('open');
+        }
+      });
+
+      // 選択肢のイベント
+      menu.querySelectorAll('.dr-dropdown-item').forEach(item => {
+        // クリック
+        item.onclick = (e) => {
+          if (item.classList.contains('disabled')) return;
+          e.stopPropagation();
+
+          const value = item.dataset.value;
+          this.selectedDateOption = value;
+
+          // 選択状態を更新
+          menu.querySelectorAll('.dr-dropdown-item').forEach(el => el.classList.remove('selected'));
+          item.classList.add('selected');
+
+          // トグルテキストを更新
+          toggle.textContent = item.textContent.trim();
+
+          // 日付を設定
+          let dateObj = null;
+          if (value === 'today') {
+            dateObj = getToday();
+          } else if (value === 'last' && this.lastVisitData?.lastVisit) {
+            dateObj = this.lastVisitData.lastVisit;
+          } else if (value === 'myLast' && this.lastVisitData?.myLastVisit) {
+            dateObj = this.lastVisitData.myLastVisit;
+          }
+
+          if (dateObj) {
+            this.overlay.querySelector('#dr-start-year').value = dateObj.year;
+            this.overlay.querySelector('#dr-start-month').value = dateObj.month;
+            this.overlay.querySelector('#dr-start-day').value = dateObj.day;
+          }
+
+          menu.classList.remove('open');
+        };
+
+        // ホバー（ツールチップ表示）
+        item.onmouseenter = (e) => {
+          const tooltipText = item.dataset.tooltip;
+          if (tooltipText) {
+            this.showTooltip(e, decodeURIComponent(tooltipText));
+          }
+        };
+
+        item.onmouseleave = () => {
+          this.hideTooltip();
+        };
+      });
     }
 
     showTooltip(e, text) {
@@ -1327,11 +1631,18 @@
       tooltip.id = 'dr-karte-tooltip';
       document.body.appendChild(tooltip);
 
-      // ボタンの上に配置
-      const rect = e.target.getBoundingClientRect();
+      // トグルボタンの幅に合わせる
+      const toggle = this.overlay.querySelector('#dr-dropdown-toggle');
+      const toggleRect = toggle.getBoundingClientRect();
+      tooltip.style.width = `${toggleRect.width}px`;
+      tooltip.style.boxSizing = 'border-box';
+
+      // ドロップダウンメニューの上に固定配置
+      const menu = this.overlay.querySelector('#dr-dropdown-menu');
+      const menuRect = menu.getBoundingClientRect();
       const tooltipHeight = tooltip.offsetHeight;
-      tooltip.style.left = `${rect.left}px`;
-      tooltip.style.top = `${rect.top - tooltipHeight - 5}px`;
+      tooltip.style.left = `${menuRect.left}px`;
+      tooltip.style.top = `${menuRect.top - tooltipHeight - 5}px`;
     }
 
     hideTooltip() {
@@ -1344,22 +1655,63 @@
       const diseases = await fetchRegisteredDiseases(this.patientUuid);
 
       // 登録済み病名をSetに保存（重複チェック用）
+      // 未コード化病名（code: 0000999）の場合は customDiseaseName を使用
+      // 修飾語も含めた完全な病名で判定
       this.registeredDiseaseNames = new Set(
-        diseases.map(d => d.masterDisease?.name).filter(Boolean)
+        diseases.map(d => {
+          let baseName;
+          if (d.masterDisease?.code === '0000999' && d.customDiseaseName?.value) {
+            baseName = d.customDiseaseName.value;
+          } else {
+            baseName = d.masterDisease?.name;
+          }
+          if (!baseName) return null;
+          return this.applyModifiers(baseName, d.masterModifiers || []);
+        }).filter(Boolean)
       );
 
       if (diseases.length === 0) {
         container.innerHTML = '<div class="dr-registered-empty">登録済みの病名はありません</div>';
       } else {
         container.innerHTML = diseases.map(d => {
-          const name = d.masterDisease?.name || '（名称なし）';
+          // 未コード化病名（code: 0000999）の場合は customDiseaseName を優先
+          let baseName;
+          if (d.masterDisease?.code === '0000999' && d.customDiseaseName?.value) {
+            baseName = d.customDiseaseName.value;
+          } else {
+            baseName = d.masterDisease?.name || '（名称なし）';
+          }
+          // 修飾語を適用
+          const name = this.applyModifiers(baseName, d.masterModifiers || []);
           const date = this.formatDate(d.startDate);
+          const outcomeLabel = this.getOutcomeLabel(d.outcome);
           return `<div class="dr-registered-item">
             <div class="dr-registered-name">${name}</div>
-            ${date ? `<div class="dr-registered-date">${date}</div>` : ''}
+            <div class="dr-registered-meta">
+              ${date ? `<span class="dr-registered-date">${date}</span>` : ''}
+              ${outcomeLabel ? `<span class="dr-registered-outcome">${outcomeLabel}</span>` : ''}
+            </div>
           </div>`;
         }).join('');
       }
+    }
+
+    applyModifiers(baseName, modifiers) {
+      if (!modifiers || modifiers.length === 0) return baseName;
+      const prefixes = modifiers.filter(m => m.position === 'PREFIX').map(m => m.name).join('');
+      const suffixes = modifiers.filter(m => m.position === 'SUFFIX').map(m => m.name).join('');
+      return prefixes + baseName + suffixes;
+    }
+
+    getOutcomeLabel(outcome) {
+      const map = {
+        'CONTINUED': '継続',
+        'CURED': '治癒',
+        'CANCELLED': '中止',
+        'TRANSFERRED': '移行',
+        'DEAD': '死亡'
+      };
+      return map[outcome] || '';
     }
 
     // 日付フォーマット（{year, month, day} → YYYY/M/D）
@@ -1394,7 +1746,7 @@
               <div class="dr-body">
                 <!-- タブ切り替え -->
                 <div class="dr-tabs">
-                  <div class="dr-tab active" data-tab="natural">自然言語検索</div>
+                  <div class="dr-tab active" data-tab="natural">かんたん検索</div>
                   <div class="dr-tab" data-tab="classic">従来の検索</div>
                 </div>
 
@@ -1438,36 +1790,36 @@
                     <div class="dr-preview-name" id="dr-preview-name"></div>
                   </div>
                 </div>
-
-                <!-- オプション -->
-                <div class="dr-section">
-                  <div class="dr-section-title">オプション</div>
-                  <div class="dr-options">
-                    <div class="dr-option">
-                      <input type="checkbox" id="dr-is-main">
-                      <label for="dr-is-main">主病名</label>
+              </div>
+              <!-- オプション（下部固定） -->
+              <div class="dr-options-section">
+                <div class="dr-section-title">オプション</div>
+                <div class="dr-options">
+                  <div class="dr-option">
+                    <input type="checkbox" id="dr-is-main">
+                    <label for="dr-is-main">主病名</label>
+                    <input type="checkbox" id="dr-is-suspected" style="margin-left: 16px;">
+                    <label for="dr-is-suspected">疑い</label>
+                  </div>
+                  <div class="dr-option" style="grid-column: 1 / -1;">
+                    <label>開始日:</label>
+                    <div class="dr-date-inputs">
+                      <input type="text" class="dr-date-input" id="dr-start-year" value="${today.year}" maxlength="4">
+                      <span>/</span>
+                      <input type="text" class="dr-date-input" id="dr-start-month" value="${today.month}" maxlength="2">
+                      <span>/</span>
+                      <input type="text" class="dr-date-input" id="dr-start-day" value="${today.day}" maxlength="2">
                     </div>
-                    <div class="dr-option">
-                      <input type="checkbox" id="dr-is-suspected">
-                      <label for="dr-is-suspected">疑い</label>
+                    <div class="dr-custom-dropdown" id="dr-last-visit-dropdown">
+                      <div class="dr-dropdown-toggle" id="dr-dropdown-toggle">読み込み中...</div>
+                      <div class="dr-dropdown-menu" id="dr-dropdown-menu"></div>
                     </div>
-                    <div class="dr-option" style="grid-column: 1 / -1;">
-                      <label>開始日:</label>
-                      <div class="dr-date-inputs">
-                        <input type="text" class="dr-date-input" id="dr-start-year" value="${today.year}" maxlength="4">
-                        <span>/</span>
-                        <input type="text" class="dr-date-input" id="dr-start-month" value="${today.month}" maxlength="2">
-                        <span>/</span>
-                        <input type="text" class="dr-date-input" id="dr-start-day" value="${today.day}" maxlength="2">
-                      </div>
-                      <button type="button" class="dr-btn-last-visit" id="dr-last-visit-btn">前回受診日に設定</button>
-                    </div>
-                    <div class="dr-option">
-                      <label>転帰:</label>
-                      <select class="dr-select" id="dr-outcome">
-                        ${OUTCOMES.map(o => `<option value="${o.value}">${o.label}</option>`).join('')}
-                      </select>
-                    </div>
+                  </div>
+                  <div class="dr-option">
+                    <label>転帰:</label>
+                    <select class="dr-select" id="dr-outcome">
+                      ${OUTCOMES.map(o => `<option value="${o.value}">${o.label}</option>`).join('')}
+                    </select>
                   </div>
                 </div>
               </div>
@@ -1528,36 +1880,18 @@
 
       // 登録ボタン
       this.overlay.querySelector('#dr-register').onclick = () => this.register();
-
-      // 前回受診日ボタン（クリックで日付を設定、データは事前取得済み）
-      const lastVisitBtn = this.overlay.querySelector('#dr-last-visit-btn');
-
-      lastVisitBtn.onclick = () => {
-        if (this.lastVisitData) {
-          this.overlay.querySelector('#dr-start-year').value = this.lastVisitData.year;
-          this.overlay.querySelector('#dr-start-month').value = this.lastVisitData.month;
-          this.overlay.querySelector('#dr-start-day').value = this.lastVisitData.day;
-        } else {
-          alert('前回受診日が取得できませんでした');
-        }
-      };
-
-      // カスタムツールチップ（即座に表示）
-      lastVisitBtn.onmouseenter = (e) => {
-        if (this.lastVisitTooltip) {
-          this.showTooltip(e, this.lastVisitTooltip);
-        }
-      };
-      lastVisitBtn.onmouseleave = () => this.hideTooltip();
     }
 
     updateDiseaseList(query) {
       const list = this.overlay.querySelector('#dr-disease-list');
-      let items = searchDiseases(query);
 
-      if (!query) {
-        items = sortByFrequency(items, STORAGE_KEY_DISEASE, 0);
+      // 検索文字が空の場合は候補を表示しない
+      if (!query || !query.trim()) {
+        list.innerHTML = '<div class="dr-empty">病名を入力してください</div>';
+        return;
       }
+
+      let items = searchDiseases(query);
 
       if (items.length === 0) {
         list.innerHTML = '<div class="dr-empty">該当する病名がありません</div>';
@@ -1586,6 +1920,8 @@
             code: item.dataset.code,
             name: item.dataset.name
           };
+          // 入力テキストを選択した病名に置換
+          this.overlay.querySelector('#dr-disease-search').value = item.dataset.name;
           this.overlay.querySelector('#dr-selected-disease').style.display = 'flex';
           this.overlay.querySelector('#dr-selected-disease-name').textContent = this.selectedDisease.name;
           this.updatePreview();
@@ -1596,11 +1932,14 @@
 
     updateModifierList(query) {
       const list = this.overlay.querySelector('#dr-modifier-list');
-      let items = searchModifiers(query);
 
-      if (!query) {
-        items = sortByFrequency(items, STORAGE_KEY_MODIFIER, 0);
+      // 検索文字が空の場合は候補を表示しない
+      if (!query || !query.trim()) {
+        list.innerHTML = '<div class="dr-empty">修飾語を入力してください</div>';
+        return;
       }
+
+      let items = searchModifiers(query);
 
       // 既に選択済みのものを除外
       const selectedCodes = this.selectedModifiers.map(m => m.code);
@@ -1624,6 +1963,8 @@
             code: item.dataset.code,
             name: item.dataset.name
           });
+          // 入力テキストを選択した修飾語に置換
+          this.overlay.querySelector('#dr-modifier-search').value = item.dataset.name;
           this.updateModifierTags();
           this.updateModifierList(this.overlay.querySelector('#dr-modifier-search').value);
           this.updatePreview();
@@ -1681,7 +2022,7 @@
         const suffixTags = c.suffixes.map(s => `<span class="dr-candidate-tag suffix">${s.name}</span>`).join('');
         const allTags = prefixTags + suffixTags;
         const diseaseInfo = `<span style="color:#666;">${c.disease.name} (${c.disease.icd10 || '-'})</span>`;
-        const isRegistered = this.isRegistered(c.disease.name);
+        const isRegistered = this.isRegistered(c.displayName);
         const registeredBadge = isRegistered ? '<span class="dr-candidate-tag registered">登録済</span>' : '';
         const registeredClass = isRegistered ? ' registered' : '';
 
@@ -1708,6 +2049,9 @@
 
     // 候補を選択して既存の状態に反映
     selectCandidate(candidate) {
+      // 入力テキストを選択した候補の表示名に置換
+      this.overlay.querySelector('#dr-natural-input').value = candidate.displayName;
+
       // 病名を設定
       this.selectedDisease = {
         code: candidate.disease.code,
@@ -1826,7 +2170,16 @@
           });
 
           console.log(`[${SCRIPT_NAME}] 病名登録完了`);
-          this.close();
+
+          // ボタンを元に戻す
+          btn.disabled = false;
+          btn.textContent = '登録';
+
+          // 成功メッセージをモーダル中央に表示
+          this.showSuccessMessage('登録しました');
+
+          // 登録済み病名を再取得して表示更新
+          this.loadRegisteredDiseases();
 
           // 画面更新（Apollo Client refetch）
           if (window.__APOLLO_CLIENT__) {
@@ -1841,6 +2194,18 @@
         btn.disabled = false;
         btn.textContent = '登録';
       }
+    }
+
+    showSuccessMessage(message) {
+      const modal = this.overlay.querySelector('.dr-modal');
+      const msgEl = document.createElement('div');
+      msgEl.className = 'dr-success-message';
+      msgEl.textContent = message;
+      modal.appendChild(msgEl);
+
+      setTimeout(() => {
+        msgEl.remove();
+      }, 2000);
     }
 
     close() {
