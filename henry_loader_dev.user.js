@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry Loader (Dev)
 // @namespace    https://henry-app.jp/
-// @version      1.4.0
+// @version      1.5.0
 // @description  Henryスクリプトの動的ローダー（開発版）
 // @author       sk powered by Claude
 // @match        https://henry-app.jp/*

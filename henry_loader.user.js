@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry Loader
 // @namespace    https://henry-app.jp/
-// @version      1.4.0
+// @version      1.5.0
 // @description  Henryスクリプトの動的ローダー（リリース版）
 // @author       sk powered by Claude
 // @match        https://henry-app.jp/*
@@ -234,9 +234,10 @@ const unsafeWindow = window;
         .filter(s => matchesHost(s.match) && s.enabled !== false)
         .sort((a, b) => a.order - b.order);
 
-      // Toolbox用にmanifest情報を公開
+      // Toolbox用にmanifest情報を公開（ベータ版は設定パネルに非表示）
+      const visibleScripts = matchingScripts.filter(s => !(s.label || '').includes('ベータ版'));
       pageWindow.HenryLoaderConfig = {
-        scripts: matchingScripts,
+        scripts: visibleScripts,
         disabledScripts: disabledScripts,
         setDisabledScripts: (names) => {
           setDisabledScripts(new Set(names));
