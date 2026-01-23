@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Google Drive連携
 // @namespace    https://henry-app.jp/
-// @version      2.3.3
+// @version      2.4.0
 // @description  HenryのファイルをGoogle Drive APIで直接変換・編集。GAS不要版。
 // @author       sk powered by Claude & Gemini
 // @match        https://henry-app.jp/*
@@ -664,7 +664,7 @@
       });
     }
 
-    // Fetchインターセプト（ファイル一覧キャッシュ用）
+    // Fetchインターセプト（ファイル一覧キャッシュ + テンプレートダウンロード横取り）
     // Proxyを使用してネイティブfetchの振る舞いを保持し、FirestoreのWebChannel通信への影響を回避
     function setupFetchIntercept() {
       if (pageWindow._driveDirectHooked) return;
@@ -684,27 +684,64 @@
             if (!bodyStr) return response;
 
             const requestJson = JSON.parse(bodyStr);
-            if (requestJson.operationName !== 'ListPatientFiles') return response;
+            const opName = requestJson.operationName;
 
-            const requestFolderUuid = requestJson.variables?.input?.parentFileFolderUuid?.value ?? null;
-            const pageToken = requestJson.variables?.input?.pageToken ?? '';
-            const clone = response.clone();
-            const json = await clone.json();
-            const patientFiles = json.data?.listPatientFiles?.patientFiles;
+            // テンプレートダウンロードのインターセプト
+            if (opName === 'GeneratePatientDocumentDownloadTemporaryFile') {
+              const clone = response.clone();
+              const json = await clone.json();
+              const data = json.data?.patientDocumentDownloadTemporaryFile;
 
-            if (!Array.isArray(patientFiles)) return response;
+              if (data?.redirectUrl) {
+                const patientId = requestJson.variables?.patientId;
+                debugLog('Henry', 'テンプレートダウンロード検知:', data.title);
 
-            const folderKey = requestFolderUuid ?? '__root__';
-            const filesWithFolder = patientFiles.map(f => ({
-              ...f,
-              parentFileFolderUuid: requestFolderUuid
-            }));
+                // Google Docs処理を開始（非同期、レスポンス返却をブロックしない）
+                handleTemplateDownload({
+                  redirectUrl: data.redirectUrl,
+                  title: data.title,
+                  patientId: patientId
+                });
 
-            if (pageToken === '') {
-              cachedFilesByFolder.set(folderKey, filesWithFolder);
-            } else {
-              const existing = cachedFilesByFolder.get(folderKey) || [];
-              cachedFilesByFolder.set(folderKey, [...existing, ...filesWithFolder]);
+                // 改変したレスポンスを返す（データをnullにしてHenry本体の処理を無効化）
+                const modifiedJson = {
+                  ...json,
+                  data: {
+                    ...json.data,
+                    patientDocumentDownloadTemporaryFile: null
+                  }
+                };
+
+                return new Response(JSON.stringify(modifiedJson), {
+                  status: response.status,
+                  statusText: response.statusText,
+                  headers: response.headers
+                });
+              }
+            }
+
+            // ファイル一覧のキャッシュ
+            if (opName === 'ListPatientFiles') {
+              const requestFolderUuid = requestJson.variables?.input?.parentFileFolderUuid?.value ?? null;
+              const pageToken = requestJson.variables?.input?.pageToken ?? '';
+              const clone = response.clone();
+              const json = await clone.json();
+              const patientFiles = json.data?.listPatientFiles?.patientFiles;
+
+              if (Array.isArray(patientFiles)) {
+                const folderKey = requestFolderUuid ?? '__root__';
+                const filesWithFolder = patientFiles.map(f => ({
+                  ...f,
+                  parentFileFolderUuid: requestFolderUuid
+                }));
+
+                if (pageToken === '') {
+                  cachedFilesByFolder.set(folderKey, filesWithFolder);
+                } else {
+                  const existing = cachedFilesByFolder.get(folderKey) || [];
+                  cachedFilesByFolder.set(folderKey, [...existing, ...filesWithFolder]);
+                }
+              }
             }
           } catch (e) {
             debugError('Henry', 'Fetch Hook Error:', e.message);
@@ -712,6 +749,103 @@
 
           return response;
         }
+      });
+    }
+
+    // テンプレートダウンロードをGoogle Docsで開く
+    async function handleTemplateDownload({ redirectUrl, title, patientId }) {
+      // 重複防止（同じURLが処理中なら無視）
+      if (inflight.has(redirectUrl)) return;
+
+      // 認証設定チェック
+      if (!getGoogleAuth()?.isConfigured()) {
+        alert('Google Docs連携にはOAuth設定が必要です。設定ダイアログを開きます。');
+        getGoogleAuth()?.showConfigDialog();
+        return;
+      }
+
+      // 認証チェック
+      if (!getGoogleAuth()?.isAuthenticated()) {
+        alert('Google認証が必要です。認証画面を開きます。');
+        getGoogleAuth()?.startAuth();
+        return;
+      }
+
+      inflight.set(redirectUrl, true);
+      const hide = showProcessingIndicator(`書類を開いています... (${title})`);
+
+      try {
+        // ファイルタイプ判定（URLから拡張子を取得）
+        const isDocx = redirectUrl.includes('.docx');
+        const isXlsx = redirectUrl.includes('.xlsx');
+        if (!isDocx && !isXlsx) {
+          debugLog('Henry', '変換対象外のファイル形式:', title);
+          hide();
+          inflight.delete(redirectUrl);
+          return;
+        }
+
+        const mimeInfo = isDocx ? MIME_TYPES.docx : MIME_TYPES.xlsx;
+
+        // GCSからダウンロード（署名付きURLなのでトークン不要）
+        const fileBuffer = await downloadFromGCSWithSignedUrl(redirectUrl);
+        const blob = new Blob([fileBuffer]);
+
+        // 一時フォルダを取得または作成
+        const tempFolder = await DriveAPI.getOrCreateFolder(CONFIG.TEMP_FOLDER_NAME);
+
+        // Google Driveにアップロード（変換付き）
+        const driveFile = await DriveAPI.uploadWithConversion(
+          title,
+          blob,
+          mimeInfo.source,
+          mimeInfo.google,
+          {
+            henryPatientUuid: patientId,
+            henryFileUuid: '',  // テンプレートから新規作成なのでまだない
+            henryFolderUuid: '',
+            henrySource: 'drive-direct-template'
+          },
+          tempFolder.id
+        );
+
+        // Google Docsで開く
+        const docType = isDocx ? 'document' : 'spreadsheets';
+        const openUrl = `https://docs.google.com/${docType}/d/${driveFile.id}/edit`;
+
+        const tab = GM_openInTab(openUrl, { active: true, setParent: true });
+        tab.onclose = () => {
+          debugLog('Henry', 'Google Docsタブが閉じました。フォーカスを戻します。');
+          window.focus();
+        };
+
+        showToast('ファイルを開きました');
+
+      } catch (e) {
+        debugError('Henry', 'テンプレート処理失敗:', e.message);
+        showToast(`エラー: ${e.message}`, true);
+      } finally {
+        hide();
+        inflight.delete(redirectUrl);
+      }
+    }
+
+    // 署名付きURLからダウンロード（トークン不要）
+    async function downloadFromGCSWithSignedUrl(signedUrl) {
+      return new Promise((resolve, reject) => {
+        GM_xmlhttpRequest({
+          method: 'GET',
+          url: signedUrl,
+          responseType: 'arraybuffer',
+          onload: (response) => {
+            if (response.status === 200) {
+              resolve(response.response);
+            } else {
+              reject(new Error(`Download failed: ${response.status}`));
+            }
+          },
+          onerror: () => reject(new Error('ダウンロード通信エラー'))
+        });
       });
     }
 
