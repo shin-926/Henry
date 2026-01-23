@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         ツールボックス
 // @namespace    https://haru-chan.example
-// @version      5.3.3
+// @version      5.3.4
 // @description  プラグイン方式。シンプルUI、Noto Sans JP、ドラッグ＆ドロップ並び替え対応。
 // @author       sk powered by Claude & Gemini
 // @match        https://henry-app.jp/*
@@ -196,9 +196,24 @@
     .ht-settings-item-name {
       font-size: 13px;
       color: #374151;
+      display: flex;
+      align-items: center;
+      gap: 8px;
     }
     .ht-settings-item-name.disabled {
       color: #9CA3AF;
+    }
+    .ht-status-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      flex-shrink: 0;
+    }
+    .ht-status-dot.loaded {
+      background-color: #22C55E;
+    }
+    .ht-status-dot.not-loaded {
+      background-color: #D1D5DB;
     }
     .ht-settings-toggle {
       position: relative;
@@ -489,12 +504,17 @@
       // henry_core と henry_toolbox は無効化不可（依存関係のため）
       const isCore = script.name === 'henry_core' || script.name === 'henry_toolbox';
       const isEnabled = !disabled.has(script.name);
+      const isLoaded = loaded.has(script.name);
       const nameClass = isEnabled ? '' : 'disabled';
       const toggleClass = isEnabled ? 'active' : '';
+      const dotClass = isLoaded ? 'loaded' : 'not-loaded';
 
       html += `
         <div class="ht-settings-item" data-script="${script.name}">
-          <span class="ht-settings-item-name ${nameClass}">${script.label || script.name}</span>
+          <span class="ht-settings-item-name ${nameClass}">
+            <span class="ht-status-dot ${dotClass}"></span>
+            ${script.label || script.name}
+          </span>
           ${isCore
             ? '<span style="font-size: 11px; color: #9CA3AF;">必須</span>'
             : `<div class="ht-settings-toggle ${toggleClass}" data-script="${script.name}"></div>`
