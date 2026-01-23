@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry Disease Register
 // @namespace    https://henry-app.jp/
-// @version      3.15.6
+// @version      3.15.7
 // @description  高速病名検索・登録
 // @author       sk powered by Claude & Gemini
 // @match        https://henry-app.jp/*
@@ -862,8 +862,8 @@
       background: white;
       border-radius: 8px;
       width: 750px;
-      height: 90vh;
-      max-height: 90vh;
+      height: 95vh;
+      max-height: 95vh;
       overflow: hidden;
       display: flex;
       flex-direction: column;
@@ -1859,10 +1859,12 @@
       // 自然言語入力
       const naturalInput = this.overlay.querySelector('#dr-natural-input');
       naturalInput.oninput = debounce(() => this.updateCandidates(naturalInput.value), 200);
+      naturalInput.onfocus = function() { this.select(); };
 
       // 病名検索
       const diseaseSearch = this.overlay.querySelector('#dr-disease-search');
       diseaseSearch.oninput = debounce(() => this.updateDiseaseList(diseaseSearch.value), 150);
+      diseaseSearch.onfocus = function() { this.select(); };
 
       // 病名クリア
       this.overlay.querySelector('#dr-clear-disease').onclick = () => {
@@ -1877,6 +1879,7 @@
       // 修飾語検索
       const modifierSearch = this.overlay.querySelector('#dr-modifier-search');
       modifierSearch.oninput = debounce(() => this.updateModifierList(modifierSearch.value), 150);
+      modifierSearch.onfocus = function() { this.select(); };
 
       // 登録ボタン
       this.overlay.querySelector('#dr-register').onclick = () => this.register();
