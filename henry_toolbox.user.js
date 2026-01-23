@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         ツールボックス
 // @namespace    https://haru-chan.example
-// @version      5.3.0
+// @version      5.3.1
 // @description  プラグイン方式。シンプルUI、Noto Sans JP、ドラッグ＆ドロップ並び替え対応。
 // @author       sk powered by Claude & Gemini
 // @match        https://henry-app.jp/*
@@ -171,6 +171,18 @@
       padding: 8px 0;
       max-height: calc(70vh - 100px);
       overflow-y: auto;
+    }
+    .ht-scroll-indicator {
+      height: 32px;
+      background: linear-gradient(to bottom, transparent, rgba(240,240,240,0.95));
+      margin-top: -32px;
+      position: relative;
+      pointer-events: none;
+      opacity: 0;
+      transition: opacity 0.2s;
+    }
+    .ht-scroll-indicator.visible {
+      opacity: 1;
     }
     .ht-settings-item {
       display: flex;
@@ -495,12 +507,25 @@
     const reloadClass = hasPendingChanges() ? '' : 'disabled';
     html += `
       </div>
+      <div class="ht-scroll-indicator"></div>
       <div class="ht-settings-footer">
         <span class="ht-settings-reload ${reloadClass}">リロードして反映</span>
       </div>
     `;
 
     settingsPanel.innerHTML = html;
+
+    // スクロールインジケーターの制御
+    const body = settingsPanel.querySelector('.ht-settings-body');
+    const scrollIndicator = settingsPanel.querySelector('.ht-scroll-indicator');
+    const updateScrollIndicator = () => {
+      const hasMoreContent = body.scrollHeight > body.clientHeight;
+      const isAtBottom = body.scrollTop + body.clientHeight >= body.scrollHeight - 5;
+      scrollIndicator.classList.toggle('visible', hasMoreContent && !isAtBottom);
+    };
+    body.addEventListener('scroll', updateScrollIndicator);
+    // 初期表示時にも確認
+    setTimeout(updateScrollIndicator, 0);
 
     // イベント設定
     settingsPanel.querySelector('.ht-settings-close').addEventListener('click', closeSettingsPanel);
