@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry Loader
 // @namespace    https://henry-app.jp/
-// @version      1.6.0
+// @version      1.6.1
 // @description  Henryスクリプトの動的ローダー（リリース版）
 // @author       sk powered by Claude
 // @match        https://henry-app.jp/*
@@ -252,8 +252,10 @@ const unsafeWindow = window;
         }
       };
 
-      // 無効スクリプトを除外
-      const targetScripts = matchingScripts.filter(s => !disabledScripts.has(s.name));
+      // 無効スクリプトとベータ版を除外（配布版ではベータ版は読み込まない）
+      const targetScripts = matchingScripts.filter(s =>
+        !disabledScripts.has(s.name) && !(s.label || '').includes('ベータ版')
+      );
 
       log('読み込み対象:', targetScripts.map(s => s.name).join(', '));
 
