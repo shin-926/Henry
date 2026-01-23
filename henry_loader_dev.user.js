@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry Loader (Dev)
 // @namespace    https://henry-app.jp/
-// @version      1.5.0
+// @version      1.6.0
 // @description  Henryスクリプトの動的ローダー（開発版）
 // @author       sk powered by Claude
 // @match        https://henry-app.jp/*
@@ -225,8 +225,10 @@ const unsafeWindow = window;
       const fn = new Function(wrappedCode);
       fn();
       log('読み込み完了:', scriptInfo.name);
+      return true;
     } catch (e) {
       error(`スクリプトエラー (${scriptInfo.name}):`, e.message);
+      return false;
     }
   }
 
@@ -255,9 +257,11 @@ const unsafeWindow = window;
         .sort((a, b) => a.order - b.order);
 
       // Toolbox用にmanifest情報を公開
+      const loadedScripts = new Set();
       pageWindow.HenryLoaderConfig = {
         scripts: matchingScripts,
         disabledScripts: disabledScripts,
+        loadedScripts: loadedScripts,
         setDisabledScripts: (names) => {
           setDisabledScripts(new Set(names));
           pageWindow.HenryLoaderConfig.disabledScripts = new Set(names);
@@ -276,7 +280,10 @@ const unsafeWindow = window;
       // TODO: 現状は1つ失敗で全停止（依存関係を考慮した安全な設計）
       // 「失敗スキップして続行」が必要なら個別try-catchを検討
       for (const script of targetScripts) {
-        await loadScript(script);
+        const success = await loadScript(script);
+        if (success) {
+          loadedScripts.add(script.name);
+        }
       }
 
       const elapsed = (performance.now() - startTime).toFixed(0);

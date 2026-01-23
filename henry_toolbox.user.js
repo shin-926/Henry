@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         ツールボックス
 // @namespace    https://haru-chan.example
-// @version      5.2.8
+// @version      5.3.0
 // @description  プラグイン方式。シンプルUI、Noto Sans JP、ドラッグ＆ドロップ並び替え対応。
 // @author       sk powered by Claude & Gemini
 // @match        https://henry-app.jp/*
@@ -411,7 +411,6 @@
   // ============================================
 
   let settingsPanel = null;
-  let settingsChanged = false;
 
   function createSettingsPanel() {
     settingsPanel = document.createElement('div');
@@ -442,6 +441,20 @@
 
     const scripts = loaderConfig.scripts || [];
     const disabled = loaderConfig.disabledScripts || new Set();
+    const loaded = loaderConfig.loadedScripts || new Set();
+
+    // 設定と実際の読み込み状態に差分があるかチェック
+    // loaderConfig.disabledScriptsを直接参照（setDisabledScriptsで更新されるため）
+    const hasPendingChanges = () => {
+      const currentDisabled = loaderConfig.disabledScripts || new Set();
+      for (const script of scripts) {
+        if (script.name === 'henry_core' || script.name === 'henry_toolbox') continue;
+        const shouldBeLoaded = !currentDisabled.has(script.name);
+        const isLoaded = loaded.has(script.name);
+        if (shouldBeLoaded !== isLoaded) return true;
+      }
+      return false;
+    };
 
     let html = `
       <div class="ht-settings-header">
@@ -478,10 +491,12 @@
       `;
     });
 
+    // 差分があれば「リロードして反映」を有効化
+    const reloadClass = hasPendingChanges() ? '' : 'disabled';
     html += `
       </div>
       <div class="ht-settings-footer">
-        <span class="ht-settings-reload disabled">リロードして反映</span>
+        <span class="ht-settings-reload ${reloadClass}">リロードして反映</span>
       </div>
     `;
 
@@ -513,17 +528,21 @@
         }
         loaderConfig.setDisabledScripts(Array.from(currentDisabled));
 
-        // リロードボタンを有効化
-        settingsChanged = true;
+        // 差分があればリロードボタンを有効化、なければ無効化
         const reloadBtn = settingsPanel.querySelector('.ht-settings-reload');
-        if (reloadBtn) reloadBtn.classList.remove('disabled');
+        if (reloadBtn) {
+          if (hasPendingChanges()) {
+            reloadBtn.classList.remove('disabled');
+          } else {
+            reloadBtn.classList.add('disabled');
+          }
+        }
       });
     });
   }
 
   function openSettingsPanel() {
     if (!settingsPanel) createSettingsPanel();
-    settingsChanged = false;
     buildSettingsPanel();
 
     // パネル位置（画面中央）
