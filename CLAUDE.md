@@ -548,6 +548,10 @@ GitHubから各スクリプトを動的に読み込む仕組み。Tampermonkey�
 - [ ] TASK-032: henry_disease_register: 登録済み病名の編集機能 [2026-01-23]
 - [ ] TASK-033: henry_hospitalization_data: パーシステッドクエリをフルクエリ方式に修正 [2026-01-23]
   - LIST_CLINICAL_DOCUMENTS, LIST_REHABILITATION_DOCUMENTS, LIST_ORDERS の3クエリ
+- [ ] TASK-034: henry_toolbox: MutationObserverの監視範囲最適化検討 [2026-01-23]
+  - 現状: document.bodyをsubtree:trueで監視（debounceで軽減）
+  - 改善案: navの親要素など、より限定的なコンテナを監視対象にする
+  - 注意: Henry本体のDOM構造の安定性に依存するため、堅牢性とのトレードオフ
 - [x] TASK-027: henry_disease_register Loader経由で初期化エラー → Loaderに@require対応追加で解決 [2026-01-22]
 - [x] TASK-021: MutationObserver最適化 完了 [2026-01-21]
   - ✅ henry_imaging_order_helper: OK（2段階監視 + cleaner）
