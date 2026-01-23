@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Google Drive連携
 // @namespace    https://henry-app.jp/
-// @version      2.3.2
+// @version      2.3.3
 // @description  HenryのファイルをGoogle Drive APIで直接変換・編集。GAS不要版。
 // @author       sk powered by Claude & Gemini
 // @match        https://henry-app.jp/*
@@ -431,7 +431,7 @@
       color: '#fff',
       fontSize: '14px',
       fontWeight: '500',
-      zIndex: '100000',
+      zIndex: '1500',
       boxShadow: '0 4px 12px rgba(0,0,0,0.3)',
       opacity: '0',
       transition: 'opacity 0.3s ease'
@@ -454,7 +454,7 @@
       color: '#fff',
       padding: '12px 20px',
       borderRadius: '24px',
-      zIndex: '100000',
+      zIndex: '1400',
       display: 'flex',
       alignItems: 'center',
       gap: '12px',
@@ -505,7 +505,7 @@
         right: '0',
         bottom: '0',
         backgroundColor: 'rgba(0,0,0,0.5)',
-        zIndex: '100001',
+        zIndex: '1500',
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center'

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         ログインヘルパー
 // @namespace    http://tampermonkey.net/
-// @version      6.9.5
+// @version      6.9.6
 // @description  Henry電子カルテのログイン入力補助（React完全対応 + フィルタリング機能）
 // @author       sk powered by Claude & Gemini
 // @match        https://henry-app.jp/*
@@ -84,7 +84,7 @@
             border: 1px solid #ddd;
             border-radius: 4px;
             box-shadow: 0 4px 16px rgba(0,0,0,0.2);
-            z-index: 99999;
+            z-index: 1400;
             display: none;
             font-family: "Noto Sans JP", sans-serif;
         }
@@ -127,7 +127,7 @@
             width: 100%;
             height: 100%;
             background: rgba(0,0,0,0.5);
-            z-index: 100000;
+            z-index: 1500;
             display: flex;
             justify-content: center;
             align-items: center;
@@ -215,7 +215,7 @@
             color: white;
             padding: 12px 20px;
             border-radius: 4px;
-            z-index: 999999;
+            z-index: 1500;
             animation: slideInRight 0.3s, fadeOut 0.3s 1.7s;
             box-shadow: 0 4px 12px rgba(0,0,0,0.15);
         }

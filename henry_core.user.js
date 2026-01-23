@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry Core
 // @namespace    https://henry-app.jp/
-// @version      2.12.1
+// @version      2.12.2
 // @description  Henry スクリプト実行基盤 (GoogleAuth統合 / Google Docs対応)
 // @author       sk powered by Claude & Gemini
 // @match        https://henry-app.jp/*
@@ -468,7 +468,7 @@
           display: flex;
           align-items: center;
           justify-content: center;
-          z-index: 10000;
+          z-index: 1500;
         }
         .henry-modal-content {
           background: var(--henry-bg-base);
@@ -891,7 +891,7 @@
       const currentSecret = CONFIG.GOOGLE_CLIENT_SECRET || '';
 
       const overlay = document.createElement('div');
-      overlay.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.5);z-index:100000;display:flex;align-items:center;justify-content:center;';
+      overlay.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.5);z-index:1500;display:flex;align-items:center;justify-content:center;';
 
       const dialog = document.createElement('div');
       dialog.style.cssText = 'background:#fff;border-radius:12px;padding:24px;width:540px;max-width:90vw;font-family:-apple-system,sans-serif;';
@@ -1056,7 +1056,7 @@
       background: ${isError ? '#dc3545' : '#28a745'};
       color: white;
       border-radius: 8px;
-      z-index: 999999;
+      z-index: 1500;
       font-size: 14px;
       box-shadow: 0 4px 12px rgba(0,0,0,0.3);
     `;

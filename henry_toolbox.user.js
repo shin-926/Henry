@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         ツールボックス
 // @namespace    https://haru-chan.example
-// @version      5.1.11
+// @version      5.2.7
 // @description  プラグイン方式。シンプルUI、Noto Sans JP、ドラッグ＆ドロップ並び替え対応。
 // @author       sk powered by Claude & Gemini
 // @match        https://henry-app.jp/*
@@ -58,7 +58,7 @@
       background-color: #fff;
       border-radius: 8px;
       box-shadow: 0 4px 20px rgba(0,0,0,0.15);
-      z-index: 100000;
+      z-index: 1400;
       display: none;
       border: 1px solid #e5e7eb;
       font-family: 'Noto Sans JP', -apple-system, BlinkMacSystemFont, sans-serif;
@@ -122,13 +122,139 @@
       border-radius: 2px;
       font-size: 12px;
       line-height: 16px;
-      z-index: 1500;
+      z-index: 1400;
       pointer-events: none;
       visibility: hidden;
       white-space: nowrap;
     }
     #ht-tooltip.visible {
       visibility: visible;
+    }
+
+    /* スクリプト設定パネル */
+    #ht-settings-panel {
+      position: fixed;
+      width: 320px;
+      max-height: 70vh;
+      background-color: #fff;
+      border-radius: 8px;
+      box-shadow: 0 4px 20px rgba(0,0,0,0.2);
+      z-index: 1500;
+      display: none;
+      border: 1px solid #e5e7eb;
+      font-family: 'Noto Sans JP', -apple-system, BlinkMacSystemFont, sans-serif;
+      overflow: hidden;
+    }
+    #ht-settings-panel.visible {
+      display: block;
+    }
+    .ht-settings-header {
+      padding: 12px 16px;
+      border-bottom: 1px solid #e5e7eb;
+      font-weight: 500;
+      font-size: 14px;
+      color: #374151;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .ht-settings-close {
+      cursor: pointer;
+      color: #9CA3AF;
+      font-size: 18px;
+      line-height: 1;
+    }
+    .ht-settings-close:hover {
+      color: #374151;
+    }
+    .ht-settings-body {
+      padding: 8px 0;
+      max-height: calc(70vh - 100px);
+      overflow-y: auto;
+    }
+    .ht-settings-item {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 8px 16px;
+    }
+    .ht-settings-item:hover {
+      background: #f9fafb;
+    }
+    .ht-settings-item-name {
+      font-size: 13px;
+      color: #374151;
+    }
+    .ht-settings-item-name.disabled {
+      color: #9CA3AF;
+    }
+    .ht-settings-toggle {
+      position: relative;
+      width: 40px;
+      height: 22px;
+      background: #e5e7eb;
+      border-radius: 11px;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+    .ht-settings-toggle.active {
+      background: #10B981;
+    }
+    .ht-settings-toggle::after {
+      content: '';
+      position: absolute;
+      top: 2px;
+      left: 2px;
+      width: 18px;
+      height: 18px;
+      background: #fff;
+      border-radius: 50%;
+      transition: transform 0.2s;
+    }
+    .ht-settings-toggle.active::after {
+      transform: translateX(18px);
+    }
+    .ht-settings-footer {
+      padding: 12px 16px;
+      border-top: 1px solid #e5e7eb;
+      font-size: 13px;
+      text-align: center;
+    }
+    .ht-settings-reload {
+      color: #3B82F6;
+      cursor: pointer;
+    }
+    .ht-settings-reload:hover {
+      text-decoration: underline;
+    }
+    .ht-settings-reload.disabled {
+      color: #D1D5DB;
+      cursor: default;
+    }
+    .ht-settings-reload.disabled:hover {
+      text-decoration: none;
+    }
+    .ht-settings-divider {
+      border: none;
+      border-top: 1px solid #e5e7eb;
+      margin: 6px 0;
+    }
+    .ht-settings-btn {
+      display: flex;
+      align-items: center;
+      padding: 8px 12px;
+      cursor: pointer;
+      font-size: 13px;
+      color: #374151;
+      border-radius: 6px;
+      transition: background 0.1s;
+      margin: 0 6px;
+    }
+    .ht-settings-btn:hover {
+      background: #f3f4f6;
+    }
+    .ht-settings-btn svg {
+      margin-right: 8px;
     }
   `);
 
@@ -216,7 +342,7 @@
       empty.className = 'ht-empty';
       empty.textContent = 'ツール未登録';
       panel.appendChild(empty);
-      return;
+      // 設定ボタンは表示するので return しない
     }
 
     toolbox.items.forEach((item, index) => {
@@ -256,7 +382,164 @@
       row.appendChild(btn);
       panel.appendChild(row);
     });
+
+    // 区切り線 + スクリプト設定ボタン
+    if (toolbox.items.length > 0) {
+      const divider = document.createElement('hr');
+      divider.className = 'ht-settings-divider';
+      panel.appendChild(divider);
+    }
+
+    const settingsBtn = document.createElement('div');
+    settingsBtn.className = 'ht-settings-btn';
+    settingsBtn.innerHTML = `
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="12" cy="12" r="3"></circle>
+        <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+      </svg>
+      <span>スクリプト設定</span>
+    `;
+    settingsBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      openSettingsPanel();
+    });
+    panel.appendChild(settingsBtn);
   }
+
+  // ============================================
+  // 4.5. スクリプト設定パネル
+  // ============================================
+
+  let settingsPanel = null;
+  let settingsChanged = false;
+
+  function createSettingsPanel() {
+    settingsPanel = document.createElement('div');
+    settingsPanel.id = 'ht-settings-panel';
+    document.body.appendChild(settingsPanel);
+    return settingsPanel;
+  }
+
+  function buildSettingsPanel() {
+    if (!settingsPanel) createSettingsPanel();
+
+    const loaderConfig = unsafeWindow.HenryLoaderConfig;
+    if (!loaderConfig) {
+      settingsPanel.innerHTML = `
+        <div class="ht-settings-header">
+          <span>スクリプト設定</span>
+          <span class="ht-settings-close">&times;</span>
+        </div>
+        <div class="ht-settings-body">
+          <div style="padding: 16px; color: #9CA3AF; text-align: center;">
+            Loader未検出<br><small>Henry Loader経由で起動してください</small>
+          </div>
+        </div>
+      `;
+      settingsPanel.querySelector('.ht-settings-close').addEventListener('click', closeSettingsPanel);
+      return;
+    }
+
+    const scripts = loaderConfig.scripts || [];
+    const disabled = loaderConfig.disabledScripts || new Set();
+
+    let html = `
+      <div class="ht-settings-header">
+        <span>スクリプト設定</span>
+        <span class="ht-settings-close">&times;</span>
+      </div>
+      <div class="ht-settings-body">
+    `;
+
+    scripts.forEach(script => {
+      // henry_core と henry_toolbox は無効化不可（依存関係のため）
+      const isCore = script.name === 'henry_core' || script.name === 'henry_toolbox';
+      const isEnabled = !disabled.has(script.name);
+      const nameClass = isEnabled ? '' : 'disabled';
+      const toggleClass = isEnabled ? 'active' : '';
+
+      html += `
+        <div class="ht-settings-item" data-script="${script.name}">
+          <span class="ht-settings-item-name ${nameClass}">${script.label || script.name}</span>
+          ${isCore
+            ? '<span style="font-size: 11px; color: #9CA3AF;">必須</span>'
+            : `<div class="ht-settings-toggle ${toggleClass}" data-script="${script.name}"></div>`
+          }
+        </div>
+      `;
+    });
+
+    html += `
+      </div>
+      <div class="ht-settings-footer">
+        <span class="ht-settings-reload disabled">リロードして反映</span>
+      </div>
+    `;
+
+    settingsPanel.innerHTML = html;
+
+    // イベント設定
+    settingsPanel.querySelector('.ht-settings-close').addEventListener('click', closeSettingsPanel);
+    settingsPanel.querySelector('.ht-settings-reload').addEventListener('click', (e) => {
+      if (e.target.classList.contains('disabled')) return;
+      location.reload();
+    });
+
+    settingsPanel.querySelectorAll('.ht-settings-toggle').forEach(toggle => {
+      toggle.addEventListener('click', (e) => {
+        const scriptName = e.target.dataset.script;
+        const isActive = e.target.classList.contains('active');
+
+        // トグル切り替え
+        e.target.classList.toggle('active');
+        const nameEl = e.target.closest('.ht-settings-item').querySelector('.ht-settings-item-name');
+        nameEl.classList.toggle('disabled');
+
+        // 設定を保存
+        const currentDisabled = new Set(loaderConfig.disabledScripts);
+        if (isActive) {
+          currentDisabled.add(scriptName);
+        } else {
+          currentDisabled.delete(scriptName);
+        }
+        loaderConfig.setDisabledScripts(Array.from(currentDisabled));
+
+        // リロードボタンを有効化
+        settingsChanged = true;
+        const reloadBtn = settingsPanel.querySelector('.ht-settings-reload');
+        if (reloadBtn) reloadBtn.classList.remove('disabled');
+      });
+    });
+  }
+
+  function openSettingsPanel() {
+    if (!settingsPanel) createSettingsPanel();
+    settingsChanged = false;
+    buildSettingsPanel();
+
+    // パネル位置（画面中央）
+    settingsPanel.style.top = '50%';
+    settingsPanel.style.left = '50%';
+    settingsPanel.style.transform = 'translate(-50%, -50%)';
+    settingsPanel.classList.add('visible');
+
+    closePanel();  // メインパネルを閉じる
+  }
+
+  function closeSettingsPanel() {
+    if (settingsPanel) {
+      settingsPanel.classList.remove('visible');
+    }
+  }
+
+  // 設定パネル外クリックで閉じる
+  document.addEventListener('click', (e) => {
+    if (settingsPanel && settingsPanel.classList.contains('visible')) {
+      if (!settingsPanel.contains(e.target)) {
+        closeSettingsPanel();
+      }
+    }
+  });
 
   // ============================================
   // 5. ドラッグ＆ドロップ処理

@@ -1,6 +1,6 @@
-# Henry EMR 開発ガイドライン (Core Rules v4.25)
+# Henry EMR 開発ガイドライン (Core Rules v4.26)
 
-<!-- 📝 UPDATED: v4.25 - 確認後は返答を待つルール追加 -->
+<!-- 📝 UPDATED: v4.26 - 開発環境ローカルサーバー運用ルール追加 -->
 
 > このドキュメントはAIアシスタントとの協働開発における必須ルール集です。HenryCore APIの詳細は `henry_core.user.js` 冒頭のAPI目次と実装を参照。
 
@@ -444,12 +444,30 @@ GitHubから各スクリプトを動的に読み込む仕組み。Tampermonkey�
   - 確認後に返答を待たずに実装を始めない
   - 確認が不要な場合は、確認を求めずに直接作業を進める
 
+- **IMPORTANT**: 開発中はローカルサーバーからスクリプトを取得している（GitHubからではない）
+  - Henry Loaderがローカルサーバー（`http://localhost:8080`）から最新版を取得する設定になっている
+  - ローカルファイルを修正すれば、ページリロードでTampermonkey上にも即座に反映される
+  - developブランチへのプッシュはバックアップ目的（スクリプト更新とは無関係）
+  - mainブランチへのプッシュは本番リリース時のみ
+  - **「GitHubにプッシュしていないから更新されていない」という誤解をしないこと**
+
+- **YOU MUST**: z-indexは以下の階層ルールに従うこと（Henryログインモーダル=1600の下に配置）：
+  | 階層 | z-index | 用途 |
+  |------|---------|------|
+  | 最上位 | 1600 | Henry本体のログインモーダル（変更不可） |
+  | モーダル | 1500 | Tampermonkey製モーダル、ポップアップ、トースト |
+  | 常駐UI | 1400 | Tampermonkey製アイコン、ツールチップ、インジケーター |
+  - **理由**: セッションタイムアウト時のログインモーダルがスクリプトUIに隠れてしまう問題を防ぐ
+  - 予約システム（manage-maokahp.reserve.ne.jp）など Henry 以外のドメインはこのルール対象外
+
 ---
 
 ## 変更履歴
 
 | Version | Date | Changes |
 |---------|------|---------|
+| v4.27 | 2026-01-23 | z-index階層ルール追加（ログインモーダル対策） |
+| v4.26 | 2026-01-23 | 開発環境ローカルサーバー運用ルール追加 |
 | v4.25 | 2026-01-23 | 確認後は返答を待つルール追加 |
 | v4.24 | 2026-01-22 | エラーロガー廃止（henry_error_logger削除、MCP直接確認に移行） |
 | v4.23 | 2026-01-22 | GM_info.script.versionパターンルール追加（バージョン定数） |
@@ -500,7 +518,7 @@ GitHubから各スクリプトを動的に読み込む仕組み。Tampermonkey�
 - [ ] TASK-016: Henry本体の画面更新が行われない問題（他ユーザーの変更が反映されない等。原因特定が必要）
 - [x] TASK-017: 主治医意見書スクリプトのOAuthスコープ削減 → 対応不要と判断（組織内限定、リスク低） [2026-01-22]
 - [ ] TASK-018: 主治医意見書の下書きインポート/エクスポート機能（PC間でデータ移行可能に）
-- [ ] TASK-020: ログインモーダル表示時にスクリプトUIが上に出る問題（原因特定待ち） [2026-01-15]
+- [x] TASK-020: ログインモーダル表示時にスクリプトUIが上に出る問題 → z-index階層ルール導入で解決 [2026-01-23]
 - [ ] TASK-028: Miele-LXIV（DICOMビューア）GitHub版ビルド [2026-01-22]
   - 前提: Xcodeインストール（App Storeから）
   - 手順: brew install kconfig-frontend wget cmake → miele-lxiv-easy clone → build.sh
@@ -515,6 +533,7 @@ GitHubから各スクリプトを動的に読み込む仕組み。Tampermonkey�
   - UI表示ロジック（showToast等）のHenryCore統合検討
   - GM_xmlhttpRequestラッパーの拡張
 - [ ] TASK-031: henry_ikensho_form: localStorageのPII保存をGoogle DriveのappPropertiesへ移行 [2026-01-22]
+- [ ] TASK-032: henry_disease_register: 登録済み病名の編集機能 [2026-01-23]
 - [x] TASK-027: henry_disease_register Loader経由で初期化エラー → Loaderに@require対応追加で解決 [2026-01-22]
 - [x] TASK-021: MutationObserver最適化 完了 [2026-01-21]
   - ✅ henry_imaging_order_helper: OK（2段階監視 + cleaner）

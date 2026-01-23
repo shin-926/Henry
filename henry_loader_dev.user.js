@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry Loader (Dev)
 // @namespace    https://henry-app.jp/
-// @version      1.3.0
+// @version      1.4.0
 // @description  Henryスクリプトの動的ローダー（開発版）
 // @author       sk powered by Claude
 // @match        https://henry-app.jp/*
@@ -54,6 +54,19 @@
     MANIFEST_FILE: 'manifest.json',
     DEBUG: true  // 開発版はデバッグログ有効
   };
+
+  // ==========================================
+  // スクリプト有効/無効設定
+  // ==========================================
+  const DISABLED_SCRIPTS_KEY = 'loader-disabled-scripts';
+
+  function getDisabledScripts() {
+    return new Set(GM_getValue(DISABLED_SCRIPTS_KEY, []));
+  }
+
+  function setDisabledScripts(disabledSet) {
+    GM_setValue(DISABLED_SCRIPTS_KEY, Array.from(disabledSet));
+  }
 
   // ==========================================
   // GM_*関数をグローバルに公開
@@ -232,12 +245,32 @@ const unsafeWindow = window;
       log('マニフェストバージョン:', manifest.version);
       log('スクリプト数:', manifest.scripts.length);
 
-      // 現在のホストにマッチするスクリプトをフィルタ（enabled: falseは除外）
-      const targetScripts = manifest.scripts
+      // ユーザーの無効設定を取得
+      const disabledScripts = getDisabledScripts();
+      log('無効スクリプト:', Array.from(disabledScripts));
+
+      // 現在のホストにマッチするスクリプトをフィルタ
+      const matchingScripts = manifest.scripts
         .filter(s => matchesHost(s.match) && s.enabled !== false)
         .sort((a, b) => a.order - b.order);
 
+      // Toolbox用にmanifest情報を公開
+      pageWindow.HenryLoaderConfig = {
+        scripts: matchingScripts,
+        disabledScripts: disabledScripts,
+        setDisabledScripts: (names) => {
+          setDisabledScripts(new Set(names));
+          pageWindow.HenryLoaderConfig.disabledScripts = new Set(names);
+        }
+      };
+
+      // 無効スクリプトを除外
+      const targetScripts = matchingScripts.filter(s => !disabledScripts.has(s.name));
+
       log('読み込み対象:', targetScripts.map(s => s.name).join(', '));
+      if (disabledScripts.size > 0) {
+        log('スキップ:', matchingScripts.filter(s => disabledScripts.has(s.name)).map(s => s.name).join(', '));
+      }
 
       // 順番に読み込み
       // TODO: 現状は1つ失敗で全停止（依存関係を考慮した安全な設計）

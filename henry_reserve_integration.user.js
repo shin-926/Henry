@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         予約システム連携
 // @namespace    https://github.com/shin-926/Henry
-// @version      4.1.24
+// @version      4.1.25
 // @description  Henryカルテと予約システム間の双方向連携（再診予約・照射オーダー自動予約・自動印刷・患者プレビュー）
 // @author       sk powered by Claude & Gemini
 // @match        https://henry-app.jp/*
@@ -93,9 +93,9 @@
     PREVIEW_COUNT: 3,
     PLUGIN_ORDER: 30,
     DEFAULT_TIME: '09:00',
-    // z-index
-    Z_INDEX_OVERLAY: 100000,
-    Z_INDEX_POPUP: 100001,
+    // z-index (Henry ログインモーダル=1600 より下に配置)
+    Z_INDEX_OVERLAY: 1500,
+    Z_INDEX_POPUP: 1500,
     // 印刷
     PRINT_DELAY_MS: 500,
     PRINT_COOLDOWN_MS: 3000,
@@ -1940,7 +1940,7 @@ html, body { margin: 0; padding: 0; }
       if (!document.getElementById('henry-dialog-zindex-fix')) {
         const style = document.createElement('style');
         style.id = 'henry-dialog-zindex-fix';
-        style.textContent = '.ui-dialog { z-index: 10000 !important; }';
+        style.textContent = '.ui-dialog { z-index: 1500 !important; }';
         document.head.appendChild(style);
       }
     }

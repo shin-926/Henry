@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry セット展開検索ヘルパー
 // @namespace    https://henry-app.jp/
-// @version      2.3.6
+// @version      2.3.7
 // @description  セット展開画面の検索ボックス上にクイック検索ボタンを追加
 // @author       sk powered by Claude & Gemini
 // @match        https://henry-app.jp/*
@@ -219,7 +219,7 @@
       .hss-drag-ghost {
         position: fixed;
         pointer-events: none;
-        z-index: 10001;
+        z-index: 1400;
         padding: 4px 12px;
         font-size: 13px;
         border: 1px solid #2196f3;
@@ -287,7 +287,7 @@
         box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15);
         min-width: 200px;
         max-width: 280px;
-        z-index: 10000;
+        z-index: 1500;
         padding: 12px;
       }
       .hss-edit-popup-section {

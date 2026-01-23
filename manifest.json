@@ -1,9 +1,10 @@
 {
-  "version": "1.3.0",
+  "version": "1.4.1",
   "description": "Henryスクリプト動的ローダー用マニフェスト",
   "scripts": [
     {
       "name": "henry_core",
+      "label": "Henry Core（基盤）",
       "file": "henry_core.user.js",
       "match": ["henry-app.jp", "docs.google.com"],
       "order": 1,
@@ -11,6 +12,7 @@
     },
     {
       "name": "henry_toolbox",
+      "label": "ツールボックス",
       "file": "henry_toolbox.user.js",
       "match": ["henry-app.jp"],
       "order": 2,
@@ -18,6 +20,7 @@
     },
     {
       "name": "henry_google_drive_bridge",
+      "label": "Google Drive連携",
       "file": "henry_google_drive_bridge.user.js",
       "match": ["henry-app.jp", "docs.google.com"],
       "order": 10,
@@ -25,6 +28,7 @@
     },
     {
       "name": "henry_reserve_integration",
+      "label": "予約システム連携",
       "file": "henry_reserve_integration.user.js",
       "match": ["henry-app.jp", "manage-maokahp.reserve.ne.jp"],
       "order": 10,
@@ -32,6 +36,7 @@
     },
     {
       "name": "reserve_calendar_ui",
+      "label": "予約カレンダーUI",
       "file": "reserve_calendar_ui.user.js",
       "match": ["manage-maokahp.reserve.ne.jp"],
       "order": 10,
@@ -39,6 +44,7 @@
     },
     {
       "name": "henry_imaging_order_helper",
+      "label": "照射オーダー補助",
       "file": "henry_imaging_order_helper.user.js",
       "match": ["henry-app.jp"],
       "order": 10,
@@ -46,6 +52,7 @@
     },
     {
       "name": "henry_disease_register",
+      "label": "病名登録",
       "file": "henry_disease_register.user.js",
       "match": ["henry-app.jp"],
       "order": 10,
@@ -53,6 +60,7 @@
     },
     {
       "name": "henry_order_history",
+      "label": "オーダー履歴（ベータ版）",
       "file": "henry_order_history.user.js",
       "match": ["henry-app.jp"],
       "order": 10,
@@ -60,6 +68,7 @@
     },
     {
       "name": "henry_karte_history",
+      "label": "カルテ履歴（ベータ版）",
       "file": "henry_karte_history.user.js",
       "match": ["henry-app.jp"],
       "order": 10,
@@ -67,6 +76,7 @@
     },
     {
       "name": "henry_note_reader",
+      "label": "カルテ内容表示（ベータ版）",
       "file": "henry_note_reader.user.js",
       "match": ["henry-app.jp"],
       "order": 10,
@@ -74,6 +84,7 @@
     },
     {
       "name": "henry_ikensho_form",
+      "label": "主治医意見書",
       "file": "henry_ikensho_form.user.js",
       "match": ["henry-app.jp"],
       "order": 10,
@@ -81,6 +92,7 @@
     },
     {
       "name": "henry_auto_approver",
+      "label": "一括承認",
       "file": "henry_auto_approver.user.js",
       "match": ["henry-app.jp"],
       "order": 10,
@@ -88,6 +100,7 @@
     },
     {
       "name": "henry_login_helper",
+      "label": "ログイン補助",
       "file": "henry_login_helper.user.js",
       "match": ["henry-app.jp"],
       "order": 10,
@@ -95,6 +108,7 @@
     },
     {
       "name": "henry_set_search_helper",
+      "label": "セット検索",
       "file": "henry_set_search_helper.user.js",
       "match": ["henry-app.jp"],
       "order": 10,
@@ -102,6 +116,7 @@
     },
     {
       "name": "henry_reception_filter",
+      "label": "受付フィルタ",
       "file": "henry_reception_filter.user.js",
       "match": ["henry-app.jp"],
       "order": 10,
@@ -109,6 +124,7 @@
     },
     {
       "name": "henry_memo",
+      "label": "メモ帳",
       "file": "henry_memo.user.js",
       "match": ["henry-app.jp"],
       "order": 10,
@@ -116,6 +132,7 @@
     },
     {
       "name": "henry_hospitalization_data",
+      "label": "入院データ取得",
       "file": "henry_hospitalization_data.user.js",
       "match": ["henry-app.jp"],
       "order": 10,
@@ -123,6 +140,7 @@
     },
     {
       "name": "henry_test_helper",
+      "label": "テストヘルパー",
       "file": "henry_test_helper.user.js",
       "match": ["henry-app.jp"],
       "order": 10,

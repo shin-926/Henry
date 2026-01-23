@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         主治医意見書作成フォーム
 // @namespace    https://henry-app.jp/
-// @version      2.6.4
+// @version      2.6.5
 // @description  主治医意見書の入力フォームとGoogle Docs出力（GAS不要版・API直接呼び出し）
 // @author       sk powered by Claude & Gemini
 // @match        https://henry-app.jp/*
@@ -2989,7 +2989,7 @@
         position: fixed;
         background: #1e293b; color: white; padding: 12px 16px;
         border-radius: 8px; font-size: 11px; font-weight: normal;
-        z-index: 10000;
+        z-index: 1400;
         opacity: 0; visibility: hidden; transition: opacity 0.2s, visibility 0.2s;
         box-shadow: 0 4px 12px rgba(0,0,0,0.15);
         line-height: 1.5;
