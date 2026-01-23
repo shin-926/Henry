@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         ツールボックス
 // @namespace    https://haru-chan.example
-// @version      5.2.7
+// @version      5.2.8
 // @description  プラグイン方式。シンプルUI、Noto Sans JP、ドラッグ＆ドロップ並び替え対応。
 // @author       sk powered by Claude & Gemini
 // @match        https://henry-app.jp/*
@@ -451,7 +451,16 @@
       <div class="ht-settings-body">
     `;
 
-    scripts.forEach(script => {
+    // ベータ版を下に表示するためソート
+    const sortedScripts = [...scripts].sort((a, b) => {
+      const aIsBeta = (a.label || '').includes('ベータ版');
+      const bIsBeta = (b.label || '').includes('ベータ版');
+      if (aIsBeta && !bIsBeta) return 1;
+      if (!aIsBeta && bIsBeta) return -1;
+      return 0;
+    });
+
+    sortedScripts.forEach(script => {
       // henry_core と henry_toolbox は無効化不可（依存関係のため）
       const isCore = script.name === 'henry_core' || script.name === 'henry_toolbox';
       const isEnabled = !disabled.has(script.name);
