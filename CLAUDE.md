@@ -360,6 +360,18 @@ GitHubから各スクリプトを動的に読み込む仕組み。Tampermonkey�
 ページ読み込み → Loader起動 → manifest.json取得 → ホストにマッチするスクリプトをorder順に読み込み
 ```
 
+**スクリプト設定機能**:
+- Toolboxの「スクリプト設定」からスクリプトのON/OFFを切り替え可能
+- 設定は`GM_setValue('loader-disabled-scripts', [...])` に保存
+- 変更は次回ページ読み込み時に反映
+- `henry_core`と`henry_toolbox`は必須のため無効化不可
+
+**ベータ版スクリプト**:
+- manifest.jsonの`label`に「ベータ版」を含むスクリプトは設定パネル下部に表示
+- 配布用ローダー（henry_loader.user.js）では`DEFAULT_DISABLED`でデフォルト無効
+- 開発用ローダー（henry_loader_dev.user.js）ではすべて有効
+- 新規ベータ版追加時: manifest.jsonのlabelに「（ベータ版）」追加 + 配布用ローダーのDEFAULT_DISABLEDに追加
+
 ### スクリプト一覧
 
 | カテゴリ | ファイル名 | 説明 |
@@ -534,6 +546,8 @@ GitHubから各スクリプトを動的に読み込む仕組み。Tampermonkey�
   - GM_xmlhttpRequestラッパーの拡張
 - [ ] TASK-031: henry_ikensho_form: localStorageのPII保存をGoogle DriveのappPropertiesへ移行 [2026-01-22]
 - [ ] TASK-032: henry_disease_register: 登録済み病名の編集機能 [2026-01-23]
+- [ ] TASK-033: henry_hospitalization_data: パーシステッドクエリをフルクエリ方式に修正 [2026-01-23]
+  - LIST_CLINICAL_DOCUMENTS, LIST_REHABILITATION_DOCUMENTS, LIST_ORDERS の3クエリ
 - [x] TASK-027: henry_disease_register Loader経由で初期化エラー → Loaderに@require対応追加で解決 [2026-01-22]
 - [x] TASK-021: MutationObserver最適化 完了 [2026-01-21]
   - ✅ henry_imaging_order_helper: OK（2段階監視 + cleaner）

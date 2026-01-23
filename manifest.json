@@ -132,7 +132,7 @@
     },
     {
       "name": "henry_hospitalization_data",
-      "label": "入院データ取得",
+      "label": "入院データ取得（ベータ版）",
       "file": "henry_hospitalization_data.user.js",
       "match": ["henry-app.jp"],
       "order": 10,
@@ -140,7 +140,7 @@
     },
     {
       "name": "henry_test_helper",
-      "label": "テストヘルパー",
+      "label": "テストヘルパー（ベータ版）",
       "file": "henry_test_helper.user.js",
       "match": ["henry-app.jp"],
       "order": 10,

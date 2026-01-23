@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         予約システム連携
 // @namespace    https://github.com/shin-926/Henry
-// @version      4.1.25
+// @version      4.1.26
 // @description  Henryカルテと予約システム間の双方向連携（再診予約・照射オーダー自動予約・自動印刷・患者プレビュー）
 // @author       sk powered by Claude & Gemini
 // @match        https://henry-app.jp/*
@@ -268,6 +268,19 @@
           }
         }
       }
+    `,
+    GetEncounterDepartment: `
+      query GetEncounterDepartment($id: ID!) {
+        encounter(id: $id) {
+          basedOn {
+            ... on Session {
+              doctor {
+                departmentName
+              }
+            }
+          }
+        }
+      }
     `
   };
 
@@ -478,38 +491,17 @@
     },
 
     async getDepartmentName(encounterId) {
-      if (!encounterId || !this.originalFetch) return '';
-
-      if (!AuthCapture.hasAuth()) {
-        return '';
-      }
+      if (!encounterId) return '';
 
       try {
-        const response = await this.originalFetch(CONFIG.HENRY_GRAPHQL_V2, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            ...AuthCapture.getHeaders()
-          },
-          credentials: 'include',
-          body: JSON.stringify({
-            operationName: 'EncounterEditorQuery',
-            variables: { id: encounterId },
-            extensions: {
-              persistedQuery: {
-                version: 1,
-                sha256Hash: 'd0b915a8f1fc7508ebd07f1c47a1d804419b4f31668c66363c452c3e14dfe407'
-              }
-            }
-          })
-        });
-
-        if (!response.ok) {
-          throw new Error(`HTTP ${response.status}`);
+        const HenryCore = unsafeWindow.HenryCore;
+        if (!HenryCore) {
+          log.warn('HenryCoreが見つかりません');
+          return '';
         }
 
-        const json = await response.json();
-        return json.data?.encounter?.basedOn?.[0]?.doctor?.departmentName || '';
+        const result = await HenryCore.query(QUERIES.GetEncounterDepartment, { id: encounterId });
+        return result.data?.encounter?.basedOn?.[0]?.doctor?.departmentName || '';
       } catch (e) {
         log.error(`診療科取得エラー: ${e.message}`);
         return '';
