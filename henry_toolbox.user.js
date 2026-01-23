@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         ツールボックス
 // @namespace    https://haru-chan.example
-// @version      5.3.2
+// @version      5.3.3
 // @description  プラグイン方式。シンプルUI、Noto Sans JP、ドラッグ＆ドロップ並び替え対応。
 // @author       sk powered by Claude & Gemini
 // @match        https://henry-app.jp/*
@@ -438,7 +438,7 @@
     if (!loaderConfig) {
       settingsPanel.innerHTML = `
         <div class="ht-settings-header">
-          <span>設定</span>
+          <span>スクリプト ON/OFF</span>
           <span class="ht-settings-close">&times;</span>
         </div>
         <div class="ht-settings-body">
@@ -470,7 +470,7 @@
 
     let html = `
       <div class="ht-settings-header">
-        <span>設定</span>
+        <span>スクリプト ON/OFF</span>
         <span class="ht-settings-close">&times;</span>
       </div>
       <div class="ht-settings-body">
