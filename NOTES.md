@@ -887,28 +887,44 @@ Henry本体が文書テンプレートの開き方を変更した。
 
 **新しい流れ：**
 1. テンプレートから患者用文書を作成
-2. いきなりローカルにダウンロードされる
+2. いきなりローカルにダウンロードされる（`GeneratePatientDocumentDownloadTemporaryFile` API経由）
 
-### 影響
+### 実装内容（v2.4.0）
 
-henry_google_drive_bridgeは、フォルダ経由のダブルクリック操作をフックして、Google Docsでの編集を可能にしていた。新しい流れでは、このフックポイントがなくなる可能性がある。
+1. **Fetchインターセプト方式**を採用
+   - `GeneratePatientDocumentDownloadTemporaryFile` GraphQL APIをインターセプト
+   - レスポンスから `redirectUrl`（署名付きGCS URL）と `title` を取得
+   - レスポンスを `null` に改変してHenry本体のダウンロード処理を無効化
+   - Google Docsで開く処理を実行
 
-### 検討事項
+2. **レスポンス改変のポイント**
+   - `redirectUrl: ''` だけではHenryが新しいタブでカルテを開いてしまう
+   - `patientDocumentDownloadTemporaryFile: null` にすることでHenryの処理を完全に停止
 
-1. **新しいフックポイントの特定**
-   - 直接ダウンロードのトリガーとなるイベント/API呼び出しは何か？
-   - インターセプト可能か？
+```javascript
+// 改変したレスポンスを返す（データをnullにしてHenry本体の処理を無効化）
+const modifiedJson = {
+  ...json,
+  data: {
+    ...json.data,
+    patientDocumentDownloadTemporaryFile: null
+  }
+};
+```
 
-2. **方式の検討**
-   - 直接ダウンロードをインターセプトして、代わりにGoogle Docsで開く？
-   - ダウンロード後にGoogle Docsへのアップロード＆編集を促す？
-   - 別のUI（ボタン等）でGoogle Docs編集を提供する？
+### ダブルクリック方式との違い（調査結果）
 
-3. **調査項目**
-   - chrome-devtools-mcpで新しいテンプレート作成フローを観察
-   - どのタイミングでどのAPIが呼ばれるか確認
-   - ダウンロードのトリガーとなるDOM要素/イベントを特定
+**ダブルクリック方式**（既存のフォルダ内ファイル）:
+- `ListPatientFiles` のレスポンスから `redirectUrl` をキャッシュ
+- ダブルクリック時は**新規APIコールなし**（キャッシュ済みURLを使用）
+- DOMイベント（`dblclick`）をインターセプトして処理を横取り
+- **Fetchインターセプト化不可能**（インターセプトすべきAPIコールが存在しない）
+
+**テンプレート方式**（新規対応）:
+- テンプレート選択時に `GeneratePatientDocumentDownloadTemporaryFile` APIが呼ばれる
+- このAPIレスポンスをFetchインターセプトで改変可能
+- **Fetchインターセプト方式が適切**
 
 ### ステータス
 
-未着手 - 方式検討から開始
+✅ 完了（v2.4.0）- 2026-01-24

@@ -552,7 +552,7 @@ GitHubから各スクリプトを動的に読み込む仕組み。Tampermonkey�
   - 現状: document.bodyをsubtree:trueで監視（debounceで軽減）
   - 改善案: navの親要素など、より限定的なコンテナを監視対象にする
   - 注意: Henry本体のDOM構造の安定性に依存するため、堅牢性とのトレードオフ
-- [ ] TASK-035: henry_google_drive_bridge: テンプレート開き方変更対応 [2026-01-23]
+- [x] TASK-035: henry_google_drive_bridge: テンプレート開き方変更対応 → Fetchインターセプト方式でv2.4.0完了 [2026-01-24]
   - Henry本体が文書テンプレートの開き方を変更（フォルダ経由→直接ダウンロード）
   - 方式検討から必要（詳細はNOTES.md参照）
 - [ ] TASK-036: 新規スクリプト: リハビリオーダー簡略化 [2026-01-23]
