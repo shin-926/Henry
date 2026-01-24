@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry Disease Register
 // @namespace    https://henry-app.jp/
-// @version      3.16.0
+// @version      3.19.0
 // @description  高速病名検索・登録
 // @author       sk powered by Claude & Gemini
 // @match        https://henry-app.jp/*
@@ -202,6 +202,87 @@
     } catch (e) {
       console.error(`[${SCRIPT_NAME}]`, e.message);
       return null;
+    }
+  }
+
+  // ============================================
+  // リハビリオーダー履歴取得クエリ
+  // ============================================
+  const REHAB_HISTORY_QUERY = `
+    query ListSectionedOrdersInPatient($input: ListSectionedOrdersInPatientRequestInput!) {
+      listSectionedOrdersInPatient(input: $input) {
+        sections {
+          sectionDate { year month day }
+          orders {
+            uuid
+            orderType
+            order {
+              rehabilitationOrder {
+                uuid
+                detail {
+                  patientReceiptDisease {
+                    masterDisease {
+                      code
+                      name
+                    }
+                  }
+                  rehabilitationCalculationType {
+                    name
+                  }
+                }
+              }
+            }
+          }
+        }
+        nextPageToken
+      }
+    }
+  `;
+
+  async function fetchRehabHistory(patientUuid) {
+    try {
+      const today = new Date();
+      const result = await HenryCore.query(REHAB_HISTORY_QUERY, {
+        input: {
+          patientUuid,
+          searchDate: {
+            year: today.getFullYear(),
+            month: today.getMonth() + 1,
+            day: today.getDate()
+          },
+          filterOrderStatus: [],
+          filterOrderTypes: ["ORDER_TYPE_REHABILITATION"],
+          patientCareType: "PATIENT_CARE_TYPE_ANY",
+          pageSize: 50,
+          pageToken: ""
+        }
+      });
+
+      const sections = result.data?.listSectionedOrdersInPatient?.sections || [];
+      const history = [];
+
+      for (const section of sections) {
+        const { year, month, day } = section.sectionDate;
+        for (const order of section.orders) {
+          const rehabOrder = order.order?.rehabilitationOrder;
+          if (rehabOrder?.detail) {
+            const diseaseName = rehabOrder.detail.patientReceiptDisease?.masterDisease?.name;
+            const rehabType = rehabOrder.detail.rehabilitationCalculationType?.name;
+            if (diseaseName) {
+              history.push({
+                date: `${year}/${month}/${day}`,
+                diseaseName,
+                rehabType: rehabType || ''
+              });
+            }
+          }
+        }
+      }
+
+      return history;
+    } catch (e) {
+      console.error(`[${SCRIPT_NAME}]`, e.message);
+      return [];
     }
   }
 
@@ -876,6 +957,7 @@
       width: 750px;
       height: 95vh;
       max-height: 95vh;
+      transition: width 0.2s ease;
       overflow: hidden;
       display: flex;
       flex-direction: column;
@@ -908,12 +990,50 @@
       flex: 1;
       overflow: hidden;
     }
+    .dr-left-panels {
+      display: flex;
+      border-right: 1px solid #e0e0e0;
+    }
     .dr-left-panel {
-      width: 200px;
+      width: 180px;
       border-right: 1px solid #e0e0e0;
       display: flex;
       flex-direction: column;
       background: #fafafa;
+    }
+    .dr-left-panel.hidden {
+      display: none;
+    }
+    .dr-left-panel:last-child {
+      width: 200px;
+      border-right: none;
+    }
+    .dr-panel-toggle {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 20px;
+      height: 20px;
+      font-size: 14px;
+      background: #e3f2fd;
+      color: #1976d2;
+      border-radius: 4px;
+      cursor: pointer;
+      flex-shrink: 0;
+    }
+    .dr-panel-toggle:hover {
+      background: #bbdefb;
+    }
+    .dr-panel-toggle.hidden {
+      display: none;
+    }
+    .dr-left-panel-header {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .dr-left-panel-header-text {
+      flex: 1;
     }
     .dr-left-panel-header {
       padding: 12px;
@@ -956,6 +1076,34 @@
       text-align: center;
       color: #888;
       font-size: 12px;
+    }
+    .dr-rehab-match {
+      background: #fff8e1;
+      border-left: 3px solid #ffc107;
+    }
+    .dr-rehab-item {
+      padding: 8px 10px;
+      font-size: 12px;
+      border-bottom: 1px solid #eee;
+      color: #333;
+    }
+    .dr-rehab-item:last-child {
+      border-bottom: none;
+    }
+    .dr-rehab-name {
+      color: #333;
+      line-height: 1.3;
+    }
+    .dr-rehab-meta {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+      font-size: 10px;
+      color: #888;
+      margin-top: 2px;
+    }
+    .dr-rehab-type {
+      color: #1976d2;
     }
     .dr-right-panel {
       flex: 1;
@@ -1118,13 +1266,12 @@
       align-items: center;
     }
     .dr-date-input {
-      width: 60px;
-      height: 26px;
+      width: 140px;
+      height: 30px;
       padding: 0 8px;
       border: 1px solid #ccc;
       border-radius: 4px;
       font-size: 13px;
-      text-align: center;
       box-sizing: border-box;
     }
     .dr-select {
@@ -1439,7 +1586,10 @@
     }
     /* 編集ポップアップ */
     .dr-edit-popup {
-      position: absolute;
+      position: fixed;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
       background: white;
       border: 1px solid #ccc;
       border-radius: 8px;
@@ -1496,6 +1646,7 @@
       this.registeredDiseases = []; // 登録済み病名データ（編集用）
       this.lastVisitData = null; // 前回受診日データ（日付+カルテ内容）
       this.editPopup = null; // 編集ポップアップ
+      this.latestRehabDiseaseNames = new Set(); // 最新リハビリ病名（ハイライト用）
 
       this.render();
     }
@@ -1524,6 +1675,9 @@
 
       // 登録済み病名を取得・表示
       this.loadRegisteredDiseases();
+
+      // リハビリ履歴を取得・表示
+      this.loadRehabHistory();
 
       // 前回受診日を事前取得（ボタンテキスト・ツールチップ設定）
       this.loadLastVisitData();
@@ -1658,9 +1812,8 @@
           }
 
           if (dateObj) {
-            this.overlay.querySelector('#dr-start-year').value = dateObj.year;
-            this.overlay.querySelector('#dr-start-month').value = dateObj.month;
-            this.overlay.querySelector('#dr-start-day').value = dateObj.day;
+            const dateStr = `${dateObj.year}-${String(dateObj.month).padStart(2, '0')}-${String(dateObj.day).padStart(2, '0')}`;
+            this.overlay.querySelector('#dr-start-date').value = dateStr;
           }
 
           menu.classList.remove('open');
@@ -1705,6 +1858,52 @@
     hideTooltip() {
       const existing = document.getElementById('dr-karte-tooltip');
       if (existing) existing.remove();
+    }
+
+    async loadRehabHistory() {
+      const container = this.overlay.querySelector('#dr-rehab-history');
+      const history = await fetchRehabHistory(this.patientUuid);
+
+      if (history.length === 0) {
+        container.innerHTML = '<div class="dr-registered-empty">リハビリ病名履歴がありません</div>';
+        return;
+      }
+
+      // 最新（先頭）のリハビリ病名を保存（ハイライト用）
+      if (history.length > 0) {
+        this.latestRehabDiseaseNames = new Set([history[0].diseaseName]);
+        // 登録済み病名が既にロード済みならハイライトを更新
+        this.updateRehabHighlight();
+      }
+
+      container.innerHTML = history.map(item => {
+        // リハビリ区分を短縮表示
+        let shortType = item.rehabType || '';
+        shortType = shortType.replace('リハビリテーション', 'リハ');
+        return `<div class="dr-rehab-item">
+          <div class="dr-rehab-name">${item.diseaseName}</div>
+          <div class="dr-rehab-meta">
+            <span class="dr-rehab-type">${shortType}</span>
+            <span class="dr-rehab-date">${item.date}</span>
+          </div>
+        </div>`;
+      }).join('');
+    }
+
+    // 登録済み病名のリハビリ病名ハイライトを更新
+    updateRehabHighlight() {
+      if (!this.overlay) return;
+      const items = this.overlay.querySelectorAll('#dr-registered-diseases .dr-registered-item');
+      items.forEach(item => {
+        const nameEl = item.querySelector('.dr-registered-name');
+        if (!nameEl) return;
+        const name = nameEl.textContent;
+        if (this.latestRehabDiseaseNames.has(name)) {
+          item.classList.add('dr-rehab-match');
+        } else {
+          item.classList.remove('dr-rehab-match');
+        }
+      });
     }
 
     async loadRegisteredDiseases() {
@@ -1761,6 +1960,9 @@
             this.showEditPopup(e, this.registeredDiseases[index]);
           };
         });
+
+        // リハビリ病名ハイライトを更新
+        this.updateRehabHighlight();
       }
     }
 
@@ -1802,11 +2004,27 @@
             <span class="dr-close">&times;</span>
           </div>
           <div class="dr-content">
-            <!-- 左パネル: 登録済み病名 -->
-            <div class="dr-left-panel">
-              <div class="dr-left-panel-header">登録済み病名</div>
-              <div class="dr-left-panel-body" id="dr-registered-diseases">
-                <div class="dr-registered-empty">読み込み中...</div>
+            <!-- 左パネル群 -->
+            <div class="dr-left-panels">
+              <!-- リハビリ病名履歴（デフォルト非表示） -->
+              <div class="dr-left-panel hidden" id="dr-rehab-panel">
+                <div class="dr-left-panel-header">
+                  <span class="dr-left-panel-header-text">リハビリ病名履歴</span>
+                  <span class="dr-panel-toggle hidden" id="dr-rehab-close">&gt;</span>
+                </div>
+                <div class="dr-left-panel-body" id="dr-rehab-history">
+                  <div class="dr-registered-empty">読み込み中...</div>
+                </div>
+              </div>
+              <!-- 登録済み病名 -->
+              <div class="dr-left-panel">
+                <div class="dr-left-panel-header">
+                  <span class="dr-panel-toggle" id="dr-rehab-open">&lt;</span>
+                  <span class="dr-left-panel-header-text">登録済み病名</span>
+                </div>
+                <div class="dr-left-panel-body" id="dr-registered-diseases">
+                  <div class="dr-registered-empty">読み込み中...</div>
+                </div>
               </div>
             </div>
             <!-- 右パネル: 検索・登録 -->
@@ -1871,13 +2089,7 @@
                   </div>
                   <div class="dr-option" style="grid-column: 1 / -1;">
                     <label>開始日:</label>
-                    <div class="dr-date-inputs">
-                      <input type="text" class="dr-date-input" id="dr-start-year" value="${today.year}" maxlength="4">
-                      <span>/</span>
-                      <input type="text" class="dr-date-input" id="dr-start-month" value="${today.month}" maxlength="2">
-                      <span>/</span>
-                      <input type="text" class="dr-date-input" id="dr-start-day" value="${today.day}" maxlength="2">
-                    </div>
+                    <input type="date" class="dr-date-input" id="dr-start-date" value="${today.year}-${String(today.month).padStart(2, '0')}-${String(today.day).padStart(2, '0')}">
                     <div class="dr-custom-dropdown" id="dr-last-visit-dropdown">
                       <div class="dr-dropdown-toggle" id="dr-dropdown-toggle">読み込み中...</div>
                       <div class="dr-dropdown-menu" id="dr-dropdown-menu"></div>
@@ -1951,6 +2163,29 @@
 
       // 登録ボタン
       this.overlay.querySelector('#dr-register').onclick = () => this.register();
+
+      // リハビリパネル開閉
+      this.overlay.querySelector('#dr-rehab-open').onclick = () => this.toggleRehabPanel(true);
+      this.overlay.querySelector('#dr-rehab-close').onclick = () => this.toggleRehabPanel(false);
+    }
+
+    toggleRehabPanel(open) {
+      const panel = this.overlay.querySelector('#dr-rehab-panel');
+      const openBtn = this.overlay.querySelector('#dr-rehab-open');
+      const closeBtn = this.overlay.querySelector('#dr-rehab-close');
+      const modal = this.overlay.querySelector('.dr-modal');
+
+      if (open) {
+        panel.classList.remove('hidden');
+        openBtn.classList.add('hidden');
+        closeBtn.classList.remove('hidden');
+        modal.style.width = '930px';
+      } else {
+        panel.classList.add('hidden');
+        openBtn.classList.remove('hidden');
+        closeBtn.classList.add('hidden');
+        modal.style.width = '750px';
+      }
     }
 
     updateDiseaseList(query) {
@@ -2176,9 +2411,8 @@
     async register() {
       if (!this.selectedDisease) return;
 
-      const startYear = parseInt(this.overlay.querySelector('#dr-start-year').value);
-      const startMonth = parseInt(this.overlay.querySelector('#dr-start-month').value);
-      const startDay = parseInt(this.overlay.querySelector('#dr-start-day').value);
+      const dateValue = this.overlay.querySelector('#dr-start-date').value;
+      const [startYear, startMonth, startDay] = dateValue.split('-').map(v => parseInt(v));
       const isMain = this.overlay.querySelector('#dr-is-main').checked;
       const isSuspected = this.overlay.querySelector('#dr-is-suspected').checked;
       const outcomeValue = this.overlay.querySelector('#dr-outcome').value;
@@ -2307,13 +2541,7 @@
         <div class="dr-edit-popup-header">${displayName}</div>
         <div class="dr-edit-popup-row">
           <label>開始日:</label>
-          <div class="dr-date-inputs">
-            <input type="text" class="dr-date-input" id="dr-edit-start-year" value="${disease.startDate?.year || today.year}" maxlength="4">
-            <span>/</span>
-            <input type="text" class="dr-date-input" id="dr-edit-start-month" value="${disease.startDate?.month || today.month}" maxlength="2">
-            <span>/</span>
-            <input type="text" class="dr-date-input" id="dr-edit-start-day" value="${disease.startDate?.day || today.day}" maxlength="2">
-          </div>
+          <input type="date" class="dr-date-input" id="dr-edit-start-date" value="${disease.startDate?.year || today.year}-${String(disease.startDate?.month || today.month).padStart(2, '0')}-${String(disease.startDate?.day || today.day).padStart(2, '0')}">
         </div>
         <div class="dr-edit-popup-row">
           <label>転帰:</label>
@@ -2323,13 +2551,7 @@
         </div>
         <div class="dr-edit-popup-row" id="dr-edit-end-date-row" style="display: ${disease.outcome && disease.outcome !== 'CONTINUED' ? 'flex' : 'none'};">
           <label>終了日:</label>
-          <div class="dr-date-inputs">
-            <input type="text" class="dr-date-input" id="dr-edit-end-year" value="${disease.endDate?.year || today.year}" maxlength="4">
-            <span>/</span>
-            <input type="text" class="dr-date-input" id="dr-edit-end-month" value="${disease.endDate?.month || today.month}" maxlength="2">
-            <span>/</span>
-            <input type="text" class="dr-date-input" id="dr-edit-end-day" value="${disease.endDate?.day || today.day}" maxlength="2">
-          </div>
+          <input type="date" class="dr-date-input" id="dr-edit-end-date" value="${disease.endDate?.year || today.year}-${String(disease.endDate?.month || today.month).padStart(2, '0')}-${String(disease.endDate?.day || today.day).padStart(2, '0')}">
         </div>
         <div class="dr-edit-popup-row">
           <input type="checkbox" id="dr-edit-is-main" ${disease.isMain ? 'checked' : ''}>
@@ -2343,11 +2565,6 @@
         </div>
       `;
 
-      // 位置を設定
-      const rect = e.target.closest('.dr-registered-item').getBoundingClientRect();
-      popup.style.top = `${rect.bottom + 4}px`;
-      popup.style.left = `${rect.left}px`;
-
       document.body.appendChild(popup);
       this.editPopup = popup;
 
@@ -2358,10 +2575,9 @@
         if (outcome && outcome !== 'CONTINUED' && outcome !== '') {
           endDateRow.style.display = 'flex';
           // 終了日が空なら今日の日付を設定
-          if (!popup.querySelector('#dr-edit-end-year').value) {
-            popup.querySelector('#dr-edit-end-year').value = today.year;
-            popup.querySelector('#dr-edit-end-month').value = today.month;
-            popup.querySelector('#dr-edit-end-day').value = today.day;
+          const endDateInput = popup.querySelector('#dr-edit-end-date');
+          if (!endDateInput.value) {
+            endDateInput.value = `${today.year}-${String(today.month).padStart(2, '0')}-${String(today.day).padStart(2, '0')}`;
           }
         } else {
           endDateRow.style.display = 'none';
@@ -2399,9 +2615,8 @@
       const popup = this.editPopup;
       if (!popup) return;
 
-      const startYear = parseInt(popup.querySelector('#dr-edit-start-year').value);
-      const startMonth = parseInt(popup.querySelector('#dr-edit-start-month').value);
-      const startDay = parseInt(popup.querySelector('#dr-edit-start-day').value);
+      const startDateValue = popup.querySelector('#dr-edit-start-date').value;
+      const [startYear, startMonth, startDay] = startDateValue.split('-').map(v => parseInt(v));
       const outcomeValue = popup.querySelector('#dr-edit-outcome').value;
       const isMain = popup.querySelector('#dr-edit-is-main').checked;
       const isSuspected = popup.querySelector('#dr-edit-is-suspected').checked;
@@ -2409,9 +2624,8 @@
       // 終了日
       let endDateStr = 'null';
       if (outcomeValue && outcomeValue !== 'CONTINUED' && outcomeValue !== '') {
-        const endYear = parseInt(popup.querySelector('#dr-edit-end-year').value);
-        const endMonth = parseInt(popup.querySelector('#dr-edit-end-month').value);
-        const endDay = parseInt(popup.querySelector('#dr-edit-end-day').value);
+        const endDateValue = popup.querySelector('#dr-edit-end-date').value;
+        const [endYear, endMonth, endDay] = endDateValue.split('-').map(v => parseInt(v));
         endDateStr = `{ year: ${endYear}, month: ${endMonth}, day: ${endDay} }`;
       }
 
