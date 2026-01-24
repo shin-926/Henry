@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         ツールボックス
 // @namespace    https://haru-chan.example
-// @version      5.3.5
+// @version      5.4.0
 // @description  プラグイン方式。シンプルUI、Noto Sans JP、ドラッグ＆ドロップ並び替え対応。
 // @author       sk powered by Claude & Gemini
 // @match        https://henry-app.jp/*
@@ -446,12 +446,22 @@
     return settingsPanel;
   }
 
+  // 外部スクリプト定義（Henry以外のドメインで動作するスクリプト）
+  const EXTERNAL_SCRIPTS = [
+    { name: 'reserve_calendar_ui', label: '予約カレンダーUI' }
+  ];
+
   function buildSettingsPanel() {
     if (!settingsPanel) createSettingsPanel();
 
     const loaderConfig = unsafeWindow.HenryLoaderConfig;
+
+    // 外部スクリプトの無効化状態を取得（Loaderがなくても動作）
+    const externalDisabled = new Set(GM_getValue('loader-disabled-scripts', []));
+
     if (!loaderConfig) {
-      settingsPanel.innerHTML = `
+      // Loader未検出でも外部スクリプトの設定は可能
+      let html = `
         <div class="ht-settings-header">
           <span>スクリプト ON/OFF</span>
           <span class="ht-settings-close">&times;</span>
@@ -460,9 +470,54 @@
           <div style="padding: 16px; color: #9CA3AF; text-align: center;">
             Loader未検出<br><small>Henry Loader経由で起動してください</small>
           </div>
+          <hr class="ht-settings-divider">
+          <div style="padding: 8px 16px 4px; font-size: 11px; color: #9CA3AF; font-weight: 500;">外部スクリプト</div>
+      `;
+
+      EXTERNAL_SCRIPTS.forEach(script => {
+        const isEnabled = !externalDisabled.has(script.name);
+        const nameClass = isEnabled ? '' : 'disabled';
+        const toggleClass = isEnabled ? 'active' : '';
+
+        html += `
+          <div class="ht-settings-item" data-script="${script.name}" data-external="true">
+            <span class="ht-settings-item-name ${nameClass}">
+              ${script.label || script.name}
+            </span>
+            <div class="ht-settings-toggle ${toggleClass}" data-script="${script.name}" data-external="true"></div>
+          </div>
+        `;
+      });
+
+      html += `
+        </div>
+        <div class="ht-settings-footer">
+          <small style="color: #9CA3AF;">外部スクリプトは対象サイトで反映</small>
         </div>
       `;
+
+      settingsPanel.innerHTML = html;
       settingsPanel.querySelector('.ht-settings-close').addEventListener('click', closeSettingsPanel);
+
+      // 外部スクリプトのトグルイベント
+      settingsPanel.querySelectorAll('.ht-settings-toggle[data-external="true"]').forEach(toggle => {
+        toggle.addEventListener('click', (e) => {
+          const scriptName = e.target.dataset.script;
+          const isActive = e.target.classList.contains('active');
+
+          e.target.classList.toggle('active');
+          const nameEl = e.target.closest('.ht-settings-item').querySelector('.ht-settings-item-name');
+          nameEl.classList.toggle('disabled');
+
+          const currentDisabled = new Set(GM_getValue('loader-disabled-scripts', []));
+          if (isActive) {
+            currentDisabled.add(scriptName);
+          } else {
+            currentDisabled.delete(scriptName);
+          }
+          GM_setValue('loader-disabled-scripts', Array.from(currentDisabled));
+        });
+      });
       return;
     }
 
@@ -521,6 +576,27 @@
       `;
     });
 
+    // 外部スクリプトセクション
+    html += `
+      <hr class="ht-settings-divider">
+      <div style="padding: 8px 16px 4px; font-size: 11px; color: #9CA3AF; font-weight: 500;">外部スクリプト（他サイト）</div>
+    `;
+
+    EXTERNAL_SCRIPTS.forEach(script => {
+      const isEnabled = !externalDisabled.has(script.name);
+      const nameClass = isEnabled ? '' : 'disabled';
+      const toggleClass = isEnabled ? 'active' : '';
+
+      html += `
+        <div class="ht-settings-item" data-script="${script.name}" data-external="true">
+          <span class="ht-settings-item-name ${nameClass}">
+            ${script.label || script.name}
+          </span>
+          <div class="ht-settings-toggle ${toggleClass}" data-script="${script.name}" data-external="true"></div>
+        </div>
+      `;
+    });
+
     // 差分があれば「リロードして反映」を有効化
     const reloadClass = hasPendingChanges() ? '' : 'disabled';
     html += `
@@ -552,7 +628,8 @@
       location.reload();
     });
 
-    settingsPanel.querySelectorAll('.ht-settings-toggle').forEach(toggle => {
+    // Loaderスクリプトのトグル
+    settingsPanel.querySelectorAll('.ht-settings-toggle:not([data-external])').forEach(toggle => {
       toggle.addEventListener('click', (e) => {
         const scriptName = e.target.dataset.script;
         const isActive = e.target.classList.contains('active');
@@ -580,6 +657,27 @@
             reloadBtn.classList.add('disabled');
           }
         }
+      });
+    });
+
+    // 外部スクリプトのトグル
+    settingsPanel.querySelectorAll('.ht-settings-toggle[data-external="true"]').forEach(toggle => {
+      toggle.addEventListener('click', (e) => {
+        const scriptName = e.target.dataset.script;
+        const isActive = e.target.classList.contains('active');
+
+        e.target.classList.toggle('active');
+        const nameEl = e.target.closest('.ht-settings-item').querySelector('.ht-settings-item-name');
+        nameEl.classList.toggle('disabled');
+
+        // 外部スクリプトはGM storageを直接更新
+        const currentDisabled = new Set(GM_getValue('loader-disabled-scripts', []));
+        if (isActive) {
+          currentDisabled.add(scriptName);
+        } else {
+          currentDisabled.delete(scriptName);
+        }
+        GM_setValue('loader-disabled-scripts', Array.from(currentDisabled));
       });
     });
   }

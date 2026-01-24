@@ -1,11 +1,11 @@
 // ==UserScript==
 // @name         予約システム：カレンダーUIカスタム
 // @namespace    http://tampermonkey.net/
-// @version      2.48.5
+// @version      2.49.0
 // @description  カレンダー縦表示、週ジャンプなど
 // @author       sk powered by Claude & Gemini
 // @match        https://manage-maokahp.reserve.ne.jp/manage/calendar.php*
-// @grant        none
+// @grant        GM_getValue
 // @run-at       document-idle
 // @updateURL    https://raw.githubusercontent.com/shin-926/Henry/main/reserve_calendar_ui.user.js
 // @downloadURL  https://raw.githubusercontent.com/shin-926/Henry/main/reserve_calendar_ui.user.js
@@ -43,6 +43,13 @@
 
   const VERSION = GM_info.script.version;
   const SCRIPT_NAME = 'ReserveCalendarUI';
+
+  // 無効化チェック（Henry Toolboxの設定と連携）
+  const disabledScripts = GM_getValue('loader-disabled-scripts', []);
+  if (disabledScripts.includes('reserve_calendar_ui')) {
+    console.log(`[${SCRIPT_NAME}] Disabled by user setting (v${VERSION})`);
+    return;
+  }
 
     const CONFIG = {
         targetSelector: '#div_swipe_calendar',        // カレンダー要素のセレクタ
