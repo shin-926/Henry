@@ -19,6 +19,14 @@
       "enabled": true
     },
     {
+      "name": "henry_google_auth_settings",
+      "label": "Google認証設定",
+      "file": "henry_google_auth_settings.user.js",
+      "match": ["henry-app.jp"],
+      "order": 5,
+      "enabled": true
+    },
+    {
       "name": "henry_google_drive_bridge",
       "label": "Google Drive連携",
       "file": "henry_google_drive_bridge.user.js",

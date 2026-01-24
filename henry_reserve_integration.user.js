@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         予約システム連携
 // @namespace    https://github.com/shin-926/Henry
-// @version      4.2.0
+// @version      4.2.2
 // @description  Henryカルテと予約システム間の双方向連携（再診予約・照射オーダー自動予約・自動印刷・患者プレビュー）
 // @author       sk powered by Claude & Gemini
 // @match        https://henry-app.jp/*
@@ -364,7 +364,10 @@
       'LATERALITY_LEFT': '左',
       'LATERALITY_RIGHT': '右',
       'LATERALITY_BOTH': '両',
-      // LATERALITY_NONE は空欄（オリジナルに合わせる）
+      'UNILATERAL_LEFT': '左',
+      'UNILATERAL_RIGHT': '右',
+      'BILATERAL': '両',
+      // LATERALITY_NONE, UNILATERAL_UNSPECIFIED は空欄
     };
     return map[laterality] || '';
   };
@@ -836,8 +839,8 @@ html, body { margin: 0; padding: 0; }
         // CT/MRI: bodySite, laterality, note のみ
         { key: 'ct', arrayKey: 'series', includeAllFields: false },
         { key: 'mriAbove_1_5AndBelow_3Tesla', arrayKey: 'series', includeAllFields: false },
-        // MD（骨塩定量）: bodySites を使用、note は親から取得
-        { key: 'md', arrayKey: 'bodySites', includeAllFields: false, noteFromParent: true },
+        // MD（骨塩定量）: series を使用、全フィールド出力
+        { key: 'md', arrayKey: 'series', includeAllFields: true },
       ];
 
       for (const config of modalityConfigs) {
@@ -931,10 +934,10 @@ html, body { margin: 0; padding: 0; }
       return !!condition?.mriAbove_1_5AndBelow_3Tesla;
     },
 
-    // 単純撮影の場合のみ「方向」列が必要
+    // 単純撮影・MD（骨塩定量）の場合は「方向」列が必要
     _needsBodyPositionColumn(condition) {
       if (!condition) return false;
-      return !!(condition.plainRadiographyDigital || condition.plainRadiographyAnalog);
+      return !!(condition.plainRadiographyDigital || condition.plainRadiographyAnalog || condition.md);
     },
 
     _generateSafetyChecklist() {

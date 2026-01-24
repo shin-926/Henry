@@ -391,7 +391,8 @@ GitHubから各スクリプトを動的に読み込む仕組み。Tampermonkey�
 | | henry_set_search_helper.user.js | セット展開クイック検索 |
 | | henry_reception_filter.user.js | 外来受付フィルタ（未完了のみ） |
 | | henry_memo.user.js | メモ帳（タブ管理・保存） |
-| **Google連携** | henry_google_drive_bridge.user.js | Google Drive API直接連携 |
+| **Google連携** | henry_google_auth_settings.user.js | Google OAuth認証の設定・管理 |
+| | henry_google_drive_bridge.user.js | Google Drive API直接連携 |
 | | henry_ikensho_form.user.js | 主治医意見書作成フォーム |
 | **開発用** | henry_test_helper.user.js | テストデータ自動入力 |
 

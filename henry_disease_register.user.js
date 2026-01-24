@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry Disease Register
 // @namespace    https://henry-app.jp/
-// @version      3.15.7
+// @version      3.16.0
 // @description  高速病名検索・登録
 // @author       sk powered by Claude & Gemini
 // @match        https://henry-app.jp/*
@@ -212,18 +212,30 @@
     query ListPatientReceiptDiseases($input: ListPatientReceiptDiseasesRequestInput!) {
       listPatientReceiptDiseases(input: $input) {
         patientReceiptDiseases {
+          uuid
           startDate {
             year
             month
             day
           }
+          endDate {
+            year
+            month
+            day
+          }
           outcome
+          isMain
+          isSuspected
+          excludeReceipt
+          intractableDiseaseType
+          patientCareType
           masterDisease {
             name
             code
           }
           masterModifiers {
             name
+            code
             position
           }
           customDiseaseName {
@@ -1425,6 +1437,49 @@
     .dr-dropdown-item.disabled:hover {
       background: transparent;
     }
+    /* 編集ポップアップ */
+    .dr-edit-popup {
+      position: absolute;
+      background: white;
+      border: 1px solid #ccc;
+      border-radius: 8px;
+      box-shadow: 0 4px 16px rgba(0,0,0,0.2);
+      padding: 16px;
+      z-index: 1500;
+      min-width: 280px;
+    }
+    .dr-edit-popup-header {
+      font-weight: bold;
+      font-size: 14px;
+      margin-bottom: 12px;
+      padding-bottom: 8px;
+      border-bottom: 1px solid #eee;
+    }
+    .dr-edit-popup-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 10px;
+    }
+    .dr-edit-popup-row label {
+      font-size: 13px;
+      min-width: 60px;
+    }
+    .dr-edit-popup-footer {
+      display: flex;
+      justify-content: flex-end;
+      gap: 8px;
+      margin-top: 12px;
+      padding-top: 12px;
+      border-top: 1px solid #eee;
+    }
+    .dr-registered-item {
+      cursor: pointer;
+      transition: background-color 0.15s;
+    }
+    .dr-registered-item:hover {
+      background: #f0f4ff;
+    }
   `;
 
   // ============================================
@@ -1438,7 +1493,9 @@
       this.selectedCandidateIndex = null;
       this.overlay = null;
       this.registeredDiseaseNames = new Set(); // 登録済み病名（重複チェック用）
+      this.registeredDiseases = []; // 登録済み病名データ（編集用）
       this.lastVisitData = null; // 前回受診日データ（日付+カルテ内容）
+      this.editPopup = null; // 編集ポップアップ
 
       this.render();
     }
@@ -1654,6 +1711,9 @@
       const container = this.overlay.querySelector('#dr-registered-diseases');
       const diseases = await fetchRegisteredDiseases(this.patientUuid);
 
+      // 登録済み病名データを保持（編集用）
+      this.registeredDiseases = diseases;
+
       // 登録済み病名をSetに保存（重複チェック用）
       // 未コード化病名（code: 0000999）の場合は customDiseaseName を使用
       // 修飾語も含めた完全な病名で判定
@@ -1673,7 +1733,7 @@
       if (diseases.length === 0) {
         container.innerHTML = '<div class="dr-registered-empty">登録済みの病名はありません</div>';
       } else {
-        container.innerHTML = diseases.map(d => {
+        container.innerHTML = diseases.map((d, index) => {
           // 未コード化病名（code: 0000999）の場合は customDiseaseName を優先
           let baseName;
           if (d.masterDisease?.code === '0000999' && d.customDiseaseName?.value) {
@@ -1685,7 +1745,7 @@
           const name = this.applyModifiers(baseName, d.masterModifiers || []);
           const date = this.formatDate(d.startDate);
           const outcomeLabel = this.getOutcomeLabel(d.outcome);
-          return `<div class="dr-registered-item">
+          return `<div class="dr-registered-item" data-index="${index}">
             <div class="dr-registered-name">${name}</div>
             <div class="dr-registered-meta">
               ${date ? `<span class="dr-registered-date">${date}</span>` : ''}
@@ -1693,6 +1753,14 @@
             </div>
           </div>`;
         }).join('');
+
+        // クリックイベントを追加
+        container.querySelectorAll('.dr-registered-item').forEach(item => {
+          item.onclick = (e) => {
+            const index = parseInt(item.dataset.index);
+            this.showEditPopup(e, this.registeredDiseases[index]);
+          };
+        });
       }
     }
 
@@ -2213,7 +2281,221 @@
 
     close() {
       this.hideTooltip();
+      this.hideEditPopup();
       this.overlay.remove();
+    }
+
+    showEditPopup(e, disease) {
+      this.hideEditPopup();
+
+      // 病名表示名を構築
+      let baseName;
+      if (disease.masterDisease?.code === '0000999' && disease.customDiseaseName?.value) {
+        baseName = disease.customDiseaseName.value;
+      } else {
+        baseName = disease.masterDisease?.name || '（名称なし）';
+      }
+      const displayName = this.applyModifiers(baseName, disease.masterModifiers || []);
+
+      // 今日の日付
+      const today = getToday();
+
+      // ポップアップを作成
+      const popup = document.createElement('div');
+      popup.className = 'dr-edit-popup';
+      popup.innerHTML = `
+        <div class="dr-edit-popup-header">${displayName}</div>
+        <div class="dr-edit-popup-row">
+          <label>開始日:</label>
+          <div class="dr-date-inputs">
+            <input type="text" class="dr-date-input" id="dr-edit-start-year" value="${disease.startDate?.year || today.year}" maxlength="4">
+            <span>/</span>
+            <input type="text" class="dr-date-input" id="dr-edit-start-month" value="${disease.startDate?.month || today.month}" maxlength="2">
+            <span>/</span>
+            <input type="text" class="dr-date-input" id="dr-edit-start-day" value="${disease.startDate?.day || today.day}" maxlength="2">
+          </div>
+        </div>
+        <div class="dr-edit-popup-row">
+          <label>転帰:</label>
+          <select class="dr-select" id="dr-edit-outcome">
+            ${OUTCOMES.map(o => `<option value="${o.value}" ${disease.outcome === (o.value || 'CONTINUED') ? 'selected' : ''}>${o.label}</option>`).join('')}
+          </select>
+        </div>
+        <div class="dr-edit-popup-row" id="dr-edit-end-date-row" style="display: ${disease.outcome && disease.outcome !== 'CONTINUED' ? 'flex' : 'none'};">
+          <label>終了日:</label>
+          <div class="dr-date-inputs">
+            <input type="text" class="dr-date-input" id="dr-edit-end-year" value="${disease.endDate?.year || today.year}" maxlength="4">
+            <span>/</span>
+            <input type="text" class="dr-date-input" id="dr-edit-end-month" value="${disease.endDate?.month || today.month}" maxlength="2">
+            <span>/</span>
+            <input type="text" class="dr-date-input" id="dr-edit-end-day" value="${disease.endDate?.day || today.day}" maxlength="2">
+          </div>
+        </div>
+        <div class="dr-edit-popup-row">
+          <input type="checkbox" id="dr-edit-is-main" ${disease.isMain ? 'checked' : ''}>
+          <label for="dr-edit-is-main">主病名</label>
+          <input type="checkbox" id="dr-edit-is-suspected" ${disease.isSuspected ? 'checked' : ''} style="margin-left: 16px;">
+          <label for="dr-edit-is-suspected">疑い</label>
+        </div>
+        <div class="dr-edit-popup-footer">
+          <button class="dr-btn dr-btn-secondary" id="dr-edit-cancel">キャンセル</button>
+          <button class="dr-btn dr-btn-primary" id="dr-edit-save">保存</button>
+        </div>
+      `;
+
+      // 位置を設定
+      const rect = e.target.closest('.dr-registered-item').getBoundingClientRect();
+      popup.style.top = `${rect.bottom + 4}px`;
+      popup.style.left = `${rect.left}px`;
+
+      document.body.appendChild(popup);
+      this.editPopup = popup;
+
+      // 転帰変更時に終了日を表示/非表示
+      popup.querySelector('#dr-edit-outcome').onchange = (ev) => {
+        const outcome = ev.target.value;
+        const endDateRow = popup.querySelector('#dr-edit-end-date-row');
+        if (outcome && outcome !== 'CONTINUED' && outcome !== '') {
+          endDateRow.style.display = 'flex';
+          // 終了日が空なら今日の日付を設定
+          if (!popup.querySelector('#dr-edit-end-year').value) {
+            popup.querySelector('#dr-edit-end-year').value = today.year;
+            popup.querySelector('#dr-edit-end-month').value = today.month;
+            popup.querySelector('#dr-edit-end-day').value = today.day;
+          }
+        } else {
+          endDateRow.style.display = 'none';
+        }
+      };
+
+      // キャンセル
+      popup.querySelector('#dr-edit-cancel').onclick = () => this.hideEditPopup();
+
+      // 保存
+      popup.querySelector('#dr-edit-save').onclick = () => this.updateDisease(disease);
+
+      // 外部クリックで閉じる
+      setTimeout(() => {
+        document.addEventListener('click', this.handleOutsideClick = (ev) => {
+          if (!popup.contains(ev.target) && !ev.target.closest('.dr-registered-item')) {
+            this.hideEditPopup();
+          }
+        });
+      }, 0);
+    }
+
+    hideEditPopup() {
+      if (this.editPopup) {
+        this.editPopup.remove();
+        this.editPopup = null;
+      }
+      if (this.handleOutsideClick) {
+        document.removeEventListener('click', this.handleOutsideClick);
+        this.handleOutsideClick = null;
+      }
+    }
+
+    async updateDisease(disease) {
+      const popup = this.editPopup;
+      if (!popup) return;
+
+      const startYear = parseInt(popup.querySelector('#dr-edit-start-year').value);
+      const startMonth = parseInt(popup.querySelector('#dr-edit-start-month').value);
+      const startDay = parseInt(popup.querySelector('#dr-edit-start-day').value);
+      const outcomeValue = popup.querySelector('#dr-edit-outcome').value;
+      const isMain = popup.querySelector('#dr-edit-is-main').checked;
+      const isSuspected = popup.querySelector('#dr-edit-is-suspected').checked;
+
+      // 終了日
+      let endDateStr = 'null';
+      if (outcomeValue && outcomeValue !== 'CONTINUED' && outcomeValue !== '') {
+        const endYear = parseInt(popup.querySelector('#dr-edit-end-year').value);
+        const endMonth = parseInt(popup.querySelector('#dr-edit-end-month').value);
+        const endDay = parseInt(popup.querySelector('#dr-edit-end-day').value);
+        endDateStr = `{ year: ${endYear}, month: ${endMonth}, day: ${endDay} }`;
+      }
+
+      // outcomeは必須、未選択の場合は CONTINUED
+      const outcome = outcomeValue || 'CONTINUED';
+
+      // 修飾語コード
+      const modifierCodes = (disease.masterModifiers || []).map(m => `"${m.code}"`).join(', ');
+
+      // カスタム病名
+      const customDiseaseNameStr = disease.customDiseaseName?.value
+        ? `"${disease.customDiseaseName.value}"`
+        : 'null';
+
+      const MUTATION = `
+        mutation {
+          updateMultiPatientReceiptDiseases(input: {
+            records: [{
+              recordOperation: RECORD_OPERATION_UPDATE,
+              patientReceiptDisease: {
+                patientUuid: "${this.patientUuid}",
+                uuid: "${disease.uuid}",
+                masterDiseaseCode: "${disease.masterDisease?.code || ''}",
+                isMain: ${isMain},
+                isSuspected: ${isSuspected},
+                excludeReceipt: ${disease.excludeReceipt || false},
+                masterModifierCodes: [${modifierCodes}],
+                startDate: { year: ${startYear}, month: ${startMonth}, day: ${startDay} },
+                outcome: ${outcome},
+                endDate: ${endDateStr},
+                customDiseaseName: ${customDiseaseNameStr},
+                intractableDiseaseType: ${disease.intractableDiseaseType || 'NOT_APPLICABLE'},
+                patientCareType: ${disease.patientCareType || 'PATIENT_CARE_TYPE_ANY'}
+              },
+              fieldMask: {
+                paths: [
+                  "master_disease_code",
+                  "is_main",
+                  "is_suspected",
+                  "exclude_receipt",
+                  "master_modifier_codes",
+                  "start_date",
+                  "end_date",
+                  "outcome",
+                  "custom_disease_name",
+                  "intractable_disease_type",
+                  "patient_care_type"
+                ]
+              }
+            }]
+          }) {
+            patientReceiptDiseases {
+              uuid
+            }
+          }
+        }
+      `;
+
+      const saveBtn = popup.querySelector('#dr-edit-save');
+      saveBtn.disabled = true;
+      saveBtn.textContent = '保存中...';
+
+      try {
+        const result = await HenryCore.query(MUTATION);
+
+        if (result.data?.updateMultiPatientReceiptDiseases) {
+          console.log(`[${SCRIPT_NAME}] 病名更新完了`);
+          this.hideEditPopup();
+          this.showSuccessMessage('更新しました');
+          this.loadRegisteredDiseases();
+
+          // 画面更新（Apollo Client refetch）
+          if (window.__APOLLO_CLIENT__) {
+            window.__APOLLO_CLIENT__.refetchQueries({ include: 'active' });
+          }
+        } else {
+          throw new Error('更新に失敗しました');
+        }
+      } catch (e) {
+        console.error(`[${SCRIPT_NAME}]`, e);
+        alert('更新に失敗しました: ' + e.message);
+        saveBtn.disabled = false;
+        saveBtn.textContent = '保存';
+      }
     }
   }
 
