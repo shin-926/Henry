@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry Core
 // @namespace    https://henry-app.jp/
-// @version      2.12.2
+// @version      2.13.0
 // @description  Henry スクリプト実行基盤 (GoogleAuth統合 / Google Docs対応)
 // @author       sk powered by Claude & Gemini
 // @match        https://henry-app.jp/*
@@ -1076,6 +1076,27 @@
       UI.init();
       checkForAuthCode();
     }
+
+    // クロスタブ通信: Google Docs側からのOAuthトークンリクエストを監視
+    GM_addValueChangeListener('drive_direct_oauth_request', (name, oldVal, newVal, remote) => {
+      if (!remote || !newVal?.requestId) return;
+
+      const tokens = GoogleAuth.getTokens();
+      const credentials = {
+        clientId: CONFIG.GOOGLE_CLIENT_ID,
+        clientSecret: CONFIG.GOOGLE_CLIENT_SECRET
+      };
+
+      // トークンと認証情報を返信
+      GM_setValue('drive_direct_oauth_response', {
+        requestId: newVal.requestId,
+        tokens: tokens,
+        credentials: GoogleAuth.isConfigured() ? credentials : null
+      });
+
+      console.log('[Henry Core] クロスタブ: OAuthトークンリクエストに応答');
+    });
+
     console.log(`[Henry Core] Ready v${VERSION} (Henry mode)`);
 
   } else if (isGoogleDocs) {

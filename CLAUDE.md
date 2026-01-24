@@ -1,6 +1,6 @@
-# Henry EMR 開発ガイドライン (Core Rules v4.26)
+# Henry EMR 開発ガイドライン (Core Rules v4.29)
 
-<!-- 📝 UPDATED: v4.26 - 開発環境ローカルサーバー運用ルール追加 -->
+<!-- 📝 UPDATED: v4.29 - Google Docs用ローダー（2ローダー構成）追加 -->
 
 > このドキュメントはAIアシスタントとの協働開発における必須ルール集です。HenryCore APIの詳細は `henry_core.user.js` 冒頭のAPI目次と実装を参照。
 
@@ -342,22 +342,39 @@ chrome-devtools-mcpでリアルタイム調査。静的リファレンスは廃�
 
 ### 動的スクリプトローダー (Henry Loader)
 
-GitHubから各スクリプトを動的に読み込む仕組み。Tampermonkeyに**ローダー1つだけ**をインストールすれば全スクリプトが使える。
+GitHubから各スクリプトを動的に読み込む仕組み。
 
-| ファイル | 用途 | 参照ブランチ |
-|---------|------|-------------|
-| henry_loader.user.js | 本番用 | main |
-| henry_loader_dev.user.js | 開発用（デバッグログ有効） | develop |
-| manifest.json | スクリプト定義（読み込み順序・対象ホスト） | - |
+| ファイル | 用途 | 対象ドメイン | 読み込み方式 |
+|---------|------|-------------|-------------|
+| henry_loader.user.js | 本番用 | Henry, 予約システム | 動的（manifest.json） |
+| henry_loader_dev.user.js | 開発用 | Henry, 予約システム | 動的（ローカルサーバー） |
+| henry_loader_docs.user.js | Google Docs用 | docs.google.com | @require（GitHub main） |
+| manifest.json | スクリプト定義 | - | - |
+
+**2ローダー構成の理由**:
+- Google DocsはCSP（Content Security Policy）が厳しく、動的スクリプト実行がブロックされる
+- `@require`方式ならTampermonkeyがCSPをバイパスして読み込める
+- 開発環境では以下の2つをTampermonkeyにインストール：
+  - henry_loader_dev.user.js（Henry/予約用 - ローカルサーバー）
+  - henry_loader_docs.user.js（Google Docs用 - GitHub main）
+
+**Google Docs開発時の注意**:
+- henry_core / henry_google_drive_bridge を修正した場合、Google Docs側に反映するには GitHub へ push が必要
+- Henry側はローカルサーバーから即時反映される
 
 **メリット**:
 - 毎回GitHubから最新版を取得（Tampermonkey更新問題を回避）
-- 新規ユーザーはローダー1つで全スクリプト利用可能
+- 新規ユーザーはローダー1つで全スクリプト利用可能（配布用）
 - 既存の個別インストール方式と並行運用可能
 
-**動作フロー**:
+**動作フロー（Henry/予約）**:
 ```
 ページ読み込み → Loader起動 → manifest.json取得 → ホストにマッチするスクリプトをorder順に読み込み
+```
+
+**動作フロー（Google Docs）**:
+```
+ページ読み込み → Loader起動 → @requireで事前読み込み済みのhenry_core/henry_google_drive_bridgeが実行
 ```
 
 **スクリプト設定機能**:
@@ -486,6 +503,7 @@ GitHubから各スクリプトを動的に読み込む仕組み。Tampermonkey�
 
 | Version | Date | Changes |
 |---------|------|---------|
+| v4.29 | 2026-01-24 | Google Docs用ローダー追加（2ローダー構成、CSP対策） |
 | v4.28 | 2026-01-24 | HTML/CSS再現時の手順ルール追加 |
 | v4.27 | 2026-01-23 | z-index階層ルール追加（ログインモーダル対策） |
 | v4.26 | 2026-01-23 | 開発環境ローカルサーバー運用ルール追加 |

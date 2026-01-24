@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Google Drive連携
 // @namespace    https://henry-app.jp/
-// @version      2.4.0
+// @version      2.5.0
 // @description  HenryのファイルをGoogle Drive APIで直接変換・編集。GAS不要版。
 // @author       sk powered by Claude & Gemini
 // @match        https://henry-app.jp/*
@@ -1068,6 +1068,95 @@
       });
     }
 
+    // OAuthトークンをクロスタブ通信で取得
+    let cachedOAuthData = null;
+
+    async function requestOAuthTokens(timeout = 3000) {
+      // 既にキャッシュがあればそれを返す
+      if (cachedOAuthData?.tokens?.refresh_token) {
+        return cachedOAuthData;
+      }
+
+      return new Promise((resolve) => {
+        const requestId = Date.now() + Math.random();
+        let resolved = false;
+
+        const listenerId = GM_addValueChangeListener('drive_direct_oauth_response', (name, oldVal, newVal, remote) => {
+          if (resolved) return;
+          if (remote && newVal?.requestId === requestId) {
+            resolved = true;
+            GM_removeValueChangeListener(listenerId);
+            cachedOAuthData = newVal;
+            debugLog('Docs', 'OAuthトークンをクロスタブで取得成功');
+            resolve(newVal);
+          }
+        });
+
+        setTimeout(() => {
+          if (resolved) return;
+          resolved = true;
+          GM_removeValueChangeListener(listenerId);
+          debugLog('Docs', 'OAuthトークン取得タイムアウト');
+          resolve(null);
+        }, timeout);
+
+        GM_setValue('drive_direct_oauth_request', { requestId });
+        debugLog('Docs', 'OAuthトークンをリクエスト中...');
+      });
+    }
+
+    // OAuthトークンでAPIリクエスト（クロスタブ取得版）
+    async function getValidAccessTokenCrossTab() {
+      const oauthData = await requestOAuthTokens();
+      if (!oauthData?.tokens?.refresh_token || !oauthData?.credentials) {
+        throw new Error('OAuthトークンを取得できません。Henryタブを開いてGoogle認証を行ってください。');
+      }
+
+      const tokens = oauthData.tokens;
+      const creds = oauthData.credentials;
+
+      // アクセストークンが有効ならそのまま返す
+      if (tokens.access_token && Date.now() < tokens.expires_at) {
+        return tokens.access_token;
+      }
+
+      // リフレッシュが必要
+      debugLog('Docs', 'アクセストークンをリフレッシュ中...');
+      return new Promise((resolve, reject) => {
+        GM_xmlhttpRequest({
+          method: 'POST',
+          url: 'https://oauth2.googleapis.com/token',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          data: new URLSearchParams({
+            client_id: creds.clientId,
+            client_secret: creds.clientSecret,
+            refresh_token: tokens.refresh_token,
+            grant_type: 'refresh_token'
+          }).toString(),
+          onload: (response) => {
+            if (response.status === 200) {
+              const data = JSON.parse(response.responseText);
+              // キャッシュを更新
+              cachedOAuthData.tokens = {
+                access_token: data.access_token,
+                refresh_token: tokens.refresh_token,
+                expires_at: Date.now() + (data.expires_in * 1000) - 60000
+              };
+              debugLog('Docs', 'アクセストークンリフレッシュ成功');
+              resolve(data.access_token);
+            } else {
+              debugError('Docs', 'リフレッシュ失敗:', response.responseText);
+              reject(new Error('トークンリフレッシュに失敗しました'));
+            }
+          },
+          onerror: (err) => {
+            debugError('Docs', 'リフレッシュエラー:', err);
+            reject(new Error('トークンリフレッシュ通信エラー'));
+          }
+        });
+      });
+    }
+
     // Henryへリフレッシュ要求
     function notifyHenryToRefresh(patientId) {
       GM_setValue('drive_direct_refresh_request', {
@@ -1233,7 +1322,7 @@
       try {
         const docId = window.location.pathname.split('/')[3];
         if (docId) {
-          await DriveAPI.deleteFile(docId);
+          await deleteFileCrossTab(docId);
           debugLog('Docs', 'ファイル削除完了');
         }
 
@@ -1288,32 +1377,22 @@
       btn.appendChild(textSpan);
 
       try {
-        // 認証設定チェック
-        if (!getGoogleAuth()?.isConfigured()) {
-          alert('OAuth設定が必要です。設定ダイアログを開きます。');
-          getGoogleAuth()?.showConfigDialog();
-          return;
-        }
-
-        // Google Drive認証チェック
-        if (!getGoogleAuth()?.isAuthenticated()) {
-          // 自動で認証を開始
-          const auth = getGoogleAuth();
-          if (auth?.startAuth) {
-            alert('Google認証が必要です。認証画面を開きます。');
-            auth.startAuth();
-          } else {
-            alert('Google認証モジュールが見つかりません。Henryタブで認証してください。');
+        // OAuth認証チェック（ローカル → クロスタブの順でフォールバック）
+        let useLocalAuth = getGoogleAuth()?.isAuthenticated();
+        if (!useLocalAuth) {
+          const oauthData = await requestOAuthTokens();
+          if (!oauthData?.tokens?.refresh_token) {
+            alert('Google認証が必要です。Henryタブを開いてGoogle認証を行ってください。');
+            return;
           }
-          return;
         }
 
         // ドキュメントID取得
         const docId = window.location.pathname.split('/')[3];
         if (!docId) throw new Error('ドキュメントIDが取得できません');
 
-        // メタデータ取得
-        const metadata = await DriveAPI.getFileMetadata(docId, 'id,name,properties');
+        // メタデータ取得（クロスタブ版）
+        const metadata = await getFileMetadataCrossTab(docId, 'id,name,properties');
         const props = metadata.properties || {};
 
         if (!props.henryPatientUuid) {
@@ -1332,8 +1411,8 @@
         const mimeInfo = isSpreadsheet ? MIME_TYPES.xlsx : MIME_TYPES.docx;
         const fileName = metadata.name;
 
-        // エクスポート
-        const fileBuffer = await DriveAPI.exportFile(docId, mimeInfo.source);
+        // エクスポート（クロスタブ版）
+        const fileBuffer = await exportFileCrossTab(docId, mimeInfo.source);
         const blob = new Blob([fileBuffer], { type: mimeInfo.source });
 
         // 保存先フォルダを決定
@@ -1392,10 +1471,10 @@
 
         const newFileUuid = createResult?.createPatientFile?.uuid;
 
-        // メタデータ更新
+        // メタデータ更新（クロスタブ版）
         if (newFileUuid) {
           debugLog('Docs', 'メタデータ更新中...');
-          await DriveAPI.updateFileProperties(docId, {
+          await updateFilePropertiesCrossTab(docId, {
             ...props,
             henryFileUuid: newFileUuid,
             henryFolderUuid: targetFolderUuid || ''
@@ -1407,7 +1486,7 @@
 
         // Google Driveのファイルを削除
         try {
-          await DriveAPI.deleteFile(docId);
+          await deleteFileCrossTab(docId);
           debugLog('Docs', 'Google Driveファイル削除完了');
         } catch (e) {
           debugLog('Docs', 'Google Driveファイル削除スキップ:', e.message);
@@ -1437,10 +1516,16 @@
     async function checkAndCreateButton() {
       if (document.getElementById('drive-direct-save-container')) return;
 
-      // OAuth認証チェック
-      if (!getGoogleAuth()?.isAuthenticated()) {
-        debugLog('Docs', 'OAuth未認証のためボタン非表示');
-        return;
+      // OAuth認証チェック（ローカル → クロスタブの順でフォールバック）
+      let useLocalAuth = getGoogleAuth()?.isAuthenticated();
+      if (!useLocalAuth) {
+        // クロスタブ通信でOAuthトークンを取得してみる
+        const oauthData = await requestOAuthTokens();
+        if (!oauthData?.tokens?.refresh_token) {
+          debugLog('Docs', 'OAuth未認証（ローカル・クロスタブ両方）のためボタン非表示');
+          return;
+        }
+        debugLog('Docs', 'クロスタブ経由でOAuth認証確認OK');
       }
 
       // ドキュメントID取得
@@ -1448,8 +1533,8 @@
       if (!docId) return;
 
       try {
-        // メタデータ取得
-        const metadata = await DriveAPI.getFileMetadata(docId, 'id,name,properties');
+        // メタデータ取得（クロスタブ版のアクセストークンを使用）
+        const metadata = await getFileMetadataCrossTab(docId, 'id,name,properties');
         const props = metadata.properties || {};
 
         // henryPatientUuidがない場合はボタンを表示しない
@@ -1463,6 +1548,91 @@
       } catch (e) {
         debugLog('Docs', 'メタデータ取得失敗:', e.message);
       }
+    }
+
+    // クロスタブ版のファイルメタデータ取得
+    async function getFileMetadataCrossTab(fileId, fields) {
+      const accessToken = await getValidAccessTokenCrossTab();
+      return new Promise((resolve, reject) => {
+        GM_xmlhttpRequest({
+          method: 'GET',
+          url: `https://www.googleapis.com/drive/v3/files/${fileId}?fields=${encodeURIComponent(fields)}`,
+          headers: { 'Authorization': `Bearer ${accessToken}` },
+          onload: (response) => {
+            if (response.status >= 200 && response.status < 300) {
+              resolve(JSON.parse(response.responseText));
+            } else {
+              reject(new Error(`API Error: ${response.status}`));
+            }
+          },
+          onerror: (err) => reject(new Error('API通信エラー'))
+        });
+      });
+    }
+
+    // クロスタブ版のファイルエクスポート
+    async function exportFileCrossTab(fileId, mimeType) {
+      const accessToken = await getValidAccessTokenCrossTab();
+      return new Promise((resolve, reject) => {
+        GM_xmlhttpRequest({
+          method: 'GET',
+          url: `https://www.googleapis.com/drive/v3/files/${fileId}/export?mimeType=${encodeURIComponent(mimeType)}`,
+          headers: { 'Authorization': `Bearer ${accessToken}` },
+          responseType: 'arraybuffer',
+          onload: (response) => {
+            if (response.status >= 200 && response.status < 300) {
+              resolve(response.response);
+            } else {
+              reject(new Error(`Export Error: ${response.status}`));
+            }
+          },
+          onerror: (err) => reject(new Error('エクスポート通信エラー'))
+        });
+      });
+    }
+
+    // クロスタブ版のファイルプロパティ更新
+    async function updateFilePropertiesCrossTab(fileId, properties) {
+      const accessToken = await getValidAccessTokenCrossTab();
+      return new Promise((resolve, reject) => {
+        GM_xmlhttpRequest({
+          method: 'PATCH',
+          url: `https://www.googleapis.com/drive/v3/files/${fileId}`,
+          headers: {
+            'Authorization': `Bearer ${accessToken}`,
+            'Content-Type': 'application/json'
+          },
+          data: JSON.stringify({ properties }),
+          onload: (response) => {
+            if (response.status >= 200 && response.status < 300) {
+              resolve(JSON.parse(response.responseText));
+            } else {
+              reject(new Error(`Update Error: ${response.status}`));
+            }
+          },
+          onerror: (err) => reject(new Error('更新通信エラー'))
+        });
+      });
+    }
+
+    // クロスタブ版のファイル削除
+    async function deleteFileCrossTab(fileId) {
+      const accessToken = await getValidAccessTokenCrossTab();
+      return new Promise((resolve, reject) => {
+        GM_xmlhttpRequest({
+          method: 'DELETE',
+          url: `https://www.googleapis.com/drive/v3/files/${fileId}`,
+          headers: { 'Authorization': `Bearer ${accessToken}` },
+          onload: (response) => {
+            if (response.status >= 200 && response.status < 300) {
+              resolve(true);
+            } else {
+              reject(new Error(`Delete Error: ${response.status}`));
+            }
+          },
+          onerror: (err) => reject(new Error('削除通信エラー'))
+        });
+      });
     }
 
     // 初期化

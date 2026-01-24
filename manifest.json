@@ -6,7 +6,7 @@
       "name": "henry_core",
       "label": "Henry Core（基盤）",
       "file": "henry_core.user.js",
-      "match": ["henry-app.jp", "docs.google.com"],
+      "match": ["henry-app.jp"],
       "order": 1,
       "enabled": true
     },
@@ -30,7 +30,7 @@
       "name": "henry_google_drive_bridge",
       "label": "Google Drive連携",
       "file": "henry_google_drive_bridge.user.js",
-      "match": ["henry-app.jp", "docs.google.com"],
+      "match": ["henry-app.jp"],
       "order": 10,
       "enabled": true
     },

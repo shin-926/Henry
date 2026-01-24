@@ -1,12 +1,15 @@
 // ==UserScript==
-// @name         Henry Loader (Dev)
+// @name         Henry Loader (Unified)
 // @namespace    https://henry-app.jp/
-// @version      1.7.1
-// @description  Henryスクリプトの動的ローダー（開発版）
+// @version      1.0.0
+// @description  Henryスクリプト統合ローダー（全ドメイン対応）
 // @author       sk powered by Claude
 // @match        https://henry-app.jp/*
 // @match        https://*.henry-app.jp/*
 // @match        https://manage-maokahp.reserve.ne.jp/*
+// @match        https://docs.google.com/*
+// @require      https://raw.githubusercontent.com/shin-926/Henry/main/henry_core.user.js
+// @require      https://raw.githubusercontent.com/shin-926/Henry/main/henry_google_drive_bridge.user.js
 // @grant        GM_xmlhttpRequest
 // @grant        GM_setValue
 // @grant        GM_getValue
@@ -28,35 +31,43 @@
 // @connect      storage.googleapis.com
 // @connect      henry-app.jp
 // @run-at       document-start
-// @updateURL    https://raw.githubusercontent.com/shin-926/Henry/develop/henry_loader_dev.user.js
-// @downloadURL  https://raw.githubusercontent.com/shin-926/Henry/develop/henry_loader_dev.user.js
+// @updateURL    https://raw.githubusercontent.com/shin-926/Henry/main/henry_loader_unified.user.js
+// @downloadURL  https://raw.githubusercontent.com/shin-926/Henry/main/henry_loader_unified.user.js
 // ==/UserScript==
 
 (function() {
   'use strict';
 
-  // TODO: 本番用(henry_loader.user.js)と開発用(henry_loader_dev.user.js)でコードが重複している
-  // 将来的にビルドツール導入を検討し、1ソースから2ファイル生成する構成も可能
-
   // ==========================================
   // 設定
   // ==========================================
   const CONFIG = {
-    // ローカルモード: trueでローカルサーバーから読み込み（即時反映）
-    LOCAL_MODE: true,
+    LOCAL_MODE: false,  // 統合版はGitHubモード
     LOCAL_URL: 'http://localhost:8080',
-
-    // GitHubモード（LOCAL_MODE: falseの場合）
-    BRANCH: 'develop',
+    BRANCH: 'main',
     BASE_URL: 'https://raw.githubusercontent.com/shin-926/Henry',
-
     MANIFEST_FILE: 'manifest.json',
-    DEBUG: true  // 開発版はデバッグログ有効
+    DEBUG: false
   };
 
+  // @requireで既に読み込み済みのスクリプト（二重読み込み防止）
+  const PRELOADED_SCRIPTS = new Set(['henry_core', 'henry_google_drive_bridge']);
+
   // ==========================================
-  // スクリプト有効/無効設定
+  // Google Docs判定
   // ==========================================
+  const isGoogleDocs = location.host === 'docs.google.com';
+
+  if (isGoogleDocs) {
+    // Google Docsでは @require で既に読み込まれているので終了
+    console.log('[HenryLoader:Unified] Google Docsモード（@require経由で読み込み済み）');
+    return;
+  }
+
+  // ==========================================
+  // 以下はHenry/予約システム用の動的ローダー
+  // ==========================================
+
   const DISABLED_SCRIPTS_KEY = 'loader-disabled-scripts';
 
   function getDisabledScripts() {
@@ -67,11 +78,7 @@
     GM_setValue(DISABLED_SCRIPTS_KEY, Array.from(disabledSet));
   }
 
-  // ==========================================
   // GM_*関数をグローバルに公開
-  // ==========================================
-  // NOTE: GM_WRAPPERがwindow.GM_*を参照するため、グローバル公開は必須
-  // GM_WRAPPERは各スクリプト実行時に先頭に追加され、ローカル変数として注入する
   const pageWindow = typeof unsafeWindow !== 'undefined' ? unsafeWindow : window;
 
   pageWindow.GM_xmlhttpRequest = GM_xmlhttpRequest;
@@ -87,35 +94,27 @@
     pageWindow.GM_registerMenuCommand = GM_registerMenuCommand;
   }
 
-  // ==========================================
-  // ユーティリティ
-  // ==========================================
   function log(...args) {
     if (CONFIG.DEBUG) {
-      console.log('[HenryLoader:Dev]', ...args);
+      console.log('[HenryLoader:Unified]', ...args);
     }
   }
 
   function error(...args) {
-    console.error('[HenryLoader:Dev]', ...args);
+    console.error('[HenryLoader:Unified]', ...args);
   }
 
   function getUrl(file) {
     if (CONFIG.LOCAL_MODE) {
-      // ローカルモード: キャッシュバスター付き
       return `${CONFIG.LOCAL_URL}/${file}?t=${Date.now()}`;
     }
-    // GitHubモード: キャッシュバスター付きURL
     return `${CONFIG.BASE_URL}/${CONFIG.BRANCH}/${file}?t=${Date.now()}`;
   }
 
-  // 現在のホストがmatchパターンに一致するか
-  // TODO: 正規表現を使った実装に変更すると柔軟性が増す（現状で動作に問題なし）
   function matchesHost(patterns) {
     const host = location.host;
     return patterns.some(pattern => {
       if (pattern.startsWith('*.')) {
-        // ワイルドカード: *.henry-app.jp
         const domain = pattern.slice(2);
         return host === domain || host.endsWith('.' + domain);
       }
@@ -123,7 +122,6 @@
     });
   }
 
-  // @requireを解析してURLリストを返す
   function parseRequires(code) {
     const requires = [];
     const metaMatch = code.match(/\/\/ ==UserScript==([\s\S]*?)\/\/ ==\/UserScript==/);
@@ -138,12 +136,8 @@
     return requires;
   }
 
-  // 読み込み済みの@require URLを記録
   const loadedRequires = new Set();
 
-  // ==========================================
-  // スクリプトローダー
-  // ==========================================
   async function fetchText(url) {
     return new Promise((resolve, reject) => {
       GM_xmlhttpRequest({
@@ -166,12 +160,10 @@
   async function loadManifest() {
     const url = getUrl(CONFIG.MANIFEST_FILE);
     log('マニフェスト取得:', url);
-
     const text = await fetchText(url);
     return JSON.parse(text);
   }
 
-  // GM_*関数をローカル変数として注入するラッパー
   const GM_WRAPPER = `
 const GM_xmlhttpRequest = window.GM_xmlhttpRequest;
 const GM_setValue = window.GM_setValue;
@@ -186,7 +178,6 @@ const GM_registerMenuCommand = window.GM_registerMenuCommand;
 const unsafeWindow = window;
 `;
 
-  // Blob URL + script タグでコードを実行（Trusted Types対応）
   function executeViaScriptTag(code, name) {
     return new Promise((resolve, reject) => {
       try {
@@ -210,6 +201,12 @@ const unsafeWindow = window;
   }
 
   async function loadScript(scriptInfo) {
+    // @requireで既に読み込み済みならスキップ
+    if (PRELOADED_SCRIPTS.has(scriptInfo.name)) {
+      log('スキップ（@require済み）:', scriptInfo.name);
+      return true;
+    }
+
     const url = getUrl(scriptInfo.file);
     log('スクリプト読み込み:', scriptInfo.name);
 
@@ -222,7 +219,6 @@ const unsafeWindow = window;
         log('@require 読み込み:', reqUrl);
         try {
           const reqCode = await fetchText(reqUrl);
-          // @requireはグローバルスコープで実行（Blob URL方式）
           await executeViaScriptTag(reqCode, reqUrl);
           loadedRequires.add(reqUrl);
           log('@require 完了:', reqUrl);
@@ -234,15 +230,10 @@ const unsafeWindow = window;
       }
     }
 
-    // UserScriptのメタデータブロックを除去
-    // (ローダーが既にgrant等を処理しているため)
     const cleanCode = code.replace(/\/\/ ==UserScript==[\s\S]*?\/\/ ==\/UserScript==/, '');
-
-    // GM_*関数のラッパーを先頭に追加
     const wrappedCode = GM_WRAPPER + cleanCode;
 
     try {
-      // Blob URL + script タグで実行（Trusted Types対応）
       await executeViaScriptTag(wrappedCode, scriptInfo.name);
       log('読み込み完了:', scriptInfo.name);
       return true;
@@ -254,30 +245,24 @@ const unsafeWindow = window;
 
   async function main() {
     const startTime = performance.now();
-    if (CONFIG.LOCAL_MODE) {
-      log('ローダー起動 [ローカルモード]', CONFIG.LOCAL_URL);
-    } else {
-      log('ローダー起動 [GitHubモード]', CONFIG.BRANCH);
-    }
+    log('ローダー起動 [統合版]');
     log('現在のホスト:', location.host);
 
     try {
-      // マニフェスト取得
       const manifest = await loadManifest();
       log('マニフェストバージョン:', manifest.version);
-      log('スクリプト数:', manifest.scripts.length);
 
-      // ユーザーの無効設定を取得
       const disabledScripts = getDisabledScripts();
-      log('無効スクリプト:', Array.from(disabledScripts));
 
-      // 現在のホストにマッチするスクリプトをフィルタ
       const matchingScripts = manifest.scripts
         .filter(s => matchesHost(s.match) && s.enabled !== false)
         .sort((a, b) => a.order - b.order);
 
-      // Toolbox用にmanifest情報を公開
       const loadedScripts = new Set();
+
+      // @requireで読み込み済みのものは最初から追加
+      PRELOADED_SCRIPTS.forEach(name => loadedScripts.add(name));
+
       pageWindow.HenryLoaderConfig = {
         scripts: matchingScripts,
         disabledScripts: disabledScripts,
@@ -288,17 +273,10 @@ const unsafeWindow = window;
         }
       };
 
-      // 無効スクリプトを除外（開発用はベータ版も読み込む。配布用はベータ版を除外）
       const targetScripts = matchingScripts.filter(s => !disabledScripts.has(s.name));
 
       log('読み込み対象:', targetScripts.map(s => s.name).join(', '));
-      if (disabledScripts.size > 0) {
-        log('スキップ:', matchingScripts.filter(s => disabledScripts.has(s.name)).map(s => s.name).join(', '));
-      }
 
-      // 順番に読み込み
-      // TODO: 現状は1つ失敗で全停止（依存関係を考慮した安全な設計）
-      // 「失敗スキップして続行」が必要なら個別try-catchを検討
       for (const script of targetScripts) {
         const success = await loadScript(script);
         if (success) {
@@ -314,7 +292,6 @@ const unsafeWindow = window;
     }
   }
 
-  // 起動（DOM準備完了を待つ）
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', main);
   } else {
