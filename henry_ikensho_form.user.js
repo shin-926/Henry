@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         主治医意見書作成フォーム
 // @namespace    https://henry-app.jp/
-// @version      2.6.5
+// @version      2.6.6
 // @description  主治医意見書の入力フォームとGoogle Docs出力（GAS不要版・API直接呼び出し）
 // @author       sk powered by Claude & Gemini
 // @match        https://henry-app.jp/*
@@ -1718,22 +1718,22 @@
     const data = formData.diagnosis;
 
     // 診断名1（必須、30文字）
-    section.appendChild(createTextField('診断名1', 'diagnosis_1_name', 'diagnosis', data.diagnosis_1_name, true, '例：脳梗塞', 30));
+    section.appendChild(createTextField('診断名1', 'diagnosis_1_name', 'diagnosis', data.diagnosis_1_name, true, '', 30));
 
     // 発症年月日1（必須、15文字）
-    section.appendChild(createTextField('発症年月日1', 'diagnosis_1_onset', 'diagnosis', data.diagnosis_1_onset, true, '例：令和4年3月15日', 15));
+    section.appendChild(createTextField('発症年月日1', 'diagnosis_1_onset', 'diagnosis', data.diagnosis_1_onset, true, '', 15));
 
     // 診断名2（任意、30文字）
     section.appendChild(createTextField('診断名2', 'diagnosis_2_name', 'diagnosis', data.diagnosis_2_name, false, '', 30));
 
     // 発症年月日2（任意、15文字）
-    section.appendChild(createTextField('発症年月日2', 'diagnosis_2_onset', 'diagnosis', data.diagnosis_2_onset, false, '例：令和3年5月20日', 15));
+    section.appendChild(createTextField('発症年月日2', 'diagnosis_2_onset', 'diagnosis', data.diagnosis_2_onset, false, '', 15));
 
     // 診断名3（任意、30文字）
     section.appendChild(createTextField('診断名3', 'diagnosis_3_name', 'diagnosis', data.diagnosis_3_name, false, '', 30));
 
     // 発症年月日3（任意、15文字）
-    section.appendChild(createTextField('発症年月日3', 'diagnosis_3_onset', 'diagnosis', data.diagnosis_3_onset, false, '例：令和2年10月1日', 15));
+    section.appendChild(createTextField('発症年月日3', 'diagnosis_3_onset', 'diagnosis', data.diagnosis_3_onset, false, '', 15));
 
     // 症状としての安定性（必須）
     const stabilityField = createRadioField(
@@ -1751,7 +1751,7 @@
     section.appendChild(stabilityField);
 
     // 症状不安定時の具体的状況（条件付き必須：症状安定性=不安定の場合、1行57文字）
-    const unstableDetailsField = createTextField('症状不安定時の具体的状況', 'symptom_unstable_details', 'diagnosis', data.symptom_unstable_details, false, '不安定な場合の具体的な状況を記入', 57);
+    const unstableDetailsField = createTextField('症状不安定時の具体的状況', 'symptom_unstable_details', 'diagnosis', data.symptom_unstable_details, false, '', 57);
     unstableDetailsField.style.marginLeft = '24px';
     section.appendChild(unstableDetailsField);
     setupConditionalField(stabilityField, unstableDetailsField, '2');
@@ -2085,10 +2085,10 @@
     ));
 
     // 身長（必須）
-    section.appendChild(createTextField('身長', 'height', 'mental_physical_state', data.height, true, '例：160'));
+    section.appendChild(createTextField('身長', 'height', 'mental_physical_state', data.height, true, ''));
 
     // 体重（必須）
-    section.appendChild(createTextField('体重', 'weight', 'mental_physical_state', data.weight, true, '例：55'));
+    section.appendChild(createTextField('体重', 'weight', 'mental_physical_state', data.weight, true, ''));
 
     // 過去6ヶ月の体重の変化（必須）
     section.appendChild(createRadioField(
@@ -2119,7 +2119,7 @@
     section.appendChild(limbLossField);
 
     // 四肢欠損部位（条件付き必須、19文字）
-    const limbLossLocationField = createTextField('部位', 'limb_loss_location', 'mental_physical_state', data.limb_loss_location, false, '例：右下肢', 19);
+    const limbLossLocationField = createTextField('部位', 'limb_loss_location', 'mental_physical_state', data.limb_loss_location, false, '', 19);
     limbLossLocationField.style.marginLeft = '24px';
     section.appendChild(limbLossLocationField);
     setupConditionalField(limbLossField, limbLossLocationField, '1');
@@ -2661,18 +2661,28 @@
     // (5) 医学的管理の必要性
     section.appendChild(createSubsectionTitle('(5) 医学的管理の必要性'));
 
-    // 医学的管理の必要性（チェックボックス、11桁、その他23文字）
-    section.appendChild(createCheckboxFieldWithOtherInput(
+    // 医学的管理の必要性（チェックボックス、11桁、その他24文字）
+    const medicalManagementField = createCheckboxFieldWithOtherInput(
       '',
       'medical_management_necessity',
       'life_function',
-      ['血圧', '心疾患', '誤嚥', '呼吸障害', '嚥下障害', '移動', '運動', '栄養・食生活', '摂食・嚥下機能', '口腔衛生管理', 'その他'],
+      ['訪問診療', '訪問看護', '看護職員の訪問による相談・支援', '訪問歯科診療', '訪問薬剤管理指導', '訪問リハビリテーション', '短期入所療養介護', '訪問歯科衛生指導', '訪問栄養食事指導', '通所リハビリテーション', 'その他の医療系サービス'],
       data.medical_management_necessity,
       'other_medical_management',
       data.other_medical_management,
       false,
-      23
-    ));
+      24
+    );
+    // その他の記述欄を広げる＋カウンターを次の行に
+    const otherInput = medicalManagementField.querySelector('input[data-field-name="other_medical_management"]');
+    if (otherInput) {
+      otherInput.style.minWidth = '350px';
+      const optionLabel = otherInput.parentElement;
+      if (optionLabel) {
+        optionLabel.style.flexWrap = 'wrap';
+      }
+    }
+    section.appendChild(medicalManagementField);
 
     // (6) サービス提供時における医学的観点からの留意事項
     section.appendChild(createSubsectionTitle('(6) サービス提供時における医学的観点からの留意事項'));
@@ -3253,7 +3263,7 @@
    * 最後のオプション（「その他」）の右側にテキスト入力を追加し、
    * 「その他」が選択されていない場合はグレーアウトする
    */
-  function createCheckboxFieldWithOtherInput(label, name, section, options, currentValue, otherFieldName, otherFieldValue, required = false, otherMaxChars = 0) {
+  function createCheckboxFieldWithOtherInput(label, name, section, options, currentValue, otherFieldName, otherFieldValue, required = false, otherMaxChars = 0, otherPlaceholder = '') {
     const field = document.createElement('div');
     field.style.cssText = 'margin-bottom: 16px;';
 
@@ -3299,7 +3309,7 @@
         otherInput = document.createElement('input');
         otherInput.type = 'text';
         otherInput.value = otherFieldValue || '';
-        otherInput.placeholder = '科名を入力';
+        otherInput.placeholder = otherPlaceholder;
         otherInput.dataset.fieldName = otherFieldName;
         otherInput.dataset.section = section;
         otherInput.style.cssText = 'padding: 8px 12px; border: 1px solid #cbd5e1; border-radius: 4px; font-size: 14px; flex: 1;';
