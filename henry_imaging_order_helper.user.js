@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         画像オーダー入力支援
 // @namespace    https://henry-app.jp/
-// @version      1.26.2
+// @version      1.28.5
 // @description  画像照射オーダーモーダルに部位・方向選択UIを追加（複数内容対応）
 // @author       sk powered by Claude & Gemini
 // @match        https://henry-app.jp/*
@@ -558,29 +558,76 @@
     // モダリティ選択のイベント登録（一度だけ）
     if (!modalitySelect.dataset.hasModalityListener) {
       modalitySelect.dataset.hasModalityListener = 'true';
+      // inputイベントでも早期に属性を設定（ちらつき防止）
+      modalitySelect.addEventListener('input', () => {
+        const modalityValue = modalitySelect.value;
+        dialog.dataset.modality = MODALITY_MAP[modalityValue] || '';
+      });
+
+      // MutationObserverでMD用フィールドが追加されたら即座に非表示
+      let mdFieldObserver = null;
+      const startMDFieldObserver = () => {
+        if (mdFieldObserver) return; // 既に監視中
+        mdFieldObserver = new MutationObserver((mutations) => {
+          for (const mutation of mutations) {
+            if (mutation.type === 'childList') {
+              for (const node of mutation.addedNodes) {
+                if (node.nodeType === 1 && node.querySelector?.('input[name*="filmCount"]')) {
+                  toggleMDFields(dialog, true);
+                  stopMDFieldObserver(); // 目的達成したら停止
+                  return;
+                }
+              }
+            }
+          }
+        });
+        mdFieldObserver.observe(dialog, { childList: true, subtree: true });
+      };
+      const stopMDFieldObserver = () => {
+        if (mdFieldObserver) {
+          mdFieldObserver.disconnect();
+          mdFieldObserver = null;
+        }
+      };
+
       modalitySelect.addEventListener('change', async () => {
         const modalityValue = modalitySelect.value;
         currentModality = MODALITY_MAP[modalityValue] || '';
         logger.info(`モダリティ変更: ${currentModality}`);
+        // CSSで即座に非表示にするためdata-modality属性を設定
+        dialog.dataset.modality = currentModality;
         modalityChangeCallbacks.forEach(cb => cb(currentModality));
         hideAutoFilledFields(dialog);
+        // NOTE: startMDFieldObserverはawaitの前に呼ぶ（ReactがDOMを追加する前に監視を開始するため）
+        if (currentModality === 'MD') {
+          startMDFieldObserver();
+        } else {
+          stopMDFieldObserver();
+        }
         if (currentModality === 'XP' || currentModality === 'MD') {
           await setBodyPositionToArbitrary(dialog);
         }
         if (currentModality === 'MD') {
           await setBodySiteToForearm(dialog);
+          toggleMDFields(dialog, true);
+        } else {
+          toggleMDFields(dialog, false);
         }
       });
 
       // 初期値を設定
       currentModality = MODALITY_MAP[modalitySelect.value] || '';
       logger.info(`初期モダリティ: ${currentModality}`);
+      // CSSで即座に非表示にするためdata-modality属性を設定
+      dialog.dataset.modality = currentModality;
       hideAutoFilledFields(dialog);
       if (currentModality === 'XP' || currentModality === 'MD') {
         setBodyPositionToArbitrary(dialog);
       }
       if (currentModality === 'MD') {
+        startMDFieldObserver(); // MD選択時に監視開始
         setBodySiteToForearm(dialog);
+        toggleMDFields(dialog, true);
       }
     }
 
@@ -668,6 +715,12 @@
       if (parent) {
         parent.style.display = helperMode ? 'none' : '';
       }
+    }
+
+    // MDの場合、枚数・サイズの表示/非表示を切り替え
+    if (currentModality === 'MD') {
+      const dialog = findImagingOrderDialog();
+      toggleMDFields(dialog, helperMode);
     }
   }
 
@@ -970,6 +1023,39 @@
   }
 
   // ==========================================
+  // 骨塩定量用：枚数・サイズフィールドを非表示/表示
+  // ==========================================
+
+  // NOTE: 親要素にdata-testid等の安定したセレクタがないため、
+  //       depth（階層）を数えて親を辿る方式を採用。
+  //       Henry側に安定したセレクタが追加されればclosest()に変更可能。
+  function toggleMDFields(dialog, hide) {
+    if (!dialog) dialog = findImagingOrderDialog();
+    if (!dialog) return;
+
+    const labels = dialog.querySelectorAll('label');
+    labels.forEach(label => {
+      const text = label.textContent.trim();
+      if (text === '枚数' || text === 'サイズ') {
+        // 親要素を辿ってフォームグループを探す（depth 4: 非表示対象）
+        let depth4 = label.parentElement;
+        for (let i = 0; i < 3 && depth4; i++) {
+          depth4 = depth4.parentElement;
+        }
+        // depth 5: margin-topを持つ親
+        const depth5 = depth4?.parentElement;
+
+        if (depth4) {
+          depth4.style.setProperty('display', hide ? 'none' : '', 'important');
+        }
+        if (depth5) {
+          depth5.style.setProperty('margin-top', hide ? '0' : '', 'important');
+        }
+      }
+    });
+  }
+
+  // ==========================================
   // 自動入力フィールド（部位・体位・枚数・撮影条件）を非表示にする
   // 空白スペース対策: 親4（margin-top: 16px）もJSで非表示にする
   // ==========================================
@@ -992,6 +1078,14 @@
         /* 撮影条件フォームを非表示 */
         div:has(> div > div > input[name*="configuration"]) {
           display: none !important;
+        }
+        /* 骨塩定量(MD)の場合、枚数・サイズを即座に非表示（ちらつき防止） */
+        /* NOTE: サイズのSELECTにはname属性がないため、+ div（兄弟セレクタ）で選択。 */
+        /*       Henry側に安定したセレクタが追加されれば個別指定に変更可能。 */
+        [data-modality="MD"] div:has(> div > div > input[name*="filmCount"]),
+        [data-modality="MD"] div:has(> div > div > input[name*="filmCount"]) + div {
+          display: none !important;
+          margin-top: 0 !important;
         }
       `;
       document.head.appendChild(style);
@@ -1193,6 +1287,22 @@
     const { row: rowMD, buttonsContainer: mdButtonsContainer } = createMDRow((forearm) => {
       state.mdForearm = forearm;
       setNativeValue(noteInput, forearm);
+
+      // 側性を設定（「右前腕」→「右」、「左前腕」→「左」）
+      const laterality = forearm.startsWith('右') ? '右' : '左';
+      const currentLateralitySelect = findLateralitySelect(noteInput);
+      const mappedValue = LATERALITY_MAP[laterality];
+      if (currentLateralitySelect && mappedValue) {
+        currentLateralitySelect.value = mappedValue;
+        currentLateralitySelect.dispatchEvent(new Event('change', { bubbles: true }));
+        logger.info(`UI ${index + 1}: 元フォーム側性(MD)を ${mappedValue} に設定`);
+      }
+
+      // 枚数を1に設定
+      if (filmCountInput) {
+        setNativeValue(filmCountInput, '1');
+        logger.info(`UI ${index + 1}: 枚数(MD)を 1 に設定`);
+      }
     });
 
     const { row: row1, majorSelect, minorSelect, lateralitySelect, subItemSelect } = createSelectionRow();
