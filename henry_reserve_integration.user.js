@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         予約システム連携
 // @namespace    https://github.com/shin-926/Henry
-// @version      4.1.26
+// @version      4.2.0
 // @description  Henryカルテと予約システム間の双方向連携（再診予約・照射オーダー自動予約・自動印刷・患者プレビュー）
 // @author       sk powered by Claude & Gemini
 // @match        https://henry-app.jp/*
@@ -711,6 +711,56 @@ html, body { margin: 0; padding: 0; }
   body { width: 100%; zoom: 1; margin: 0; padding: 0; }
   .page { break-after: page; box-shadow: none; margin: 0; }
 }
+
+/* 安全点検項目 */
+.safety-section {
+  margin-top: 20px;
+  padding-top: 4px;
+}
+.safety-header {
+  display: flex;
+  justify-content: space-between;
+}
+.safety-title {
+  font-family: "Noto Sans JP";
+  font-size: 21px;
+  font-weight: 700;
+  line-height: 24px;
+  color: rgb(0, 0, 0);
+}
+.safety-confirmer {
+  font-family: "Noto Sans JP";
+  font-size: 14px;
+  line-height: 24px;
+  color: rgb(0, 0, 0);
+}
+.safety-body {
+  display: flex;
+  gap: 12px;
+}
+.safety-body ul {
+  flex: 1;
+  list-style: disc;
+  margin: 0;
+  padding: 0 0 0 21px;
+}
+.safety-body li {
+  margin-top: 8px;
+}
+.safety-item {
+  display: flex;
+  font-family: "Noto Sans JP";
+  font-size: 14px;
+  line-height: 24px;
+  color: rgb(0, 0, 0);
+}
+.safety-item .label {
+  flex-grow: 1;
+}
+.safety-item .option {
+  width: 30px;
+  flex-shrink: 0;
+}
       `;
 
       return `
@@ -763,24 +813,9 @@ html, body { margin: 0; padding: 0; }
         </table>
       </section>
       <section>
-        <table class="series-table">
-          <thead>
-            <tr><th colspan="7">指示内容</th></tr>
-            <tr>
-              <td style="width: 4%;"></td>
-              <td style="width: 8%;">部位</td>
-              <td style="width: 8%;">側性</td>
-              <td style="width: 16%;">方向</td>
-              <td style="width: 30%;">撮影条件</td>
-              <td style="width: 10%;">枚数</td>
-              <td style="width: 32%;">補足</td>
-            </tr>
-          </thead>
-          <tbody>
-            ${this._generateSeriesRows(series)}
-          </tbody>
-        </table>
+        ${this._generateSeriesTable(order.detail?.condition, series)}
       </section>
+      ${this._isMri(order.detail?.condition) ? this._generateSafetyChecklist() : ''}
     </div>
   </div>
 </body>
@@ -823,13 +858,16 @@ html, body { margin: 0; padding: 0; }
       return [];
     },
 
-    _generateSeriesRows(series) {
+    _generateSeriesTable(condition, series) {
+      const hasBodyPosition = this._needsBodyPositionColumn(condition);
       const maxRows = CONFIG.PRINT_MAX_SERIES_ROWS;
-      let rows = '';
 
-      for (let i = 0; i < maxRows; i++) {
-        const s = series[i] || {};
-        rows += `
+      if (hasBodyPosition) {
+        // 単純撮影用: 7列（方向列あり）
+        let rows = '';
+        for (let i = 0; i < maxRows; i++) {
+          const s = series[i] || {};
+          rows += `
             <tr>
               <td style="width: 4%;">${i + 1}</td>
               <td style="width: 8%;">${escapeHtml(s.bodySite || '')}</td>
@@ -837,11 +875,107 @@ html, body { margin: 0; padding: 0; }
               <td style="width: 16%;">${escapeHtml(s.bodyPositions || '')}</td>
               <td style="width: 30%;">${escapeHtml(s.configuration || '')}</td>
               <td style="width: 10%;">${s.filmCount || ''}</td>
-              <td style="width: 32%;">${escapeHtml(s.note || '')}</td>
+              <td style="width: 24%;">${escapeHtml(s.note || '')}</td>
             </tr>`;
+        }
+        return `
+        <table class="series-table">
+          <thead>
+            <tr><th colspan="7">指示内容</th></tr>
+            <tr>
+              <td style="width: 4%;"></td>
+              <td style="width: 8%;">部位</td>
+              <td style="width: 8%;">側性</td>
+              <td style="width: 16%;">方向</td>
+              <td style="width: 30%;">撮影条件</td>
+              <td style="width: 10%;">枚数</td>
+              <td style="width: 24%;">補足</td>
+            </tr>
+          </thead>
+          <tbody>${rows}</tbody>
+        </table>`;
+      } else {
+        // CT/MRI/MD用: 6列（方向列なし）
+        let rows = '';
+        for (let i = 0; i < maxRows; i++) {
+          const s = series[i] || {};
+          rows += `
+            <tr>
+              <td style="width: 4%;">${i + 1}</td>
+              <td style="width: 8%;">${escapeHtml(s.bodySite || '')}</td>
+              <td style="width: 8%;">${s.laterality || ''}</td>
+              <td style="width: 28%;">${escapeHtml(s.configuration || '')}</td>
+              <td style="width: 10%;">${s.filmCount || ''}</td>
+              <td style="width: 42%;">${escapeHtml(s.note || '')}</td>
+            </tr>`;
+        }
+        return `
+        <table class="series-table">
+          <thead>
+            <tr><th colspan="6">指示内容</th></tr>
+            <tr>
+              <td style="width: 4%;"></td>
+              <td style="width: 8%;">部位</td>
+              <td style="width: 8%;">側性</td>
+              <td style="width: 28%;">撮影条件</td>
+              <td style="width: 10%;">枚数</td>
+              <td style="width: 42%;">補足</td>
+            </tr>
+          </thead>
+          <tbody>${rows}</tbody>
+        </table>`;
       }
+    },
 
-      return rows;
+    _isMri(condition) {
+      return !!condition?.mriAbove_1_5AndBelow_3Tesla;
+    },
+
+    // 単純撮影の場合のみ「方向」列が必要
+    _needsBodyPositionColumn(condition) {
+      if (!condition) return false;
+      return !!(condition.plainRadiographyDigital || condition.plainRadiographyAnalog);
+    },
+
+    _generateSafetyChecklist() {
+      const leftItems = [
+        '心臓ペースメーカー',
+        '脳動脈クリップ',
+        '外科用クリップ',
+        '人工関節',
+        '人工聴器（埋込）',
+        'その他の体内金属',
+      ];
+      const rightItems = [
+        '義眼',
+        '人工弁',
+        '妊娠（　　　週）',
+        '重篤な発作の可能性',
+        '薬物アレルギー',
+        '貴金属を身に着けていないか',
+      ];
+
+      const renderItem = (label) => `
+        <li><div class="safety-item">
+          <span class="label">${escapeHtml(label)}</span>
+          <span class="option">有</span>
+          <span class="option">無</span>
+        </div></li>`;
+
+      const leftHtml = leftItems.map(renderItem).join('');
+      const rightHtml = rightItems.map(renderItem).join('');
+
+      return `
+      <section class="safety-section">
+        <header class="safety-header">
+          <h2 class="safety-title">安全点検項目</h2>
+          <div class="safety-confirmer">確認者名（　　　　　　　　）</div>
+        </header>
+        <div class="safety-body">
+          <ul>${leftHtml}</ul>
+          <ul>${rightHtml}</ul>
+        </div>
+      </section>`;
     },
   };
 
