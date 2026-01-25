@@ -98,6 +98,37 @@ if (!googleAuth?.isAuthenticated()) {
 
 ---
 
+## クロスタブOAuth通信（Google Docs連携）
+
+Google DocsでOAuthトークンを取得するための仕組み。Henry側で認証済みのトークンをGoogle Docs側に共有する。
+
+### 背景
+
+- Google DocsはCSPが厳しく、Tampermonkeyの`@require`でスクリプトを読み込む必要がある
+- Tampermonkeyの`GM_setValue/GM_getValue`はスクリプトごとに分離されている
+- 別々のローダー（henry_loader_dev / henry_loader_docs）を使うとストレージが共有されない
+
+### 解決策: 統合ローダー
+
+`henry_loader_unified.user.js`を使用することで、Henry側とGoogle Docs側で同じGM_*ストレージを共有する。
+
+**動作フロー:**
+1. Google Docs側が`GM_setValue('drive_direct_oauth_request', { requestId })`でトークンをリクエスト
+2. Henry側（henry_core.user.js）が`GM_addValueChangeListener`でリクエストを検知
+3. Henry側が`GM_setValue('drive_direct_oauth_response', { requestId, tokens, credentials })`で応答
+4. Google Docs側がレスポンスを受け取り、OAuthトークンを使用
+
+**統合ローダーの特徴:**
+- Google Docs: `@require`でGitHub developブランチから読み込み
+- Henry: ローカルサーバー（localhost:8080）から動的に読み込み
+- 両方とも同じTampermonkeyスクリプトなのでGM_*ストレージを共有
+
+**注意点:**
+- Google Docs側のコード変更はGitHubにプッシュ後、Tampermonkeyでスクリプトを再保存して@requireを再取得する必要がある
+- 開発中にGoogle Docs側を頻繁に変更する場合は不便だが、クロスタブ通信には必須
+
+---
+
 ## GraphQL インライン方式
 
 GraphQL mutationで変数型（`$input: SomeInput!`）がエラーになる場合は、インライン方式を使う。
