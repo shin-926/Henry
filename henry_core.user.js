@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry Core
 // @namespace    https://henry-app.jp/
-// @version      2.14.4
+// @version      2.14.5
 // @description  Henry スクリプト実行基盤 (GoogleAuth統合 / Google Docs対応)
 // @author       sk powered by Claude & Gemini
 // @match        https://henry-app.jp/*
@@ -278,15 +278,15 @@
 
       try {
         const result = await queryInternal(`
-          query ListOrganizationMemberships($input: ListOrganizationMembershipsInput!) {
-            listOrganizationMemberships(input: $input) {
+          query ListOrganizationMemberships {
+            listOrganizationMemberships(input: { pageSize: 200, pageToken: "" }) {
               memberships {
                 user { uuid }
                 departmentName
               }
             }
           }
-        `, { input: { pageSize: 200, pageToken: '' } }, { endpoint: '/graphql' });
+        `, {}, { endpoint: '/graphql' });
 
         const memberships = result.data?.listOrganizationMemberships?.memberships || [];
         const me = memberships.find(m => m.user?.uuid === myUuid);
