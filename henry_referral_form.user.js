@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         診療情報提供書フォーム
 // @namespace    https://henry-app.jp/
-// @version      1.0.3
+// @version      1.0.4
 // @description  診療情報提供書の入力フォームとGoogle Docs出力
 // @author       sk powered by Claude
 // @match        https://henry-app.jp/*
@@ -720,7 +720,9 @@
         prescriptions: prescriptions,
         use_diseases: true,
         use_prescriptions: true,
-        selected_diseases: diseases.map(d => d.uuid),
+        use_family_diseases: false,
+        selected_diseases: [],
+        selected_family_diseases: [],
 
         // 手入力項目
         destination_hospital: '',
@@ -728,7 +730,7 @@
         destination_doctor: '',
         diagnosis_text: '',
         purpose_and_history: '',
-        family_history: '',
+        family_history_text: '',
         prescription_text: '',
         remarks: ''
       };
@@ -1101,8 +1103,26 @@
           <!-- 既往歴・家族歴 -->
           <div class="rf-section">
             <div class="rf-section-title">既往歴および家族歴</div>
-            <div class="rf-field">
-              <textarea id="rf-family-history" rows="3" placeholder="既往歴、家族歴を入力">${escapeHtml(formData.family_history)}</textarea>
+            ${formData.diseases.length > 0 ? `
+              <div class="rf-use-toggle">
+                <input type="checkbox" id="rf-use-family-diseases" ${formData.use_family_diseases ? 'checked' : ''}>
+                <label for="rf-use-family-diseases">登録病名から選択</label>
+              </div>
+              <div id="rf-family-diseases-list" class="rf-checkbox-list" style="${formData.use_family_diseases ? '' : 'display:none;'}">
+                ${formData.diseases.map(d => `
+                  <div class="rf-checkbox-item">
+                    <input type="checkbox" id="rf-family-disease-${d.uuid}" value="${d.uuid}"
+                      ${formData.selected_family_diseases?.includes(d.uuid) ? 'checked' : ''}>
+                    <label for="rf-family-disease-${d.uuid}">${escapeHtml(d.name)}${d.isSuspected ? ' (疑い)' : ''}</label>
+                  </div>
+                `).join('')}
+              </div>
+            ` : ''}
+            <div id="rf-family-history-manual" style="${formData.use_family_diseases ? 'display:none;' : ''}">
+              <div class="rf-field">
+                <label>既往歴・家族歴（手入力）</label>
+                <textarea id="rf-family-history" rows="3" placeholder="既往歴、家族歴を入力">${escapeHtml(formData.family_history_text)}</textarea>
+              </div>
             </div>
           </div>
 
@@ -1166,6 +1186,22 @@
       });
     }
 
+    // 既往歴病名選択トグル
+    const useFamilyDiseases = modal.querySelector('#rf-use-family-diseases');
+    if (useFamilyDiseases) {
+      useFamilyDiseases.addEventListener('change', () => {
+        const familyDiseasesList = modal.querySelector('#rf-family-diseases-list');
+        const familyHistoryManual = modal.querySelector('#rf-family-history-manual');
+        if (useFamilyDiseases.checked) {
+          familyDiseasesList.style.display = '';
+          familyHistoryManual.style.display = 'none';
+        } else {
+          familyDiseasesList.style.display = 'none';
+          familyHistoryManual.style.display = '';
+        }
+      });
+    }
+
     // 下書き保存
     modal.querySelector('#rf-save-draft').addEventListener('click', () => {
       const data = collectFormData(modal, formData);
@@ -1211,8 +1247,22 @@
     data.destination_department = modal.querySelector('#rf-dest-department')?.value || '';
     data.destination_doctor = modal.querySelector('#rf-dest-doctor')?.value || '';
     data.purpose_and_history = modal.querySelector('#rf-purpose')?.value || '';
-    data.family_history = modal.querySelector('#rf-family-history')?.value || '';
+    data.family_history_text = modal.querySelector('#rf-family-history')?.value || '';
     data.remarks = modal.querySelector('#rf-remarks')?.value || '';
+
+    // 既往歴（病名選択）
+    const useFamilyDiseases = modal.querySelector('#rf-use-family-diseases');
+    data.use_family_diseases = useFamilyDiseases?.checked ?? false;
+
+    if (data.use_family_diseases && data.diseases.length > 0) {
+      data.selected_family_diseases = [];
+      data.diseases.forEach(d => {
+        const cb = modal.querySelector(`#rf-family-disease-${d.uuid}`);
+        if (cb?.checked) {
+          data.selected_family_diseases.push(d.uuid);
+        }
+      });
+    }
 
     // 病名
     const useDiseases = modal.querySelector('#rf-use-diseases');
@@ -1274,6 +1324,15 @@
       prescriptionText = formData.prescription_text || '';
     }
 
+    // 既往歴テキスト作成
+    let familyHistoryText = '';
+    if (formData.use_family_diseases && formData.diseases.length > 0 && formData.selected_family_diseases?.length > 0) {
+      const selectedDiseases = formData.diseases.filter(d => formData.selected_family_diseases.includes(d.uuid));
+      familyHistoryText = selectedDiseases.map(d => d.name + (d.isSuspected ? '（疑い）' : '')).join('，');
+    } else {
+      familyHistoryText = formData.family_history_text || '';
+    }
+
     // プレースホルダー置換リクエスト作成
     const requests = [
       DocsAPI.createReplaceTextRequest('{{作成日_和暦}}', formData.creation_date_wareki),
@@ -1290,7 +1349,7 @@
       DocsAPI.createReplaceTextRequest('{{紹介先医師名}}', formData.destination_doctor),
       DocsAPI.createReplaceTextRequest('{{診断名}}', diagnosisText),
       DocsAPI.createReplaceTextRequest('{{紹介目的および病状経過}}', formData.purpose_and_history),
-      DocsAPI.createReplaceTextRequest('{{既往歴および家族歴}}', formData.family_history),
+      DocsAPI.createReplaceTextRequest('{{既往歴および家族歴}}', familyHistoryText),
       DocsAPI.createReplaceTextRequest('{{全処方薬}}', prescriptionText),
       DocsAPI.createReplaceTextRequest('{{備考}}', formData.remarks)
     ];
