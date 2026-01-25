@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         診療情報提供書フォーム
 // @namespace    https://henry-app.jp/
-// @version      1.0.5
+// @version      1.0.6
 // @description  診療情報提供書の入力フォームとGoogle Docs出力
 // @author       sk powered by Claude
 // @match        https://henry-app.jp/*
@@ -711,7 +711,7 @@
         patient_age: patientInfo.age,
         patient_sex: patientInfo.sex,
         patient_address: patientInfo.address,
-        patient_phone: patientInfo.phone,
+        patient_phone: formatPhoneNumber(patientInfo.phone),
         physician_name: physicianName,
         department_name: departmentName,
         creation_date_wareki: getTodayWareki(),
@@ -743,7 +743,7 @@
       formData.patient_age = patientInfo.age;
       formData.patient_sex = patientInfo.sex;
       formData.patient_address = patientInfo.address;
-      formData.patient_phone = patientInfo.phone;
+      formData.patient_phone = formatPhoneNumber(patientInfo.phone);
       formData.physician_name = physicianName;
       formData.department_name = departmentName;
       formData.creation_date_wareki = getTodayWareki();
@@ -1239,6 +1239,26 @@
       .replace(/>/g, '&gt;')
       .replace(/"/g, '&quot;')
       .replace(/'/g, '&#039;');
+  }
+
+  // 電話番号フォーマット
+  function formatPhoneNumber(phone) {
+    if (!phone) return '';
+
+    // 全角数字を半角に変換
+    let normalized = phone.replace(/[０-９]/g, s => String.fromCharCode(s.charCodeAt(0) - 0xFEE0));
+    // 全角ハイフン等を半角に変換
+    normalized = normalized.replace(/[ー−‐―]/g, '-');
+    // 数字とハイフン以外を除去
+    const digitsOnly = normalized.replace(/[^0-9]/g, '');
+
+    // 携帯電話（11桁、090/080/070/060で始まる）
+    if (digitsOnly.length === 11 && /^0[6789]0/.test(digitsOnly)) {
+      return `${digitsOnly.slice(0, 3)}-${digitsOnly.slice(3, 7)}-${digitsOnly.slice(7)}`;
+    }
+
+    // 固定電話等はハイフン正規化のみ
+    return normalized;
   }
 
   function collectFormData(modal, originalData) {
