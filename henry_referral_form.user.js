@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         診療情報提供書フォーム
 // @namespace    https://henry-app.jp/
-// @version      1.0.7
+// @version      1.0.8
 // @description  診療情報提供書の入力フォームとGoogle Docs出力
 // @author       sk powered by Claude
 // @match        https://henry-app.jp/*
@@ -1416,7 +1416,7 @@
     // プラグイン登録
     await pageWindow.HenryCore.registerPlugin({
       id: 'referral-form',
-      name: '紹介状',
+      name: '診療情報提供書',
       icon: '📄',
       description: '診療情報提供書を作成',
       version: VERSION,
