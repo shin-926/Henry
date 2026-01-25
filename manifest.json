@@ -72,7 +72,7 @@
       "file": "henry_order_history.user.js",
       "match": ["henry-app.jp"],
       "order": 10,
-      "enabled": true
+      "enabled": false
     },
     {
       "name": "henry_prescription_history",
@@ -88,7 +88,7 @@
       "file": "henry_karte_history.user.js",
       "match": ["henry-app.jp"],
       "order": 10,
-      "enabled": true
+      "enabled": false
     },
     {
       "name": "henry_note_reader",
@@ -96,7 +96,7 @@
       "file": "henry_note_reader.user.js",
       "match": ["henry-app.jp"],
       "order": 10,
-      "enabled": true
+      "enabled": false
     },
     {
       "name": "henry_ikensho_form",
@@ -160,7 +160,7 @@
       "file": "henry_hospitalization_data.user.js",
       "match": ["henry-app.jp"],
       "order": 10,
-      "enabled": true
+      "enabled": false
     },
     {
       "name": "henry_hospitalization_search",
@@ -176,7 +176,7 @@
       "file": "henry_test_helper.user.js",
       "match": ["henry-app.jp"],
       "order": 10,
-      "enabled": true
+      "enabled": false
     }
   ]
 }
