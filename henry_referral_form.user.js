@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         診療情報提供書フォーム
 // @namespace    https://henry-app.jp/
-// @version      1.0.6
+// @version      1.0.7
 // @description  診療情報提供書の入力フォームとGoogle Docs出力
 // @author       sk powered by Claude
 // @match        https://henry-app.jp/*
@@ -1249,7 +1249,7 @@
     let normalized = phone.replace(/[０-９]/g, s => String.fromCharCode(s.charCodeAt(0) - 0xFEE0));
     // 全角ハイフン等を半角に変換
     normalized = normalized.replace(/[ー−‐―]/g, '-');
-    // 数字とハイフン以外を除去
+    // 数字のみ抽出
     const digitsOnly = normalized.replace(/[^0-9]/g, '');
 
     // 携帯電話（11桁、090/080/070/060で始まる）
@@ -1257,7 +1257,17 @@
       return `${digitsOnly.slice(0, 3)}-${digitsOnly.slice(3, 7)}-${digitsOnly.slice(7)}`;
     }
 
-    // 固定電話等はハイフン正規化のみ
+    // 市外局番省略（7桁）→ XXX-XXXX
+    if (digitsOnly.length === 7) {
+      return `${digitsOnly.slice(0, 3)}-${digitsOnly.slice(3)}`;
+    }
+
+    // 市外局番省略（8桁）→ XXXX-XXXX
+    if (digitsOnly.length === 8) {
+      return `${digitsOnly.slice(0, 4)}-${digitsOnly.slice(4)}`;
+    }
+
+    // それ以外は全角→半角変換のみ
     return normalized;
   }
 
