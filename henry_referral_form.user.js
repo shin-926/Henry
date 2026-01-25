@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         診療情報提供書フォーム
 // @namespace    https://henry-app.jp/
-// @version      1.0.2
+// @version      1.0.3
 // @description  診療情報提供書の入力フォームとGoogle Docs出力
 // @author       sk powered by Claude
 // @match        https://henry-app.jp/*
@@ -656,7 +656,7 @@
       if (d.isSuspected) name += '（疑い）';
       if (d.isMain) name += '【主】';
       return name;
-    }).join(', ');
+    }).join('，');
   }
 
   // ==========================================
@@ -1075,9 +1075,7 @@
                 <input type="checkbox" id="rf-use-prescriptions" ${formData.use_prescriptions ? 'checked' : ''}>
                 <label for="rf-use-prescriptions">最新の処方を使用する</label>
               </div>
-              <div id="rf-prescriptions-preview" class="rf-prescription-preview" ${formData.use_prescriptions ? '' : 'style="display:none;"'}>
-                ${escapeHtml(formatPrescriptions(formData.prescriptions))}
-              </div>
+              <div id="rf-prescriptions-preview" class="rf-prescription-preview" ${formData.use_prescriptions ? '' : 'style="display:none;"'}>${escapeHtml(formatPrescriptions(formData.prescriptions))}</div>
               <div id="rf-prescription-manual" style="${formData.use_prescriptions ? 'display:none;' : ''}">
                 <div class="rf-field">
                   <label>処方内容（手入力）</label>
@@ -1263,7 +1261,7 @@
     let diagnosisText = '';
     if (formData.use_diseases && formData.diseases.length > 0 && formData.selected_diseases?.length > 0) {
       const selectedDiseases = formData.diseases.filter(d => formData.selected_diseases.includes(d.uuid));
-      diagnosisText = selectedDiseases.map(d => d.name + (d.isSuspected ? '（疑い）' : '')).join(', ');
+      diagnosisText = selectedDiseases.map(d => d.name + (d.isSuspected ? '（疑い）' : '')).join('，');
     } else {
       diagnosisText = formData.diagnosis_text || '';
     }
