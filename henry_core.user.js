@@ -116,7 +116,7 @@
     GOOGLE_CREDENTIALS_KEY: 'google_oauth_credentials'
   };
 
-  console.log('[Henry Core] Initializing v2.10.8...');
+  console.log(`[Henry Core] Initializing v${VERSION}...`);
 
   // ==========================================
   // 1. Auth Manager (認証トークン)

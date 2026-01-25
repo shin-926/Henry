@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry Loader (Dev)
 // @namespace    https://henry-app.jp/
-// @version      1.7.1
+// @version      1.8.0
 // @description  Henryスクリプトの動的ローダー（開発版）
 // @author       sk powered by Claude
 // @match        https://henry-app.jp/*
@@ -186,25 +186,15 @@ const GM_registerMenuCommand = window.GM_registerMenuCommand;
 const unsafeWindow = window;
 `;
 
-  // Blob URL + script タグでコードを実行（Trusted Types対応）
-  function executeViaScriptTag(code, name) {
+  // eval でコードを実行（CSPで 'unsafe-eval' が許可されている場合）
+  function executeCode(code, name) {
     return new Promise((resolve, reject) => {
       try {
-        const blob = new Blob([code], { type: 'application/javascript' });
-        const blobUrl = URL.createObjectURL(blob);
-        const script = document.createElement('script');
-        script.src = blobUrl;
-        script.onload = () => {
-          URL.revokeObjectURL(blobUrl);
-          resolve(true);
-        };
-        script.onerror = (e) => {
-          URL.revokeObjectURL(blobUrl);
-          reject(new Error(`Script load failed: ${name}`));
-        };
-        document.head.appendChild(script);
+        // eval を使って実行（CSPで許可されている）
+        (0, eval)(code);
+        resolve(true);
       } catch (e) {
-        reject(e);
+        reject(new Error(`Script execution failed: ${name} - ${e.message}`));
       }
     });
   }
@@ -223,7 +213,7 @@ const unsafeWindow = window;
         try {
           const reqCode = await fetchText(reqUrl);
           // @requireはグローバルスコープで実行（Blob URL方式）
-          await executeViaScriptTag(reqCode, reqUrl);
+          await executeCode(reqCode, reqUrl);
           loadedRequires.add(reqUrl);
           log('@require 完了:', reqUrl);
         } catch (e) {
@@ -243,7 +233,7 @@ const unsafeWindow = window;
 
     try {
       // Blob URL + script タグで実行（Trusted Types対応）
-      await executeViaScriptTag(wrappedCode, scriptInfo.name);
+      await executeCode(wrappedCode, scriptInfo.name);
       log('読み込み完了:', scriptInfo.name);
       return true;
     } catch (e) {

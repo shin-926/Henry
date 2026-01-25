@@ -1,15 +1,15 @@
 // ==UserScript==
-// @name         Henry Loader (Unified)
+// @name         Henry Loader (Unified Dev)
 // @namespace    https://henry-app.jp/
-// @version      1.0.0
-// @description  Henryスクリプト統合ローダー（全ドメイン対応）
+// @version      1.1.0
+// @description  Henryスクリプト統合ローダー（全ドメイン対応・開発版）
 // @author       sk powered by Claude
 // @match        https://henry-app.jp/*
 // @match        https://*.henry-app.jp/*
 // @match        https://manage-maokahp.reserve.ne.jp/*
 // @match        https://docs.google.com/*
-// @require      https://raw.githubusercontent.com/shin-926/Henry/main/henry_core.user.js
-// @require      https://raw.githubusercontent.com/shin-926/Henry/main/henry_google_drive_bridge.user.js
+// @require      https://raw.githubusercontent.com/shin-926/Henry/develop/henry_core.user.js
+// @require      https://raw.githubusercontent.com/shin-926/Henry/develop/henry_google_drive_bridge.user.js
 // @grant        GM_xmlhttpRequest
 // @grant        GM_setValue
 // @grant        GM_getValue
@@ -31,8 +31,8 @@
 // @connect      storage.googleapis.com
 // @connect      henry-app.jp
 // @run-at       document-start
-// @updateURL    https://raw.githubusercontent.com/shin-926/Henry/main/henry_loader_unified.user.js
-// @downloadURL  https://raw.githubusercontent.com/shin-926/Henry/main/henry_loader_unified.user.js
+// @updateURL    https://raw.githubusercontent.com/shin-926/Henry/develop/henry_loader_unified.user.js
+// @downloadURL  https://raw.githubusercontent.com/shin-926/Henry/develop/henry_loader_unified.user.js
 // ==/UserScript==
 
 (function() {
@@ -42,12 +42,16 @@
   // 設定
   // ==========================================
   const CONFIG = {
-    LOCAL_MODE: false,  // 統合版はGitHubモード
+    // ローカルモード: trueでローカルサーバーから読み込み（即時反映）
+    // Google Docsでは@requireからGitHub読み込み、Henry側はローカル読み込み
+    LOCAL_MODE: true,
     LOCAL_URL: 'http://localhost:8080',
-    BRANCH: 'main',
+
+    // GitHubモード（LOCAL_MODE: falseの場合）
+    BRANCH: 'develop',
     BASE_URL: 'https://raw.githubusercontent.com/shin-926/Henry',
     MANIFEST_FILE: 'manifest.json',
-    DEBUG: false
+    DEBUG: true  // 開発版はデバッグログ有効
   };
 
   // @requireで既に読み込み済みのスクリプト（二重読み込み防止）
@@ -178,24 +182,15 @@ const GM_registerMenuCommand = window.GM_registerMenuCommand;
 const unsafeWindow = window;
 `;
 
-  function executeViaScriptTag(code, name) {
+  // eval でコードを実行（CSPで 'unsafe-eval' が許可されている場合）
+  function executeCode(code, name) {
     return new Promise((resolve, reject) => {
       try {
-        const blob = new Blob([code], { type: 'application/javascript' });
-        const blobUrl = URL.createObjectURL(blob);
-        const script = document.createElement('script');
-        script.src = blobUrl;
-        script.onload = () => {
-          URL.revokeObjectURL(blobUrl);
-          resolve(true);
-        };
-        script.onerror = (e) => {
-          URL.revokeObjectURL(blobUrl);
-          reject(new Error(`Script load failed: ${name}`));
-        };
-        document.head.appendChild(script);
+        // eval を使って実行（CSPで許可されている）
+        (0, eval)(code);
+        resolve(true);
       } catch (e) {
-        reject(e);
+        reject(new Error(`Script execution failed: ${name} - ${e.message}`));
       }
     });
   }
@@ -219,7 +214,7 @@ const unsafeWindow = window;
         log('@require 読み込み:', reqUrl);
         try {
           const reqCode = await fetchText(reqUrl);
-          await executeViaScriptTag(reqCode, reqUrl);
+          await executeCode(reqCode, reqUrl);
           loadedRequires.add(reqUrl);
           log('@require 完了:', reqUrl);
         } catch (e) {
@@ -234,7 +229,7 @@ const unsafeWindow = window;
     const wrappedCode = GM_WRAPPER + cleanCode;
 
     try {
-      await executeViaScriptTag(wrappedCode, scriptInfo.name);
+      await executeCode(wrappedCode, scriptInfo.name);
       log('読み込み完了:', scriptInfo.name);
       return true;
     } catch (e) {
