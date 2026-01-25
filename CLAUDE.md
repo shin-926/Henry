@@ -1,6 +1,6 @@
-# Henry EMR 開発ガイドライン (Core Rules v4.29)
+# Henry EMR 開発ガイドライン (Core Rules v4.30)
 
-<!-- 📝 UPDATED: v4.29 - Google Docs用ローダー（2ローダー構成）追加 -->
+<!-- 📝 UPDATED: v4.30 - ローダー構成を実際のファイルに基づき修正 -->
 
 > このドキュメントはAIアシスタントとの協働開発における必須ルール集です。HenryCore APIの詳細は `henry_core.user.js` 冒頭のAPI目次と実装を参照。
 
@@ -342,52 +342,17 @@ chrome-devtools-mcpでリアルタイム調査。静的リファレンスは廃�
 
 ### 動的スクリプトローダー (Henry Loader)
 
-GitHubから各スクリプトを動的に読み込む仕組み。
+GitHubから各スクリプトを動的に読み込む仕組み。詳細は `NOTES.md` の「Henry Loader」セクションを参照。
 
-| ファイル | 用途 | 対象ドメイン | 読み込み方式 |
-|---------|------|-------------|-------------|
-| henry_loader.user.js | 本番用 | Henry, 予約システム | 動的（manifest.json） |
-| henry_loader_dev.user.js | 開発用 | Henry, 予約システム | 動的（ローカルサーバー） |
-| henry_loader_docs.user.js | Google Docs用 | docs.google.com | @require（GitHub main） |
-| manifest.json | スクリプト定義 | - | - |
+| ファイル | 用途 | 読み込み元 |
+|---------|------|-----------|
+| henry_loader.user.js | 本番用 | GitHub main |
+| henry_loader_dev.user.js | 開発用 | localhost:8080 |
 
-**2ローダー構成の理由**:
-- Google DocsはCSP（Content Security Policy）が厳しく、動的スクリプト実行がブロックされる
-- `@require`方式ならTampermonkeyがCSPをバイパスして読み込める
-- 開発環境では以下の2つをTampermonkeyにインストール：
-  - henry_loader_dev.user.js（Henry/予約用 - ローカルサーバー）
-  - henry_loader_docs.user.js（Google Docs用 - GitHub main）
-
-**Google Docs開発時の注意**:
-- henry_core / henry_google_drive_bridge を修正した場合、Google Docs側に反映するには GitHub へ push が必要
-- Henry側はローカルサーバーから即時反映される
-
-**メリット**:
-- 毎回GitHubから最新版を取得（Tampermonkey更新問題を回避）
-- 新規ユーザーはローダー1つで全スクリプト利用可能（配布用）
-- 既存の個別インストール方式と並行運用可能
-
-**動作フロー（Henry/予約）**:
-```
-ページ読み込み → Loader起動 → manifest.json取得 → ホストにマッチするスクリプトをorder順に読み込み
-```
-
-**動作フロー（Google Docs）**:
-```
-ページ読み込み → Loader起動 → @requireで事前読み込み済みのhenry_core/henry_google_drive_bridgeが実行
-```
-
-**スクリプト設定機能**:
-- Toolboxの「スクリプト設定」からスクリプトのON/OFFを切り替え可能
-- 設定は`GM_setValue('loader-disabled-scripts', [...])` に保存
-- 変更は次回ページ読み込み時に反映
-- `henry_core`と`henry_toolbox`は必須のため無効化不可
-
-**ベータ版スクリプト**:
-- manifest.jsonの`label`に「ベータ版」を含むスクリプトは設定パネル下部に表示
-- 配布用ローダー（henry_loader.user.js）では`DEFAULT_DISABLED`でデフォルト無効
-- 開発用ローダー（henry_loader_dev.user.js）ではすべて有効
-- 新規ベータ版追加時: manifest.jsonのlabelに「（ベータ版）」追加 + 配布用ローダーのDEFAULT_DISABLEDに追加
+**ポイント**:
+- 1ファイルで Henry/予約/Google Docs すべてに対応
+- GM_*ストレージを全ドメインで共有（クロスタブOAuth通信が可能）
+- Google Docs側のコード変更は GitHub push 後に反映
 
 ### スクリプト一覧
 
@@ -403,6 +368,7 @@ GitHubから各スクリプトを動的に読み込む仕組み。
 | **カルテ** | henry_karte_history.user.js | 過去カルテ記事出力（実験） |
 | | henry_note_reader.user.js | カルテ内容リーダー |
 | | henry_hospitalization_data.user.js | 入院データ表示（実験） |
+| | henry_hospitalization_search.user.js | カルテ記録検索（入院・外来） |
 | **業務効率化** | henry_auto_approver.user.js | 承認待ちオーダー一括承認 |
 | | henry_login_helper.user.js | ログイン入力補助 |
 | | henry_set_search_helper.user.js | セット展開クイック検索 |
@@ -411,6 +377,7 @@ GitHubから各スクリプトを動的に読み込む仕組み。
 | **Google連携** | henry_google_auth_settings.user.js | Google OAuth認証の設定・管理 |
 | | henry_google_drive_bridge.user.js | Google Drive API直接連携 |
 | | henry_ikensho_form.user.js | 主治医意見書作成フォーム |
+| | henry_referral_form.user.js | 診療情報提供書フォーム |
 | **開発用** | henry_test_helper.user.js | テストデータ自動入力 |
 
 ---
@@ -497,12 +464,18 @@ GitHubから各スクリプトを動的に読み込む仕組み。
   4. 取得したデータに基づいて忠実に実装
   - **理由**: 断片的な情報で推測実装すると何度も修正が必要になる
 
+- **YOU MUST**: GraphQL APIを調査するときは、リクエストのURL（エンドポイント）も必ず確認すること：
+  - ペイロードだけでなく、リクエストURLが `/graphql` なのか `/graphql-v2` なのかを確認
+  - DevToolsのネットワークタブで「Request URL」を見ればすぐ分かる
+  - **推測でエンドポイントを決めない。確認してから実装する**
+
 ---
 
 ## 変更履歴
 
 | Version | Date | Changes |
 |---------|------|---------|
+| v4.30 | 2026-01-25 | ローダー構成を実際のファイル（henry_loader/henry_loader_dev）に基づき修正 |
 | v4.29 | 2026-01-24 | Google Docs用ローダー追加（2ローダー構成、CSP対策） |
 | v4.28 | 2026-01-24 | HTML/CSS再現時の手順ルール追加 |
 | v4.27 | 2026-01-23 | z-index階層ルール追加（ログインモーダル対策） |
@@ -545,7 +518,7 @@ GitHubから各スクリプトを動的に読み込む仕組み。
 
 ### 調査・開発タスク
 - [ ] TASK-001: ORDER_STATUS_REVOKED の承認API特定
-- [ ] TASK-002: 独自オーダーセット選択UI
+- [x] TASK-002: 独自オーダーセット選択UI → 終了 [2026-01-25]
 - [ ] TASK-003: 病名サジェスト機能
 - [ ] TASK-011: henry_karte_history 処方表示改善（mhlwMedicine対応、medicationTiming用法取得、検体検査フィールド調査）
 - [x] TASK-013: Tampermonkey更新問題 → Henry Loaderで解決（毎回GitHubから最新取得）[2026-01-21]
@@ -554,14 +527,11 @@ GitHubから各スクリプトを動的に読み込む仕組み。
   - henry_ikensho_form: プラグイン登録のみ
   - henry_memo: グローバルイベント、UIは呼び出し時表示
   - henry_toolbox: MutationObserverで継続監視（debounce付き、ボタン消失時に再挿入）
-- [ ] TASK-016: Henry本体の画面更新が行われない問題（他ユーザーの変更が反映されない等。原因特定が必要）
+- [x] TASK-016: Henry本体の画面更新が行われない問題 → 終了 [2026-01-25]
 - [x] TASK-017: 主治医意見書スクリプトのOAuthスコープ削減 → 対応不要と判断（組織内限定、リスク低） [2026-01-22]
 - [ ] TASK-018: 主治医意見書の下書きインポート/エクスポート機能（PC間でデータ移行可能に）
 - [x] TASK-020: ログインモーダル表示時にスクリプトUIが上に出る問題 → z-index階層ルール導入で解決 [2026-01-23]
-- [ ] TASK-028: Miele-LXIV（DICOMビューア）GitHub版ビルド [2026-01-22]
-  - 前提: Xcodeインストール（App Storeから）
-  - 手順: brew install kconfig-frontend wget cmake → miele-lxiv-easy clone → build.sh
-  - 参考: https://github.com/bettar/miele-lxiv-easy
+- [x] TASK-028: Miele-LXIV（DICOMビューア）GitHub版ビルド → 一旦終了 [2026-01-25]
 - [ ] TASK-029: henry_set_search_helper 巨大関数リファクタリング [2026-01-22]
   - createButtonContainer（400行以上）を責務分割
   - DragDropHandler: ドラッグ＆ドロップ関連ロジック
@@ -572,9 +542,13 @@ GitHubから各スクリプトを動的に読み込む仕組み。
   - UI表示ロジック（showToast等）のHenryCore統合検討
   - GM_xmlhttpRequestラッパーの拡張
 - [ ] TASK-031: henry_ikensho_form: localStorageのPII保存をGoogle DriveのappPropertiesへ移行 [2026-01-22]
-- [ ] TASK-032: henry_disease_register: 登録済み病名の編集機能 [2026-01-23]
+- [x] TASK-032: henry_disease_register: 登録済み病名の編集機能 → 完了 [2026-01-25]
 - [ ] TASK-033: henry_hospitalization_data: パーシステッドクエリをフルクエリ方式に修正 [2026-01-23]
-  - LIST_CLINICAL_DOCUMENTS, LIST_REHABILITATION_DOCUMENTS, LIST_ORDERS の3クエリ
+  - LIST_CLINICAL_DOCUMENTS: 変数方式OK（ListClinicalDocumentsRequestInput!は公開）
+  - LIST_REHABILITATION_DOCUMENTS: インライン方式必要（入力型非公開）
+  - LIST_ORDERS: インライン方式必要（入力型非公開）+ エンドポイント要調査（/graphqlでField undefined）
+  - ClinicalCalendarView: インライン方式必要 + 要調査（エラー発生）
+  - 現状Persisted Query方式で動作中のため一旦保留
 - [ ] TASK-034: henry_toolbox: MutationObserverの監視範囲最適化検討 [2026-01-23]
   - 現状: document.bodyをsubtree:trueで監視（debounceで軽減）
   - 改善案: navの親要素など、より限定的なコンテナを監視対象にする
@@ -585,6 +559,9 @@ GitHubから各スクリプトを動的に読み込む仕組み。
 - [ ] TASK-036: 新規スクリプト: リハビリオーダー簡略化 [2026-01-23]
   - カルテのリハビリオーダー入力が煩雑なため、シンプルにするスクリプトを開発
   - 要件・仕様は未定（着手時に詳細ヒアリング）
+- [ ] TASK-037: henry_referral_form: 近隣病院のドロップダウン選択機能 [2026-01-25]
+  - 紹介先病院と診療科をドロップダウンで選択可能にする
+  - 近隣病院リストの管理方法は未定
 - [x] TASK-027: henry_disease_register Loader経由で初期化エラー → Loaderに@require対応追加で解決 [2026-01-22]
 - [x] TASK-021: MutationObserver最適化 完了 [2026-01-21]
   - ✅ henry_imaging_order_helper: OK（2段階監視 + cleaner）
