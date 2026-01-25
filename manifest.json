@@ -75,6 +75,14 @@
       "enabled": true
     },
     {
+      "name": "henry_prescription_history",
+      "label": "処方歴",
+      "file": "henry_prescription_history.user.js",
+      "match": ["henry-app.jp"],
+      "order": 10,
+      "enabled": true
+    },
+    {
       "name": "henry_karte_history",
       "label": "カルテ履歴（ベータ版）",
       "file": "henry_karte_history.user.js",
@@ -94,6 +102,14 @@
       "name": "henry_ikensho_form",
       "label": "主治医意見書",
       "file": "henry_ikensho_form.user.js",
+      "match": ["henry-app.jp"],
+      "order": 10,
+      "enabled": true
+    },
+    {
+      "name": "henry_referral_form",
+      "label": "診療情報提供書",
+      "file": "henry_referral_form.user.js",
       "match": ["henry-app.jp"],
       "order": 10,
       "enabled": true
@@ -142,6 +158,14 @@
       "name": "henry_hospitalization_data",
       "label": "入院データ取得（ベータ版）",
       "file": "henry_hospitalization_data.user.js",
+      "match": ["henry-app.jp"],
+      "order": 10,
+      "enabled": true
+    },
+    {
+      "name": "henry_hospitalization_search",
+      "label": "カルテ記録検索",
+      "file": "henry_hospitalization_search.user.js",
       "match": ["henry-app.jp"],
       "order": 10,
       "enabled": true

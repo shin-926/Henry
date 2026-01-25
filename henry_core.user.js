@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry Core
 // @namespace    https://henry-app.jp/
-// @version      2.13.0
+// @version      2.14.0
 // @description  Henry スクリプト実行基盤 (GoogleAuth統合 / Google Docs対応)
 // @author       sk powered by Claude & Gemini
 // @match        https://henry-app.jp/*
@@ -45,6 +45,7 @@
  *   query(queryString, variables?, options?)     - GraphQL API呼び出し（エンドポイント自動学習）
  *   getPatientUuid()                             - 現在表示中の患者UUID
  *   getMyUuid()                                  - ログインユーザーUUID（非同期）
+ *   getMyDepartment()                            - ログインユーザー診療科（非同期）
  *   getToken()                                   - Firebase Auth トークン（非同期）
  *   tokenStatus()                                - トークン有効性確認（非同期）
  *
@@ -198,6 +199,7 @@
   const Context = {
     _myUuid: null,
     _myName: null,
+    _myDepartment: null,
 
     // URLからのみ取得（キャッシュ廃止：患者取り違え防止）
     // NOTE: Henry本体のURL構造に依存（/patients/:uuid 形式）
@@ -264,6 +266,37 @@
     getMyName: async () => {
       const me = await Context._resolveMe();
       return me?.name || null;
+    },
+
+    getMyDepartment: async () => {
+      if (Context._myDepartment !== null) {
+        return Context._myDepartment;
+      }
+
+      const myUuid = await Context.getMyUuid();
+      if (!myUuid) return '';
+
+      try {
+        const result = await queryInternal(`
+          query ListOrganizationMemberships($input: ListOrganizationMembershipsRequestInput!) {
+            listOrganizationMemberships(input: $input) {
+              memberships {
+                user { uuid }
+                departmentName
+              }
+            }
+          }
+        `, { input: {} });
+
+        const memberships = result.data?.listOrganizationMemberships?.memberships || [];
+        const me = memberships.find(m => m.user?.uuid === myUuid);
+        Context._myDepartment = me?.departmentName || '';
+        console.log(`[Henry Core] Department resolved: ${Context._myDepartment}`);
+        return Context._myDepartment;
+      } catch (e) {
+        console.error('[Henry Core] getMyDepartment エラー:', e.message);
+        return '';
+      }
     }
   };
 
@@ -967,6 +1000,7 @@
 
     getMyUuid: Context.getMyUuid,
     getMyName: Context.getMyName,
+    getMyDepartment: Context.getMyDepartment,
 
     registerPlugin: async (options) => {
       // プラグインをレジストリに追加
