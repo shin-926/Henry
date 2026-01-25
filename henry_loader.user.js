@@ -1,13 +1,15 @@
 // ==UserScript==
 // @name         Henry Loader
 // @namespace    https://henry-app.jp/
-// @version      1.6.1
+// @version      1.7.0
 // @description  Henryスクリプトの動的ローダー（リリース版）
 // @author       sk powered by Claude
 // @match        https://henry-app.jp/*
 // @match        https://*.henry-app.jp/*
 // @match        https://docs.google.com/*
 // @match        https://manage-maokahp.reserve.ne.jp/*
+// @require      https://raw.githubusercontent.com/shin-926/Henry/main/henry_core.user.js
+// @require      https://raw.githubusercontent.com/shin-926/Henry/main/henry_google_drive_bridge.user.js
 // @grant        GM_xmlhttpRequest
 // @grant        GM_setValue
 // @grant        GM_getValue
@@ -39,6 +41,14 @@
   // 将来規模が大きくなった場合、ビルドツール(esbuild等)で1ソースから2ファイル生成する構成を検討
 
   // ==========================================
+  // Google Docs判定（@requireで既に読み込み済み）
+  // ==========================================
+  if (location.host === 'docs.google.com') {
+    console.log('[HenryLoader] Google Docsモード（@require経由で読み込み済み）');
+    return;
+  }
+
+  // ==========================================
   // 設定
   // ==========================================
   const CONFIG = {
@@ -56,6 +66,9 @@
       'henry_test_helper'
     ]
   };
+
+  // @requireで既に読み込み済みのスクリプト（二重読み込み防止）
+  const PRELOADED_SCRIPTS = new Set(['henry_core', 'henry_google_drive_bridge']);
 
   // ==========================================
   // スクリプト有効/無効設定
@@ -183,6 +196,12 @@ const unsafeWindow = window;
 `;
 
   async function loadScript(scriptInfo) {
+    // @requireで既に読み込み済みならスキップ
+    if (PRELOADED_SCRIPTS.has(scriptInfo.name)) {
+      log('スキップ（@require済み）:', scriptInfo.name);
+      return true;
+    }
+
     const url = getUrl(scriptInfo.file);
     log('スクリプト読み込み:', scriptInfo.name);
 
