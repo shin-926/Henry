@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         診療情報提供書フォーム
 // @namespace    https://henry-app.jp/
-// @version      1.0.4
+// @version      1.0.5
 // @description  診療情報提供書の入力フォームとGoogle Docs出力
 // @author       sk powered by Claude
 // @match        https://henry-app.jp/*
@@ -638,7 +638,8 @@
 
     const lines = [];
     for (const m of latest.medicines) {
-      let line = m.name;
+      // メーカー名（「〜」）を削除
+      let line = m.name.replace(/「[^」]*」/g, '').trim();
       if (m.quantity) line += ` ${m.quantity}${m.unit}`;
       if (m.usage) line += ` ${m.usage}`;
       if (m.days) line += ` ${m.days}日分`;
