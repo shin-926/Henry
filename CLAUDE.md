@@ -1,6 +1,6 @@
-# Henry EMR 開発ガイドライン (Core Rules v4.39)
+# Henry EMR 開発ガイドライン (Core Rules v4.40)
 
-<!-- 📝 UPDATED: v4.39 - スクリプト読み込み方式の説明追加 -->
+<!-- 📝 UPDATED: v4.40 - 共通UI関数使用ルール追加 -->
 
 > このドキュメントはAIアシスタントとの協働開発における必須ルール集です。HenryCore APIの詳細は `henry_core.user.js` 冒頭のAPI目次と実装を参照。
 
@@ -404,6 +404,15 @@ GitHubから各スクリプトを動的に読み込む仕組み。詳細は `NOT
 
 - **IMPORTANT**: コード固有の課題やTODOは、該当コード内にTODOコメントとして残すこと（例: `// TODO: 動作確認後にこのログを削除`）
 
+- **YOU MUST**: 新規スクリプト作成時は `HenryCore.ui.*` の共通UI関数を使用すること：
+  - トースト通知: `HenryCore.ui.showToast(message, type, duration)`
+  - スピナー: `HenryCore.ui.showSpinner(message)` → `{ close }` を返す
+  - モーダル: `HenryCore.ui.showModal(options)`
+  - 入力フィールド: `HenryCore.ui.createInput(options)`, `HenryCore.ui.createTextarea(options)`
+  - ボタン: `HenryCore.ui.createButton(options)`
+  - デザイントークン: `HenryCore.ui.tokens` で色・フォント・余白等を参照
+  - **例外**: HenryCoreが利用できない環境（ログイン画面、外部ドメイン）では独自実装を許容
+
 - **IMPORTANT**: 作業完了後、一段上の視点（メタな視点）から影響範囲を確認し、必要な追加作業があればユーザーに提案すること。コード・ドキュメント・設計方針・運用フロー・命名規則など、あらゆる側面で整合性を考える。
 
 - **YOU MUST**: APIを使用する前に、必ず仕様を確認すること：
@@ -519,6 +528,7 @@ GitHubから各スクリプトを動的に読み込む仕組み。詳細は `NOT
 
 | Version | Date | Changes |
 |---------|------|---------|
+| v4.40 | 2026-01-26 | 共通UI関数（HenryCore.ui.*）使用ルール追加 |
 | v4.39 | 2026-01-26 | スクリプト読み込み方式（@require vs eval）の説明追加 |
 | v4.38 | 2026-01-26 | Google Docs文書作成ルール追加（詳細はNOTES.md） |
 | v4.36 | 2026-01-26 | GitHub Issues記載ガイドライン追加 |
