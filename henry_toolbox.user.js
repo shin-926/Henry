@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         ツールボックス
 // @namespace    https://haru-chan.example
-// @version      5.6.0
+// @version      5.7.1
 // @description  プラグイン方式。シンプルUI、Noto Sans JP、ドラッグ＆ドロップ並び替え対応。
 // @author       sk powered by Claude & Gemini
 // @match        https://henry-app.jp/*
@@ -62,7 +62,7 @@
       display: none;
       border: 1px solid #e5e7eb;
       font-family: 'Noto Sans JP', -apple-system, BlinkMacSystemFont, sans-serif;
-      overflow: hidden;
+      overflow: visible;
       opacity: 0;
       transform: translateX(-10px);
       transition: opacity 0.2s, transform 0.2s;
@@ -291,7 +291,7 @@
     .ht-group-row {
       position: relative;
     }
-    .ht-group-row .ht-item-btn::after {
+    .ht-group-row > .ht-item-btn::after {
       content: '▶';
       margin-left: auto;
       font-size: 10px;
@@ -318,6 +318,27 @@
       visibility: visible;
       transform: translateX(0);
     }
+    .ht-group-row.dragging > .ht-submenu {
+      opacity: 0 !important;
+      visibility: hidden !important;
+    }
+
+    /* サブメニュー内ドラッグ中は表示を維持 */
+    .ht-submenu.submenu-dragging {
+      opacity: 1 !important;
+      visibility: visible !important;
+      transform: translateX(0) !important;
+    }
+    .ht-submenu-row.dragging {
+      opacity: 0.4;
+      background: #f9fafb;
+    }
+    .ht-submenu-row.drag-over {
+      border-top: 2px solid #10B981;
+    }
+    .ht-submenu-row.drag-over-bottom {
+      border-bottom: 2px solid #10B981;
+    }
     .ht-submenu .ht-row {
       padding: 0 6px;
     }
@@ -335,6 +356,15 @@
   const toolbox = unsafeWindow.HenryToolbox;
 
   let userOrder = GM_getValue('toolbox-user-order', {});
+  let groupOrder = GM_getValue('toolbox-group-order', {});  // グループ用のorder
+  let groupItemOrder = GM_getValue('toolbox-group-item-order', {});  // グループ内アイテムの順序
+
+  // 現在の表示アイテム（ドラッグ用）
+  let currentDisplayItems = [];
+
+  // サブメニュードラッグ用
+  let submenuDragSrcEl = null;
+  let currentSubmenuGroup = null;
 
   // ============================================
   // 3. ロジック
@@ -414,7 +444,7 @@
             name: item.group,
             icon: item.groupIcon || '📁',
             items: [],
-            order: item.order  // グループ内最初のアイテムのorderを使用
+            order: groupOrder[item.group] ?? item.order  // groupOrderを優先
           };
         }
         // グループ内でgroupIconが指定されていれば上書き
@@ -423,7 +453,9 @@
         }
         groups[item.group].items.push({ ...item, originalIndex: index });
       } else {
-        ungrouped.push({ ...item, originalIndex: index });
+        // ungroupedもuserOrderを参照
+        const order = userOrder[item.event] ?? item.order ?? 99;
+        ungrouped.push({ ...item, originalIndex: index, order });
       }
     });
 
@@ -467,9 +499,19 @@
   }
 
   // グループ行を作成（サブメニュー付き）
-  function createGroupRow(groupData) {
+  function createGroupRow(groupData, index) {
     const row = document.createElement('div');
     row.className = 'ht-row ht-group-row';
+    row.draggable = true;
+    row.dataset.index = index;
+    row.dataset.groupName = groupData.name;
+
+    row.addEventListener('dragstart', handleDragStart);
+    row.addEventListener('dragenter', handleDragEnter);
+    row.addEventListener('dragover', handleDragOver);
+    row.addEventListener('dragleave', handleDragLeave);
+    row.addEventListener('drop', handleDrop);
+    row.addEventListener('dragend', handleDragEnd);
 
     const btn = document.createElement('div');
     btn.className = 'ht-item-btn';
@@ -483,10 +525,30 @@
     // サブメニュー作成
     const submenu = document.createElement('div');
     submenu.className = 'ht-submenu';
+    submenu.dataset.groupName = groupData.name;
 
-    groupData.items.forEach(item => {
+    // グループ内アイテムをソート
+    const sortedItems = [...groupData.items].sort((a, b) => {
+      const orderA = groupItemOrder[groupData.name]?.[a.event] ?? a.order ?? 99;
+      const orderB = groupItemOrder[groupData.name]?.[b.event] ?? b.order ?? 99;
+      return orderA - orderB;
+    });
+
+    sortedItems.forEach((item, subIndex) => {
       const subRow = document.createElement('div');
-      subRow.className = 'ht-row';
+      subRow.className = 'ht-row ht-submenu-row';
+      subRow.draggable = true;
+      subRow.dataset.subIndex = subIndex;
+      subRow.dataset.event = item.event;
+      subRow.dataset.groupName = groupData.name;
+
+      // サブメニュー用ドラッグイベント
+      subRow.addEventListener('dragstart', handleSubmenuDragStart);
+      subRow.addEventListener('dragenter', handleSubmenuDragEnter);
+      subRow.addEventListener('dragover', handleSubmenuDragOver);
+      subRow.addEventListener('dragleave', handleSubmenuDragLeave);
+      subRow.addEventListener('drop', handleSubmenuDrop);
+      subRow.addEventListener('dragend', handleSubmenuDragEnd);
 
       const subBtn = document.createElement('div');
       subBtn.className = 'ht-item-btn';
@@ -546,13 +608,16 @@
     // order順にソート
     displayItems.sort((a, b) => (a.order ?? 99) - (b.order ?? 99));
 
+    // ドラッグ用に保存
+    currentDisplayItems = displayItems;
+
     // 表示
     displayItems.forEach((displayItem, index) => {
       if (displayItem.type === 'group') {
-        const row = createGroupRow(displayItem.data);
+        const row = createGroupRow(displayItem.data, index);
         panel.appendChild(row);
       } else {
-        const row = createItemRow(displayItem.data, displayItem.data.originalIndex);
+        const row = createItemRow(displayItem.data, index);
         panel.appendChild(row);
       }
     });
@@ -866,6 +931,12 @@
     e.dataTransfer.effectAllowed = 'move';
     e.dataTransfer.setData('text/html', this.innerHTML);
     this.classList.add('dragging');
+
+    // グループ行の場合、サブメニューを非表示
+    const submenu = this.querySelector('.ht-submenu');
+    if (submenu) {
+      submenu.style.display = 'none';
+    }
   }
 
   function handleDragOver(e) {
@@ -923,6 +994,137 @@
     this.classList.remove('dragging');
     const rows = panel.querySelectorAll('.ht-row');
     rows.forEach(row => row.classList.remove('drag-over', 'drag-over-bottom'));
+
+    // グループ行の場合、サブメニューを再表示
+    const submenu = this.querySelector('.ht-submenu');
+    if (submenu) {
+      submenu.style.display = '';
+    }
+  }
+
+  // ============================================
+  // 5.5. サブメニュー用ドラッグ＆ドロップ処理
+  // ============================================
+
+  function handleSubmenuDragStart(e) {
+    e.stopPropagation();  // 親のドラッグを防止
+    submenuDragSrcEl = this;
+    currentSubmenuGroup = this.dataset.groupName;
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('text/html', this.innerHTML);
+    this.classList.add('dragging');
+
+    // サブメニューを表示し続ける
+    const submenu = this.closest('.ht-submenu');
+    if (submenu) submenu.classList.add('submenu-dragging');
+  }
+
+  function handleSubmenuDragOver(e) {
+    if (e.preventDefault) e.preventDefault();
+    e.stopPropagation();
+    e.dataTransfer.dropEffect = 'move';
+
+    if (this !== submenuDragSrcEl && this.dataset.groupName === currentSubmenuGroup) {
+      const rect = this.getBoundingClientRect();
+      const midY = rect.top + rect.height / 2;
+
+      this.classList.remove('drag-over', 'drag-over-bottom');
+      if (e.clientY < midY) {
+        this.classList.add('drag-over');
+      } else {
+        this.classList.add('drag-over-bottom');
+      }
+    }
+
+    return false;
+  }
+
+  function handleSubmenuDragEnter(e) {
+    e.stopPropagation();
+  }
+
+  function handleSubmenuDragLeave(e) {
+    e.stopPropagation();
+    this.classList.remove('drag-over', 'drag-over-bottom');
+  }
+
+  function handleSubmenuDrop(e) {
+    if (e.stopPropagation) e.stopPropagation();
+    e.preventDefault();
+
+    if (submenuDragSrcEl !== this && this.dataset.groupName === currentSubmenuGroup) {
+      const groupName = this.dataset.groupName;
+      const submenu = this.closest('.ht-submenu');
+      const rows = Array.from(submenu.querySelectorAll('.ht-submenu-row'));
+
+      const oldIndex = rows.indexOf(submenuDragSrcEl);
+      let newIndex = rows.indexOf(this);
+
+      // 下半分にドロップした場合
+      const rect = this.getBoundingClientRect();
+      const midY = rect.top + rect.height / 2;
+      if (e.clientY >= midY) {
+        newIndex++;
+      }
+
+      if (oldIndex < newIndex) {
+        newIndex--;
+      }
+
+      moveSubmenuItem(groupName, oldIndex, newIndex, rows);
+    }
+
+    return false;
+  }
+
+  function handleSubmenuDragEnd(e) {
+    e.stopPropagation();
+    this.classList.remove('dragging');
+
+    // サブメニューのdraggingクラスを解除
+    const submenu = this.closest('.ht-submenu');
+    if (submenu) submenu.classList.remove('submenu-dragging');
+
+    const rows = submenu?.querySelectorAll('.ht-submenu-row') || [];
+    rows.forEach(row => row.classList.remove('drag-over', 'drag-over-bottom'));
+
+    submenuDragSrcEl = null;
+    currentSubmenuGroup = null;
+  }
+
+  function moveSubmenuItem(groupName, fromIndex, toIndex, rows) {
+    // 順序を保存
+    if (!groupItemOrder[groupName]) {
+      groupItemOrder[groupName] = {};
+    }
+
+    // 現在の順序を配列として取得
+    const events = rows.map(r => r.dataset.event);
+    const movedEvent = events.splice(fromIndex, 1)[0];
+    events.splice(toIndex, 0, movedEvent);
+
+    // 新しい順序を保存
+    events.forEach((event, index) => {
+      groupItemOrder[groupName][event] = index;
+    });
+
+    GM_setValue('toolbox-group-item-order', groupItemOrder);
+
+    // DOM操作で並び替え（buildMenuを呼ばない）
+    const submenu = rows[0]?.closest('.ht-submenu');
+    if (submenu) {
+      const srcRow = rows[fromIndex];
+      const targetRow = rows[toIndex];
+      if (fromIndex < toIndex) {
+        submenu.insertBefore(srcRow, targetRow.nextSibling);
+      } else {
+        submenu.insertBefore(srcRow, targetRow);
+      }
+      // data-subIndexを更新
+      Array.from(submenu.querySelectorAll('.ht-submenu-row')).forEach((row, i) => {
+        row.dataset.subIndex = i;
+      });
+    }
   }
 
   // ============================================
@@ -930,18 +1132,25 @@
   // ============================================
 
   function moveItem(fromIndex, toIndex) {
-    const item = toolbox.items.splice(fromIndex, 1)[0];
-    toolbox.items.splice(toIndex, 0, item);
+    // displayItemsベースで移動
+    const item = currentDisplayItems.splice(fromIndex, 1)[0];
+    currentDisplayItems.splice(toIndex, 0, item);
     saveCurrentOrder();
     buildMenu();
   }
 
   function saveCurrentOrder() {
     userOrder = {};
-    toolbox.items.forEach((item, index) => {
-      userOrder[item.event] = index;
+    groupOrder = {};
+    currentDisplayItems.forEach((displayItem, index) => {
+      if (displayItem.type === 'group') {
+        groupOrder[displayItem.data.name] = index;
+      } else {
+        userOrder[displayItem.data.event] = index;
+      }
     });
     GM_setValue('toolbox-user-order', userOrder);
+    GM_setValue('toolbox-group-order', groupOrder);
   }
 
   function closePanel() {
