@@ -185,6 +185,14 @@
       "match": ["henry-app.jp"],
       "order": 10,
       "beta": true
+    },
+    {
+      "name": "henry_ui_mockup",
+      "label": "UI Mockup（ベータ版）",
+      "file": "henry_ui_mockup.user.js",
+      "match": ["henry-app.jp"],
+      "order": 99,
+      "beta": true
     }
   ]
 }

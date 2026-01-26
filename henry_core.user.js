@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry Core
 // @namespace    https://henry-app.jp/
-// @version      2.15.0
+// @version      2.16.0
 // @description  Henry スクリプト実行基盤 (GoogleAuth統合 / Google Docs対応)
 // @author       sk powered by Claude & Gemini
 // @match        https://henry-app.jp/*
@@ -38,7 +38,7 @@
 
 /**
  * ============================================
- * Henry Core API 目次 (v2.10.8)
+ * Henry Core API 目次 (v2.16.0)
  * ============================================
  *
  * ■ Core API
@@ -64,8 +64,13 @@
  *   createLogger(name)                           - ロガー作成 { info, warn, error }
  *
  * ■ UI Components (ui.*)
+ *   tokens                                          - デザイントークン（色、フォント、スペーシング等）
  *   createButton({ label, variant?, icon?, onClick? })
+ *   createInput({ placeholder?, type?, value? })    - テキスト入力フィールド
+ *   createTextarea({ placeholder?, value?, rows? }) - 複数行テキスト入力
  *   showModal({ title, content, actions?, width?, closeOnOverlayClick? })
+ *   showToast(message, type?, duration?)            - トースト通知
+ *   showSpinner(message?)                           - ローディング表示 → { close }
  *
  * ■ Google Auth (modules.GoogleAuth.*)
  *   isConfigured()                               - 設定済みか
@@ -442,6 +447,77 @@
     _initialized: false,
     _waitingForBody: false,
 
+    // Design Tokens (Henry本体準拠)
+    tokens: {
+      // Colors - Primary
+      colorPrimary: '#00CC92',
+      colorPrimaryHover: '#00b583',
+      colorPrimaryLight: 'rgba(0, 204, 146, 0.1)',
+
+      // Colors - Semantic
+      colorSuccess: '#00CC92',
+      colorError: '#E05231',
+      colorErrorHover: '#c9472b',
+      colorWarning: '#f59e0b',
+
+      // Colors - Text
+      colorText: 'rgba(0, 0, 0, 0.84)',
+      colorTextMuted: 'rgba(0, 0, 0, 0.57)',
+      colorTextDisabled: 'rgba(0, 0, 0, 0.38)',
+      colorTextInverse: '#ffffff',
+
+      // Colors - Surface
+      colorSurface: '#ffffff',
+      colorSurfaceAlt: '#F5F7FA',
+      colorSurfaceHover: 'rgba(0, 0, 0, 0.04)',
+      colorSurfaceCancel: 'rgba(0, 0, 0, 0.06)',
+
+      // Colors - Border
+      colorBorder: 'rgba(0, 0, 0, 0.13)',
+      colorBorderFocus: '#00CC92',
+
+      // Colors - Overlay
+      colorOverlay: 'rgba(0, 0, 0, 0.5)',
+
+      // Typography
+      fontFamily: '"Noto Sans JP", system-ui, -apple-system, sans-serif',
+      fontSizeSmall: '12px',
+      fontSizeBase: '14px',
+      fontSizeLarge: '16px',
+      fontSizeXLarge: '20px',
+      fontWeightNormal: '400',
+      fontWeightMedium: '600',
+
+      // Spacing
+      spacingXs: '4px',
+      spacingSm: '8px',
+      spacingMd: '12px',
+      spacingLg: '16px',
+      spacingXl: '24px',
+
+      // Border Radius
+      radiusSmall: '4px',
+      radiusMedium: '8px',
+      radiusLarge: '12px',
+      radiusPill: '18px',
+
+      // Shadows
+      shadowSmall: '0 1px 2px rgba(0, 0, 0, 0.05)',
+      shadowMedium: '0 1px 3px rgba(0,0,0,0.12), 0 1px 2px rgba(0,0,0,0.24)',
+      shadowLarge: '0 10px 25px rgba(0, 0, 0, 0.15)',
+
+      // Z-Index (Henry: ログインモーダル=1600の下)
+      zIndexDropdown: 1000,
+      zIndexSticky: 1100,
+      zIndexFixed: 1200,
+      zIndexModalBackdrop: 1400,
+      zIndexModal: 1500,
+
+      // Transitions
+      transitionFast: '0.15s ease',
+      transitionBase: '0.2s ease',
+    },
+
     init: () => {
       if (UI._initialized) return;
       UI._initialized = true;
@@ -556,6 +632,86 @@
       return btn;
     },
 
+    /**
+     * 入力フィールドを作成
+     * @param {Object} options - オプション
+     * @param {string} options.placeholder - プレースホルダー
+     * @param {string} options.type - input type
+     * @param {string} options.value - 初期値
+     */
+    createInput: ({ placeholder = '', type = 'text', value = '' } = {}) => {
+      const input = document.createElement('input');
+      input.type = type;
+      input.placeholder = placeholder;
+      input.value = value;
+
+      Object.assign(input.style, {
+        fontFamily: UI.tokens.fontFamily,
+        fontSize: UI.tokens.fontSizeBase,
+        color: UI.tokens.colorText,
+        padding: `${UI.tokens.spacingSm} ${UI.tokens.spacingMd}`,
+        border: `1px solid ${UI.tokens.colorBorder}`,
+        borderRadius: UI.tokens.radiusSmall,
+        outline: 'none',
+        transition: UI.tokens.transitionBase,
+        width: '100%',
+        boxSizing: 'border-box',
+        background: UI.tokens.colorSurface,
+      });
+
+      input.addEventListener('focus', () => {
+        input.style.borderColor = UI.tokens.colorBorderFocus;
+        input.style.boxShadow = `0 0 0 2px ${UI.tokens.colorPrimaryLight}`;
+      });
+      input.addEventListener('blur', () => {
+        input.style.borderColor = UI.tokens.colorBorder;
+        input.style.boxShadow = 'none';
+      });
+
+      return input;
+    },
+
+    /**
+     * テキストエリアを作成
+     * @param {Object} options - オプション
+     * @param {string} options.placeholder - プレースホルダー
+     * @param {string} options.value - 初期値
+     * @param {number} options.rows - 行数
+     */
+    createTextarea: ({ placeholder = '', value = '', rows = 4 } = {}) => {
+      const textarea = document.createElement('textarea');
+      textarea.placeholder = placeholder;
+      textarea.value = value;
+      textarea.rows = rows;
+
+      Object.assign(textarea.style, {
+        fontFamily: UI.tokens.fontFamily,
+        fontSize: UI.tokens.fontSizeBase,
+        color: UI.tokens.colorText,
+        padding: UI.tokens.spacingMd,
+        border: `1px solid ${UI.tokens.colorBorder}`,
+        borderRadius: UI.tokens.radiusSmall,
+        outline: 'none',
+        transition: UI.tokens.transitionBase,
+        width: '100%',
+        boxSizing: 'border-box',
+        background: UI.tokens.colorSurface,
+        resize: 'vertical',
+        lineHeight: '1.5',
+      });
+
+      textarea.addEventListener('focus', () => {
+        textarea.style.borderColor = UI.tokens.colorBorderFocus;
+        textarea.style.boxShadow = `0 0 0 2px ${UI.tokens.colorPrimaryLight}`;
+      });
+      textarea.addEventListener('blur', () => {
+        textarea.style.borderColor = UI.tokens.colorBorder;
+        textarea.style.boxShadow = 'none';
+      });
+
+      return textarea;
+    },
+
     showModal: ({ title, content, actions = [], width, closeOnOverlayClick = true }) => {
       UI.init();
 
@@ -632,6 +788,123 @@
       }
 
       return { close };
+    },
+
+    /**
+     * トースト通知を表示
+     * @param {string} message - メッセージ
+     * @param {'success'|'error'|'warning'|'info'} type - タイプ
+     * @param {number} duration - 表示時間(ms)
+     */
+    showToast: (message, type = 'info', duration = 3000) => {
+      const colors = {
+        success: UI.tokens.colorSuccess,
+        error: UI.tokens.colorError,
+        warning: UI.tokens.colorWarning,
+        info: UI.tokens.colorPrimary,
+      };
+
+      const toast = document.createElement('div');
+      toast.textContent = message;
+
+      Object.assign(toast.style, {
+        position: 'fixed',
+        bottom: '24px',
+        right: '24px',
+        background: colors[type] || colors.info,
+        color: UI.tokens.colorTextInverse,
+        padding: `${UI.tokens.spacingMd} ${UI.tokens.spacingLg}`,
+        borderRadius: UI.tokens.radiusPill,
+        fontFamily: UI.tokens.fontFamily,
+        fontSize: UI.tokens.fontSizeBase,
+        fontWeight: UI.tokens.fontWeightMedium,
+        boxShadow: UI.tokens.shadowLarge,
+        zIndex: UI.tokens.zIndexModal,
+        opacity: '0',
+        transform: 'translateY(20px)',
+        transition: UI.tokens.transitionBase,
+      });
+
+      document.body.appendChild(toast);
+
+      // Animate in
+      requestAnimationFrame(() => {
+        toast.style.opacity = '1';
+        toast.style.transform = 'translateY(0)';
+      });
+
+      // Animate out
+      setTimeout(() => {
+        toast.style.opacity = '0';
+        toast.style.transform = 'translateY(20px)';
+        setTimeout(() => toast.remove(), 200);
+      }, duration);
+    },
+
+    /**
+     * 処理中インジケーターを表示
+     * @param {string} message - メッセージ
+     * @returns {{ close: Function }} - 閉じる関数を含むオブジェクト
+     */
+    showSpinner: (message = '処理中...') => {
+      // スピナーアニメーションを追加
+      if (!document.getElementById('henry-spinner-keyframes')) {
+        const style = document.createElement('style');
+        style.id = 'henry-spinner-keyframes';
+        style.textContent = '@keyframes henry-spin { to { transform: rotate(360deg); } }';
+        document.head.appendChild(style);
+      }
+
+      const overlay = document.createElement('div');
+      Object.assign(overlay.style, {
+        position: 'fixed',
+        top: '0',
+        left: '0',
+        width: '100%',
+        height: '100%',
+        background: UI.tokens.colorOverlay,
+        zIndex: UI.tokens.zIndexModal,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+      });
+
+      const container = document.createElement('div');
+      Object.assign(container.style, {
+        background: UI.tokens.colorSurface,
+        padding: UI.tokens.spacingXl,
+        borderRadius: UI.tokens.radiusMedium,
+        boxShadow: UI.tokens.shadowMedium,
+        textAlign: 'center',
+      });
+
+      const spinner = document.createElement('div');
+      Object.assign(spinner.style, {
+        width: '40px',
+        height: '40px',
+        border: `3px solid ${UI.tokens.colorBorder}`,
+        borderTop: `3px solid ${UI.tokens.colorPrimary}`,
+        borderRadius: '50%',
+        margin: '0 auto 16px',
+        animation: 'henry-spin 1s linear infinite',
+      });
+
+      const text = document.createElement('div');
+      text.textContent = message;
+      Object.assign(text.style, {
+        fontFamily: UI.tokens.fontFamily,
+        fontSize: UI.tokens.fontSizeBase,
+        color: UI.tokens.colorText,
+      });
+
+      container.appendChild(spinner);
+      container.appendChild(text);
+      overlay.appendChild(container);
+      document.body.appendChild(overlay);
+
+      return {
+        close: () => overlay.remove(),
+      };
     }
   };
 
