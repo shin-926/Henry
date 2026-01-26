@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Google Drive連携
 // @namespace    https://henry-app.jp/
-// @version      2.6.0
+// @version      2.6.1
 // @description  HenryのファイルをGoogle Drive APIで直接変換・編集。GAS不要版。
 // @author       sk powered by Claude & Gemini
 // @match        https://henry-app.jp/*
@@ -681,10 +681,33 @@
       pageWindow.fetch = new Proxy(originalFetch, {
         apply: async function(target, thisArg, argumentsList) {
           const [url, options] = argumentsList;
+
+          // リクエスト時点でテンプレートダウンロードを検知し、早期スピナー表示
+          let earlySpinnerHide = null;
+          if (url?.includes?.('/graphql') && options?.body) {
+            try {
+              const bodyStr = typeof options.body === 'string' ? options.body : null;
+              if (bodyStr) {
+                const requestJson = JSON.parse(bodyStr);
+                if (requestJson.operationName === 'GeneratePatientDocumentDownloadTemporaryFile') {
+                  if (pageWindow.HenryCore?.ui) {
+                    const { close } = pageWindow.HenryCore.ui.showSpinner('書類を準備中...');
+                    earlySpinnerHide = close;
+                  }
+                }
+              }
+            } catch (e) {
+              // パース失敗は無視
+            }
+          }
+
           const response = await Reflect.apply(target, thisArg, argumentsList);
 
           // GraphQL以外はそのまま返す
-          if (!url?.includes?.('/graphql') || !options?.body) return response;
+          if (!url?.includes?.('/graphql') || !options?.body) {
+            earlySpinnerHide?.();
+            return response;
+          }
 
           try {
             const bodyStr = typeof options.body === 'string' ? options.body : null;
@@ -707,8 +730,10 @@
                 handleTemplateDownload({
                   redirectUrl: data.redirectUrl,
                   title: data.title,
-                  patientId: patientId
+                  patientId: patientId,
+                  earlySpinnerHide
                 });
+                earlySpinnerHide = null; // handleTemplateDownloadに引き渡したのでクリア
 
                 // 改変したレスポンスを返す（データをnullにしてHenry本体の処理を無効化）
                 const modifiedJson = {
@@ -752,21 +777,33 @@
             }
           } catch (e) {
             debugError('Henry', 'Fetch Hook Error:', e.message);
+            earlySpinnerHide?.();
           }
 
+          // 早期スピナーが残っていれば閉じる（handleTemplateDownloadに渡されなかった場合）
+          earlySpinnerHide?.();
           return response;
         }
       });
     }
 
     // テンプレートダウンロードをGoogle Docsで開く
-    async function handleTemplateDownload({ redirectUrl, title, patientId }) {
+    async function handleTemplateDownload({ redirectUrl, title, patientId, earlySpinnerHide = null }) {
       // 重複防止（同じURLが処理中なら無視）
-      if (inflight.has(redirectUrl)) return;
+      if (inflight.has(redirectUrl)) {
+        earlySpinnerHide?.();
+        return;
+      }
 
-      if (!checkGoogleAuthReady()) return;
+      if (!checkGoogleAuthReady()) {
+        earlySpinnerHide?.();
+        return;
+      }
 
       inflight.set(redirectUrl, true);
+
+      // 早期スピナーを閉じて、タイトル付きスピナーに切り替え
+      earlySpinnerHide?.();
       const { close: hide } = pageWindow.HenryCore.ui.showSpinner(`書類を開いています... (${title})`);
 
       try {
