@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry Hospitalization Data Viewer
 // @namespace    https://github.com/shin-926/Henry
-// @version      0.15.0
+// @version      0.16.0
 // @description  入院患者の日々データを取得・表示（バイタル・処方・注射・検査・栄養・ADL・看護日誌対応）
 // @author       sk powered by Claude & Gemini
 // @match        https://henry-app.jp/*
@@ -35,7 +35,7 @@
  * - 患者プロフィール: GraphQL API (ListClinicalDocuments - CUSTOM type) - フルクエリ方式
  * - リハビリ日々記録: GraphQL API (ListRehabilitationDocuments) - インライン方式
  * - リハビリオーダー: GraphQL API (ListOrders - ORDER_TYPE_REHABILITATION) - インライン方式
- * - バイタルサイン: Persisted Query API (ClinicalCalendarView v2 - vitalSign resource)
+ * - バイタルサイン: Persisted Query API (GetClinicalCalendarView - vitalSign resource)
  */
 
 (function() {
@@ -48,7 +48,7 @@
   const ORG_UUID = 'ce6b556b-2a8d-4fce-b8dd-89ba638fc825';
 
   // Note: 以前はPersisted Query Hashを使用していたが、フルクエリ方式/インライン方式に移行済み
-  // callPersistedQuery関数はfetchCalendarData（ClinicalCalendarView v2）でのみ使用
+  // callPersistedQuery関数はfetchCalendarData（GetClinicalCalendarView on /graphql）でのみ使用
 
   // GraphQL Queries（フルクエリ方式）
   const QUERIES = {
@@ -329,41 +329,45 @@
     }
   }
 
-  // カレンダービューデータを取得（ClinicalCalendarView v2 API）
+  // カレンダービューデータを取得（GetClinicalCalendarView API）
   // 過去1週間分の全データを一括取得
+  // Note: prescriptionOrder, injectionOrderはこのAPIでは取得できない（別APIで取得が必要）
   const CALENDAR_RESOURCES = [
     '//henry-app.jp/clinicalResource/vitalSign',
-    '//henry-app.jp/clinicalResource/prescriptionOrder',
-    '//henry-app.jp/clinicalResource/injectionOrder',
-    '//henry-app.jp/clinicalResource/inspectionReport',
     '//henry-app.jp/clinicalResource/nutritionOrder',
-    '//henry-app.jp/clinicalResource/adlAssessment',
-    '//henry-app.jp/clinicalResource/nursingJournal'
+    '//henry-app.jp/clinicalResource/hospitalizationClinicalDocument',
+    '//henry-app.jp/clinicalResource/biopsyInspectionOrder',
+    '//henry-app.jp/clinicalResource/inspectionReport',
+    '//henry-app.jp/clinicalResource/patientBodyMeasurement'
   ];
 
   async function fetchCalendarData(patientUuid) {
     try {
       const today = new Date();
-      const baseDateStr = `${today.getFullYear()}-${(today.getMonth() + 1).toString().padStart(2, '0')}-${today.getDate().toString().padStart(2, '0')}`;
 
       const result = await callPersistedQuery(
-        'ClinicalCalendarView',
+        'GetClinicalCalendarView',
         {
-          patientId: patientUuid,
-          baseDate: baseDateStr,
-          beforeDateSize: 7,
-          afterDateSize: 0,
-          clinicalResourceHrns: CALENDAR_RESOURCES,
-          createUserIds: [],
-          accountingOrderShinryoShikibetsus: [],
-          includeRevoked: false
+          input: {
+            patientUuid: patientUuid,
+            baseDate: {
+              year: today.getFullYear(),
+              month: today.getMonth() + 1,
+              day: today.getDate()
+            },
+            beforeDateSize: 16,
+            afterDateSize: 0,
+            clinicalResourceHrns: CALENDAR_RESOURCES,
+            createUserUuids: [],
+            accountingOrderShinryoShikibetsus: []
+          }
         },
-        '76fe89f7c07e56986793133842d73854a2063b39c36c076f4cee4a4588ece59f', // ClinicalCalendarView v2 Hash
-        'graphql-v2'
+        '74f284465206f367c4c544c20b020204478fa075a1fd3cb1bf3fd266ced026e1', // GetClinicalCalendarView Hash
+        'graphql' // graphql-v2 ではなく graphql
       );
 
-      const data = result?.data?.clinicalCalendarView;
-      console.log(`[${SCRIPT_NAME}] ClinicalCalendarView (v2) 生データ:`, data);
+      const data = result?.data?.getClinicalCalendarView;
+      console.log(`[${SCRIPT_NAME}] GetClinicalCalendarView 生データ:`, data);
 
       // バイタルサイン
       const vitalSigns = (data?.vitalSigns || []).map(vs => ({
