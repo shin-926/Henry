@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry セット展開検索ヘルパー
 // @namespace    https://henry-app.jp/
-// @version      2.3.7
+// @version      2.4.0
 // @description  セット展開画面の検索ボックス上にクイック検索ボタンを追加
 // @author       sk powered by Claude & Gemini
 // @match        https://henry-app.jp/*
@@ -427,133 +427,43 @@
     });
   }
 
-  // 編集ポップアップを閉じる（入力中のテキストがあれば自動追加）
-  function closeEditPopup() {
-    const popup = document.querySelector('.hss-edit-popup');
-    if (popup) {
-      const addInput = popup.querySelector('.hss-edit-popup-add input');
-      const indexAttr = popup.dataset.itemIndex;
-      if (addInput && indexAttr !== undefined) {
-        const val = addInput.value.trim();
-        if (val) {
-          const items = loadItems();
-          const index = parseInt(indexAttr, 10);
-          if (items[index]) {
-            if (!items[index].items) items[index].items = [];
-            items[index].items.push(val);
-            saveItems(items);
+  // ============================================================
+  // EditPopup モジュール
+  // - 編集ポップアップの表示・管理を担当
+  // - 名前編集、サブ項目の追加/削除/並び替え
+  // ============================================================
+  const EditPopup = {
+    // ポップアップを閉じる（入力中のテキストがあれば自動追加）
+    close() {
+      const popup = document.querySelector('.hss-edit-popup');
+      if (popup) {
+        const addInput = popup.querySelector('.hss-edit-popup-add input');
+        const indexAttr = popup.dataset.itemIndex;
+        if (addInput && indexAttr !== undefined) {
+          const val = addInput.value.trim();
+          if (val) {
+            const items = loadItems();
+            const index = parseInt(indexAttr, 10);
+            if (items[index]) {
+              if (!items[index].items) items[index].items = [];
+              items[index].items.push(val);
+              saveItems(items);
+            }
           }
         }
+        popup.remove();
       }
-      popup.remove();
-    }
-  }
+    },
 
-  // ボタンコンテナを作成（パネル要素を引数で受け取る）
-  function createButtonContainer(panel) {
-    let items = loadItems();
-    const container = document.createElement('div');
-    container.className = 'hss-button-container';
-    container.id = 'hss-button-container';
-
-    // 状態管理
-    let dragMode = false;
-    let draggedIndex = null;
-    let dropTargetIndex = null;
-    let dropPosition = null;
-    let longPressTimer = null;
-    let longPressStartX = 0;
-    let longPressStartY = 0;
-    let longPressTargetIndex = null;
-    let longPressTargetText = '';
-    let ghost = null;
-    let trashZone = null;
-    let overTrash = false;
-    const LONG_PRESS_DURATION = 400;
-    const DRAG_THRESHOLD = 8;
-
-    // ゴースト要素作成
-    function createGhost(text, x, y) {
-      ghost = document.createElement('div');
-      ghost.className = 'hss-drag-ghost';
-      ghost.textContent = text;
-      ghost.style.left = x + 'px';
-      ghost.style.top = y + 'px';
-      document.body.appendChild(ghost);
-    }
-
-    function updateGhostPosition(x, y) {
-      if (ghost) {
-        ghost.style.left = x + 'px';
-        ghost.style.top = y + 'px';
-      }
-    }
-
-    function removeGhost() {
-      if (ghost) {
-        ghost.remove();
-        ghost = null;
-      }
-    }
-
-    // ドロップインジケーター
-    let dropIndicator = null;
-
-    function createDropIndicator() {
-      dropIndicator = document.createElement('div');
-      dropIndicator.className = 'hss-drop-indicator';
-      dropIndicator.style.display = 'none';
-      container.appendChild(dropIndicator);
-    }
-
-    function showDropIndicator(x, top, height) {
-      if (!dropIndicator) return;
-      dropIndicator.style.display = 'block';
-      dropIndicator.style.left = x + 'px';
-      dropIndicator.style.top = top + 'px';
-      dropIndicator.style.height = height + 'px';
-    }
-
-    function hideDropIndicator() {
-      if (dropIndicator) dropIndicator.style.display = 'none';
-      dropTargetIndex = null;
-      dropPosition = null;
-    }
-
-    // ドラッグモード開始
-    function enterDragMode(startIndex, text, x, y) {
-      closeEditPopup();
-      closeAllDropdowns();
-      dragMode = true;
-      draggedIndex = startIndex;
-      container.classList.add('hss-drag-mode');
-
-      const elements = container.querySelectorAll('.hss-quick-btn, .hss-dropdown');
-      elements[startIndex]?.classList.add('hss-dragging');
-
-      createGhost(text, x, y);
-      if (trashZone) trashZone.classList.add('active');
-    }
-
-    function exitDragMode() {
-      dragMode = false;
-      draggedIndex = null;
-      overTrash = false;
-      container.classList.remove('hss-drag-mode');
-      container.querySelectorAll('.hss-dragging').forEach(el => el.classList.remove('hss-dragging'));
-      removeGhost();
-      hideDropIndicator();
-      if (trashZone) {
-        trashZone.classList.remove('active');
-        trashZone.classList.remove('drag-over');
-      }
-    }
-
-    // 編集ポップアップを表示
-    function showEditPopup(targetElement, index) {
-      closeEditPopup();
+    // ポップアップを表示
+    // @param targetElement - ポップアップを表示する基準となる要素
+    // @param index - items配列内のインデックス
+    // @param callbacks - { getItems, saveItems, refreshButtons }
+    show(targetElement, index, callbacks) {
+      this.close();
       closeAllDropdowns();
 
+      const items = callbacks.getItems();
       const item = items[index];
       const popup = document.createElement('div');
       popup.className = 'hss-edit-popup';
@@ -573,8 +483,8 @@
         const newText = nameInput.value.trim();
         if (newText && newText !== item.text) {
           item.text = newText;
-          saveItems(items);
-          refreshButtons(panel);
+          callbacks.saveItems(items);
+          callbacks.refreshButtons();
         }
       };
       nameInput.onkeydown = (e) => {
@@ -596,85 +506,85 @@
 
       let draggedSubIndex = null;
 
-      function renderItems() {
+      const renderItems = () => {
         itemsList.innerHTML = '';
         const subItems = item.items || [];
         subItems.forEach((subItem, subIndex) => {
-            const row = document.createElement('div');
-            row.className = 'hss-edit-popup-item';
-            row.draggable = true;
-            row.dataset.index = subIndex;
+          const row = document.createElement('div');
+          row.className = 'hss-edit-popup-item';
+          row.draggable = true;
+          row.dataset.index = subIndex;
 
-            // ドラッグハンドル
-            const handle = document.createElement('span');
-            handle.className = 'hss-drag-handle';
-            handle.textContent = '⋮⋮';
+          // ドラッグハンドル
+          const handle = document.createElement('span');
+          handle.className = 'hss-drag-handle';
+          handle.textContent = '⋮⋮';
 
-            // ドラッグイベント
-            row.ondragstart = (e) => {
-              draggedSubIndex = subIndex;
-              row.classList.add('dragging');
-              e.dataTransfer.effectAllowed = 'move';
-            };
-            row.ondragend = () => {
-              row.classList.remove('dragging');
-              draggedSubIndex = null;
-              itemsList.querySelectorAll('.drag-over').forEach(el => el.classList.remove('drag-over'));
-            };
-            row.ondragover = (e) => {
+          // ドラッグイベント
+          row.ondragstart = (e) => {
+            draggedSubIndex = subIndex;
+            row.classList.add('dragging');
+            e.dataTransfer.effectAllowed = 'move';
+          };
+          row.ondragend = () => {
+            row.classList.remove('dragging');
+            draggedSubIndex = null;
+            itemsList.querySelectorAll('.drag-over').forEach(el => el.classList.remove('drag-over'));
+          };
+          row.ondragover = (e) => {
+            e.preventDefault();
+            if (draggedSubIndex === null || draggedSubIndex === subIndex) return;
+            row.classList.add('drag-over');
+          };
+          row.ondragleave = () => {
+            row.classList.remove('drag-over');
+          };
+          row.ondrop = (e) => {
+            e.preventDefault();
+            row.classList.remove('drag-over');
+            if (draggedSubIndex === null || draggedSubIndex === subIndex) return;
+            // 順序入れ替え
+            const draggedItem = item.items[draggedSubIndex];
+            item.items.splice(draggedSubIndex, 1);
+            const newIndex = draggedSubIndex < subIndex ? subIndex - 1 : subIndex;
+            item.items.splice(newIndex, 0, draggedItem);
+            callbacks.saveItems(items);
+            renderItems();
+          };
+
+          const input = document.createElement('input');
+          input.type = 'text';
+          input.className = 'hss-edit-popup-item-input';
+          input.value = subItem;
+          input.onchange = () => {
+            const newValue = input.value.trim();
+            if (newValue && newValue !== subItem) {
+              item.items[subIndex] = newValue;
+              callbacks.saveItems(items);
+            } else if (!newValue) {
+              input.value = subItem; // 空の場合は元に戻す
+            }
+          };
+          input.onkeydown = (e) => {
+            if (e.key === 'Enter') {
               e.preventDefault();
-              if (draggedSubIndex === null || draggedSubIndex === subIndex) return;
-              row.classList.add('drag-over');
-            };
-            row.ondragleave = () => {
-              row.classList.remove('drag-over');
-            };
-            row.ondrop = (e) => {
-              e.preventDefault();
-              row.classList.remove('drag-over');
-              if (draggedSubIndex === null || draggedSubIndex === subIndex) return;
-              // 順序入れ替え
-              const draggedItem = item.items[draggedSubIndex];
-              item.items.splice(draggedSubIndex, 1);
-              const newIndex = draggedSubIndex < subIndex ? subIndex - 1 : subIndex;
-              item.items.splice(newIndex, 0, draggedItem);
-              saveItems(items);
-              renderItems();
-            };
-
-            const input = document.createElement('input');
-            input.type = 'text';
-            input.className = 'hss-edit-popup-item-input';
-            input.value = subItem;
-            input.onchange = () => {
-              const newValue = input.value.trim();
-              if (newValue && newValue !== subItem) {
-                item.items[subIndex] = newValue;
-                saveItems(items);
-              } else if (!newValue) {
-                input.value = subItem; // 空の場合は元に戻す
-              }
-            };
-            input.onkeydown = (e) => {
-              if (e.key === 'Enter') {
-                e.preventDefault();
-                input.blur();
-              }
-            };
-            const deleteBtn = document.createElement('button');
-            deleteBtn.className = 'hss-edit-popup-item-delete';
-            deleteBtn.textContent = '×';
-            deleteBtn.onclick = () => {
-              item.items.splice(subIndex, 1);
-              saveItems(items);
-              renderItems();
-            };
-            row.appendChild(handle);
-            row.appendChild(input);
-            row.appendChild(deleteBtn);
-            itemsList.appendChild(row);
+              input.blur();
+            }
+          };
+          const deleteBtn = document.createElement('button');
+          deleteBtn.className = 'hss-edit-popup-item-delete';
+          deleteBtn.textContent = '×';
+          deleteBtn.onclick = () => {
+            item.items.splice(subIndex, 1);
+            callbacks.saveItems(items);
+            renderItems();
+          };
+          row.appendChild(handle);
+          row.appendChild(input);
+          row.appendChild(deleteBtn);
+          itemsList.appendChild(row);
         });
-      }
+      };
       renderItems();
       itemsSection.appendChild(itemsList);
 
@@ -692,7 +602,7 @@
           if (val) {
             if (!item.items) item.items = [];
             item.items.push(val);
-            saveItems(items);
+            callbacks.saveItems(items);
             addInput.value = '';
             renderItems();
             // 新しい入力欄にフォーカス
@@ -736,13 +646,270 @@
       // ポップアップ内クリックで閉じない
       popup.onclick = (e) => e.stopPropagation();
     }
+  };
 
-    createDropIndicator();
+  // 後方互換: 既存コードからの呼び出し用
+  function closeEditPopup() {
+    EditPopup.close();
+  }
+
+  // ============================================================
+  // ButtonRenderer モジュール
+  // - ボタン/ドロップダウンのDOM生成を担当
+  // ============================================================
+  const ButtonRenderer = {
+    // 単一ボタンを作成
+    createButton(item, callbacks) {
+      const btn = document.createElement('button');
+      btn.className = 'hss-quick-btn';
+      btn.textContent = item.text;
+      btn.onclick = () => {
+        if (callbacks.isDragging()) return;
+        if (document.querySelector('.hss-edit-popup')) return;
+        callbacks.onSearch(item.text);
+      };
+      return btn;
+    },
+
+    // ドロップダウンを作成
+    createDropdown(item, callbacks) {
+      const dropdown = document.createElement('div');
+      dropdown.className = 'hss-dropdown';
+
+      const btn = document.createElement('button');
+      btn.className = 'hss-dropdown-btn';
+      btn.innerHTML = `<span>${item.text}</span><span class="hss-dropdown-arrow">▼</span>`;
+
+      const menu = document.createElement('div');
+      menu.className = 'hss-dropdown-menu';
+
+      item.items.forEach(subItem => {
+        const menuItem = document.createElement('button');
+        menuItem.className = 'hss-dropdown-item';
+        menuItem.textContent = subItem;
+        menuItem.onclick = (e) => {
+          e.stopPropagation();
+          if (callbacks.isDragging()) return;
+          callbacks.onSearch(subItem);
+          closeAllDropdowns();
+        };
+        menu.appendChild(menuItem);
+      });
+
+      btn.onclick = (e) => {
+        e.stopPropagation();
+        if (callbacks.isDragging()) return;
+        if (document.querySelector('.hss-edit-popup')) return;
+        const isOpen = btn.classList.contains('open');
+        closeAllDropdowns();
+        if (!isOpen) {
+          btn.classList.add('open');
+          menu.classList.add('open');
+        }
+      };
+
+      dropdown.appendChild(btn);
+      dropdown.appendChild(menu);
+      return dropdown;
+    },
+
+    // 全アイテムを描画
+    renderItems(container, items, callbacks) {
+      items.forEach((item, index) => {
+        const hasItems = item.items && item.items.length > 0;
+        const element = hasItems
+          ? this.createDropdown(item, callbacks)
+          : this.createButton(item, callbacks);
+        container.appendChild(element);
+        callbacks.setupLongPress(element, index, item.text);
+      });
+    },
+
+    // 追加ボタンを作成
+    createAddButton(onAdd) {
+      const addBtn = document.createElement('button');
+      addBtn.className = 'hss-control-btn';
+      addBtn.textContent = '+';
+      addBtn.title = '新規ボタンを追加';
+      addBtn.onclick = (e) => {
+        e.stopPropagation();
+        closeEditPopup();
+        onAdd();
+      };
+      return addBtn;
+    },
+
+    // ゴミ箱を作成
+    createTrashZone() {
+      const trashZone = document.createElement('div');
+      trashZone.className = 'hss-trash-zone';
+      trashZone.textContent = '🗑';
+      trashZone.title = 'ボタンをここにドラッグで削除';
+      return trashZone;
+    }
+  };
+
+  // ============================================================
+  // DragDropHandler モジュール
+  // - ドラッグ&ドロップのロジックを担当
+  // - ゴースト要素、ドロップインジケーター、長押し検出、FLIPアニメーション
+  // ============================================================
+  function createDragDropHandler(container, callbacks) {
+    const LONG_PRESS_DURATION = 400;
+    const DRAG_THRESHOLD = 8;
+
+    // 状態管理
+    let dragMode = false;
+    let draggedIndex = null;
+    let dropTargetIndex = null;
+    let dropPosition = null;
+    let longPressTimer = null;
+    let longPressStartX = 0;
+    let longPressStartY = 0;
+    let longPressTargetIndex = null;
+    let longPressTargetText = '';
+    let ghost = null;
+    let trashZone = null;
+    let overTrash = false;
+    let dropIndicator = null;
+
+    // ゴースト要素
+    function createGhost(text, x, y) {
+      ghost = document.createElement('div');
+      ghost.className = 'hss-drag-ghost';
+      ghost.textContent = text;
+      ghost.style.left = x + 'px';
+      ghost.style.top = y + 'px';
+      document.body.appendChild(ghost);
+    }
+
+    function updateGhostPosition(x, y) {
+      if (ghost) {
+        ghost.style.left = x + 'px';
+        ghost.style.top = y + 'px';
+      }
+    }
+
+    function removeGhost() {
+      if (ghost) {
+        ghost.remove();
+        ghost = null;
+      }
+    }
+
+    // ドロップインジケーター
+    function showDropIndicator(x, top, height) {
+      if (!dropIndicator) return;
+      dropIndicator.style.display = 'block';
+      dropIndicator.style.left = x + 'px';
+      dropIndicator.style.top = top + 'px';
+      dropIndicator.style.height = height + 'px';
+    }
+
+    function hideDropIndicator() {
+      if (dropIndicator) dropIndicator.style.display = 'none';
+      dropTargetIndex = null;
+      dropPosition = null;
+    }
+
+    // ドラッグモード制御
+    function enterDragMode(startIndex, text, x, y) {
+      closeEditPopup();
+      closeAllDropdowns();
+      dragMode = true;
+      draggedIndex = startIndex;
+      container.classList.add('hss-drag-mode');
+
+      const elements = container.querySelectorAll('.hss-quick-btn, .hss-dropdown');
+      elements[startIndex]?.classList.add('hss-dragging');
+
+      createGhost(text, x, y);
+      if (trashZone) trashZone.classList.add('active');
+    }
+
+    function exitDragMode() {
+      dragMode = false;
+      draggedIndex = null;
+      overTrash = false;
+      container.classList.remove('hss-drag-mode');
+      container.querySelectorAll('.hss-dragging').forEach(el => el.classList.remove('hss-dragging'));
+      removeGhost();
+      hideDropIndicator();
+      if (trashZone) {
+        trashZone.classList.remove('active');
+        trashZone.classList.remove('drag-over');
+      }
+    }
+
+    // FLIPアニメーション用：位置を記録
+    function capturePositions() {
+      const positions = [];
+      const elements = container.querySelectorAll('.hss-quick-btn, .hss-dropdown');
+      elements.forEach((el) => {
+        const rect = el.getBoundingClientRect();
+        positions.push({ left: rect.left, top: rect.top });
+      });
+      return positions;
+    }
+
+    // FLIPアニメーション付きでボタンを再描画
+    function refreshButtonsWithAnimation(oldFromIndex, oldToIndex) {
+      const oldPositions = capturePositions();
+
+      callbacks.removeButtons();
+      callbacks.insertButtons();
+
+      const newContainer = document.getElementById('hss-button-container');
+      if (!newContainer) return;
+
+      const indexMap = [];
+      for (let i = 0; i < oldPositions.length; i++) {
+        if (i === oldFromIndex) {
+          indexMap[i] = oldToIndex;
+        } else if (oldFromIndex < oldToIndex) {
+          if (i > oldFromIndex && i <= oldToIndex) {
+            indexMap[i] = i - 1;
+          } else {
+            indexMap[i] = i;
+          }
+        } else {
+          if (i >= oldToIndex && i < oldFromIndex) {
+            indexMap[i] = i + 1;
+          } else {
+            indexMap[i] = i;
+          }
+        }
+      }
+
+      const newElements = newContainer.querySelectorAll('.hss-quick-btn, .hss-dropdown');
+
+      newElements.forEach((el, newIndex) => {
+        const oldIndex = indexMap.indexOf(newIndex);
+        if (oldIndex === -1 || !oldPositions[oldIndex]) return;
+
+        const oldPos = oldPositions[oldIndex];
+        const newRect = el.getBoundingClientRect();
+        const deltaX = oldPos.left - newRect.left;
+        const deltaY = oldPos.top - newRect.top;
+
+        if (Math.abs(deltaX) < 1 && Math.abs(deltaY) < 1) return;
+
+        el.style.transition = 'none';
+        el.style.transform = `translate(${deltaX}px, ${deltaY}px)`;
+        el.offsetHeight; // 強制リフロー
+
+        el.style.transition = '';
+        el.classList.add('hss-animating');
+        el.style.transform = '';
+        el.addEventListener('transitionend', () => {
+          el.classList.remove('hss-animating');
+          el.style.transition = '';
+        }, { once: true });
+      });
+    }
 
     // マウス移動ハンドラ
     function handleMouseMove(e) {
-      // 長押し待機中またはポップアップ表示後に移動したらドラッグモードへ
-      // ただしポップアップ内でのマウス移動は除外
       if (longPressTargetIndex !== null && !e.target.closest('.hss-edit-popup')) {
         const dx = e.clientX - longPressStartX;
         const dy = e.clientY - longPressStartY;
@@ -806,91 +973,8 @@
       }
     }
 
-    // FLIPアニメーション用：位置を記録
-    function capturePositions() {
-      const positions = [];
-      const elements = container.querySelectorAll('.hss-quick-btn, .hss-dropdown');
-      elements.forEach((el) => {
-        const rect = el.getBoundingClientRect();
-        positions.push({ left: rect.left, top: rect.top });
-      });
-      return positions;
-    }
-
-    // FLIPアニメーション付きでボタンを再描画
-    function refreshButtonsWithAnimation(oldFromIndex, oldToIndex) {
-      // First: 現在の位置を記録
-      const oldPositions = capturePositions();
-
-      // データは既に更新済みなので再描画
-      removeButtons();
-      insertButtons(panel);
-
-      // Last: 新しい位置を取得してアニメーション
-      const newContainer = document.getElementById('hss-button-container');
-      if (!newContainer) return;
-
-      // 新しいインデックス順での対応を計算
-      // oldFromIndex -> newToIndex への移動
-      // 例: [0,1,2,3,4] で 2->4 なら [0,1,3,4,2] になる
-      // 旧インデックス -> 新インデックス のマッピングを作成
-      const indexMap = [];
-      for (let i = 0; i < oldPositions.length; i++) {
-        if (i === oldFromIndex) {
-          indexMap[i] = oldToIndex;
-        } else if (oldFromIndex < oldToIndex) {
-          // 左から右へ移動: fromとtoの間は1つ左にずれる
-          if (i > oldFromIndex && i <= oldToIndex) {
-            indexMap[i] = i - 1;
-          } else {
-            indexMap[i] = i;
-          }
-        } else {
-          // 右から左へ移動: toとfromの間は1つ右にずれる
-          if (i >= oldToIndex && i < oldFromIndex) {
-            indexMap[i] = i + 1;
-          } else {
-            indexMap[i] = i;
-          }
-        }
-      }
-
-      const newElements = newContainer.querySelectorAll('.hss-quick-btn, .hss-dropdown');
-
-      // 新しい各要素について、旧位置からアニメーション
-      newElements.forEach((el, newIndex) => {
-        // この新インデックスに対応する旧インデックスを探す
-        const oldIndex = indexMap.indexOf(newIndex);
-        if (oldIndex === -1 || !oldPositions[oldIndex]) return;
-
-        const oldPos = oldPositions[oldIndex];
-        const newRect = el.getBoundingClientRect();
-        const deltaX = oldPos.left - newRect.left;
-        const deltaY = oldPos.top - newRect.top;
-
-        if (Math.abs(deltaX) < 1 && Math.abs(deltaY) < 1) return;
-
-        // Invert: 既存のtransitionを無効化して古い位置に即座に配置
-        el.style.transition = 'none';
-        el.style.transform = `translate(${deltaX}px, ${deltaY}px)`;
-
-        // 強制リフロー（スタイル適用を確定）
-        el.offsetHeight;
-
-        // Play: アニメーションで新しい位置へ
-        el.style.transition = '';
-        el.classList.add('hss-animating');
-        el.style.transform = '';
-        el.addEventListener('transitionend', () => {
-          el.classList.remove('hss-animating');
-          el.style.transition = '';
-        }, { once: true });
-      });
-    }
-
     // マウスアップでドロップ処理
     function handleMouseUp() {
-      // 長押しタイマーをクリア
       if (longPressTimer !== null) {
         clearTimeout(longPressTimer);
         longPressTimer = null;
@@ -898,27 +982,21 @@
       longPressTargetIndex = null;
 
       if (dragMode && draggedIndex !== null) {
-        // ゴミ箱にドロップ → 削除
         if (overTrash) {
-          items.splice(draggedIndex, 1);
-          saveItems(items);
+          callbacks.deleteItem(draggedIndex);
           exitDragMode();
-          refreshButtons(panel);
+          callbacks.refreshButtons();
           return;
         }
 
-        // 通常のドロップ
         if (dropTargetIndex !== null && dropPosition !== null) {
-          const draggedItem = items[draggedIndex];
           let newIndex = dropPosition === 'left' ? dropTargetIndex : dropTargetIndex + 1;
           if (draggedIndex < newIndex) newIndex--;
 
           if (draggedIndex !== newIndex) {
             const oldFromIndex = draggedIndex;
             const oldToIndex = newIndex;
-            items.splice(draggedIndex, 1);
-            items.splice(newIndex, 0, draggedItem);
-            saveItems(items);
+            callbacks.moveItem(draggedIndex, newIndex);
             exitDragMode();
             refreshButtonsWithAnimation(oldFromIndex, oldToIndex);
             return;
@@ -928,132 +1006,135 @@
       }
     }
 
-    // 長押し検出の設定
-    function setupLongPress(element, index, text) {
-      element.addEventListener('mousedown', (e) => {
-        if (e.button !== 0) return;
-        longPressStartX = e.clientX;
-        longPressStartY = e.clientY;
-        longPressTargetIndex = index;
-        longPressTargetText = text;
+    // 公開API
+    return {
+      // ドロップインジケーターを作成してコンテナに追加
+      createDropIndicator() {
+        dropIndicator = document.createElement('div');
+        dropIndicator.className = 'hss-drop-indicator';
+        dropIndicator.style.display = 'none';
+        container.appendChild(dropIndicator);
+      },
 
-        longPressTimer = setTimeout(() => {
-          longPressTimer = null;
-          // 長押し完了 → ポップアップ表示
-          showEditPopup(element, index);
-        }, LONG_PRESS_DURATION);
-      });
+      // ゴミ箱要素を設定
+      setTrashZone(zone) {
+        trashZone = zone;
+      },
 
-      element.addEventListener('mouseup', () => {
-        if (longPressTimer !== null) {
-          clearTimeout(longPressTimer);
-          longPressTimer = null;
-        }
-      });
-    }
+      // ドラッグ中かどうか
+      isDragging() {
+        return dragMode;
+      },
 
-    // 項目が0個ならボタン、1個以上ならドロップダウンとして描画
-    items.forEach((item, index) => {
-      const hasItems = item.items && item.items.length > 0;
+      // 長押し検出の設定
+      setupLongPress(element, index, text, onLongPress) {
+        element.addEventListener('mousedown', (e) => {
+          if (e.button !== 0) return;
+          longPressStartX = e.clientX;
+          longPressStartY = e.clientY;
+          longPressTargetIndex = index;
+          longPressTargetText = text;
 
-      if (hasItems) {
-        // ドロップダウン
-        const dropdown = document.createElement('div');
-        dropdown.className = 'hss-dropdown';
-
-        const btn = document.createElement('button');
-        btn.className = 'hss-dropdown-btn';
-        btn.innerHTML = `<span>${item.text}</span><span class="hss-dropdown-arrow">▼</span>`;
-
-        const menu = document.createElement('div');
-        menu.className = 'hss-dropdown-menu';
-
-        item.items.forEach(subItem => {
-          const menuItem = document.createElement('button');
-          menuItem.className = 'hss-dropdown-item';
-          menuItem.textContent = subItem;
-          menuItem.onclick = (e) => {
-            e.stopPropagation();
-            if (dragMode) return;
-            const searchInput = getSearchInput(panel);
-            if (searchInput) {
-              setInputValueReactSafe(searchInput, subItem + ' ');
-              searchInput.focus();
-            }
-            closeAllDropdowns();
-          };
-          menu.appendChild(menuItem);
+          longPressTimer = setTimeout(() => {
+            longPressTimer = null;
+            onLongPress(element, index);
+          }, LONG_PRESS_DURATION);
         });
 
-        btn.onclick = (e) => {
-          e.stopPropagation();
-          if (dragMode) return;
-          // ポップアップが表示中なら何もしない（長押し後のclickを無視）
-          if (document.querySelector('.hss-edit-popup')) return;
-          const isOpen = btn.classList.contains('open');
-          closeAllDropdowns();
-          if (!isOpen) {
-            btn.classList.add('open');
-            menu.classList.add('open');
+        element.addEventListener('mouseup', () => {
+          if (longPressTimer !== null) {
+            clearTimeout(longPressTimer);
+            longPressTimer = null;
           }
-        };
+        });
+      },
 
-        dropdown.appendChild(btn);
-        dropdown.appendChild(menu);
-        container.appendChild(dropdown);
-        setupLongPress(dropdown, index, item.text);
-      } else {
-        // 通常ボタン
-        const btn = document.createElement('button');
-        btn.className = 'hss-quick-btn';
-        btn.textContent = item.text;
-        btn.onclick = () => {
-          if (dragMode) return;
-          // ポップアップが表示中なら何もしない（長押し後のclickを無視）
-          if (document.querySelector('.hss-edit-popup')) return;
-          const searchInput = getSearchInput(panel);
-          if (searchInput) {
-            setInputValueReactSafe(searchInput, item.text + ' ');
-            searchInput.focus();
-          }
-        };
-        container.appendChild(btn);
-        setupLongPress(btn, index, item.text);
+      // イベントリスナーを登録
+      attachEventListeners() {
+        document.addEventListener('mouseup', handleMouseUp);
+        document.addEventListener('mousemove', handleMouseMove);
+      },
+
+      // イベントリスナーを削除
+      detachEventListeners() {
+        document.removeEventListener('mouseup', handleMouseUp);
+        document.removeEventListener('mousemove', handleMouseMove);
+      }
+    };
+  }
+
+  // ボタンコンテナを作成（パネル要素を引数で受け取る）
+  function createButtonContainer(panel) {
+    let items = loadItems();
+    const container = document.createElement('div');
+    container.className = 'hss-button-container';
+    container.id = 'hss-button-container';
+
+    // DragDropHandlerを作成
+    const dragDrop = createDragDropHandler(container, {
+      removeButtons,
+      insertButtons: () => insertButtons(panel),
+      refreshButtons: () => refreshButtons(panel),
+      deleteItem: (index) => {
+        items.splice(index, 1);
+        saveItems(items);
+      },
+      moveItem: (fromIndex, toIndex) => {
+        const draggedItem = items[fromIndex];
+        items.splice(fromIndex, 1);
+        items.splice(toIndex, 0, draggedItem);
+        saveItems(items);
       }
     });
 
-    // 右端コントロール: 追加ボタン
-    const addBtn = document.createElement('button');
-    addBtn.className = 'hss-control-btn';
-    addBtn.textContent = '+';
-    addBtn.title = '新規ボタンを追加';
-    addBtn.onclick = (e) => {
-      e.stopPropagation();
-      closeEditPopup();
+    // 編集ポップアップを表示（EditPopupモジュールに委譲）
+    function showEditPopup(targetElement, index) {
+      EditPopup.show(targetElement, index, {
+        getItems: () => items,
+        saveItems: (updatedItems) => {
+          items = updatedItems;
+          saveItems(items);
+        },
+        refreshButtons: () => refreshButtons(panel)
+      });
+    }
+
+    dragDrop.createDropIndicator();
+
+    // 検索実行コールバック
+    const onSearch = (text) => {
+      const searchInput = getSearchInput(panel);
+      if (searchInput) {
+        setInputValueReactSafe(searchInput, text + ' ');
+        searchInput.focus();
+      }
+    };
+
+    // ボタン/ドロップダウンを描画（ButtonRendererモジュールに委譲）
+    ButtonRenderer.renderItems(container, items, {
+      isDragging: () => dragDrop.isDragging(),
+      onSearch,
+      setupLongPress: (el, idx, text) => dragDrop.setupLongPress(el, idx, text, showEditPopup)
+    });
+
+    // 追加ボタン
+    const addBtn = ButtonRenderer.createAddButton(() => {
       items.push({ type: 'button', text: '新規', items: [] });
       saveItems(items);
       refreshButtons(panel);
-    };
+    });
     container.appendChild(addBtn);
 
-    // 右端コントロール: ゴミ箱
-    trashZone = document.createElement('div');
-    trashZone.className = 'hss-trash-zone';
-    trashZone.textContent = '🗑';
-    trashZone.title = 'ボタンをここにドラッグで削除';
+    // ゴミ箱
+    const trashZone = ButtonRenderer.createTrashZone();
     container.appendChild(trashZone);
+    dragDrop.setTrashZone(trashZone);
 
-    document.addEventListener('mouseup', handleMouseUp);
-    document.addEventListener('mousemove', handleMouseMove);
+    // イベントリスナーを登録
+    dragDrop.attachEventListeners();
 
     // クリーンアップ関数をモジュールレベル変数に保存
-    // NOTE: cleaner.add() は setup() 毎に1回だけ呼ばれるが、ハンドラは
-    // ボタン再描画のたびに追加/削除される。そのためモジュールレベル変数を使用し、
-    // removeButtons() 内でクリーンアップを行う。cleaner は removeButtons() を呼ぶ。
-    mouseHandlersCleanup = () => {
-      document.removeEventListener('mouseup', handleMouseUp);
-      document.removeEventListener('mousemove', handleMouseMove);
-    };
+    mouseHandlersCleanup = () => dragDrop.detachEventListeners();
 
     return container;
   }
