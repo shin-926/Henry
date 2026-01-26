@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry Hospitalization Data Viewer
 // @namespace    https://github.com/shin-926/Henry
-// @version      0.14.1
+// @version      0.15.0
 // @description  入院患者の日々データを取得・表示（バイタル・処方・注射・検査・栄養・ADL・看護日誌対応）
 // @author       sk powered by Claude & Gemini
 // @match        https://henry-app.jp/*
@@ -29,13 +29,13 @@
  * - バイタルサイン（体温・血圧・脈拍・SpO2）
  *
  * ■ データソース
- * - 入院情報: GraphQL API (ListPatientHospitalizations)
- * - 医師記録: Persisted Query API (ListClinicalDocuments - HOSPITALIZATION_CONSULTATION)
- * - 看護記録: Persisted Query API (ListClinicalDocuments - CUSTOM type)
- * - 患者プロフィール: Persisted Query API (ListClinicalDocuments - CUSTOM type)
- * - リハビリ日々記録: Persisted Query API (ListRehabilitationDocuments)
- * - リハビリオーダー: Persisted Query API (ListOrders - ORDER_TYPE_REHABILITATION)
- * - バイタルサイン: Persisted Query API (GetClinicalCalendarView - vitalSign resource)
+ * - 入院情報: GraphQL API (ListPatientHospitalizations) - インライン方式
+ * - 医師記録: GraphQL API (ListClinicalDocuments - HOSPITALIZATION_CONSULTATION) - フルクエリ方式
+ * - 看護記録: GraphQL API (ListClinicalDocuments - CUSTOM type) - フルクエリ方式
+ * - 患者プロフィール: GraphQL API (ListClinicalDocuments - CUSTOM type) - フルクエリ方式
+ * - リハビリ日々記録: GraphQL API (ListRehabilitationDocuments) - インライン方式
+ * - リハビリオーダー: GraphQL API (ListOrders - ORDER_TYPE_REHABILITATION) - インライン方式
+ * - バイタルサイン: Persisted Query API (ClinicalCalendarView v2 - vitalSign resource)
  */
 
 (function() {
@@ -47,11 +47,26 @@
   // 組織UUID（マオカ病院）
   const ORG_UUID = 'ce6b556b-2a8d-4fce-b8dd-89ba638fc825';
 
-  // Persisted Query Hashes
-  const HASHES = {
-    LIST_CLINICAL_DOCUMENTS: '1c4cab71733c192c3143f4c25e6040eb6df6d87fc6cda513f6566a75da7d7df0',
-    LIST_ORDERS: '8fb50e5d48a0c44a0891e376ddf03dc069b792ea991f62bde9d1e9da63fcb4b3',
-    LIST_REHABILITATION_DOCUMENTS: 'b7a50dc3c27506e9c0fcdb13cb1b504487b8979fdd2ab5a54eaa83a95f907d3e'
+  // Note: 以前はPersisted Query Hashを使用していたが、フルクエリ方式/インライン方式に移行済み
+  // callPersistedQuery関数はfetchCalendarData（ClinicalCalendarView v2）でのみ使用
+
+  // GraphQL Queries（フルクエリ方式）
+  const QUERIES = {
+    LIST_CLINICAL_DOCUMENTS: `
+      query ListClinicalDocuments($input: ListClinicalDocumentsRequestInput!) {
+        listClinicalDocuments(input: $input) {
+          documents {
+            uuid
+            editorData
+            performTime { seconds }
+            updateTime { seconds }
+            creator { name }
+            type { type }
+          }
+          nextPageToken
+        }
+      }
+    `
   };
 
   // Persisted Query を使用してAPIを呼び出す
@@ -88,22 +103,18 @@
     return response.json();
   }
 
-  // 医師記録を取得（Persisted Query）
+  // 医師記録を取得（フルクエリ方式）
   // Note: HOSPITALIZATION_CONSULTATION のみ有効（HOSPITALIZATION_PROGRESSは無効なenum）
   async function fetchClinicalDocuments(patientUuid, documentTypes = ['HOSPITALIZATION_CONSULTATION']) {
     try {
-      const result = await callPersistedQuery(
-        'ListClinicalDocuments',
-        {
-          input: {
-            patientUuid,
-            pageToken: '',
-            pageSize: 50,
-            clinicalDocumentTypes: documentTypes.map(type => ({ type }))
-          }
-        },
-        HASHES.LIST_CLINICAL_DOCUMENTS
-      );
+      const result = await window.HenryCore.query(QUERIES.LIST_CLINICAL_DOCUMENTS, {
+        input: {
+          patientUuid,
+          pageToken: '',
+          pageSize: 50,
+          clinicalDocumentTypes: documentTypes.map(type => ({ type }))
+        }
+      });
 
       const documents = result?.data?.listClinicalDocuments?.documents || [];
 
@@ -125,26 +136,21 @@
   const NURSING_RECORD_CUSTOM_TYPE_UUID = 'e4ac1e1c-40e2-4c19-9df4-aa57adae7d4f';  // 看護記録
   const PATIENT_PROFILE_CUSTOM_TYPE_UUID = 'f639619a-6fdb-452a-a803-8d42cd50830d'; // 患者プロフィール
 
-  // 看護記録（SOAP形式）を取得（Persisted Query）
+  // 看護記録（SOAP形式）を取得（フルクエリ方式）
   // 看護記録はCUSTOMタイプとして保存されている
-
   async function fetchNursingRecords(patientUuid) {
     try {
-      const result = await callPersistedQuery(
-        'ListClinicalDocuments',
-        {
-          input: {
-            patientUuid,
-            pageToken: '',
-            pageSize: 50,
-            clinicalDocumentTypes: [{
-              type: 'CUSTOM',
-              clinicalDocumentCustomTypeUuid: { value: NURSING_RECORD_CUSTOM_TYPE_UUID }
-            }]
-          }
-        },
-        HASHES.LIST_CLINICAL_DOCUMENTS
-      );
+      const result = await window.HenryCore.query(QUERIES.LIST_CLINICAL_DOCUMENTS, {
+        input: {
+          patientUuid,
+          pageToken: '',
+          pageSize: 50,
+          clinicalDocumentTypes: [{
+            type: 'CUSTOM',
+            clinicalDocumentCustomTypeUuid: { value: NURSING_RECORD_CUSTOM_TYPE_UUID }
+          }]
+        }
+      });
 
       const documents = result?.data?.listClinicalDocuments?.documents || [];
 
@@ -161,25 +167,21 @@
     }
   }
 
-  // 患者プロフィールを取得（Persisted Query）
+  // 患者プロフィールを取得（フルクエリ方式）
   // 患者プロフィールもCUSTOMタイプとして保存されている
   async function fetchPatientProfile(patientUuid) {
     try {
-      const result = await callPersistedQuery(
-        'ListClinicalDocuments',
-        {
-          input: {
-            patientUuid,
-            pageToken: '',
-            pageSize: 10,
-            clinicalDocumentTypes: [{
-              type: 'CUSTOM',
-              clinicalDocumentCustomTypeUuid: { value: PATIENT_PROFILE_CUSTOM_TYPE_UUID }
-            }]
-          }
-        },
-        HASHES.LIST_CLINICAL_DOCUMENTS
-      );
+      const result = await window.HenryCore.query(QUERIES.LIST_CLINICAL_DOCUMENTS, {
+        input: {
+          patientUuid,
+          pageToken: '',
+          pageSize: 10,
+          clinicalDocumentTypes: [{
+            type: 'CUSTOM',
+            clinicalDocumentCustomTypeUuid: { value: PATIENT_PROFILE_CUSTOM_TYPE_UUID }
+          }]
+        }
+      });
 
       const documents = result?.data?.listClinicalDocuments?.documents || [];
 
@@ -196,28 +198,35 @@
     }
   }
 
-  // リハビリ日々記録を取得（Persisted Query）
+  // リハビリ日々記録を取得（インライン方式）
   // これはリハビリスタッフが記録する日々の記録（オーダーではない）
   async function fetchRehabilitationDocuments(patientUuid) {
     try {
       // 今日の日付を取得（APIは日付パラメータを必要とする）
       const today = new Date();
-      const result = await callPersistedQuery(
-        'ListRehabilitationDocuments',
-        {
-          input: {
-            patientUuid,
+      const query = `
+        query ListRehabilitationDocuments {
+          listRehabilitationDocuments(input: {
+            patientUuid: "${patientUuid}",
             date: {
-              year: today.getFullYear(),
-              month: today.getMonth() + 1,
-              day: today.getDate()
+              year: ${today.getFullYear()},
+              month: ${today.getMonth() + 1},
+              day: ${today.getDate()}
             },
             pageSize: 100,
-            pageToken: ''
+            pageToken: ""
+          }) {
+            documents {
+              uuid
+              editorData
+              performTime { seconds }
+              createUser { name }
+              rehabilitationOrderUuid { value }
+            }
           }
-        },
-        HASHES.LIST_REHABILITATION_DOCUMENTS
-      );
+        }
+      `;
+      const result = await window.HenryCore.query(query);
 
       const documents = result?.data?.listRehabilitationDocuments?.documents || [];
 
@@ -235,21 +244,46 @@
     }
   }
 
-  // リハビリオーダーを取得（Persisted Query）
+  // リハビリオーダーを取得（インライン方式）
   async function fetchRehabilitationOrders(patientUuid) {
     try {
-      const result = await callPersistedQuery(
-        'ListOrders',
-        {
-          input: {
-            patientUuid,
-            filterOrderStatus: ['ORDER_STATUS_ACTIVE', 'ORDER_STATUS_DRAFT', 'ORDER_STATUS_ON_HOLD', 'ORDER_STATUS_PREPARING'],
-            patientCareType: 'PATIENT_CARE_TYPE_ANY',
-            filterOrderTypes: ['ORDER_TYPE_REHABILITATION']
+      const query = `
+        query ListOrders {
+          listOrders(input: {
+            patientUuid: "${patientUuid}",
+            filterOrderStatus: [ORDER_STATUS_ACTIVE, ORDER_STATUS_DRAFT, ORDER_STATUS_ON_HOLD, ORDER_STATUS_PREPARING],
+            patientCareType: PATIENT_CARE_TYPE_ANY,
+            filterOrderTypes: [ORDER_TYPE_REHABILITATION]
+          }) {
+            orders {
+              uuid
+              orderType
+              order {
+                rehabilitationOrder {
+                  uuid
+                  orderStatus
+                  startDate { year month day }
+                  endDate { year month day }
+                  doctor { name }
+                  detail {
+                    therapyStartDate { year month day }
+                    note
+                    rehabilitationPlans { uuid category name }
+                    rehabilitationCalculationType {
+                      name
+                      period { value }
+                    }
+                    patientReceiptDisease {
+                      masterDisease { name }
+                    }
+                  }
+                }
+              }
+            }
           }
-        },
-        HASHES.LIST_ORDERS
-      );
+        }
+      `;
+      const result = await window.HenryCore.query(query);
 
       const orders = result?.data?.listOrders?.orders || [];
 

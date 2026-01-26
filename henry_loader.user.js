@@ -255,7 +255,7 @@ const unsafeWindow = window;
 
       // 現在のホストにマッチするスクリプトをフィルタ
       const matchingScripts = manifest.scripts
-        .filter(s => matchesHost(s.match) && s.enabled !== false)
+        .filter(s => matchesHost(s.match) && s.enabled !== false && s.beta !== true)
         .sort((a, b) => a.order - b.order);
 
       // Toolbox用にmanifest情報を公開（ベータ版は設定パネルに非表示）

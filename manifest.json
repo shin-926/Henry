@@ -160,7 +160,7 @@
       "file": "henry_hospitalization_data.user.js",
       "match": ["henry-app.jp"],
       "order": 10,
-      "enabled": false
+      "beta": true
     },
     {
       "name": "henry_hospitalization_search",
