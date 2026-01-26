@@ -682,10 +682,10 @@
 
     /**
      * 入力フィールドを作成
-     * @param {Object} options - オプション
-     * @param {string} options.placeholder - プレースホルダー
-     * @param {string} options.type - input type
-     * @param {string} options.value - 初期値
+     * @param {Object} [options={}] - オプション（省略可、引数なしで呼び出し可能）
+     * @param {string} [options.placeholder=''] - プレースホルダー
+     * @param {string} [options.type='text'] - input type
+     * @param {string} [options.value=''] - 初期値
      */
     createInput: ({ placeholder = '', type = 'text', value = '' } = {}) => {
       UI.init();
@@ -699,10 +699,10 @@
 
     /**
      * テキストエリアを作成
-     * @param {Object} options - オプション
-     * @param {string} options.placeholder - プレースホルダー
-     * @param {string} options.value - 初期値
-     * @param {number} options.rows - 行数
+     * @param {Object} [options={}] - オプション（省略可、引数なしで呼び出し可能）
+     * @param {string} [options.placeholder=''] - プレースホルダー
+     * @param {string} [options.value=''] - 初期値
+     * @param {number} [options.rows=4] - 行数
      */
     createTextarea: ({ placeholder = '', value = '', rows = 4 } = {}) => {
       UI.init();
