@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry Core
 // @namespace    https://henry-app.jp/
-// @version      2.18.0
+// @version      2.19.0
 // @description  Henry スクリプト実行基盤 (GoogleAuth統合 / Google Docs対応)
 // @author       sk powered by Claude & Gemini
 // @match        https://henry-app.jp/*
@@ -537,6 +537,8 @@
       colorSurfaceAlt: '--henry-bg-sub',
       colorSurfaceHover: '--henry-bg-hover',
       colorBorder: '--henry-border',
+      colorBorderFocus: '--henry-border-focus',
+      colorPrimaryLight: '--henry-primary-light',
       colorOverlay: '--henry-overlay',
       shadowMedium: '--henry-shadow-card',
       shadowDialog: '--henry-shadow-dialog',
@@ -616,6 +618,29 @@
           color: var(--henry-text-high);
           margin-bottom: 16px;
         }
+        .henry-input,
+        .henry-textarea {
+          font-family: "Noto Sans JP", sans-serif;
+          font-size: 14px;
+          color: var(--henry-text-high);
+          padding: 8px 12px;
+          border: 1px solid var(--henry-border);
+          border-radius: var(--henry-radius);
+          outline: none;
+          transition: border-color 0.2s, box-shadow 0.2s;
+          width: 100%;
+          box-sizing: border-box;
+          background: var(--henry-bg-base);
+        }
+        .henry-input:focus,
+        .henry-textarea:focus {
+          border-color: var(--henry-border-focus);
+          box-shadow: 0 0 0 2px var(--henry-primary-light);
+        }
+        .henry-textarea {
+          resize: vertical;
+          line-height: 1.5;
+        }
       `;
       document.head.appendChild(style);
 
@@ -663,34 +688,12 @@
      * @param {string} options.value - 初期値
      */
     createInput: ({ placeholder = '', type = 'text', value = '' } = {}) => {
+      UI.init();
       const input = document.createElement('input');
       input.type = type;
       input.placeholder = placeholder;
       input.value = value;
-
-      Object.assign(input.style, {
-        fontFamily: UI.tokens.fontFamily,
-        fontSize: UI.tokens.fontSizeBase,
-        color: UI.tokens.colorText,
-        padding: `${UI.tokens.spacingSm} ${UI.tokens.spacingMd}`,
-        border: `1px solid ${UI.tokens.colorBorder}`,
-        borderRadius: UI.tokens.radiusSmall,
-        outline: 'none',
-        transition: UI.tokens.transitionBase,
-        width: '100%',
-        boxSizing: 'border-box',
-        background: UI.tokens.colorSurface,
-      });
-
-      input.addEventListener('focus', () => {
-        input.style.borderColor = UI.tokens.colorBorderFocus;
-        input.style.boxShadow = `0 0 0 2px ${UI.tokens.colorPrimaryLight}`;
-      });
-      input.addEventListener('blur', () => {
-        input.style.borderColor = UI.tokens.colorBorder;
-        input.style.boxShadow = 'none';
-      });
-
+      input.className = 'henry-input';
       return input;
     },
 
@@ -702,36 +705,12 @@
      * @param {number} options.rows - 行数
      */
     createTextarea: ({ placeholder = '', value = '', rows = 4 } = {}) => {
+      UI.init();
       const textarea = document.createElement('textarea');
       textarea.placeholder = placeholder;
       textarea.value = value;
       textarea.rows = rows;
-
-      Object.assign(textarea.style, {
-        fontFamily: UI.tokens.fontFamily,
-        fontSize: UI.tokens.fontSizeBase,
-        color: UI.tokens.colorText,
-        padding: UI.tokens.spacingMd,
-        border: `1px solid ${UI.tokens.colorBorder}`,
-        borderRadius: UI.tokens.radiusSmall,
-        outline: 'none',
-        transition: UI.tokens.transitionBase,
-        width: '100%',
-        boxSizing: 'border-box',
-        background: UI.tokens.colorSurface,
-        resize: 'vertical',
-        lineHeight: '1.5',
-      });
-
-      textarea.addEventListener('focus', () => {
-        textarea.style.borderColor = UI.tokens.colorBorderFocus;
-        textarea.style.boxShadow = `0 0 0 2px ${UI.tokens.colorPrimaryLight}`;
-      });
-      textarea.addEventListener('blur', () => {
-        textarea.style.borderColor = UI.tokens.colorBorder;
-        textarea.style.boxShadow = 'none';
-      });
-
+      textarea.className = 'henry-textarea';
       return textarea;
     },
 
