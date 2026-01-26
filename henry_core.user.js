@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry Core
 // @namespace    https://henry-app.jp/
-// @version      2.16.0
+// @version      2.17.0
 // @description  Henry スクリプト実行基盤 (GoogleAuth統合 / Google Docs対応)
 // @author       sk powered by Claude & Gemini
 // @match        https://henry-app.jp/*
@@ -461,7 +461,8 @@
       colorWarning: '#f59e0b',
 
       // Colors - Text
-      colorText: 'rgba(0, 0, 0, 0.84)',
+      colorText: 'rgba(0, 0, 0, 0.82)',
+      colorTextSecondary: 'rgba(0, 0, 0, 0.73)',
       colorTextMuted: 'rgba(0, 0, 0, 0.57)',
       colorTextDisabled: 'rgba(0, 0, 0, 0.38)',
       colorTextInverse: '#ffffff',
@@ -477,14 +478,14 @@
       colorBorderFocus: '#00CC92',
 
       // Colors - Overlay
-      colorOverlay: 'rgba(0, 0, 0, 0.5)',
+      colorOverlay: 'rgba(0, 0, 0, 0.4)',
 
       // Typography
       fontFamily: '"Noto Sans JP", system-ui, -apple-system, sans-serif',
       fontSizeSmall: '12px',
       fontSizeBase: '14px',
       fontSizeLarge: '16px',
-      fontSizeXLarge: '20px',
+      fontSizeXLarge: '24px',
       fontWeightNormal: '400',
       fontWeightMedium: '600',
 
@@ -500,11 +501,13 @@
       radiusMedium: '8px',
       radiusLarge: '12px',
       radiusPill: '18px',
+      radiusDialog: '4px',
 
       // Shadows
       shadowSmall: '0 1px 2px rgba(0, 0, 0, 0.05)',
       shadowMedium: '0 1px 3px rgba(0,0,0,0.12), 0 1px 2px rgba(0,0,0,0.24)',
       shadowLarge: '0 10px 25px rgba(0, 0, 0, 0.15)',
+      shadowDialog: 'rgba(0,0,0,0.13) 0px 7px 8px 0px, rgba(0,0,0,0.03) 0px 5px 22px 0px, rgba(0,0,0,0.06) 0px 12px 17px 0px, rgba(0,0,0,0.13) 0px 0px 1px 0px',
 
       // Z-Index (Henry: ログインモーダル=1600の下)
       zIndexDropdown: 1000,
@@ -530,15 +533,19 @@
         :root {
           --henry-primary: rgb(0, 204, 146);
           --henry-primary-hover: rgb(0, 180, 130);
-          --henry-text-high: rgba(0, 0, 0, 0.84);
+          --henry-text-high: rgba(0, 0, 0, 0.82);
+          --henry-text-secondary: rgba(0, 0, 0, 0.73);
           --henry-text-med: rgba(0, 0, 0, 0.57);
           --henry-text-disabled: rgba(0, 0, 0, 0.38);
           --henry-bg-base: #FFFFFF;
           --henry-bg-sub: #F5F7FA;
           --henry-bg-hover: rgba(0, 0, 0, 0.04);
           --henry-border: rgba(0, 0, 0, 0.13);
+          --henry-overlay: rgba(0, 0, 0, 0.4);
           --henry-shadow-card: 0 1px 3px rgba(0,0,0,0.12), 0 1px 2px rgba(0,0,0,0.24);
+          --henry-shadow-dialog: rgba(0,0,0,0.13) 0px 7px 8px 0px, rgba(0,0,0,0.03) 0px 5px 22px 0px, rgba(0,0,0,0.06) 0px 12px 17px 0px, rgba(0,0,0,0.13) 0px 0px 1px 0px;
           --henry-radius: 4px;
+          --henry-radius-dialog: 4px;
         }
         .henry-btn {
           font-family: "Noto Sans JP", sans-serif;
@@ -573,7 +580,7 @@
         .henry-modal-overlay {
           position: fixed;
           top: 0; left: 0; right: 0; bottom: 0;
-          background: rgba(0, 0, 0, 0.5);
+          background: var(--henry-overlay);
           display: flex;
           align-items: center;
           justify-content: center;
@@ -581,15 +588,15 @@
         }
         .henry-modal-content {
           background: var(--henry-bg-base);
-          border-radius: 8px;
+          border-radius: var(--henry-radius-dialog);
           padding: 24px;
-          box-shadow: var(--henry-shadow-card);
+          box-shadow: var(--henry-shadow-dialog);
           min-width: 400px;
           max-width: 90vw;
         }
         .henry-modal-title {
-          font-size: 20px;
-          font-weight: bold;
+          font-size: 24px;
+          font-weight: 600;
           color: var(--henry-text-high);
           margin-bottom: 16px;
         }
