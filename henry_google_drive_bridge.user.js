@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Google Drive連携
 // @namespace    https://henry-app.jp/
-// @version      2.5.0
+// @version      2.6.0
 // @description  HenryのファイルをGoogle Drive APIで直接変換・編集。GAS不要版。
 // @author       sk powered by Claude & Gemini
 // @match        https://henry-app.jp/*
@@ -501,50 +501,6 @@
     }, duration);
   }
 
-  function showProcessingIndicator(message) {
-    const container = document.createElement('div');
-    Object.assign(container.style, {
-      position: 'fixed',
-      bottom: '24px',
-      right: '24px',
-      backgroundColor: 'rgba(33, 33, 33, 0.95)',
-      color: '#fff',
-      padding: '12px 20px',
-      borderRadius: '24px',
-      zIndex: '1400',
-      display: 'flex',
-      alignItems: 'center',
-      gap: '12px',
-      boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
-      fontFamily: '-apple-system, sans-serif',
-      fontSize: '14px'
-    });
-
-    // スピナー
-    ensureSpinnerStyle();
-    const spinner = document.createElement('div');
-    Object.assign(spinner.style, {
-      width: '16px',
-      height: '16px',
-      border: '2px solid rgba(255,255,255,0.3)',
-      borderTop: '2px solid #ffffff',
-      borderRadius: '50%',
-      animation: 'drive-direct-spin 1s linear infinite'
-    });
-
-    const text = document.createElement('span');
-    text.textContent = message;
-
-    container.appendChild(spinner);
-    container.appendChild(text);
-    document.body.appendChild(container);
-
-    return () => {
-      container.style.opacity = '0';
-      setTimeout(() => container.remove(), 300);
-    };
-  }
-
   // フォルダ選択モーダル
   function showFolderSelectModal(folders) {
     return new Promise((resolve) => {
@@ -811,7 +767,7 @@
       if (!checkGoogleAuthReady()) return;
 
       inflight.set(redirectUrl, true);
-      const hide = showProcessingIndicator(`書類を開いています... (${title})`);
+      const { close: hide } = pageWindow.HenryCore.ui.showSpinner(`書類を開いています... (${title})`);
 
       try {
         // ファイルタイプ判定（URLから拡張子を取得）
@@ -858,11 +814,11 @@
           window.focus();
         };
 
-        showToast('ファイルを開きました');
+        pageWindow.HenryCore.ui.showToast('ファイルを開きました', 'success');
 
       } catch (e) {
         debugError('Henry', 'テンプレート処理失敗:', e.message);
-        showToast(`エラー: ${e.message}`, true);
+        pageWindow.HenryCore.ui.showToast(`エラー: ${e.message}`, 'error');
       } finally {
         hide();
         inflight.delete(redirectUrl);
@@ -931,7 +887,7 @@
       if (inflight.has(patientFileUuid)) return;
       inflight.set(patientFileUuid, true);
 
-      const hide = showProcessingIndicator(`書類を開いています... (${file.title})`);
+      const { close: hide } = pageWindow.HenryCore.ui.showSpinner(`書類を開いています... (${file.title})`);
 
       try {
         const henryToken = await pageWindow.HenryCore.getToken();
@@ -972,11 +928,11 @@
           window.focus();
         };
 
-        showToast('ファイルを開きました');
+        pageWindow.HenryCore.ui.showToast('ファイルを開きました', 'success');
 
       } catch (e) {
         debugError('Henry', '処理失敗:', e.message);
-        showToast(`エラー: ${e.message}`, true);
+        pageWindow.HenryCore.ui.showToast(`エラー: ${e.message}`, 'error');
       } finally {
         hide();
         inflight.delete(patientFileUuid);
