@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry Core
 // @namespace    https://henry-app.jp/
-// @version      2.14.6
+// @version      2.15.0
 // @description  Henry スクリプト実行基盤 (GoogleAuth統合 / Google Docs対応)
 // @author       sk powered by Claude & Gemini
 // @match        https://henry-app.jp/*
@@ -50,7 +50,7 @@
  *   tokenStatus()                                - トークン有効性確認（非同期）
  *
  * ■ Plugin Registration
- *   registerPlugin({ id, name, icon?, description?, version?, order?, onClick })
+ *   registerPlugin({ id, name, icon?, description?, version?, order?, onClick, group?, groupIcon? })
  *   plugins                                      - 登録済みプラグイン配列（読み取り専用）
  *
  * ■ Utilities (utils.*)
@@ -1011,7 +1011,9 @@
         description: options.description || '',
         version: options.version || '1.0.0',
         order: options.order || 100,
-        onClick: options.onClick
+        onClick: options.onClick,
+        group: options.group || null,
+        groupIcon: options.groupIcon || null
       };
 
       // 重複チェック
@@ -1036,7 +1038,9 @@
           event: `henrycore:plugin:${plugin.id}`,
           label: plugin.name,
           order: plugin.order,
-          onClick: plugin.onClick  // Toolbox v5.1.0 対応
+          onClick: plugin.onClick,  // Toolbox v5.1.0 対応
+          group: plugin.group,      // Toolbox v5.6.0 グループ化対応
+          groupIcon: plugin.groupIcon
         });
       }
 

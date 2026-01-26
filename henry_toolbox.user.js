@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         ツールボックス
 // @namespace    https://haru-chan.example
-// @version      5.4.0
+// @version      5.6.0
 // @description  プラグイン方式。シンプルUI、Noto Sans JP、ドラッグ＆ドロップ並び替え対応。
 // @author       sk powered by Claude & Gemini
 // @match        https://henry-app.jp/*
@@ -111,6 +111,9 @@
     }
     .ht-row.drag-over {
       border-top: 2px solid #10B981;
+    }
+    .ht-row.drag-over-bottom {
+      border-bottom: 2px solid #10B981;
     }
 
     /* Henry風カスタムツールチップ */
@@ -283,6 +286,44 @@
     .ht-settings-btn svg {
       margin-right: 8px;
     }
+
+    /* グループ化サブメニュー */
+    .ht-group-row {
+      position: relative;
+    }
+    .ht-group-row .ht-item-btn::after {
+      content: '▶';
+      margin-left: auto;
+      font-size: 10px;
+      color: #9CA3AF;
+    }
+    .ht-submenu {
+      position: absolute;
+      left: 100%;
+      top: 0;
+      min-width: 180px;
+      background: #fff;
+      border-radius: 8px;
+      box-shadow: 0 4px 20px rgba(0,0,0,0.15);
+      border: 1px solid #e5e7eb;
+      padding: 6px 0;
+      opacity: 0;
+      visibility: hidden;
+      transform: translateX(-8px);
+      transition: opacity 0.15s, transform 0.15s, visibility 0.15s;
+      z-index: 1401;
+    }
+    .ht-group-row:hover > .ht-submenu {
+      opacity: 1;
+      visibility: visible;
+      transform: translateX(0);
+    }
+    .ht-submenu .ht-row {
+      padding: 0 6px;
+    }
+    .ht-submenu .ht-item-btn {
+      padding: 8px 12px;
+    }
   `);
 
   // ============================================
@@ -311,12 +352,14 @@
     const exists = this.items.some(i => i.event === item.event);
     if (exists) return;
 
-    // onClick を保持
+    // onClick, group, groupIcon を保持
     const itemWithCallback = {
       event: item.event,
       label: item.label,
       order: item.order ?? 99,
-      onClick: item.onClick  // HenryCore plugin の場合に使用
+      onClick: item.onClick,  // HenryCore plugin の場合に使用
+      group: item.group || null,      // グループ化対応
+      groupIcon: item.groupIcon || null
     };
 
     this.items.push(itemWithCallback);
@@ -359,6 +402,118 @@
     return panel;
   }
 
+  // アイテムをグループ化する
+  function groupItems(items) {
+    const groups = {};
+    const ungrouped = [];
+
+    items.forEach((item, index) => {
+      if (item.group) {
+        if (!groups[item.group]) {
+          groups[item.group] = {
+            name: item.group,
+            icon: item.groupIcon || '📁',
+            items: [],
+            order: item.order  // グループ内最初のアイテムのorderを使用
+          };
+        }
+        // グループ内でgroupIconが指定されていれば上書き
+        if (item.groupIcon) {
+          groups[item.group].icon = item.groupIcon;
+        }
+        groups[item.group].items.push({ ...item, originalIndex: index });
+      } else {
+        ungrouped.push({ ...item, originalIndex: index });
+      }
+    });
+
+    return { groups, ungrouped };
+  }
+
+  // 通常アイテムの行を作成
+  function createItemRow(item, index) {
+    const row = document.createElement('div');
+    row.className = 'ht-row';
+    row.draggable = true;
+    row.dataset.index = index;
+
+    row.addEventListener('dragstart', handleDragStart);
+    row.addEventListener('dragenter', handleDragEnter);
+    row.addEventListener('dragover', handleDragOver);
+    row.addEventListener('dragleave', handleDragLeave);
+    row.addEventListener('drop', handleDrop);
+    row.addEventListener('dragend', handleDragEnd);
+
+    const btn = document.createElement('div');
+    btn.className = 'ht-item-btn';
+
+    const labelSpan = document.createElement('span');
+    labelSpan.textContent = item.label;
+    btn.appendChild(labelSpan);
+
+    btn.addEventListener('click', (e) => {
+      if (item.event.startsWith('henrycore:plugin:') && item.onClick) {
+        item.onClick();
+      } else {
+        window.dispatchEvent(new CustomEvent(item.event, {
+          detail: { triggerElement: btn }
+        }));
+      }
+      closePanel();
+    });
+
+    row.appendChild(btn);
+    return row;
+  }
+
+  // グループ行を作成（サブメニュー付き）
+  function createGroupRow(groupData) {
+    const row = document.createElement('div');
+    row.className = 'ht-row ht-group-row';
+
+    const btn = document.createElement('div');
+    btn.className = 'ht-item-btn';
+
+    const labelSpan = document.createElement('span');
+    labelSpan.textContent = `${groupData.icon} ${groupData.name}`;
+    btn.appendChild(labelSpan);
+
+    row.appendChild(btn);
+
+    // サブメニュー作成
+    const submenu = document.createElement('div');
+    submenu.className = 'ht-submenu';
+
+    groupData.items.forEach(item => {
+      const subRow = document.createElement('div');
+      subRow.className = 'ht-row';
+
+      const subBtn = document.createElement('div');
+      subBtn.className = 'ht-item-btn';
+
+      const subLabelSpan = document.createElement('span');
+      subLabelSpan.textContent = item.label;
+      subBtn.appendChild(subLabelSpan);
+
+      subBtn.addEventListener('click', (e) => {
+        if (item.event.startsWith('henrycore:plugin:') && item.onClick) {
+          item.onClick();
+        } else {
+          window.dispatchEvent(new CustomEvent(item.event, {
+            detail: { triggerElement: subBtn }
+          }));
+        }
+        closePanel();
+      });
+
+      subRow.appendChild(subBtn);
+      submenu.appendChild(subRow);
+    });
+
+    row.appendChild(submenu);
+    return row;
+  }
+
   function buildMenu() {
     if (!panel) createPanel();
     panel.innerHTML = '';
@@ -372,42 +527,34 @@
       // 設定ボタンは表示するので return しない
     }
 
-    toolbox.items.forEach((item, index) => {
-      const row = document.createElement('div');
-      row.className = 'ht-row';
+    // グループ化
+    const { groups, ungrouped } = groupItems(toolbox.items);
 
-      row.draggable = true;
-      row.dataset.index = index;
+    // グループとungroupedを統合してorder順にソート
+    const displayItems = [];
 
-      row.addEventListener('dragstart', handleDragStart);
-      row.addEventListener('dragenter', handleDragEnter);
-      row.addEventListener('dragover', handleDragOver);
-      row.addEventListener('dragleave', handleDragLeave);
-      row.addEventListener('drop', handleDrop);
-      row.addEventListener('dragend', handleDragEnd);
+    // グループを追加（グループ内の最小orderを使用）
+    Object.values(groups).forEach(g => {
+      displayItems.push({ type: 'group', data: g, order: g.order });
+    });
 
-      const btn = document.createElement('div');
-      btn.className = 'ht-item-btn';
+    // ungroupedを追加
+    ungrouped.forEach(item => {
+      displayItems.push({ type: 'item', data: item, order: item.order ?? 99 });
+    });
 
-      const labelSpan = document.createElement('span');
-      labelSpan.textContent = item.label;
-      btn.appendChild(labelSpan);
+    // order順にソート
+    displayItems.sort((a, b) => (a.order ?? 99) - (b.order ?? 99));
 
-      btn.addEventListener('click', (e) => {
-        // HenryCore plugin の場合は onClick を直接実行
-        if (item.event.startsWith('henrycore:plugin:') && item.onClick) {
-          item.onClick();
-        } else {
-          // 通常の event dispatch
-          window.dispatchEvent(new CustomEvent(item.event, {
-              detail: { triggerElement: btn }
-          }));
-        }
-        closePanel();
-      });
-
-      row.appendChild(btn);
-      panel.appendChild(row);
+    // 表示
+    displayItems.forEach((displayItem, index) => {
+      if (displayItem.type === 'group') {
+        const row = createGroupRow(displayItem.data);
+        panel.appendChild(row);
+      } else {
+        const row = createItemRow(displayItem.data, displayItem.data.originalIndex);
+        panel.appendChild(row);
+      }
     });
 
     // 区切り線 + スクリプト設定ボタン
@@ -724,25 +871,50 @@
   function handleDragOver(e) {
     if (e.preventDefault) e.preventDefault();
     e.dataTransfer.dropEffect = 'move';
+
+    if (this !== dragSrcEl) {
+      const rect = this.getBoundingClientRect();
+      const midY = rect.top + rect.height / 2;
+
+      // 上半分か下半分かを判定してインジケーター表示
+      this.classList.remove('drag-over', 'drag-over-bottom');
+      if (e.clientY < midY) {
+        this.classList.add('drag-over');
+      } else {
+        this.classList.add('drag-over-bottom');
+      }
+    }
+
     return false;
   }
 
   function handleDragEnter(e) {
-    if (this !== dragSrcEl) {
-        this.classList.add('drag-over');
-    }
+    // handleDragOverで処理
   }
 
   function handleDragLeave(e) {
-    this.classList.remove('drag-over');
+    this.classList.remove('drag-over', 'drag-over-bottom');
   }
 
   function handleDrop(e) {
     if (e.stopPropagation) e.stopPropagation();
     if (dragSrcEl !== this) {
-        const oldIndex = parseInt(dragSrcEl.dataset.index);
-        const newIndex = parseInt(this.dataset.index);
-        moveItem(oldIndex, newIndex);
+      const oldIndex = parseInt(dragSrcEl.dataset.index);
+      let newIndex = parseInt(this.dataset.index);
+
+      // 下半分にドロップした場合は、その要素の下に挿入
+      const rect = this.getBoundingClientRect();
+      const midY = rect.top + rect.height / 2;
+      if (e.clientY >= midY) {
+        newIndex++;
+      }
+
+      // 移動元より後ろに移動する場合は調整
+      if (oldIndex < newIndex) {
+        newIndex--;
+      }
+
+      moveItem(oldIndex, newIndex);
     }
     return false;
   }
@@ -750,7 +922,7 @@
   function handleDragEnd(e) {
     this.classList.remove('dragging');
     const rows = panel.querySelectorAll('.ht-row');
-    rows.forEach(row => row.classList.remove('drag-over'));
+    rows.forEach(row => row.classList.remove('drag-over', 'drag-over-bottom'));
   }
 
   // ============================================
@@ -874,19 +1046,44 @@
     return true;
   }
 
-  // SPA遷移でnavが再レンダリングされても対応するため、継続監視（debounce付き）
+  // MutationObserver管理（navのみ監視で最適化）
   let debounceTimer = null;
-  const observer = new MutationObserver(() => {
-    if (debounceTimer) clearTimeout(debounceTimer);
-    debounceTimer = setTimeout(() => {
-      // ボタンが存在しない場合のみ再初期化
-      if (!document.querySelector('button[data-tm-toolbox]')) {
-        init();
-      }
-    }, 200);
+  let observer = null;
+
+  function setupObserver() {
+    // 既存のobserverを破棄
+    if (observer) {
+      observer.disconnect();
+      observer = null;
+    }
+    if (debounceTimer) {
+      clearTimeout(debounceTimer);
+      debounceTimer = null;
+    }
+
+    const nav = document.querySelector('nav');
+    if (!nav) return;
+
+    observer = new MutationObserver(() => {
+      if (debounceTimer) clearTimeout(debounceTimer);
+      debounceTimer = setTimeout(() => {
+        // ボタンが存在しない場合のみ再初期化
+        if (!document.querySelector('button[data-tm-toolbox]')) {
+          init();
+        }
+      }, 200);
+    });
+    observer.observe(nav, { childList: true, subtree: true });
+  }
+
+  // SPA遷移時に再設定
+  window.addEventListener('henry:navigation', () => {
+    init();
+    setupObserver();
   });
-  observer.observe(document.body, { childList: true, subtree: true });
+
   init();  // 初回実行
+  setupObserver();  // 初回observer設定
 
   console.log(`[Toolbox] Ready v${VERSION}`);
 })();

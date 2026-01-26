@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         主治医意見書作成フォーム
 // @namespace    https://henry-app.jp/
-// @version      2.6.6
+// @version      2.6.7
 // @description  主治医意見書の入力フォームとGoogle Docs出力（GAS不要版・API直接呼び出し）
 // @author       sk powered by Claude & Gemini
 // @match        https://henry-app.jp/*
@@ -71,7 +71,7 @@
   // テンプレート設定
   const TEMPLATE_CONFIG = {
     TEMPLATE_ID: '1z1kJZ9wVUDotM1kPmvA5-S2mlq4CmfShnB9CzbfWtwU',
-    OUTPUT_FOLDER_NAME: '主治医意見書'
+    OUTPUT_FOLDER_NAME: 'Henry一時ファイル'
   };
 
   // 医療機関情報（ハードコード）
@@ -3666,6 +3666,8 @@
       description: '主治医意見書の入力フォームとGoogle Docs出力',
       icon: '📋',
       order: 100,
+      group: '文書作成',
+      groupIcon: '📝',
       onClick: () => showOpinionForm(pageWindow)
     });
 

@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name         診療情報提供書フォーム
+// @name         警察診断書フォーム
 // @namespace    https://henry-app.jp/
-// @version      1.0.10
-// @description  診療情報提供書の入力フォームとGoogle Docs出力
+// @version      1.0.2
+// @description  警察提出用診断書の入力フォームとGoogle Docs出力
 // @author       sk powered by Claude
 // @match        https://henry-app.jp/*
 // @grant        GM_xmlhttpRequest
@@ -13,22 +13,22 @@
 // @connect      www.googleapis.com
 // @connect      docs.googleapis.com
 // @run-at       document-idle
-// @updateURL    https://raw.githubusercontent.com/shin-926/Henry/main/henry_referral_form.user.js
-// @downloadURL  https://raw.githubusercontent.com/shin-926/Henry/main/henry_referral_form.user.js
+// @updateURL    https://raw.githubusercontent.com/shin-926/Henry/main/henry_police_certificate.user.js
+// @downloadURL  https://raw.githubusercontent.com/shin-926/Henry/main/henry_police_certificate.user.js
 // ==/UserScript==
 
 /*
- * 【診療情報提供書フォーム】
+ * 【警察診断書フォーム】
  *
  * ■ 使用場面
- * - 他院への診療情報提供書（紹介状）を作成する場合
- * - Henryから患者情報・病名・処方を取得してフォームに自動入力
+ * - 警察提出用の診断書を作成する場合
+ * - Henryから患者情報・病名を取得してフォームに自動入力
  *
  * ■ 主な機能
  * 1. 自動入力
- *    - 患者情報（氏名、生年月日、住所等）
- *    - 診療科、作成者（医師名）
- *    - 病名（選択式）、処方（選択式）
+ *    - 患者情報（氏名、生年月日、性別、住所）
+ *    - 作成者（医師名）
+ *    - 病名（選択式）
  *
  * 2. Google Docs出力
  *    - 入力内容をGoogle Docsテンプレートに反映
@@ -41,7 +41,7 @@
 (function() {
   'use strict';
 
-  const SCRIPT_NAME = 'ReferralForm';
+  const SCRIPT_NAME = 'PoliceCertificate';
   const VERSION = GM_info.script.version;
 
   const pageWindow = typeof unsafeWindow !== 'undefined' ? unsafeWindow : window;
@@ -56,7 +56,7 @@
   };
 
   const TEMPLATE_CONFIG = {
-    TEMPLATE_ID: '1Fj9vz8kQpwo2WCJ4Vo5KFlZoSlhVY_j9PoPouiTUyFs',
+    TEMPLATE_ID: '1OreF4-c5DTm_sqKwm_fKtRlA3EkG_p2XB62JxoIq6g4',
     OUTPUT_FOLDER_NAME: 'Henry一時ファイル'
   };
 
@@ -70,7 +70,7 @@
   };
 
   // localStorage設定
-  const STORAGE_KEY_PREFIX = 'henry_referral_draft_';
+  const STORAGE_KEY_PREFIX = 'henry_police_cert_draft_';
   const DRAFT_SCHEMA_VERSION = 1;
 
   let log = null;
@@ -122,58 +122,7 @@
           }
         }
       }
-    `,
-    EncountersInPatient: `
-      query EncountersInPatient($patientId: ID!, $startDate: IsoDate, $endDate: IsoDate, $pageSize: Int!, $pageToken: String) {
-        encountersInPatient(patientId: $patientId, startDate: $startDate, endDate: $endDate, pageSize: $pageSize, pageToken: $pageToken) {
-          encounters {
-            id
-            firstPublishTime
-            records(includeDraft: false) {
-              id
-              __typename
-              ... on PrescriptionOrder {
-                startDate
-                orderStatus
-                rps {
-                  uuid
-                  dosageText
-                  boundsDurationDays { value }
-                  asNeeded
-                  expectedRepeatCount { value }
-                  instructions {
-                    instruction {
-                      medicationDosageInstruction {
-                        localMedicine { name }
-                        mhlwMedicine { name unitCode }
-                        quantity {
-                          doseQuantityPerDay { value }
-                        }
-                      }
-                    }
-                  }
-                  medicationTiming {
-                    medicationTiming {
-                      canonicalPrescriptionUsage { text }
-                    }
-                  }
-                }
-              }
-            }
-          }
-          nextPageToken
-        }
-      }
     `
-  };
-
-  // 単位コードのマッピング
-  const UNIT_CODES = {
-    1: 'mL', 2: 'g', 3: 'mg', 4: 'μg', 5: 'mEq',
-    6: '管', 7: '本', 8: '瓶', 9: '袋', 10: '包',
-    11: 'シート', 12: 'ブリスター', 13: 'パック', 14: 'キット', 15: 'カプセル',
-    16: '錠', 17: '丸', 18: '枚', 19: '個', 20: '滴',
-    21: 'mL', 22: 'mg', 23: 'μg'
   };
 
   // ==========================================
@@ -345,13 +294,6 @@
   // ユーティリティ関数
   // ==========================================
 
-  function katakanaToHiragana(str) {
-    if (!str) return '';
-    return str.replace(/[ァ-ヶ]/g, char =>
-      String.fromCharCode(char.charCodeAt(0) - 0x60)
-    );
-  }
-
   function toWareki(year, month, day) {
     if (!year) return '';
 
@@ -379,21 +321,23 @@
     return `${eraName}${eraYear}年${month}月${day}日`;
   }
 
-  function calculateAge(birthYear, birthMonth, birthDay) {
-    const today = new Date();
-    let age = today.getFullYear() - birthYear;
-    const m = today.getMonth() + 1;
-    const d = today.getDate();
-
-    if (m < birthMonth || (m === birthMonth && d < birthDay)) {
-      age--;
-    }
-    return age.toString();
-  }
-
   function getTodayWareki() {
     const today = new Date();
     return toWareki(today.getFullYear(), today.getMonth() + 1, today.getDate());
+  }
+
+  function getTodayISO() {
+    const today = new Date();
+    const y = today.getFullYear();
+    const m = String(today.getMonth() + 1).padStart(2, '0');
+    const d = String(today.getDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
+  }
+
+  function isoToWareki(isoDate) {
+    if (!isoDate) return '';
+    const [year, month, day] = isoDate.split('-').map(Number);
+    return toWareki(year, month, day);
   }
 
   function formatSex(sexType) {
@@ -477,13 +421,9 @@
       return {
         patient_uuid: patientUuid,
         patient_name: (p.fullName || '').replace(/\u3000/g, ' '),
-        patient_name_kana: katakanaToHiragana(p.fullNamePhonetic || ''),
         birth_date_wareki: birthYear ? toWareki(birthYear, birthMonth, birthDay) : '',
-        age: birthYear ? calculateAge(birthYear, birthMonth, birthDay) : '',
         sex: formatSex(p.detail?.sexType),
-        postal_code: p.detail?.postalCode || '',
-        address: p.detail?.addressLine_1 || '',
-        phone: p.detail?.phoneNumber || ''
+        address: p.detail?.addressLine_1 || ''
       };
     } catch (e) {
       console.error(`[${SCRIPT_NAME}] 患者情報取得エラー:`, e.message);
@@ -510,12 +450,6 @@
       console.error(`[${SCRIPT_NAME}] 医師名取得エラー:`, e.message);
       return '';
     }
-  }
-
-  async function fetchDepartmentName() {
-    const HenryCore = pageWindow.HenryCore;
-    if (!HenryCore) return '';
-    return await HenryCore.getMyDepartment() || '';
   }
 
   async function fetchDiseases(patientUuid) {
@@ -560,105 +494,12 @@
     }
   }
 
-  async function fetchLatestPrescriptions(patientUuid) {
-    const HenryCore = pageWindow.HenryCore;
-    if (!HenryCore) return [];
-
-    try {
-      const threeMonthsAgo = new Date();
-      threeMonthsAgo.setMonth(threeMonthsAgo.getMonth() - 3);
-      const startDate = threeMonthsAgo.toISOString().split('T')[0];
-
-      const result = await HenryCore.query(QUERIES.EncountersInPatient, {
-        patientId: patientUuid,
-        startDate: startDate,
-        endDate: null,
-        pageSize: 10,
-        pageToken: null
-      }, { endpoint: '/graphql-v2' });
-
-      const encounters = result?.data?.encountersInPatient?.encounters || [];
-      const prescriptions = [];
-
-      for (const enc of encounters) {
-        const records = enc.records || [];
-        for (const rec of records) {
-          if (rec.__typename === 'PrescriptionOrder' && rec.orderStatus !== 'ORDER_STATUS_CANCELLED') {
-            const medicines = [];
-            for (const rp of (rec.rps || [])) {
-              const usage = rp.medicationTiming?.medicationTiming?.canonicalPrescriptionUsage?.text || '';
-              const days = rp.boundsDurationDays?.value;
-              const asNeeded = rp.asNeeded;
-
-              for (const inst of (rp.instructions || [])) {
-                const med = inst.instruction?.medicationDosageInstruction;
-                if (!med) continue;
-
-                const name = med.localMedicine?.name || med.mhlwMedicine?.name || '';
-                const unitCode = med.mhlwMedicine?.unitCode;
-                const unit = UNIT_CODES[unitCode] || '';
-                const qtyPerDay = med.quantity?.doseQuantityPerDay?.value;
-                const qty = qtyPerDay ? (parseInt(qtyPerDay) / 100000) : '';
-
-                medicines.push({
-                  name,
-                  quantity: qty,
-                  unit,
-                  usage,
-                  days,
-                  asNeeded
-                });
-              }
-            }
-
-            if (medicines.length > 0) {
-              prescriptions.push({
-                date: rec.startDate || enc.firstPublishTime,
-                medicines
-              });
-            }
-          }
-        }
-      }
-
-      // 日付でソート（新しい順）
-      prescriptions.sort((a, b) => new Date(b.date) - new Date(a.date));
-
-      return prescriptions;
-    } catch (e) {
-      console.error(`[${SCRIPT_NAME}] 処方取得エラー:`, e.message);
-      return [];
-    }
-  }
-
-  // 処方を文字列にフォーマット
-  function formatPrescriptions(prescriptions) {
-    if (!prescriptions || prescriptions.length === 0) return '';
-
-    // 最新の処方のみ使用
-    const latest = prescriptions[0];
-    if (!latest) return '';
-
-    const lines = [];
-    for (const m of latest.medicines) {
-      // メーカー名（「〜」）を削除
-      let line = m.name.replace(/「[^」]*」/g, '').trim();
-      if (m.quantity) line += ` ${m.quantity}${m.unit}`;
-      if (m.usage) line += ` ${m.usage}`;
-      if (m.days) line += ` ${m.days}日分`;
-      else if (m.asNeeded) line += ' 頓用';
-      lines.push(line);
-    }
-    return lines.join('\n');
-  }
-
   // 病名を文字列にフォーマット
   function formatDiseases(diseases) {
     if (!diseases || diseases.length === 0) return '';
     return diseases.map(d => {
       let name = d.name;
       if (d.isSuspected) name += '（疑い）';
-      if (d.isMain) name += '【主】';
       return name;
     }).join('，');
   }
@@ -667,7 +508,7 @@
   // フォーム表示
   // ==========================================
 
-  async function showReferralForm() {
+  async function showPoliceCertificateForm() {
     const HenryCore = pageWindow.HenryCore;
     if (!HenryCore) {
       alert('HenryCoreが見つかりません');
@@ -689,12 +530,10 @@
 
     try {
       // データ取得（並列実行）
-      const [patientInfo, physicianName, departmentName, diseases, prescriptions] = await Promise.all([
+      const [patientInfo, physicianName, diseases] = await Promise.all([
         fetchPatientInfo(),
         fetchPhysicianName(),
-        fetchDepartmentName(),
-        fetchDiseases(patientUuid),
-        fetchLatestPrescriptions(patientUuid)
+        fetchDiseases(patientUuid)
       ]);
 
       if (!patientInfo) {
@@ -711,31 +550,20 @@
         patient_uuid: patientUuid,
         patient_name: patientInfo.patient_name,
         patient_birth_date_wareki: patientInfo.birth_date_wareki,
-        patient_age: patientInfo.age,
         patient_sex: patientInfo.sex,
         patient_address: patientInfo.address,
-        patient_phone: formatPhoneNumber(patientInfo.phone),
         physician_name: physicianName,
-        department_name: departmentName,
         creation_date_wareki: getTodayWareki(),
 
         // 選択式自動取得
         diseases: diseases,
-        prescriptions: prescriptions,
         use_diseases: true,
-        use_prescriptions: true,
-        use_family_diseases: false,
         selected_diseases: [],
-        selected_family_diseases: [],
 
         // 手入力項目
-        destination_hospital: '',
-        destination_department: '',
-        destination_doctor: '',
         diagnosis_text: '',
-        purpose_and_history: '',
-        family_history_text: '',
-        prescription_text: '',
+        visit_date: getTodayISO(),
+        treatment_period: '',
         remarks: ''
       };
 
@@ -743,15 +571,11 @@
       formData.patient_uuid = patientUuid;
       formData.patient_name = patientInfo.patient_name;
       formData.patient_birth_date_wareki = patientInfo.birth_date_wareki;
-      formData.patient_age = patientInfo.age;
       formData.patient_sex = patientInfo.sex;
       formData.patient_address = patientInfo.address;
-      formData.patient_phone = formatPhoneNumber(patientInfo.phone);
       formData.physician_name = physicianName;
-      formData.department_name = departmentName;
       formData.creation_date_wareki = getTodayWareki();
       formData.diseases = diseases;
-      formData.prescriptions = prescriptions;
 
       // モーダル表示
       showFormModal(formData, savedDraft?.savedAt);
@@ -764,14 +588,14 @@
 
   function showFormModal(formData, lastSavedAt) {
     // 既存モーダルを削除
-    const existingModal = document.getElementById('referral-form-modal');
+    const existingModal = document.getElementById('police-cert-modal');
     if (existingModal) existingModal.remove();
 
     const modal = document.createElement('div');
-    modal.id = 'referral-form-modal';
+    modal.id = 'police-cert-modal';
     modal.innerHTML = `
       <style>
-        #referral-form-modal {
+        #police-cert-modal {
           position: fixed;
           top: 0;
           left: 0;
@@ -784,31 +608,31 @@
           justify-content: center;
           font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
         }
-        .rf-container {
+        .pc-container {
           background: #fff;
           border-radius: 12px;
           width: 90%;
-          max-width: 800px;
+          max-width: 700px;
           max-height: 90vh;
           display: flex;
           flex-direction: column;
           box-shadow: 0 20px 60px rgba(0,0,0,0.3);
         }
-        .rf-header {
+        .pc-header {
           padding: 20px 24px;
-          background: linear-gradient(135deg, #1976d2 0%, #1565c0 100%);
+          background: linear-gradient(135deg, #d32f2f 0%, #b71c1c 100%);
           color: white;
           border-radius: 12px 12px 0 0;
           display: flex;
           justify-content: space-between;
           align-items: center;
         }
-        .rf-header h2 {
+        .pc-header h2 {
           margin: 0;
           font-size: 20px;
           font-weight: 600;
         }
-        .rf-close {
+        .pc-close {
           background: rgba(255,255,255,0.2);
           border: none;
           color: white;
@@ -818,41 +642,41 @@
           cursor: pointer;
           font-size: 20px;
         }
-        .rf-close:hover {
+        .pc-close:hover {
           background: rgba(255,255,255,0.3);
         }
-        .rf-body {
+        .pc-body {
           flex: 1;
           overflow-y: auto;
           padding: 24px;
         }
-        .rf-section {
+        .pc-section {
           margin-bottom: 24px;
         }
-        .rf-section-title {
+        .pc-section-title {
           font-size: 16px;
           font-weight: 600;
-          color: #1976d2;
+          color: #d32f2f;
           margin-bottom: 12px;
           padding-bottom: 8px;
-          border-bottom: 2px solid #e3f2fd;
+          border-bottom: 2px solid #ffcdd2;
         }
-        .rf-row {
+        .pc-row {
           display: flex;
           gap: 16px;
           margin-bottom: 12px;
         }
-        .rf-field {
+        .pc-field {
           flex: 1;
         }
-        .rf-field label {
+        .pc-field label {
           display: block;
           font-size: 13px;
           font-weight: 500;
           color: #666;
           margin-bottom: 4px;
         }
-        .rf-field input, .rf-field textarea {
+        .pc-field input, .pc-field textarea {
           width: 100%;
           padding: 10px 12px;
           border: 1px solid #ddd;
@@ -860,23 +684,23 @@
           font-size: 14px;
           box-sizing: border-box;
         }
-        .rf-field input:focus, .rf-field textarea:focus {
+        .pc-field input:focus, .pc-field textarea:focus {
           outline: none;
-          border-color: #1976d2;
-          box-shadow: 0 0 0 3px rgba(25, 118, 210, 0.1);
+          border-color: #d32f2f;
+          box-shadow: 0 0 0 3px rgba(211, 47, 47, 0.1);
         }
-        .rf-field textarea {
+        .pc-field textarea {
           resize: vertical;
           min-height: 80px;
         }
-        .rf-field.readonly input {
+        .pc-field.readonly input {
           background: #f5f5f5;
           color: #666;
         }
-        .rf-checkbox-group {
+        .pc-checkbox-group {
           margin-top: 8px;
         }
-        .rf-checkbox-item {
+        .pc-checkbox-item {
           display: flex;
           align-items: center;
           gap: 8px;
@@ -885,21 +709,21 @@
           border-radius: 6px;
           margin-bottom: 6px;
         }
-        .rf-checkbox-item input[type="checkbox"] {
+        .pc-checkbox-item input[type="checkbox"] {
           width: 18px;
           height: 18px;
         }
-        .rf-checkbox-item label {
+        .pc-checkbox-item label {
           margin: 0;
           flex: 1;
           font-size: 14px;
           color: #333;
         }
-        .rf-checkbox-item.main-disease {
-          background: #e3f2fd;
-          border: 1px solid #90caf9;
+        .pc-checkbox-item.main-disease {
+          background: #ffebee;
+          border: 1px solid #ef9a9a;
         }
-        .rf-use-toggle {
+        .pc-use-toggle {
           display: flex;
           align-items: center;
           gap: 12px;
@@ -908,15 +732,15 @@
           border-radius: 8px;
           margin-bottom: 12px;
         }
-        .rf-use-toggle input[type="checkbox"] {
+        .pc-use-toggle input[type="checkbox"] {
           width: 20px;
           height: 20px;
         }
-        .rf-use-toggle label {
+        .pc-use-toggle label {
           font-weight: 500;
           color: #e65100;
         }
-        .rf-footer {
+        .pc-footer {
           padding: 16px 24px;
           background: #f5f5f5;
           border-radius: 0 0 12px 12px;
@@ -924,15 +748,15 @@
           justify-content: space-between;
           align-items: center;
         }
-        .rf-footer-left {
+        .pc-footer-left {
           font-size: 12px;
           color: #888;
         }
-        .rf-footer-right {
+        .pc-footer-right {
           display: flex;
           gap: 12px;
         }
-        .rf-btn {
+        .pc-btn {
           padding: 10px 24px;
           border: none;
           border-radius: 6px;
@@ -941,210 +765,136 @@
           cursor: pointer;
           transition: all 0.2s;
         }
-        .rf-btn-secondary {
+        .pc-btn-secondary {
           background: #e0e0e0;
           color: #333;
         }
-        .rf-btn-secondary:hover {
+        .pc-btn-secondary:hover {
           background: #d0d0d0;
         }
-        .rf-btn-primary {
-          background: #1976d2;
+        .pc-btn-primary {
+          background: #d32f2f;
           color: white;
         }
-        .rf-btn-primary:hover {
-          background: #1565c0;
+        .pc-btn-primary:hover {
+          background: #b71c1c;
         }
-        .rf-btn-primary:disabled {
+        .pc-btn-primary:disabled {
           background: #ccc;
           cursor: not-allowed;
         }
-        .rf-prescription-preview {
-          background: #f8f9fa;
-          padding: 12px;
-          border-radius: 6px;
-          font-size: 13px;
-          line-height: 1.6;
-          white-space: pre-wrap;
-          max-height: 150px;
-          overflow-y: auto;
-        }
       </style>
-      <div class="rf-container">
-        <div class="rf-header">
-          <h2>診療情報提供書</h2>
-          <button class="rf-close" title="閉じる">&times;</button>
+      <div class="pc-container">
+        <div class="pc-header">
+          <h2>警察診断書</h2>
+          <button class="pc-close" title="閉じる">&times;</button>
         </div>
-        <div class="rf-body">
+        <div class="pc-body">
           <!-- 自動入力項目 -->
-          <div class="rf-section">
-            <div class="rf-section-title">患者情報（自動入力）</div>
-            <div class="rf-row">
-              <div class="rf-field readonly">
+          <div class="pc-section">
+            <div class="pc-section-title">患者情報（自動入力）</div>
+            <div class="pc-row">
+              <div class="pc-field readonly">
                 <label>患者氏名</label>
                 <input type="text" value="${escapeHtml(formData.patient_name)}" readonly>
               </div>
-              <div class="rf-field readonly">
-                <label>生年月日</label>
-                <input type="text" value="${escapeHtml(formData.patient_birth_date_wareki)}" readonly>
-              </div>
-              <div class="rf-field readonly" style="flex: 0.3;">
-                <label>年齢</label>
-                <input type="text" value="${formData.patient_age}歳" readonly>
-              </div>
-              <div class="rf-field readonly" style="flex: 0.3;">
+              <div class="pc-field readonly" style="flex: 0.3;">
                 <label>性別</label>
                 <input type="text" value="${escapeHtml(formData.patient_sex)}" readonly>
               </div>
             </div>
-            <div class="rf-row">
-              <div class="rf-field readonly">
+            <div class="pc-row">
+              <div class="pc-field readonly">
+                <label>生年月日</label>
+                <input type="text" value="${escapeHtml(formData.patient_birth_date_wareki)}" readonly>
+              </div>
+            </div>
+            <div class="pc-row">
+              <div class="pc-field readonly">
                 <label>住所</label>
                 <input type="text" value="${escapeHtml(formData.patient_address)}" readonly>
               </div>
-              <div class="rf-field readonly" style="flex: 0.5;">
-                <label>電話番号</label>
-                <input type="text" value="${escapeHtml(formData.patient_phone)}" readonly>
-              </div>
             </div>
-            <div class="rf-row">
-              <div class="rf-field readonly">
-                <label>診療科</label>
-                <input type="text" value="${escapeHtml(formData.department_name)}" readonly>
-              </div>
-              <div class="rf-field readonly">
+            <div class="pc-row">
+              <div class="pc-field readonly">
                 <label>作成者</label>
                 <input type="text" value="${escapeHtml(formData.physician_name)}" readonly>
               </div>
-              <div class="rf-field readonly" style="flex: 0.5;">
+              <div class="pc-field readonly" style="flex: 0.5;">
                 <label>作成日</label>
                 <input type="text" value="${escapeHtml(formData.creation_date_wareki)}" readonly>
               </div>
             </div>
           </div>
 
-          <!-- 紹介先 -->
-          <div class="rf-section">
-            <div class="rf-section-title">紹介先</div>
-            <div class="rf-row">
-              <div class="rf-field">
-                <label>病院名</label>
-                <input type="text" id="rf-dest-hospital" value="${escapeHtml(formData.destination_hospital)}" placeholder="○○病院">
-              </div>
-              <div class="rf-field">
-                <label>診療科</label>
-                <input type="text" id="rf-dest-department" value="${escapeHtml(formData.destination_department)}" placeholder="内科">
-              </div>
-              <div class="rf-field">
-                <label>医師名</label>
-                <input type="text" id="rf-dest-doctor" value="${escapeHtml(formData.destination_doctor)}" placeholder="○○先生">
-              </div>
-            </div>
-          </div>
-
           <!-- 診断名 -->
-          <div class="rf-section">
-            <div class="rf-section-title">診断名</div>
+          <div class="pc-section">
+            <div class="pc-section-title">病名</div>
             ${formData.diseases.length > 0 ? `
-              <div class="rf-use-toggle">
-                <input type="checkbox" id="rf-use-diseases" ${formData.use_diseases ? 'checked' : ''}>
-                <label for="rf-use-diseases">登録済み病名を使用する</label>
+              <div class="pc-use-toggle">
+                <input type="checkbox" id="pc-use-diseases" ${formData.use_diseases ? 'checked' : ''}>
+                <label for="pc-use-diseases">登録済み病名を使用する</label>
               </div>
-              <div id="rf-diseases-list" class="rf-checkbox-group" ${formData.use_diseases ? '' : 'style="display:none;"'}>
+              <div id="pc-diseases-list" class="pc-checkbox-group" ${formData.use_diseases ? '' : 'style="display:none;"'}>
                 ${formData.diseases.map(d => `
-                  <div class="rf-checkbox-item ${d.isMain ? 'main-disease' : ''}">
-                    <input type="checkbox" id="rf-disease-${d.uuid}" value="${d.uuid}"
+                  <div class="pc-checkbox-item ${d.isMain ? 'main-disease' : ''}">
+                    <input type="checkbox" id="pc-disease-${d.uuid}" value="${d.uuid}"
                       ${formData.selected_diseases?.includes(d.uuid) ? 'checked' : ''}>
-                    <label for="rf-disease-${d.uuid}">${escapeHtml(d.name)}${d.isMain ? ' (主病名)' : ''}${d.isSuspected ? ' (疑い)' : ''}</label>
+                    <label for="pc-disease-${d.uuid}">${escapeHtml(d.name)}${d.isMain ? ' (主病名)' : ''}${d.isSuspected ? ' (疑い)' : ''}</label>
                   </div>
                 `).join('')}
               </div>
-              <div id="rf-diagnosis-manual" style="${formData.use_diseases ? 'display:none;' : ''}">
-                <div class="rf-field">
-                  <label>診断名（手入力）</label>
-                  <textarea id="rf-diagnosis-text" placeholder="診断名を入力">${escapeHtml(formData.diagnosis_text)}</textarea>
+              <div id="pc-diagnosis-manual" style="${formData.use_diseases ? 'display:none;' : ''}">
+                <div class="pc-field">
+                  <label>病名（手入力）</label>
+                  <textarea id="pc-diagnosis-text" placeholder="病名を入力">${escapeHtml(formData.diagnosis_text)}</textarea>
                 </div>
               </div>
             ` : `
-              <div class="rf-field">
-                <label>診断名</label>
-                <textarea id="rf-diagnosis-text" placeholder="診断名を入力">${escapeHtml(formData.diagnosis_text)}</textarea>
+              <div class="pc-field">
+                <label>病名</label>
+                <textarea id="pc-diagnosis-text" placeholder="病名を入力">${escapeHtml(formData.diagnosis_text)}</textarea>
               </div>
             `}
           </div>
 
-          <!-- 処方 -->
-          <div class="rf-section">
-            <div class="rf-section-title">現在の処方</div>
-            ${formData.prescriptions.length > 0 ? `
-              <div class="rf-use-toggle">
-                <input type="checkbox" id="rf-use-prescriptions" ${formData.use_prescriptions ? 'checked' : ''}>
-                <label for="rf-use-prescriptions">最新の処方を使用する</label>
-              </div>
-              <div id="rf-prescriptions-preview" class="rf-prescription-preview" ${formData.use_prescriptions ? '' : 'style="display:none;"'}>${escapeHtml(formatPrescriptions(formData.prescriptions))}</div>
-              <div id="rf-prescription-manual" style="${formData.use_prescriptions ? 'display:none;' : ''}">
-                <div class="rf-field">
-                  <label>処方内容（手入力）</label>
-                  <textarea id="rf-prescription-text" placeholder="処方内容を入力">${escapeHtml(formData.prescription_text)}</textarea>
-                </div>
-              </div>
-            ` : `
-              <div class="rf-field">
-                <label>処方内容</label>
-                <textarea id="rf-prescription-text" placeholder="処方内容を入力">${escapeHtml(formData.prescription_text)}</textarea>
-              </div>
-            `}
-          </div>
-
-          <!-- 紹介目的・経過 -->
-          <div class="rf-section">
-            <div class="rf-section-title">紹介目的および病状経過</div>
-            <div class="rf-field">
-              <textarea id="rf-purpose" rows="5" placeholder="紹介目的、現病歴、経過などを入力">${escapeHtml(formData.purpose_and_history)}</textarea>
-            </div>
-          </div>
-
-          <!-- 既往歴・家族歴 -->
-          <div class="rf-section">
-            <div class="rf-section-title">既往歴および家族歴</div>
-            ${formData.diseases.length > 0 ? `
-              <div class="rf-use-toggle">
-                <input type="checkbox" id="rf-use-family-diseases" ${formData.use_family_diseases ? 'checked' : ''}>
-                <label for="rf-use-family-diseases">登録病名から選択</label>
-              </div>
-              <div id="rf-family-diseases-list" class="rf-checkbox-list" style="${formData.use_family_diseases ? '' : 'display:none;'}">
-                ${formData.diseases.map(d => `
-                  <div class="rf-checkbox-item">
-                    <input type="checkbox" id="rf-family-disease-${d.uuid}" value="${d.uuid}"
-                      ${formData.selected_family_diseases?.includes(d.uuid) ? 'checked' : ''}>
-                    <label for="rf-family-disease-${d.uuid}">${escapeHtml(d.name)}${d.isSuspected ? ' (疑い)' : ''}</label>
-                  </div>
-                `).join('')}
-              </div>
-            ` : ''}
-            <div id="rf-family-history-manual" style="${formData.use_family_diseases ? 'display:none;' : ''}">
-              <div class="rf-field">
-                <label>既往歴・家族歴（手入力）</label>
-                <textarea id="rf-family-history" rows="3" placeholder="既往歴、家族歴を入力">${escapeHtml(formData.family_history_text)}</textarea>
+          <!-- 受診日 -->
+          <div class="pc-section">
+            <div class="pc-section-title">受診日</div>
+            <div class="pc-row">
+              <div class="pc-field">
+                <label>受診日</label>
+                <input type="date" id="pc-visit-date" value="${formData.visit_date || getTodayISO()}">
               </div>
             </div>
           </div>
 
-          <!-- 備考 -->
-          <div class="rf-section">
-            <div class="rf-section-title">備考</div>
-            <div class="rf-field">
-              <textarea id="rf-remarks" rows="3" placeholder="その他の情報">${escapeHtml(formData.remarks)}</textarea>
+          <!-- 治療見込み -->
+          <div class="pc-section">
+            <div class="pc-section-title">治療見込み</div>
+            <div class="pc-row">
+              <div class="pc-field">
+                <label>安静加療期間</label>
+                <input type="text" id="pc-treatment-period" value="${escapeHtml(formData.treatment_period)}" placeholder="例: 2週間">
+              </div>
+            </div>
+          </div>
+
+          <!-- 特記事項 -->
+          <div class="pc-section">
+            <div class="pc-section-title">特記事項</div>
+            <div class="pc-field">
+              <textarea id="pc-remarks" rows="3" placeholder="特記事項があれば入力">${escapeHtml(formData.remarks)}</textarea>
             </div>
           </div>
         </div>
-        <div class="rf-footer">
-          <div class="rf-footer-left">
+        <div class="pc-footer">
+          <div class="pc-footer-left">
             ${lastSavedAt ? `下書き: ${new Date(lastSavedAt).toLocaleString('ja-JP')}` : ''}
           </div>
-          <div class="rf-footer-right">
-            <button class="rf-btn rf-btn-secondary" id="rf-save-draft">下書き保存</button>
-            <button class="rf-btn rf-btn-primary" id="rf-generate">Google Docsに出力</button>
+          <div class="pc-footer-right">
+            <button class="pc-btn pc-btn-secondary" id="pc-save-draft">下書き保存</button>
+            <button class="pc-btn pc-btn-primary" id="pc-generate">Google Docsに出力</button>
           </div>
         </div>
       </div>
@@ -1153,17 +903,17 @@
     document.body.appendChild(modal);
 
     // イベントリスナー
-    modal.querySelector('.rf-close').addEventListener('click', () => modal.remove());
+    modal.querySelector('.pc-close').addEventListener('click', () => modal.remove());
     modal.addEventListener('click', (e) => {
       if (e.target === modal) modal.remove();
     });
 
     // 病名使用トグル
-    const useDiseases = modal.querySelector('#rf-use-diseases');
+    const useDiseases = modal.querySelector('#pc-use-diseases');
     if (useDiseases) {
       useDiseases.addEventListener('change', () => {
-        const diseasesList = modal.querySelector('#rf-diseases-list');
-        const diagnosisManual = modal.querySelector('#rf-diagnosis-manual');
+        const diseasesList = modal.querySelector('#pc-diseases-list');
+        const diagnosisManual = modal.querySelector('#pc-diagnosis-manual');
         if (useDiseases.checked) {
           diseasesList.style.display = '';
           diagnosisManual.style.display = 'none';
@@ -1174,40 +924,8 @@
       });
     }
 
-    // 処方使用トグル
-    const usePrescriptions = modal.querySelector('#rf-use-prescriptions');
-    if (usePrescriptions) {
-      usePrescriptions.addEventListener('change', () => {
-        const prescriptionsPreview = modal.querySelector('#rf-prescriptions-preview');
-        const prescriptionManual = modal.querySelector('#rf-prescription-manual');
-        if (usePrescriptions.checked) {
-          prescriptionsPreview.style.display = '';
-          prescriptionManual.style.display = 'none';
-        } else {
-          prescriptionsPreview.style.display = 'none';
-          prescriptionManual.style.display = '';
-        }
-      });
-    }
-
-    // 既往歴病名選択トグル
-    const useFamilyDiseases = modal.querySelector('#rf-use-family-diseases');
-    if (useFamilyDiseases) {
-      useFamilyDiseases.addEventListener('change', () => {
-        const familyDiseasesList = modal.querySelector('#rf-family-diseases-list');
-        const familyHistoryManual = modal.querySelector('#rf-family-history-manual');
-        if (useFamilyDiseases.checked) {
-          familyDiseasesList.style.display = '';
-          familyHistoryManual.style.display = 'none';
-        } else {
-          familyDiseasesList.style.display = 'none';
-          familyHistoryManual.style.display = '';
-        }
-      });
-    }
-
     // 下書き保存
-    modal.querySelector('#rf-save-draft').addEventListener('click', () => {
+    modal.querySelector('#pc-save-draft').addEventListener('click', () => {
       const data = collectFormData(modal, formData);
       if (saveDraft(formData.patient_uuid, data)) {
         alert('下書きを保存しました');
@@ -1215,8 +933,8 @@
     });
 
     // Google Docs出力
-    modal.querySelector('#rf-generate').addEventListener('click', async () => {
-      const btn = modal.querySelector('#rf-generate');
+    modal.querySelector('#pc-generate').addEventListener('click', async () => {
+      const btn = modal.querySelector('#pc-generate');
       btn.disabled = true;
       btn.textContent = '生成中...';
 
@@ -1244,82 +962,27 @@
       .replace(/'/g, '&#039;');
   }
 
-  // 電話番号フォーマット
-  function formatPhoneNumber(phone) {
-    if (!phone) return '';
-
-    // 全角数字を半角に変換
-    let normalized = phone.replace(/[０-９]/g, s => String.fromCharCode(s.charCodeAt(0) - 0xFEE0));
-    // 全角ハイフン等を半角に変換
-    normalized = normalized.replace(/[ー−‐―]/g, '-');
-    // 数字のみ抽出
-    const digitsOnly = normalized.replace(/[^0-9]/g, '');
-
-    // 携帯電話（11桁、090/080/070/060で始まる）
-    if (digitsOnly.length === 11 && /^0[6789]0/.test(digitsOnly)) {
-      return `${digitsOnly.slice(0, 3)}-${digitsOnly.slice(3, 7)}-${digitsOnly.slice(7)}`;
-    }
-
-    // 市外局番省略（7桁）→ XXX-XXXX
-    if (digitsOnly.length === 7) {
-      return `${digitsOnly.slice(0, 3)}-${digitsOnly.slice(3)}`;
-    }
-
-    // 市外局番省略（8桁）→ XXXX-XXXX
-    if (digitsOnly.length === 8) {
-      return `${digitsOnly.slice(0, 4)}-${digitsOnly.slice(4)}`;
-    }
-
-    // それ以外は全角→半角変換のみ
-    return normalized;
-  }
-
   function collectFormData(modal, originalData) {
     const data = { ...originalData };
 
-    data.destination_hospital = modal.querySelector('#rf-dest-hospital')?.value || '';
-    data.destination_department = modal.querySelector('#rf-dest-department')?.value || '';
-    data.destination_doctor = modal.querySelector('#rf-dest-doctor')?.value || '';
-    data.purpose_and_history = modal.querySelector('#rf-purpose')?.value || '';
-    data.family_history_text = modal.querySelector('#rf-family-history')?.value || '';
-    data.remarks = modal.querySelector('#rf-remarks')?.value || '';
-
-    // 既往歴（病名選択）
-    const useFamilyDiseases = modal.querySelector('#rf-use-family-diseases');
-    data.use_family_diseases = useFamilyDiseases?.checked ?? false;
-
-    if (data.use_family_diseases && data.diseases.length > 0) {
-      data.selected_family_diseases = [];
-      data.diseases.forEach(d => {
-        const cb = modal.querySelector(`#rf-family-disease-${d.uuid}`);
-        if (cb?.checked) {
-          data.selected_family_diseases.push(d.uuid);
-        }
-      });
-    }
+    data.visit_date = modal.querySelector('#pc-visit-date')?.value || getTodayISO();
+    data.treatment_period = modal.querySelector('#pc-treatment-period')?.value || '';
+    data.remarks = modal.querySelector('#pc-remarks')?.value || '';
 
     // 病名
-    const useDiseases = modal.querySelector('#rf-use-diseases');
+    const useDiseases = modal.querySelector('#pc-use-diseases');
     data.use_diseases = useDiseases?.checked ?? false;
 
     if (data.use_diseases && data.diseases.length > 0) {
       data.selected_diseases = [];
       data.diseases.forEach(d => {
-        const cb = modal.querySelector(`#rf-disease-${d.uuid}`);
+        const cb = modal.querySelector(`#pc-disease-${d.uuid}`);
         if (cb?.checked) {
           data.selected_diseases.push(d.uuid);
         }
       });
     } else {
-      data.diagnosis_text = modal.querySelector('#rf-diagnosis-text')?.value || '';
-    }
-
-    // 処方
-    const usePrescriptions = modal.querySelector('#rf-use-prescriptions');
-    data.use_prescriptions = usePrescriptions?.checked ?? false;
-
-    if (!data.use_prescriptions) {
-      data.prescription_text = modal.querySelector('#rf-prescription-text')?.value || '';
+      data.diagnosis_text = modal.querySelector('#pc-diagnosis-text')?.value || '';
     }
 
     return data;
@@ -1338,12 +1001,12 @@
     const folder = await DriveAPI.getOrCreateFolder(TEMPLATE_CONFIG.OUTPUT_FOLDER_NAME);
 
     // テンプレートをコピー（メタデータ付き）
-    const fileName = `診療情報提供書_${formData.patient_name}_${new Date().toISOString().slice(0, 10)}`;
+    const fileName = `警察診断書_${formData.patient_name}_${new Date().toISOString().slice(0, 10)}`;
     const properties = {
       henryPatientUuid: formData.patient_uuid || '',
       henryFileUuid: '',  // 新規作成なので空
       henryFolderUuid: folder.id,
-      henrySource: 'referral-form'
+      henrySource: 'police-certificate'
     };
     const newDoc = await DriveAPI.copyFile(TEMPLATE_CONFIG.TEMPLATE_ID, fileName, folder.id, properties);
 
@@ -1356,42 +1019,21 @@
       diagnosisText = formData.diagnosis_text || '';
     }
 
-    // 処方テキスト作成
-    let prescriptionText = '';
-    if (formData.use_prescriptions && formData.prescriptions.length > 0) {
-      prescriptionText = formatPrescriptions(formData.prescriptions);
-    } else {
-      prescriptionText = formData.prescription_text || '';
-    }
-
-    // 既往歴テキスト作成
-    let familyHistoryText = '';
-    if (formData.use_family_diseases && formData.diseases.length > 0 && formData.selected_family_diseases?.length > 0) {
-      const selectedDiseases = formData.diseases.filter(d => formData.selected_family_diseases.includes(d.uuid));
-      familyHistoryText = selectedDiseases.map(d => d.name + (d.isSuspected ? '（疑い）' : '')).join('，');
-    } else {
-      familyHistoryText = formData.family_history_text || '';
-    }
+    // 受診日を和暦に変換
+    const visitDateWareki = isoToWareki(formData.visit_date);
 
     // プレースホルダー置換リクエスト作成
     const requests = [
       DocsAPI.createReplaceTextRequest('{{作成日_和暦}}', formData.creation_date_wareki),
       DocsAPI.createReplaceTextRequest('{{患者氏名}}', formData.patient_name),
+      DocsAPI.createReplaceTextRequest('{{性別}}', formData.patient_sex),
       DocsAPI.createReplaceTextRequest('{{患者生年月日_和暦}}', formData.patient_birth_date_wareki),
-      DocsAPI.createReplaceTextRequest('{{患者年齢}}', formData.patient_age),
-      DocsAPI.createReplaceTextRequest('{{患者性別}}', formData.patient_sex),
       DocsAPI.createReplaceTextRequest('{{患者住所}}', formData.patient_address),
-      DocsAPI.createReplaceTextRequest('{{患者電話番号}}', formData.patient_phone),
-      DocsAPI.createReplaceTextRequest('{{作成者氏名}}', formData.physician_name),
-      DocsAPI.createReplaceTextRequest('{{診療科}}', formData.department_name),
-      DocsAPI.createReplaceTextRequest('{{紹介先病院}}', formData.destination_hospital),
-      DocsAPI.createReplaceTextRequest('{{紹介先診療科}}', formData.destination_department),
-      DocsAPI.createReplaceTextRequest('{{紹介先医師名}}', formData.destination_doctor),
+      DocsAPI.createReplaceTextRequest('{{医師名}}', formData.physician_name),
       DocsAPI.createReplaceTextRequest('{{診断名}}', diagnosisText),
-      DocsAPI.createReplaceTextRequest('{{紹介目的および病状経過}}', formData.purpose_and_history),
-      DocsAPI.createReplaceTextRequest('{{既往歴および家族歴}}', familyHistoryText),
-      DocsAPI.createReplaceTextRequest('{{全処方薬}}', prescriptionText),
-      DocsAPI.createReplaceTextRequest('{{備考}}', formData.remarks)
+      DocsAPI.createReplaceTextRequest('{{受診日}}', visitDateWareki),
+      DocsAPI.createReplaceTextRequest('{{治療見込み}}', formData.treatment_period),
+      DocsAPI.createReplaceTextRequest('{{特記事項}}', formData.remarks)
     ];
 
     // 置換実行
@@ -1424,15 +1066,15 @@
 
     // プラグイン登録
     await pageWindow.HenryCore.registerPlugin({
-      id: 'referral-form',
-      name: '診療情報提供書',
-      icon: '📄',
-      description: '診療情報提供書を作成',
+      id: 'police-certificate',
+      name: '警察診断書',
+      icon: '🚔',
+      description: '警察提出用診断書を作成',
       version: VERSION,
-      order: 200,
+      order: 210,
       group: '文書作成',
       groupIcon: '📝',
-      onClick: showReferralForm
+      onClick: showPoliceCertificateForm
     });
 
     console.log(`[${SCRIPT_NAME}] Ready (v${VERSION})`);
