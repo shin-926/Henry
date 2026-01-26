@@ -102,6 +102,125 @@
   }
 
   // ==========================================
+  // HTTP通信モジュール（GM_xmlhttpRequestのPromise化）
+  // ==========================================
+  const HttpClient = {
+    /**
+     * 基本リクエスト
+     * @param {object} options - リクエストオプション
+     * @param {string} options.method - HTTPメソッド
+     * @param {string} options.url - リクエストURL
+     * @param {object} [options.headers] - リクエストヘッダー
+     * @param {*} [options.data] - リクエストボディ
+     * @param {string} [options.responseType] - レスポンスタイプ ('text' | 'arraybuffer')
+     * @param {object} [authOptions] - 認証オプション
+     * @param {function} [authOptions.tokenProvider] - アクセストークンを返す非同期関数
+     * @param {function} [authOptions.tokenRefresher] - トークンをリフレッシュする非同期関数
+     * @returns {Promise<*>}
+     */
+    async request(options, authOptions = {}) {
+      const { tokenProvider, tokenRefresher } = authOptions;
+
+      // トークンプロバイダーがあればAuthorizationヘッダーを追加
+      if (tokenProvider) {
+        const accessToken = await tokenProvider();
+        options.headers = {
+          ...options.headers,
+          'Authorization': `Bearer ${accessToken}`
+        };
+      }
+
+      return new Promise((resolve, reject) => {
+        GM_xmlhttpRequest({
+          method: options.method || 'GET',
+          url: options.url,
+          headers: options.headers || {},
+          data: options.data,
+          responseType: options.responseType || 'text',
+          onload: (response) => {
+            if (response.status >= 200 && response.status < 300) {
+              // 成功
+              if (options.responseType === 'arraybuffer') {
+                resolve(response.response);
+              } else {
+                try {
+                  resolve(JSON.parse(response.responseText));
+                } catch {
+                  resolve(response.responseText);
+                }
+              }
+            } else if (response.status === 401 && tokenRefresher) {
+              // 401エラー: トークンリフレッシュ後に再試行
+              debugLog('HttpClient', 'Token expired, refreshing...');
+              tokenRefresher()
+                .then(() => this.request(options, authOptions))
+                .then(resolve)
+                .catch(reject);
+            } else {
+              const errorDetail = response.responseText?.substring(0, 200) || '';
+              debugError('HttpClient', `Error ${response.status}:`, errorDetail);
+              reject(new Error(`HTTP ${response.status}: ${errorDetail}`));
+            }
+          },
+          onerror: (err) => {
+            debugError('HttpClient', 'Network error:', err);
+            reject(new Error('Network error'));
+          }
+        });
+      });
+    },
+
+    /**
+     * JSON POST リクエスト
+     */
+    async postJson(url, data, headers = {}, authOptions = {}) {
+      return this.request({
+        method: 'POST',
+        url,
+        headers: { 'Content-Type': 'application/json', ...headers },
+        data: JSON.stringify(data)
+      }, authOptions);
+    },
+
+    /**
+     * バイナリダウンロード
+     */
+    async downloadBinary(url, headers = {}, authOptions = {}) {
+      return this.request({
+        method: 'GET',
+        url,
+        headers,
+        responseType: 'arraybuffer'
+      }, authOptions);
+    },
+
+    /**
+     * FormData POST（GCSアップロード用）
+     */
+    async postFormData(url, formData) {
+      return new Promise((resolve, reject) => {
+        GM_xmlhttpRequest({
+          method: 'POST',
+          url,
+          data: formData,
+          onload: (response) => {
+            if (response.status >= 200 && response.status < 300) {
+              resolve(response.responseText);
+            } else {
+              debugError('HttpClient', `FormData POST Error ${response.status}`);
+              reject(new Error(`HTTP ${response.status}`));
+            }
+          },
+          onerror: (err) => {
+            debugError('HttpClient', 'FormData POST Network error:', err);
+            reject(new Error('Network error'));
+          }
+        });
+      });
+    }
+  };
+
+  // ==========================================
   // GoogleAuth取得ヘルパー（HenryCore.modules.GoogleAuth経由）
   // ==========================================
   const pageWindow = typeof unsafeWindow !== 'undefined' ? unsafeWindow : window;
@@ -123,57 +242,33 @@
     return getGoogleAuth();
   }
 
-  // ========================================== 
+  // ==========================================
   // Google Drive APIモジュール
-  // ========================================== 
+  // ==========================================
   const DriveAPI = {
-    // APIリクエスト共通処理
+    // 認証オプション（トークン自動取得・リフレッシュ）
+    _getAuthOptions() {
+      return {
+        tokenProvider: () => getGoogleAuth().getValidAccessToken(),
+        tokenRefresher: () => getGoogleAuth().refreshAccessToken()
+      };
+    },
+
+    // APIリクエスト共通処理（HttpClientを利用）
     async request(method, url, options = {}) {
-      const accessToken = await getGoogleAuth().getValidAccessToken();
-
-      return new Promise((resolve, reject) => {
-        const headers = {
-          'Authorization': `Bearer ${accessToken}`,
-          ...options.headers
-        };
-
-        GM_xmlhttpRequest({
-          method,
-          url,
-          headers,
-          data: options.body,
-          responseType: options.responseType || 'text',
-          onload: (response) => {
-            if (response.status >= 200 && response.status < 300) {
-              if (options.responseType === 'arraybuffer') {
-                resolve(response.response);
-              } else {
-                try {
-                  resolve(JSON.parse(response.responseText));
-                } catch {
-                  resolve(response.responseText);
-                }
-              }
-            } else if (response.status === 401) {
-              // トークン期限切れ、リフレッシュ後にリトライ
-              getGoogleAuth().refreshAccessToken()
-                .then(() => this.request(method, url, options))
-                .then(resolve)
-                .catch(reject);
-            } else {
-              debugError('DriveAPI', `Error ${response.status}:`, response.responseText);
-              reject(new Error(`API Error: ${response.status}`));
-            }
-          },
-          onerror: (err) => {
-            debugError('DriveAPI', 'Network error:', err);
-            reject(new Error('API通信エラー'));
-          }
-        });
-      });
+      return HttpClient.request({
+        method,
+        url,
+        headers: options.headers || {},
+        data: options.body,
+        responseType: options.responseType
+      }, this._getAuthOptions());
     },
 
     // Multipart Uploadでファイルをアップロード（変換付き）
+    // NOTE: この関数は手動でMultipartバイナリを構築しており複雑だが、
+    // HttpClientへの統合は見送り。理由: (1) 動作中のコードを触るリスク、
+    // (2) 他で再利用予定なし、(3) Drive APIの仕様変更時は慎重なテストが必要
     async uploadWithConversion(fileName, fileBlob, sourceMimeType, targetMimeType, properties = {}, parentFolderId = null) {
       const accessToken = await getGoogleAuth().getValidAccessToken();
 
@@ -245,29 +340,8 @@
 
     // ファイルをエクスポート（Google形式 → Office形式）
     async exportFile(fileId, mimeType) {
-      const accessToken = await getGoogleAuth().getValidAccessToken();
       const url = `${CONFIG.DRIVE_API_BASE}/files/${fileId}/export?mimeType=${encodeURIComponent(mimeType)}`;
-
-      return new Promise((resolve, reject) => {
-        GM_xmlhttpRequest({
-          method: 'GET',
-          url,
-          headers: { 'Authorization': `Bearer ${accessToken}` },
-          responseType: 'arraybuffer',
-          onload: (response) => {
-            if (response.status === 200) {
-              resolve(response.response);
-            } else {
-              debugError('DriveAPI', 'エクスポート失敗:', response.status);
-              reject(new Error(`Export failed: ${response.status}`));
-            }
-          },
-          onerror: (err) => {
-            debugError('DriveAPI', 'エクスポートエラー:', err);
-            reject(new Error('エクスポート通信エラー'));
-          }
-        });
-      });
+      return HttpClient.downloadBinary(url, {}, this._getAuthOptions());
     },
 
     // ファイルメタデータ取得
@@ -365,58 +439,41 @@
         throw new Error(`Unknown operation: ${operationName}`);
       }
 
-      return new Promise((resolve, reject) => {
-        GM_xmlhttpRequest({
-          method: 'POST',
-          url: `https://henry-app.jp${CONFIG.GRAPHQL_ENDPOINT}`,
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${token}`,
-            'x-auth-organization-uuid': CONFIG.ORG_UUID
-          },
-          data: JSON.stringify({ operationName, variables, query }),
-          onload: (response) => {
-            if (response.status === 200) {
-              const body = JSON.parse(response.responseText);
-              if (body.errors) {
-                reject(new Error(body.errors[0].message));
-              } else {
-                resolve(body.data);
-              }
-            } else {
-              reject(new Error(`Henry API Error: ${response.status}`));
-            }
-          },
-          onerror: () => reject(new Error('Henry API通信エラー'))
-        });
-      });
+      const result = await HttpClient.postJson(
+        `https://henry-app.jp${CONFIG.GRAPHQL_ENDPOINT}`,
+        { operationName, variables, query },
+        {
+          'Authorization': `Bearer ${token}`,
+          'x-auth-organization-uuid': CONFIG.ORG_UUID
+        }
+      );
+
+      if (result.errors) {
+        throw new Error(result.errors[0].message);
+      }
+      return result.data;
     },
 
     async uploadToGCS(uploadUrl, blob, fileName) {
       const formData = new FormData();
       formData.append('file', blob, fileName);
-
-      return new Promise((resolve, reject) => {
-        GM_xmlhttpRequest({
-          method: 'POST',
-          url: uploadUrl,
-          data: formData,
-          onload: (response) => {
-            if (response.status >= 200 && response.status < 300) {
-              resolve();
-            } else {
-              reject(new Error(`GCS Upload Error: ${response.status}`));
-            }
-          },
-          onerror: () => reject(new Error('GCSアップロード通信エラー'))
-        });
-      });
+      await HttpClient.postFormData(uploadUrl, formData);
     }
   };
 
-  // ========================================== 
+  // ==========================================
   // UI共通
-  // ========================================== 
+  // ==========================================
+
+  // スピナーアニメーション用スタイルを注入
+  function ensureSpinnerStyle() {
+    if (document.getElementById('drive-direct-spin-style')) return;
+    const style = document.createElement('style');
+    style.id = 'drive-direct-spin-style';
+    style.textContent = '@keyframes drive-direct-spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }';
+    document.head.appendChild(style);
+  }
+
   function showToast(message, isError = false, duration = 3000) {
     const toast = document.createElement('div');
     toast.textContent = message;
@@ -464,13 +521,7 @@
     });
 
     // スピナー
-    if (!document.getElementById('drive-direct-spin-style')) {
-      const style = document.createElement('style');
-      style.id = 'drive-direct-spin-style';
-      style.textContent = `@keyframes drive-direct-spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }`;
-      document.head.appendChild(style);
-    }
-
+    ensureSpinnerStyle();
     const spinner = document.createElement('div');
     Object.assign(spinner.style, {
       width: '16px',
@@ -757,19 +808,7 @@
       // 重複防止（同じURLが処理中なら無視）
       if (inflight.has(redirectUrl)) return;
 
-      // 認証設定チェック
-      if (!getGoogleAuth()?.isConfigured()) {
-        alert('Google Docs連携にはOAuth設定が必要です。設定ダイアログを開きます。');
-        getGoogleAuth()?.showConfigDialog();
-        return;
-      }
-
-      // 認証チェック
-      if (!getGoogleAuth()?.isAuthenticated()) {
-        alert('Google認証が必要です。認証画面を開きます。');
-        getGoogleAuth()?.startAuth();
-        return;
-      }
+      if (!checkGoogleAuthReady()) return;
 
       inflight.set(redirectUrl, true);
       const hide = showProcessingIndicator(`書類を開いています... (${title})`);
@@ -832,130 +871,73 @@
 
     // 署名付きURLからダウンロード（トークン不要）
     async function downloadFromGCSWithSignedUrl(signedUrl) {
-      return new Promise((resolve, reject) => {
-        GM_xmlhttpRequest({
-          method: 'GET',
-          url: signedUrl,
-          responseType: 'arraybuffer',
-          onload: (response) => {
-            if (response.status === 200) {
-              resolve(response.response);
-            } else {
-              reject(new Error(`Download failed: ${response.status}`));
-            }
-          },
-          onerror: () => reject(new Error('ダウンロード通信エラー'))
-        });
-      });
+      return HttpClient.downloadBinary(signedUrl);
     }
 
     // GCSからファイルをダウンロード
     async function downloadFromGCS(fileUrl, token) {
-      return new Promise((resolve, reject) => {
-        GM_xmlhttpRequest({
-          method: 'GET',
-          url: fileUrl,
-          headers: { 'Authorization': `Bearer ${token}` },
-          responseType: 'arraybuffer',
-          onload: (response) => {
-            if (response.status === 200) {
-              resolve(response.response);
-            } else {
-              reject(new Error(`Download failed: ${response.status}`));
-            }
-          },
-          onerror: () => reject(new Error('ダウンロード通信エラー'))
-        });
-      });
+      return HttpClient.downloadBinary(fileUrl, { 'Authorization': `Bearer ${token}` });
     }
 
-    // ダブルクリックハンドラ
-    async function handleDoubleClick(event) {
-      if (event.target.closest('input, textarea, button, a')) return;
+    // 認証チェック（共通）
+    function checkGoogleAuthReady() {
+      if (!getGoogleAuth()?.isConfigured()) {
+        alert('OAuth設定が必要です。設定ダイアログを開きます。');
+        getGoogleAuth()?.showConfigDialog();
+        return false;
+      }
+      if (!getGoogleAuth()?.isAuthenticated()) {
+        alert('Google認証が必要です。認証画面を開きます。');
+        getGoogleAuth()?.startAuth();
+        return false;
+      }
+      return true;
+    }
 
-      const row = event.target.closest('li[role="button"][aria-roledescription="draggable"]');
-      if (!row) return;
-
-      const spans = row.querySelectorAll('span');
-      const fileName = spans[0]?.textContent?.trim();
-      const dateStr = spans[1]?.textContent?.trim();
-      if (!fileName) return;
-
-      // ファイル検索
-      const findFileByNameAndDate = (fileName, dateStr) => {
-        const candidates = [];
-        for (const files of cachedFilesByFolder.values()) {
-          for (const f of files) {
-            if (f.file?.title === fileName) {
-              candidates.push(f);
-            }
+    // キャッシュからファイルを検索
+    function findFileByNameAndDate(fileName, dateStr) {
+      const candidates = [];
+      for (const files of cachedFilesByFolder.values()) {
+        for (const f of files) {
+          if (f.file?.title === fileName) {
+            candidates.push(f);
           }
         }
+      }
 
-        if (candidates.length === 0) return null;
-        if (candidates.length === 1) return candidates[0];
+      if (candidates.length === 0) return null;
+      if (candidates.length === 1) return candidates[0];
 
-        if (dateStr) {
-          const matched = candidates.find(f => {
-            const ts = f.createTime?.seconds;
-            if (!ts) return false;
-            const date = new Date(ts * 1000);
-            const formatted = `${date.getFullYear()}.${String(date.getMonth() + 1).padStart(2, '0')}.${String(date.getDate()).padStart(2, '0')} ${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
-            return formatted === dateStr;
-          });
-          if (matched) return matched;
-        }
+      if (dateStr) {
+        const matched = candidates.find(f => {
+          const ts = f.createTime?.seconds;
+          if (!ts) return false;
+          const date = new Date(ts * 1000);
+          const formatted = `${date.getFullYear()}.${String(date.getMonth() + 1).padStart(2, '0')}.${String(date.getDate()).padStart(2, '0')} ${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
+          return formatted === dateStr;
+        });
+        if (matched) return matched;
+      }
 
-        return candidates[0];
-      };
+      return candidates[0];
+    }
 
-      const fileData = findFileByNameAndDate(fileName, dateStr);
-      if (!fileData?.file) return;
-
+    // ファイルをGoogle Docsで開く（コアロジック）
+    async function openFileInGoogleDocs(fileData, patientUuid) {
       const file = fileData.file;
-      const fileUrl = file.redirectUrl;
-      if (!fileUrl?.includes('storage.googleapis.com')) return;
-      if (!CONVERTIBLE_TYPES.has(file.fileType)) return;
-
-      event.preventDefault();
-      event.stopPropagation();
-      event.stopImmediatePropagation();
-
       const patientFileUuid = fileData.uuid;
       const folderUuid = fileData.parentFileFolderUuid || null;
 
       if (inflight.has(patientFileUuid)) return;
-
-      // 認証設定チェック
-      if (!getGoogleAuth()?.isConfigured()) {
-        alert('OAuth設定が必要です。設定ダイアログを開きます。');
-        getGoogleAuth()?.showConfigDialog();
-        return;
-      }
-
-      // 認証チェック
-      if (!getGoogleAuth()?.isAuthenticated()) {
-        alert('Google認証が必要です。認証画面を開きます。');
-        if (getGoogleAuth()) {
-          getGoogleAuth().startAuth();
-        } else {
-          alert('Google認証モジュールが見つかりません。ページを再読み込みしてください。');
-        }
-        return;
-      }
-
-      if (!pageWindow.HenryCore) return;
-      const patientUuid = pageWindow.HenryCore.getPatientUuid();
-      if (!patientUuid) return;
-
       inflight.set(patientFileUuid, true);
+
       const hide = showProcessingIndicator(`書類を開いています... (${file.title})`);
 
       try {
         const henryToken = await pageWindow.HenryCore.getToken();
 
         // 1. GCSからダウンロード
-        const fileBuffer = await downloadFromGCS(fileUrl, henryToken);
+        const fileBuffer = await downloadFromGCS(file.redirectUrl, henryToken);
         const blob = new Blob([fileBuffer]);
 
         // 2. ファイルタイプ判定
@@ -985,7 +967,6 @@
         const openUrl = `https://docs.google.com/${docType}/d/${driveFile.id}/edit`;
 
         const tab = GM_openInTab(openUrl, { active: true, setParent: true });
-        // タブが閉じたらHenryタブにフォーカスを戻す
         tab.onclose = () => {
           debugLog('Henry', 'Google Docsタブが閉じました。フォーカスを戻します。');
           window.focus();
@@ -1000,6 +981,38 @@
         hide();
         inflight.delete(patientFileUuid);
       }
+    }
+
+    // ダブルクリックハンドラ
+    async function handleDoubleClick(event) {
+      if (event.target.closest('input, textarea, button, a')) return;
+
+      const row = event.target.closest('li[role="button"][aria-roledescription="draggable"]');
+      if (!row) return;
+
+      const spans = row.querySelectorAll('span');
+      const fileName = spans[0]?.textContent?.trim();
+      const dateStr = spans[1]?.textContent?.trim();
+      if (!fileName) return;
+
+      const fileData = findFileByNameAndDate(fileName, dateStr);
+      if (!fileData?.file) return;
+
+      const file = fileData.file;
+      if (!file.redirectUrl?.includes('storage.googleapis.com')) return;
+      if (!CONVERTIBLE_TYPES.has(file.fileType)) return;
+
+      event.preventDefault();
+      event.stopPropagation();
+      event.stopImmediatePropagation();
+
+      if (!checkGoogleAuthReady()) return;
+      if (!pageWindow.HenryCore) return;
+
+      const patientUuid = pageWindow.HenryCore.getPatientUuid();
+      if (!patientUuid) return;
+
+      await openFileInGoogleDocs(fileData, patientUuid);
     }
 
     // 初期化
@@ -1040,6 +1053,12 @@
   // ========================================== 
   function runGoogleDocsMode() {
     debugLog('Docs', 'Google Docsモード開始');
+
+    // ==========================================
+    // クロスタブ通信（Henry ↔ Google Docs）
+    // ==========================================
+    // NOTE: タイムアウト3秒で設計。Henryタブがビジー状態だと失敗する可能性あり。
+    // アーキテクチャ上のトレードオフとして許容（認識しておくこと）。
 
     // Henryトークンをリクエスト
     function requestHenryToken(timeout = 3000) {
@@ -1122,39 +1141,26 @@
 
       // リフレッシュが必要
       debugLog('Docs', 'アクセストークンをリフレッシュ中...');
-      return new Promise((resolve, reject) => {
-        GM_xmlhttpRequest({
-          method: 'POST',
-          url: 'https://oauth2.googleapis.com/token',
-          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-          data: new URLSearchParams({
-            client_id: creds.clientId,
-            client_secret: creds.clientSecret,
-            refresh_token: tokens.refresh_token,
-            grant_type: 'refresh_token'
-          }).toString(),
-          onload: (response) => {
-            if (response.status === 200) {
-              const data = JSON.parse(response.responseText);
-              // キャッシュを更新
-              cachedOAuthData.tokens = {
-                access_token: data.access_token,
-                refresh_token: tokens.refresh_token,
-                expires_at: Date.now() + (data.expires_in * 1000) - 60000
-              };
-              debugLog('Docs', 'アクセストークンリフレッシュ成功');
-              resolve(data.access_token);
-            } else {
-              debugError('Docs', 'リフレッシュ失敗:', response.responseText);
-              reject(new Error('トークンリフレッシュに失敗しました'));
-            }
-          },
-          onerror: (err) => {
-            debugError('Docs', 'リフレッシュエラー:', err);
-            reject(new Error('トークンリフレッシュ通信エラー'));
-          }
-        });
+      const data = await HttpClient.request({
+        method: 'POST',
+        url: 'https://oauth2.googleapis.com/token',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        data: new URLSearchParams({
+          client_id: creds.clientId,
+          client_secret: creds.clientSecret,
+          refresh_token: tokens.refresh_token,
+          grant_type: 'refresh_token'
+        }).toString()
       });
+
+      // キャッシュを更新
+      cachedOAuthData.tokens = {
+        access_token: data.access_token,
+        refresh_token: tokens.refresh_token,
+        expires_at: Date.now() + (data.expires_in * 1000) - 60000
+      };
+      debugLog('Docs', 'アクセストークンリフレッシュ成功');
+      return data.access_token;
     }
 
     // Henryへリフレッシュ要求
@@ -1320,9 +1326,9 @@
       discardBtn.textContent = '削除中...';
 
       try {
-        const docId = window.location.pathname.split('/')[3];
+        const docId = getDocumentId();
         if (docId) {
-          await deleteFileCrossTab(docId);
+          await CrossTabDriveAPI.deleteFile(docId);
           debugLog('Docs', 'ファイル削除完了');
         }
 
@@ -1339,32 +1345,22 @@
       }
     }
 
-    // Henryへ保存処理
-    async function handleSaveToHenry(mode = 'overwrite') {
-      debugLog('Docs', '=== handleSaveToHenry 開始 ===');
-      debugLog('Docs', '  モード:', mode);
+    // ==========================================
+    // 保存処理ヘルパー関数
+    // ==========================================
 
-      const btn = document.getElementById('drive-direct-save-btn');
+    // ボタンをローディング状態にする（restore関数を返す）
+    function setButtonLoading(btn, loadingText = '保存中...') {
       const originalText = btn.textContent;
       btn.style.pointerEvents = 'none';
       btn.style.opacity = '0.7';
+      ensureSpinnerStyle();
 
-      // スピナー用スタイル追加
-      if (!document.getElementById('drive-direct-spin-style')) {
-        const style = document.createElement('style');
-        style.id = 'drive-direct-spin-style';
-        style.textContent = `@keyframes drive-direct-spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }`;
-        document.head.appendChild(style);
-      }
-
-      // スピナー付きボタンに変更
-      while (btn.firstChild) {
-        btn.removeChild(btn.firstChild);
-      }
+      // スピナー付きに変更
+      while (btn.firstChild) btn.removeChild(btn.firstChild);
       const spinner = document.createElement('div');
       Object.assign(spinner.style, {
-        width: '14px',
-        height: '14px',
+        width: '14px', height: '14px',
         border: '2px solid rgba(255,255,255,0.3)',
         borderTop: '2px solid #ffffff',
         borderRadius: '50%',
@@ -1373,129 +1369,162 @@
       });
       btn.appendChild(spinner);
       const textSpan = document.createElement('span');
-      textSpan.textContent = '保存中...';
+      textSpan.textContent = loadingText;
       btn.appendChild(textSpan);
 
+      // restore関数を返す
+      return () => {
+        while (btn.firstChild) btn.removeChild(btn.firstChild);
+        btn.textContent = originalText;
+        btn.style.pointerEvents = 'auto';
+        btn.style.opacity = '1';
+      };
+    }
+
+    // URLからドキュメントIDを取得
+    function getDocumentId() {
+      return window.location.pathname.split('/')[3] || null;
+    }
+
+    // OAuth認証チェック（クロスタブ版）
+    async function checkOAuthReadyCrossTab() {
+      if (getGoogleAuth()?.isAuthenticated()) return true;
+      const oauthData = await requestOAuthTokens();
+      return !!(oauthData?.tokens?.refresh_token);
+    }
+
+    // 患者のフォルダ一覧を取得
+    async function fetchPatientFolders(henryToken, patientUuid) {
+      const result = await HenryAPI.call(henryToken, 'ListNonEmptyPatientFileFoldersOfPatient', {
+        input: { patientUuid, pageSize: 100, pageToken: '' }
+      });
+      return result?.listNonEmptyPatientFileFoldersOfPatient?.patientFileFolders || [];
+    }
+
+    // Henryにファイルをアップロード
+    async function uploadPatientFile(henryToken, { blob, fileName, patientUuid, folderUuid }) {
+      const uploadUrlResult = await HenryAPI.call(henryToken, 'GetFileUploadUrl', {
+        input: { pathType: 'PATIENT_FILE' }
+      });
+      const { uploadUrl, fileUrl } = uploadUrlResult.getFileUploadUrl;
+
+      await HenryAPI.uploadToGCS(uploadUrl, blob, fileName);
+
+      const createResult = await HenryAPI.call(henryToken, 'CreatePatientFile', {
+        input: {
+          patientUuid,
+          parentFileFolderUuid: folderUuid ? { value: folderUuid } : null,
+          title: fileName,
+          description: '',
+          fileUrl
+        }
+      });
+
+      return createResult?.createPatientFile?.uuid;
+    }
+
+    // ファイル削除（エラーを無視）
+    async function deleteFileQuietly(asyncFn) {
       try {
-        // OAuth認証チェック（ローカル → クロスタブの順でフォールバック）
-        let useLocalAuth = getGoogleAuth()?.isAuthenticated();
-        if (!useLocalAuth) {
-          const oauthData = await requestOAuthTokens();
-          if (!oauthData?.tokens?.refresh_token) {
-            alert('Google認証が必要です。Henryタブを開いてGoogle認証を行ってください。');
-            return;
-          }
+        await asyncFn();
+      } catch (e) {
+        debugLog('Docs', '削除スキップ:', e.message);
+      }
+    }
+
+    // ==========================================
+    // Henryへ保存処理（メイン）
+    // ==========================================
+    async function handleSaveToHenry(mode = 'overwrite') {
+      debugLog('Docs', `=== handleSaveToHenry (${mode}) ===`);
+
+      const btn = document.getElementById('drive-direct-save-btn');
+      const restoreBtn = setButtonLoading(btn, '保存中...');
+
+      try {
+        // ------------------------------------------
+        // 1. 認証・コンテキストの検証
+        // ------------------------------------------
+        if (!await checkOAuthReadyCrossTab()) {
+          alert('Google認証が必要です。Henryタブを開いてGoogle認証を行ってください。');
+          return;
         }
 
-        // ドキュメントID取得
-        const docId = window.location.pathname.split('/')[3];
+        const docId = getDocumentId();
         if (!docId) throw new Error('ドキュメントIDが取得できません');
 
-        // メタデータ取得（クロスタブ版）
-        const metadata = await getFileMetadataCrossTab(docId, 'id,name,properties');
+        const metadata = await CrossTabDriveAPI.getFileMetadata(docId, 'id,name,properties');
         const props = metadata.properties || {};
-
         if (!props.henryPatientUuid) {
           throw new Error('Henryメタデータがありません。Henryから開いたファイルですか？');
         }
 
-        // Henryトークン取得
-        debugLog('Docs', 'Henryトークン取得中...');
         const henryToken = await requestHenryToken();
         if (!henryToken) {
           throw new Error('Henryトークンを取得できません。Henryタブを開いてください。');
         }
 
-        // ファイルタイプ判定
+        // ------------------------------------------
+        // 2. ファイルのエクスポート
+        // ------------------------------------------
         const isSpreadsheet = window.location.href.includes('/spreadsheets/');
         const mimeInfo = isSpreadsheet ? MIME_TYPES.xlsx : MIME_TYPES.docx;
         const fileName = metadata.name;
 
-        // エクスポート（クロスタブ版）
-        const fileBuffer = await exportFileCrossTab(docId, mimeInfo.source);
+        const fileBuffer = await CrossTabDriveAPI.exportFile(docId, mimeInfo.source);
         const blob = new Blob([fileBuffer], { type: mimeInfo.source });
 
-        // 保存先フォルダを決定
+        // ------------------------------------------
+        // 3. 保存先フォルダの決定
+        // ------------------------------------------
         let targetFolderUuid = props.henryFolderUuid || null;
 
         if (mode === 'new') {
-          // 新規保存の場合、フォルダ選択
-          debugLog('Docs', 'フォルダ一覧取得中...');
-          const foldersResult = await HenryAPI.call(henryToken, 'ListNonEmptyPatientFileFoldersOfPatient', {
-            input: {
-              patientUuid: props.henryPatientUuid,
-              pageSize: 100,
-              pageToken: ''
-            }
-          });
-          const folders = foldersResult?.listNonEmptyPatientFileFoldersOfPatient?.patientFileFolders || [];
-
+          const folders = await fetchPatientFolders(henryToken, props.henryPatientUuid);
           const selectedFolder = await showFolderSelectModal(folders);
           if (!selectedFolder) {
             showToast('保存をキャンセルしました');
             return;
           }
           targetFolderUuid = selectedFolder.uuid;
-          debugLog('Docs', '選択されたフォルダ:', selectedFolder.name);
         }
 
-        // 上書きモードの場合、既存ファイル削除
+        // ------------------------------------------
+        // 4. Henryへのアップロード
+        // ------------------------------------------
+        // 上書きモード: 既存ファイルを削除
         if (mode === 'overwrite' && props.henryFileUuid) {
-          debugLog('Docs', '既存ファイル削除中...');
-          try {
-            await HenryAPI.call(henryToken, 'DeletePatientFile', {
-              input: { uuid: props.henryFileUuid }
-            });
-          } catch (e) {
-            debugLog('Docs', '既存ファイル削除スキップ:', e.message);
-          }
+          await deleteFileQuietly(() =>
+            HenryAPI.call(henryToken, 'DeletePatientFile', { input: { uuid: props.henryFileUuid } })
+          );
         }
 
-        // Henryにアップロード
-        const uploadUrlResult = await HenryAPI.call(henryToken, 'GetFileUploadUrl', {
-          input: { pathType: 'PATIENT_FILE' }
-        });
-        const { uploadUrl, fileUrl } = uploadUrlResult.getFileUploadUrl;
-
-        await HenryAPI.uploadToGCS(uploadUrl, blob, fileName);
-
-        const createResult = await HenryAPI.call(henryToken, 'CreatePatientFile', {
-          input: {
-            patientUuid: props.henryPatientUuid,
-            parentFileFolderUuid: targetFolderUuid ? { value: targetFolderUuid } : null,
-            title: fileName,
-            description: '',
-            fileUrl: fileUrl
-          }
+        // 新しいファイルをアップロード
+        const newFileUuid = await uploadPatientFile(henryToken, {
+          blob,
+          fileName,
+          patientUuid: props.henryPatientUuid,
+          folderUuid: targetFolderUuid
         });
 
-        const newFileUuid = createResult?.createPatientFile?.uuid;
-
-        // メタデータ更新（クロスタブ版）
+        // メタデータを更新
         if (newFileUuid) {
-          debugLog('Docs', 'メタデータ更新中...');
-          await updateFilePropertiesCrossTab(docId, {
+          await CrossTabDriveAPI.updateFileProperties(docId, {
             ...props,
             henryFileUuid: newFileUuid,
             henryFolderUuid: targetFolderUuid || ''
           });
         }
 
-        // Henryへリフレッシュ通知
+        // ------------------------------------------
+        // 5. 後処理
+        // ------------------------------------------
         notifyHenryToRefresh(props.henryPatientUuid);
-
-        // Google Driveのファイルを削除
-        try {
-          await deleteFileCrossTab(docId);
-          debugLog('Docs', 'Google Driveファイル削除完了');
-        } catch (e) {
-          debugLog('Docs', 'Google Driveファイル削除スキップ:', e.message);
-        }
+        await deleteFileQuietly(() => CrossTabDriveAPI.deleteFile(docId));
 
         const actionText = mode === 'overwrite' ? '上書き保存' : '新規保存';
         showToast(`Henryへ${actionText}しました`);
 
-        // 1秒待ってからタブを閉じる
         await new Promise(r => setTimeout(r, 1000));
         window.close();
 
@@ -1503,12 +1532,7 @@
         debugError('Docs', 'エラー:', e.message);
         showToast(`エラー: ${e.message}`, true, 5000);
       } finally {
-        while (btn.firstChild) {
-          btn.removeChild(btn.firstChild);
-        }
-        btn.textContent = originalText;
-        btn.style.pointerEvents = 'auto';
-        btn.style.opacity = '1';
+        restoreBtn();
       }
     }
 
@@ -1516,25 +1540,19 @@
     async function checkAndCreateButton() {
       if (document.getElementById('drive-direct-save-container')) return;
 
-      // OAuth認証チェック（ローカル → クロスタブの順でフォールバック）
-      let useLocalAuth = getGoogleAuth()?.isAuthenticated();
-      if (!useLocalAuth) {
-        // クロスタブ通信でOAuthトークンを取得してみる
-        const oauthData = await requestOAuthTokens();
-        if (!oauthData?.tokens?.refresh_token) {
-          debugLog('Docs', 'OAuth未認証（ローカル・クロスタブ両方）のためボタン非表示');
-          return;
-        }
-        debugLog('Docs', 'クロスタブ経由でOAuth認証確認OK');
+      // OAuth認証チェック
+      if (!await checkOAuthReadyCrossTab()) {
+        debugLog('Docs', 'OAuth未認証のためボタン非表示');
+        return;
       }
 
       // ドキュメントID取得
-      const docId = window.location.pathname.split('/')[3];
+      const docId = getDocumentId();
       if (!docId) return;
 
       try {
         // メタデータ取得（クロスタブ版のアクセストークンを使用）
-        const metadata = await getFileMetadataCrossTab(docId, 'id,name,properties');
+        const metadata = await CrossTabDriveAPI.getFileMetadata(docId, 'id,name,properties');
         const props = metadata.properties || {};
 
         // henryPatientUuidがない場合はボタンを表示しない
@@ -1550,90 +1568,49 @@
       }
     }
 
-    // クロスタブ版のファイルメタデータ取得
-    async function getFileMetadataCrossTab(fileId, fields) {
-      const accessToken = await getValidAccessTokenCrossTab();
-      return new Promise((resolve, reject) => {
-        GM_xmlhttpRequest({
+    // ==========================================
+    // クロスタブ版 Drive API（Google Docsから呼び出し用）
+    // ==========================================
+    const CrossTabDriveAPI = {
+      async getFileMetadata(fileId, fields) {
+        const accessToken = await getValidAccessTokenCrossTab();
+        return HttpClient.request({
           method: 'GET',
           url: `https://www.googleapis.com/drive/v3/files/${fileId}?fields=${encodeURIComponent(fields)}`,
-          headers: { 'Authorization': `Bearer ${accessToken}` },
-          onload: (response) => {
-            if (response.status >= 200 && response.status < 300) {
-              resolve(JSON.parse(response.responseText));
-            } else {
-              reject(new Error(`API Error: ${response.status}`));
-            }
-          },
-          onerror: (err) => reject(new Error('API通信エラー'))
+          headers: { 'Authorization': `Bearer ${accessToken}` }
         });
-      });
-    }
+      },
 
-    // クロスタブ版のファイルエクスポート
-    async function exportFileCrossTab(fileId, mimeType) {
-      const accessToken = await getValidAccessTokenCrossTab();
-      return new Promise((resolve, reject) => {
-        GM_xmlhttpRequest({
-          method: 'GET',
-          url: `https://www.googleapis.com/drive/v3/files/${fileId}/export?mimeType=${encodeURIComponent(mimeType)}`,
-          headers: { 'Authorization': `Bearer ${accessToken}` },
-          responseType: 'arraybuffer',
-          onload: (response) => {
-            if (response.status >= 200 && response.status < 300) {
-              resolve(response.response);
-            } else {
-              reject(new Error(`Export Error: ${response.status}`));
-            }
-          },
-          onerror: (err) => reject(new Error('エクスポート通信エラー'))
-        });
-      });
-    }
+      async exportFile(fileId, mimeType) {
+        const accessToken = await getValidAccessTokenCrossTab();
+        return HttpClient.downloadBinary(
+          `https://www.googleapis.com/drive/v3/files/${fileId}/export?mimeType=${encodeURIComponent(mimeType)}`,
+          { 'Authorization': `Bearer ${accessToken}` }
+        );
+      },
 
-    // クロスタブ版のファイルプロパティ更新
-    async function updateFilePropertiesCrossTab(fileId, properties) {
-      const accessToken = await getValidAccessTokenCrossTab();
-      return new Promise((resolve, reject) => {
-        GM_xmlhttpRequest({
+      async updateFileProperties(fileId, properties) {
+        const accessToken = await getValidAccessTokenCrossTab();
+        return HttpClient.request({
           method: 'PATCH',
           url: `https://www.googleapis.com/drive/v3/files/${fileId}`,
           headers: {
             'Authorization': `Bearer ${accessToken}`,
             'Content-Type': 'application/json'
           },
-          data: JSON.stringify({ properties }),
-          onload: (response) => {
-            if (response.status >= 200 && response.status < 300) {
-              resolve(JSON.parse(response.responseText));
-            } else {
-              reject(new Error(`Update Error: ${response.status}`));
-            }
-          },
-          onerror: (err) => reject(new Error('更新通信エラー'))
+          data: JSON.stringify({ properties })
         });
-      });
-    }
+      },
 
-    // クロスタブ版のファイル削除
-    async function deleteFileCrossTab(fileId) {
-      const accessToken = await getValidAccessTokenCrossTab();
-      return new Promise((resolve, reject) => {
-        GM_xmlhttpRequest({
+      async deleteFile(fileId) {
+        const accessToken = await getValidAccessTokenCrossTab();
+        return HttpClient.request({
           method: 'DELETE',
           url: `https://www.googleapis.com/drive/v3/files/${fileId}`,
-          headers: { 'Authorization': `Bearer ${accessToken}` },
-          onload: (response) => {
-            if (response.status >= 200 && response.status < 300) {
-              resolve(true);
-            } else {
-              reject(new Error(`Delete Error: ${response.status}`));
-            }
-          },
-          onerror: (err) => reject(new Error('削除通信エラー'))
+          headers: { 'Authorization': `Bearer ${accessToken}` }
         });
-      });
-    }
+      }
+    };
 
     // 初期化
     checkAndCreateButton();
