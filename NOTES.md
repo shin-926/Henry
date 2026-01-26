@@ -98,34 +98,112 @@ if (!googleAuth?.isAuthenticated()) {
 
 ---
 
-## クロスタブOAuth通信（Google Docs連携）
+## Google Docs 文書作成ルール
+
+Google Docsで文書を作成するスクリプト（意見書、紹介状など）を実装する際の共通ルール。
+
+### 出力先フォルダ
+
+`Henry一時ファイル` フォルダに保存する。フォルダが存在しない場合は自動作成。
+
+```javascript
+const TEMPLATE_CONFIG = {
+  TEMPLATE_ID: 'xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx',
+  OUTPUT_FOLDER_NAME: 'Henry一時ファイル'
+};
+```
+
+### メタデータ（properties）
+
+ファイルコピー時に以下のカスタムプロパティを付与する。
+
+```javascript
+const properties = {
+  henryPatientUuid: formData.patient_uuid || '',  // 患者UUID
+  henryFileUuid: '',                               // 新規作成なので空
+  henryFolderUuid: folder.id,                      // 保存先フォルダID
+  henrySource: 'script-name'                       // スクリプト識別子
+};
+const newDoc = await DriveAPI.copyFile(TEMPLATE_CONFIG.TEMPLATE_ID, fileName, folder.id, properties);
+```
+
+**henrySource の例:**
+- `ikensho-form` - 主治医意見書
+- `referral-form` - 診療情報提供書
+- `police-certificate` - 警察診断書
+
+---
+
+## Henry Loader（動的スクリプトローダー）
+
+GitHubから各スクリプトを動的に読み込む仕組み。
+
+### ファイル構成
+
+| ファイル | 用途 | 対象ドメイン |
+|---------|------|-------------|
+| henry_loader.user.js | 本番用 | Henry, 予約, Google Docs |
+| henry_loader_dev.user.js | 開発用 | Henry, 予約, Google Docs |
+| manifest.json | スクリプト定義 | - |
+
+### 本番用と開発用の違い
+
+| | henry_loader.user.js | henry_loader_dev.user.js |
+|---|---|---|
+| @require | GitHub main | GitHub develop |
+| 動的読み込み | GitHub main | localhost:8080 |
+| デバッグログ | OFF | ON |
+
+### 動作の仕組み
+
+**共通の特徴:**
+- 1ファイルで Henry/予約/Google Docs すべてに対応（`@match`で3ドメイン指定）
+- `@require`で henry_core と henry_google_drive_bridge を事前読み込み（Google Docs用、CSP対策）
+- **1つのTampermonkeyスクリプトなのでGM_*ストレージを全ドメインで共有**
+
+**動作フロー（Henry/予約 - 開発用）:**
+```
+ページ読み込み → Loader起動 → localhost:8080からmanifest.json取得 → スクリプトをorder順に読み込み
+```
+
+**動作フロー（Google Docs）:**
+```
+ページ読み込み → Loader起動 → @requireで事前読み込み済みのhenry_core/henry_google_drive_bridgeが実行 → 即return
+```
+
+### クロスタブOAuth通信（Google Docs連携）
 
 Google DocsでOAuthトークンを取得するための仕組み。Henry側で認証済みのトークンをGoogle Docs側に共有する。
 
-### 背景
-
+**背景:**
 - Google DocsはCSPが厳しく、Tampermonkeyの`@require`でスクリプトを読み込む必要がある
-- Tampermonkeyの`GM_setValue/GM_getValue`はスクリプトごとに分離されている
-- 別々のローダー（henry_loader_dev / henry_loader_docs）を使うとストレージが共有されない
+- 1つのローダーで全ドメインをカバーすることで、GM_*ストレージを共有できる
 
-### 解決策: 統合ローダー
-
-`henry_loader_unified.user.js`を使用することで、Henry側とGoogle Docs側で同じGM_*ストレージを共有する。
-
-**動作フロー:**
+**通信フロー:**
 1. Google Docs側が`GM_setValue('drive_direct_oauth_request', { requestId })`でトークンをリクエスト
 2. Henry側（henry_core.user.js）が`GM_addValueChangeListener`でリクエストを検知
 3. Henry側が`GM_setValue('drive_direct_oauth_response', { requestId, tokens, credentials })`で応答
 4. Google Docs側がレスポンスを受け取り、OAuthトークンを使用
 
-**統合ローダーの特徴:**
-- Google Docs: `@require`でGitHub developブランチから読み込み
-- Henry: ローカルサーバー（localhost:8080）から動的に読み込み
-- 両方とも同じTampermonkeyスクリプトなのでGM_*ストレージを共有
+### Google Docs開発時の注意
 
-**注意点:**
-- Google Docs側のコード変更はGitHubにプッシュ後、Tampermonkeyでスクリプトを再保存して@requireを再取得する必要がある
-- 開発中にGoogle Docs側を頻繁に変更する場合は不便だが、クロスタブ通信には必須
+- henry_core / henry_google_drive_bridge を修正した場合、Google Docs側に反映するには GitHub へ push が必要
+- Henry側はローカルサーバーから即時反映される
+- Google Docs側のコード変更はGitHubにプッシュ後、Tampermonkeyでスクリプトを再保存して@requireを再取得
+
+### スクリプト設定機能
+
+- Toolboxの「スクリプト設定」からスクリプトのON/OFFを切り替え可能
+- 設定は`GM_setValue('loader-disabled-scripts', [...])` に保存
+- 変更は次回ページ読み込み時に反映
+- `henry_core`と`henry_toolbox`は必須のため無効化不可
+
+### ベータ版スクリプト
+
+- manifest.jsonの`label`に「ベータ版」を含むスクリプトは設定パネル下部に表示
+- 配布用ローダー（henry_loader.user.js）では`DEFAULT_DISABLED`でデフォルト無効
+- 開発用ローダー（henry_loader_dev.user.js）ではすべて有効
+- 新規ベータ版追加時: manifest.jsonのlabelに「（ベータ版）」追加 + 配布用ローダーのDEFAULT_DISABLEDに追加
 
 ---
 
@@ -193,6 +271,91 @@ await HenryCore.query(MUTATION);  // 変数なし
 ### 適用実績
 
 - `henry_disease_register.user.js` v1.2.1 - 病名登録mutation
+
+---
+
+## GraphQL フルクエリ API 注意点
+
+Persisted Query（ハッシュ方式）ではなくフルクエリ方式を使う場合の注意点。
+
+### EncountersInPatient (graphql-v2)
+
+外来診察記録を取得するAPI。
+
+```javascript
+const ENCOUNTERS_IN_PATIENT_QUERY = `
+  query EncountersInPatient($patientId: ID!, $startDate: IsoDate, $endDate: IsoDate, $pageSize: Int!, $pageToken: String) {
+    encountersInPatient(patientId: $patientId, startDate: $startDate, endDate: $endDate, pageSize: $pageSize, pageToken: $pageToken) {
+      encounters {
+        id
+        records(includeDraft: false) {  // ← 必須引数
+          id
+          __typename
+          ... on ProgressNote {
+            editorData
+            updateTime
+          }
+        }
+      }
+      nextPageToken
+    }
+  }
+`;
+
+// HenryCore.query で呼び出す（endpoint指定必須）
+const result = await HenryCore.query(ENCOUNTERS_IN_PATIENT_QUERY, {
+  patientId: patientUuid,
+  startDate: null,
+  endDate: null,
+  pageSize: 50,
+  pageToken: pageToken
+}, { endpoint: '/graphql-v2' });  // ← 先頭スラッシュ必須
+```
+
+**注意点:**
+- 日付型は `IsoDate`（`String` ではない）
+- `records(includeDraft: false)` が**必須引数**（引数なしだとエラー）
+- `endpoint: '/graphql-v2'` の先頭スラッシュ必須（HenryCoreがBASE_URLと結合するため）
+
+### ListClinicalDocuments (graphql)
+
+入院記録などの臨床文書を取得するAPI。
+
+```javascript
+const LIST_CLINICAL_DOCUMENTS_QUERY = `
+  query ListClinicalDocuments($input: ListClinicalDocumentsRequestInput!) {
+    listClinicalDocuments(input: $input) {
+      documents {
+        uuid
+        editorData
+        performTime { seconds }
+        creator { name }
+        type { __typename }
+      }
+      nextPageToken
+    }
+  }
+`;
+
+// HenryCore.query で呼び出す（endpoint省略可 = /graphql）
+const result = await HenryCore.query(LIST_CLINICAL_DOCUMENTS_QUERY, {
+  input: {
+    patientUuid,
+    pageToken: "",          // ← 空文字必須（nullは不可）
+    pageSize: 100,
+    clinicalDocumentTypes: [{ type: 'HOSPITALIZATION_CONSULTATION' }]
+  }
+});
+```
+
+**注意点:**
+- 入力型は `ListClinicalDocumentsRequestInput!`
+- フィールド名は `clinicalDocumentTypes`（`types` ではない）
+- `pageToken` は**空文字 `""`**（`null` だとエラー、`String!` 型のため）
+
+### 適用実績
+
+- `henry_hospitalization_search.user.js` v1.6.0 - カルテ記録検索
 
 ---
 

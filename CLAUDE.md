@@ -1,6 +1,6 @@
-# Henry EMR 開発ガイドライン (Core Rules v4.30)
+# Henry EMR 開発ガイドライン (Core Rules v4.39)
 
-<!-- 📝 UPDATED: v4.30 - ローダー構成を実際のファイルに基づき修正 -->
+<!-- 📝 UPDATED: v4.39 - スクリプト読み込み方式の説明追加 -->
 
 > このドキュメントはAIアシスタントとの協働開発における必須ルール集です。HenryCore APIの詳細は `henry_core.user.js` 冒頭のAPI目次と実装を参照。
 
@@ -354,6 +354,20 @@ GitHubから各スクリプトを動的に読み込む仕組み。詳細は `NOT
 - GM_*ストレージを全ドメインで共有（クロスタブOAuth通信が可能）
 - Google Docs側のコード変更は GitHub push 後に反映
 
+#### スクリプト読み込み方式
+
+| スクリプト | 読み込み方式 | 変更反映方法 |
+|-----------|-------------|-------------|
+| henry_core.user.js | `@require`（静的） | **GitHubプッシュ必須** |
+| henry_google_drive_bridge.user.js | `@require`（静的） | **GitHubプッシュ必須** |
+| その他のスクリプト | `eval()`（動的） | ローカル編集後リロード |
+
+**henry_coreが`@require`である理由**:
+1. **実行順序の保証**: `@run-at document-start`で他のスクリプトより先に実行される必要がある
+2. **Google DocsのCSP対策**: Content Security Policyにより`eval()`が使えないため、事前読み込みが必須
+
+**YOU MUST**: `henry_core.user.js` または `henry_google_drive_bridge.user.js` を変更した場合は、GitHubにプッシュしないと反映されない（ローカル編集だけでは不可）
+
 ### スクリプト一覧
 
 | カテゴリ | ファイル名 | 説明 |
@@ -406,6 +420,17 @@ GitHubから各スクリプトを動的に読み込む仕組み。詳細は `NOT
 
 - **YOU MUST**: OAuth認証が必要な場合は、`alert()` で理由を伝えてから設定ダイアログや認証画面を開くこと
   - 詳細は `NOTES.md` の「OAuth認証フロー」を参照
+
+- **IMPORTANT**: 技術的な情報について不確かな場合や、正確な仕様を知る必要がある場合は、公式ドキュメントを検索・取得すること：
+  - WebSearch / WebFetch ツールを使って公式ドキュメント、GitHubリポジトリ等から情報を取得する
+  - 信頼できるソース（公式ドキュメント、公式ブログ、GitHub）を優先する
+  - 推測で回答せず、確認してから回答する
+
+- **IMPORTANT**: 「正解」が存在しない主観的な判断が必要な場合は、Gemini MCPに相談すること：
+  - コードの品質評価、設計の良し悪し、リファクタリングの方針など
+  - 複数のアプローチがあり、どれが適切か意見が欲しいとき
+  - 実装のレビューやフィードバックが欲しいとき
+  - セッションJSONLを渡すことで、文脈を理解した上でのアドバイスが得られる
 
 - **YOU MUST**: Gemini MCP（`ask-gemini`）を使用する際は、常に `model: "gemini-3-pro-preview"` を指定すること。
 
@@ -469,9 +494,24 @@ GitHubから各スクリプトを動的に読み込む仕組み。詳細は `NOT
   - DevToolsのネットワークタブで「Request URL」を見ればすぐ分かる
   - **推測でエンドポイントを決めない。確認してから実装する**
 
-- **YOU MUST**: ベータ版スクリプト（ラベルに「ベータ版」を含むもの）は配信しないこと：
-  - manifest.jsonで `enabled: false` に設定する
-  - ベータ版は開発者のローカル環境でのみ使用する
+- **YOU MUST**: ベータ版スクリプト（ラベルに「ベータ版」を含むもの）は本番環境では配信しないこと：
+  - manifest.jsonで `beta: true` に設定する（`enabled: false` ではない）
+  - 開発版ローダーではロードされ、本番ローダーではスキップされる
+
+- **IMPORTANT**: 複雑なタスク（新機能追加、大規模修正、原因不明のバグ調査）は **Plan Mode** で開始すること：
+  - 起動方法: `Shift+Tab`×2 または `claude --permission-mode plan`
+  - Plan Modeでは編集ツールが使えないため、調査と計画に集中できる
+  - 計画をユーザーに承認されてからNormal Modeに切り替えて実装する
+  - **理由**: CLAUDE.mdのルールは無視されることがあるが、Plan Modeは物理的に編集を禁止するため確実
+
+- **YOU MUST**: 「動作確認して」「テストして」等の曖昧な指示を受けた場合は、具体的に何を確認すべきか質問すること：
+  - 正常系: どの操作が成功すればOKか
+  - 異常系: どのエラーケースを確認すべきか
+  - 境界値: 空データ、大量データ等の確認が必要か
+
+- **YOU MUST**: Google Docsで文書を作成するスクリプトは、出力先フォルダとメタデータのルールに従うこと：
+  - 詳細は `NOTES.md` の「Google Docs 文書作成ルール」を参照
+  - 新規スクリプト作成時は、実装前にユーザーに確認すること
 
 ---
 
@@ -479,6 +519,13 @@ GitHubから各スクリプトを動的に読み込む仕組み。詳細は `NOT
 
 | Version | Date | Changes |
 |---------|------|---------|
+| v4.39 | 2026-01-26 | スクリプト読み込み方式（@require vs eval）の説明追加 |
+| v4.38 | 2026-01-26 | Google Docs文書作成ルール追加（詳細はNOTES.md） |
+| v4.36 | 2026-01-26 | GitHub Issues記載ガイドライン追加 |
+| v4.35 | 2026-01-25 | 曖昧なテスト指示には確認項目を質問するルール追加 |
+| v4.34 | 2026-01-25 | 複雑なタスクはPlan Modeで開始するルール追加 |
+| v4.33 | 2026-01-25 | タスク管理をGitHub Issuesに一元化（保留タスクセクション削除） |
+| v4.32 | 2026-01-25 | 情報取得ルール追加（公式ドキュメント参照、Gemini相談） |
 | v4.31 | 2026-01-25 | ベータ版スクリプト配信禁止ルール追加 |
 | v4.30 | 2026-01-25 | ローダー構成を実際のファイル（henry_loader/henry_loader_dev）に基づき修正 |
 | v4.29 | 2026-01-24 | Google Docs用ローダー追加（2ローダー構成、CSP対策） |
@@ -511,82 +558,71 @@ GitHubから各スクリプトを動的に読み込む仕組み。詳細は `NOT
 
 ---
 
-## 🔔 保留中のタスク (Pending Tasks)
+## 🔔 タスク管理 (Task Management)
 
-> **AI向け指示**: セッション開始時に確認し、未完了タスクをリマインドすること。タスク完了時はこのセクションを更新すること。
->
-> **タスクID運用ルール**:
-> - 新規タスク追加時は `TASK-XXX` 形式のIDを振る（連番）
-> - タスク末尾に発生日を記載する（例: `[2026-01-15]`）
-> - 詳細が必要なタスクは `NOTES.md` に同じIDで見出しを作成
-> - これにより両ファイル間で `TASK-XXX` で検索して対応を取れる
+タスクは **GitHub Issues** で一元管理しています。
 
-### 調査・開発タスク
-- [ ] TASK-001: ORDER_STATUS_REVOKED の承認API特定
-- [x] TASK-002: 独自オーダーセット選択UI → 終了 [2026-01-25]
-- [ ] TASK-003: 病名サジェスト機能
-- [ ] TASK-011: henry_karte_history 処方表示改善（mhlwMedicine対応、medicationTiming用法取得、検体検査フィールド調査）
-- [x] TASK-013: Tampermonkey更新問題 → Henry Loaderで解決（毎回GitHubから最新取得）[2026-01-21]
-- [x] TASK-015: SPA遷移対応調査完了 - 以下のスクリプトはsubscribeNavigation不要と判断 [2026-01-21]
-  - henry_reserve_integration: 全ページで動作（fetchインターセプト、プラグイン登録）
-  - henry_ikensho_form: プラグイン登録のみ
-  - henry_memo: グローバルイベント、UIは呼び出し時表示
-  - henry_toolbox: MutationObserverで継続監視（debounce付き、ボタン消失時に再挿入）
-- [x] TASK-016: Henry本体の画面更新が行われない問題 → 終了 [2026-01-25]
-- [x] TASK-017: 主治医意見書スクリプトのOAuthスコープ削減 → 対応不要と判断（組織内限定、リスク低） [2026-01-22]
-- [ ] TASK-018: 主治医意見書の下書きインポート/エクスポート機能（PC間でデータ移行可能に）
-- [x] TASK-020: ログインモーダル表示時にスクリプトUIが上に出る問題 → z-index階層ルール導入で解決 [2026-01-23]
-- [x] TASK-028: Miele-LXIV（DICOMビューア）GitHub版ビルド → 一旦終了 [2026-01-25]
-- [ ] TASK-029: henry_set_search_helper 巨大関数リファクタリング [2026-01-22]
-  - createButtonContainer（400行以上）を責務分割
-  - DragDropHandler: ドラッグ＆ドロップ関連ロジック
-  - EditPopup: 編集ポップアップの生成と管理
-  - ButtonRenderer: ボタン/ドロップダウンのDOM生成
-- [ ] TASK-030: henry_google_drive_bridge リファクタリング [2026-01-22]
-  - handleDoubleClick, handleSaveToHenry の関数分割
-  - UI表示ロジック（showToast等）のHenryCore統合検討
-  - GM_xmlhttpRequestラッパーの拡張
-- [ ] TASK-031: henry_ikensho_form: localStorageのPII保存をGoogle DriveのappPropertiesへ移行 [2026-01-22]
-- [x] TASK-032: henry_disease_register: 登録済み病名の編集機能 → 完了 [2026-01-25]
-- [ ] TASK-033: henry_hospitalization_data: パーシステッドクエリをフルクエリ方式に修正 [2026-01-23]
-  - LIST_CLINICAL_DOCUMENTS: 変数方式OK（ListClinicalDocumentsRequestInput!は公開）
-  - LIST_REHABILITATION_DOCUMENTS: インライン方式必要（入力型非公開）
-  - LIST_ORDERS: インライン方式必要（入力型非公開）+ エンドポイント要調査（/graphqlでField undefined）
-  - ClinicalCalendarView: インライン方式必要 + 要調査（エラー発生）
-  - 現状Persisted Query方式で動作中のため一旦保留
-- [ ] TASK-034: henry_toolbox: MutationObserverの監視範囲最適化検討 [2026-01-23]
-  - 現状: document.bodyをsubtree:trueで監視（debounceで軽減）
-  - 改善案: navの親要素など、より限定的なコンテナを監視対象にする
-  - 注意: Henry本体のDOM構造の安定性に依存するため、堅牢性とのトレードオフ
-- [x] TASK-035: henry_google_drive_bridge: テンプレート開き方変更対応 → Fetchインターセプト方式でv2.4.0完了 [2026-01-24]
-  - Henry本体が文書テンプレートの開き方を変更（フォルダ経由→直接ダウンロード）
-  - 方式検討から必要（詳細はNOTES.md参照）
-- [ ] TASK-036: 新規スクリプト: リハビリオーダー簡略化 [2026-01-23]
-  - カルテのリハビリオーダー入力が煩雑なため、シンプルにするスクリプトを開発
-  - 要件・仕様は未定（着手時に詳細ヒアリング）
-- [ ] TASK-037: henry_referral_form: 近隣病院のドロップダウン選択機能 [2026-01-25]
-  - 紹介先病院と診療科をドロップダウンで選択可能にする
-  - 近隣病院リストの管理方法は未定
-- [x] TASK-027: henry_disease_register Loader経由で初期化エラー → Loaderに@require対応追加で解決 [2026-01-22]
-- [x] TASK-021: MutationObserver最適化 完了 [2026-01-21]
-  - ✅ henry_imaging_order_helper: OK（2段階監視 + cleaner）
-  - ✅ henry_reserve_integration: OK（debounce + cleaner）
-  - ✅ henry_set_search_helper: 修正済 v2.3.3（2段階監視パターン）
-  - ✅ henry_toolbox: 修正済 v5.1.9（継続監視 + debounce、SPA遷移対応）
-  - ✅ henry_google_drive_bridge: 修正済 v2.2.8（banner監視 + debounce）
-  - ✅ henry_login_helper: OK（SPA遷移時fullCleanupでdisconnect）
-  - ✅ henry_reception_filter: OK（main監視 + cleaner）
-  - ✅ reserve_calendar_ui: OK（非SPA、subtree:false）
-- [x] TASK-022: henry_imaging_order_helper リファクタリング完了 v1.26.0 [2026-01-21]
-- [x] TASK-024: google-docs-mcp OAuth設定（完了）[2026-01-20]
-- [x] TASK-026: Gemini MCP連携手順（CLAUDE.mdカスタムルールに記載済み）[2026-01-20]
+**確認方法**:
+- GitHub: https://github.com/shin-926/Henry/issues
+- GitHub MCP: `mcp__github__list_issues` で取得可能
 
-### 完了
-- [x] TASK-023: 予約システム連携のオーバーレイ閉じ時に一瞬見える問題（対応終了）[2026-01-20]
-- [x] TASK-025: デバッグ用ChromeにTampermonkey＋Henryスクリプト設定（完了）[2026-01-20]
-- [x] TASK-019: 照射オーダー予約後のHenry側処理（refetchQueries追加で完了）
-- [x] TASK-014: 画面更新妨害リスク修正（キャプチャフェーズ削除完了）
-- [x] TASK-009: HenryCore v2.10.4 エンドポイント自動復旧機能
-- [x] TASK-007: henry_disease_register.user.js v1.2.1
-- [x] TASK-010: henry_disease_list.user.js v1.0.2
-- [x] TASK-012: henry_disease_register.user.js v2.2.4 検索精度改善（N-gram検索追加）
+> **AI向け指示**: セッション開始時に `list_issues` でオープンなIssueを確認すること。タスク完了時は `fixes #XX` をコミットメッセージに含めてIssueを自動クローズすること。
+
+### Issue記載ガイドライン
+
+#### 必須項目
+
+| 項目 | 内容 |
+|------|------|
+| タイトル | 何をするか一目で分かる簡潔な文（例: 「ツールボックスのドラッグ位置が保存されない」） |
+| 概要 | 問題の背景、目的、期待する動作 |
+| 再現手順 | バグの場合、再現ステップを番号付きで |
+| 関連ファイル | 影響を受けるファイルパス、関数名 |
+
+#### 調査メモの記録
+
+**IMPORTANT**: 試したこと・ダメだったことを記録する。同じ失敗を繰り返さないため。
+
+```markdown
+## 調査メモ
+
+### 試したこと
+
+**1. ○○を試す** ❌
+- やったこと: ...
+- 結果: 変わらず。○○が原因ではなかった
+
+**2. △△を確認** ✅
+- やったこと: console.logで確認
+- 結果: ここが原因だった
+
+### 結論
+○○を修正する必要あり
+```
+
+#### テンプレート
+
+```markdown
+## 概要
+[問題の説明 / 追加したい機能]
+
+## 再現手順（バグの場合）
+1. ○○画面を開く
+2. △△をクリック
+3. エラーが発生
+
+## 期待する動作
+[正しい動作の説明]
+
+## 技術メモ
+- 関連ファイル: `henry_xxx.user.js:123`
+- 関連API: `getPatientUuid()`
+
+## 調査メモ
+[試したこと、分かったことを随時追記]
+
+## チェックリスト
+- [ ] 原因調査
+- [ ] 修正実装
+- [ ] 動作確認
+```

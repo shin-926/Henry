@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry Hospitalization Data Viewer
 // @namespace    https://github.com/shin-926/Henry
-// @version      0.16.0
+// @version      0.17.0
 // @description  入院患者の日々データを取得・表示（バイタル・処方・注射・検査・栄養・ADL・看護日誌対応）
 // @author       sk powered by Claude & Gemini
 // @match        https://henry-app.jp/*
@@ -331,14 +331,15 @@
 
   // カレンダービューデータを取得（GetClinicalCalendarView API）
   // 過去1週間分の全データを一括取得
-  // Note: prescriptionOrder, injectionOrderはこのAPIでは取得できない（別APIで取得が必要）
   const CALENDAR_RESOURCES = [
     '//henry-app.jp/clinicalResource/vitalSign',
     '//henry-app.jp/clinicalResource/nutritionOrder',
     '//henry-app.jp/clinicalResource/hospitalizationClinicalDocument',
     '//henry-app.jp/clinicalResource/biopsyInspectionOrder',
     '//henry-app.jp/clinicalResource/inspectionReport',
-    '//henry-app.jp/clinicalResource/patientBodyMeasurement'
+    '//henry-app.jp/clinicalResource/patientBodyMeasurement',
+    '//henry-app.jp/clinicalResource/prescriptionOrder',
+    '//henry-app.jp/clinicalResource/injectionOrder'
   ];
 
   async function fetchCalendarData(patientUuid) {
@@ -372,7 +373,7 @@
       // バイタルサイン
       const vitalSigns = (data?.vitalSigns || []).map(vs => ({
         uuid: vs.uuid,
-        recordTime: vs.recordTime ? new Date(vs.recordTime) : null,
+        recordTime: vs.recordTime?.seconds ? new Date(vs.recordTime.seconds * 1000) : null,
         temperature: vs.temperature?.value ? vs.temperature.value / 10 : null,
         bloodPressureUpper: vs.bloodPressureUpperBound?.value ? vs.bloodPressureUpperBound.value / 10 : null,
         bloodPressureLower: vs.bloodPressureLowerBound?.value ? vs.bloodPressureLowerBound.value / 10 : null,
@@ -385,8 +386,8 @@
 
       // 処方オーダー
       const prescriptionOrders = (data?.prescriptionOrders || []).map(rx => ({
-        uuid: rx.id,
-        orderTime: rx.createTime ? new Date(rx.createTime) : null,
+        uuid: rx.uuid,
+        orderTime: rx.createTime?.seconds ? new Date(rx.createTime.seconds * 1000) : null,
         status: formatOrderStatus(rx.orderStatus),
         doctor: rx.doctor?.name || '不明',
         rps: rx.rps || []
@@ -394,8 +395,8 @@
 
       // 注射オーダー
       const injectionOrders = (data?.injectionOrders || []).map(inj => ({
-        uuid: inj.id,
-        orderTime: inj.createTime ? new Date(inj.createTime) : null,
+        uuid: inj.uuid,
+        orderTime: inj.createTime?.seconds ? new Date(inj.createTime.seconds * 1000) : null,
         status: formatOrderStatus(inj.orderStatus),
         doctor: inj.doctor?.name || '不明',
         details: inj
@@ -404,7 +405,7 @@
       // 検査レポート
       const inspectionReports = (data?.inspectionReports || []).map(rep => ({
         uuid: rep.uuid,
-        reportTime: rep.reportTime ? new Date(rep.reportTime) : null,
+        reportTime: rep.reportTime?.seconds ? new Date(rep.reportTime.seconds * 1000) : null,
         title: rep.title || '検査レポート',
         content: rep.editorData ? parseEditorData(rep.editorData) : '',
         author: rep.createUser?.name || '不明'
@@ -412,8 +413,8 @@
 
       // 栄養オーダー
       const nutritionOrders = (data?.nutritionOrders || []).map(nut => ({
-        uuid: nut.id,
-        orderTime: nut.createTime ? new Date(nut.createTime) : null,
+        uuid: nut.uuid,
+        orderTime: nut.createTime?.seconds ? new Date(nut.createTime.seconds * 1000) : null,
         status: formatOrderStatus(nut.orderStatus),
         mealType: nut.mealType || '-',
         doctor: nut.doctor?.name || '不明',
@@ -423,7 +424,7 @@
       // ADL評価
       const adlAssessments = (data?.adlAssessments || []).map(adl => ({
         uuid: adl.uuid,
-        assessmentTime: adl.assessmentTime ? new Date(adl.assessmentTime) : null,
+        assessmentTime: adl.assessmentTime?.seconds ? new Date(adl.assessmentTime.seconds * 1000) : null,
         score: adl.totalScore?.value || adl.score || '-',
         author: adl.createUser?.name || '不明',
         details: adl
@@ -432,7 +433,7 @@
       // 看護日誌
       const nursingJournals = (data?.nursingJournals || []).map(nj => ({
         uuid: nj.uuid,
-        recordTime: nj.recordTime ? new Date(nj.recordTime) : null,
+        recordTime: nj.recordTime?.seconds ? new Date(nj.recordTime.seconds * 1000) : null,
         text: nj.editorData ? parseEditorData(nj.editorData) : '',
         author: nj.createUser?.name || '不明'
       })).filter(nj => nj.text);

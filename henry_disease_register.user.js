@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry Disease Register
 // @namespace    https://henry-app.jp/
-// @version      3.19.0
+// @version      3.23.1
 // @description  高速病名検索・登録
 // @author       sk powered by Claude & Gemini
 // @match        https://henry-app.jp/*
@@ -34,6 +34,15 @@
  *
  * ■ 依存ファイル
  * - henry_disease_data.js: 病名マスタデータ（@require で読み込み）
+ *
+ * ■ 変更履歴
+ * v3.22.0 (2026-01-26) - キーボード操作での候補選択機能を追加
+ *   - ↑↓キーで候補間を移動、Enterで選択確定
+ *   - 病名検索・修飾語検索の両方に対応
+ * v3.20.0 (2026-01-25) - 前回受診日の取得方法を修正
+ *   - 問題: カルテ公開日時（firstPublishTime）を使用していたため、
+ *     カルテ未公開の診療録が無視され、正しい前回受診日が取得できなかった
+ *   - 修正: 予約日時（scheduleTime）を使用するように変更
  */
 
 (function() {
@@ -68,15 +77,15 @@
   // ============================================
   // 前回受診日取得（EncountersInPatient使用）
   // NOTE: startDate/endDateはDate型で変数として渡せないため、インラインでnullを埋め込む
-  // NOTE: ログイン医師が診察した日のみを対象とする
+  // NOTE: scheduleTime（予約日時）を使用（firstPublishTimeはカルテ公開日時でnullの場合あり）
   // ============================================
   const ENCOUNTERS_QUERY = `
     query EncountersInPatient($patientId: ID!, $pageSize: Int!, $pageToken: String) {
       encountersInPatient(patientId: $patientId, startDate: null, endDate: null, pageSize: $pageSize, pageToken: $pageToken) {
         encounters {
-          firstPublishTime
           basedOn {
             ... on Session {
+              scheduleTime
               doctorId
               doctor {
                 name
@@ -115,6 +124,7 @@
   async function fetchLastVisitDates(patientUuid) {
     try {
       const myUuid = await HenryCore.getMyUuid();
+      console.log(`[${SCRIPT_NAME}] DEBUG: myUuid = ${myUuid}`);
 
       const result = await HenryCore.query(ENCOUNTERS_QUERY, {
         patientId: patientUuid,
@@ -139,13 +149,16 @@
 
       // encountersは新しい順で返される
       for (const enc of encounters) {
-        if (!enc.firstPublishTime) continue;
-        const visitDate = new Date(enc.firstPublishTime);
+        // セッション（外来予約）からscheduleTimeを取得
+        const session = enc.basedOn?.find(s => s.scheduleTime);
+        if (!session?.scheduleTime) continue;
+
+        const visitDate = new Date(session.scheduleTime);
         const visitDateOnly = new Date(visitDate);
         visitDateOnly.setHours(0, 0, 0, 0);
 
-        // 今日は除く
-        if (visitDateOnly.getTime() === today.getTime()) continue;
+        // 今日以降は除く（今日と未来の予約を除外）
+        if (visitDateOnly.getTime() >= today.getTime()) continue;
 
         const dateObj = {
           year: visitDate.getFullYear(),
@@ -175,6 +188,8 @@
 
         // ログイン医師の最後の受診日（まだ見つかっていなければ）
         if (!myLastVisit && myUuid) {
+          const doctorIds = enc.basedOn?.map(s => s.doctorId).filter(Boolean) || [];
+          console.log(`[${SCRIPT_NAME}] DEBUG: doctorIds in basedOn = ${JSON.stringify(doctorIds)}`);
           const isMyEncounter = enc.basedOn?.some(s => s.doctorId === myUuid);
           if (isMyEncounter) {
             myLastVisit = dateObj;
@@ -1081,6 +1096,14 @@
       background: #fff8e1;
       border-left: 3px solid #ffc107;
     }
+    .dr-rehab-badge {
+      font-size: 10px;
+      padding: 1px 6px;
+      background: #ffc107;
+      color: #333;
+      border-radius: 3px;
+      font-weight: bold;
+    }
     .dr-rehab-item {
       padding: 8px 10px;
       font-size: 12px;
@@ -1186,6 +1209,12 @@
     }
     .dr-list-item.selected {
       background: #e3f2fd;
+    }
+    .dr-list-item.keyboard-selected,
+    .dr-candidate-item.keyboard-selected {
+      background: #bbdefb;
+      outline: 2px solid #2196f3;
+      outline-offset: -2px;
     }
     .dr-selected-disease {
       padding: 10px 12px;
@@ -1641,6 +1670,9 @@
       this.selectedDisease = null;
       this.selectedModifiers = [];
       this.selectedCandidateIndex = null;
+      this.diseaseSelectedIndex = -1;  // キーボード選択用インデックス（病名）
+      this.modifierSelectedIndex = -1; // キーボード選択用インデックス（修飾語）
+      this.candidateSelectedIndex = -1; // キーボード選択用インデックス（かんたん検索）
       this.overlay = null;
       this.registeredDiseaseNames = new Set(); // 登録済み病名（重複チェック用）
       this.registeredDiseases = []; // 登録済み病名データ（編集用）
@@ -1725,19 +1757,13 @@
         if (this.lastVisitData.myLastVisit) {
           const d = this.lastVisitData.myLastVisit;
           const dateStr = `${d.year}/${d.month}/${d.day}`;
-          // 全体と同じ日付なら表示しない
-          if (!this.lastVisitData.lastVisit ||
-              d.year !== this.lastVisitData.lastVisit.year ||
-              d.month !== this.lastVisitData.lastVisit.month ||
-              d.day !== this.lastVisitData.lastVisit.day) {
-            const karteText = this.lastVisitData.myLastKarteText;
-            items.push({
-              value: 'myLast',
-              label: `${doctorLabel}前回受診日（${dateStr}）`,
-              tooltip: karteText ? `【${dateStr}のカルテ】\n${karteText}` : `${dateStr}（カルテ内容なし）`,
-              disabled: false
-            });
-          }
+          const karteText = this.lastVisitData.myLastKarteText;
+          items.push({
+            value: 'myLast',
+            label: `${doctorLabel}前回受診日（${dateStr}）`,
+            tooltip: karteText ? `【${dateStr}のカルテ】\n${karteText}` : `${dateStr}（カルテ内容なし）`,
+            disabled: false
+          });
         } else {
           // ログイン医師の受診歴なし
           items.push({
@@ -1898,8 +1924,20 @@
         const nameEl = item.querySelector('.dr-registered-name');
         if (!nameEl) return;
         const name = nameEl.textContent;
+        // 既存のリハビリバッジを削除
+        const existingBadge = item.querySelector('.dr-rehab-badge');
+        if (existingBadge) existingBadge.remove();
+
         if (this.latestRehabDiseaseNames.has(name)) {
           item.classList.add('dr-rehab-match');
+          // リハビリ病名バッジを追加
+          const metaEl = item.querySelector('.dr-registered-meta');
+          if (metaEl) {
+            const badge = document.createElement('span');
+            badge.className = 'dr-rehab-badge';
+            badge.textContent = 'リハビリ病名';
+            metaEl.appendChild(badge);
+          }
         } else {
           item.classList.remove('dr-rehab-match');
         }
@@ -2039,7 +2077,7 @@
                 <!-- 自然言語入力 -->
                 <div class="dr-tab-content active" id="dr-tab-natural">
                   <div class="dr-section">
-                    <input type="text" class="dr-natural-input" id="dr-natural-input" placeholder="例: 右橈骨遠位端骨折術後">
+                    <input type="text" class="dr-natural-input" id="dr-natural-input" placeholder="例: 右橈骨遠位端骨折の術後">
                     <div class="dr-natural-hint">修飾語（左/右/急性/術後など）を含めて入力すると自動分解します</div>
                     <div class="dr-candidates" id="dr-candidates" style="display:none;"></div>
                   </div>
@@ -2140,11 +2178,13 @@
       const naturalInput = this.overlay.querySelector('#dr-natural-input');
       naturalInput.oninput = debounce(() => this.updateCandidates(naturalInput.value), 200);
       naturalInput.onfocus = function() { this.select(); };
+      naturalInput.onkeydown = (e) => this.handleCandidateKeydown(e);
 
       // 病名検索
       const diseaseSearch = this.overlay.querySelector('#dr-disease-search');
       diseaseSearch.oninput = debounce(() => this.updateDiseaseList(diseaseSearch.value), 150);
       diseaseSearch.onfocus = function() { this.select(); };
+      diseaseSearch.onkeydown = (e) => this.handleDiseaseKeydown(e);
 
       // 病名クリア
       this.overlay.querySelector('#dr-clear-disease').onclick = () => {
@@ -2160,6 +2200,7 @@
       const modifierSearch = this.overlay.querySelector('#dr-modifier-search');
       modifierSearch.oninput = debounce(() => this.updateModifierList(modifierSearch.value), 150);
       modifierSearch.onfocus = function() { this.select(); };
+      modifierSearch.onkeydown = (e) => this.handleModifierKeydown(e);
 
       // 登録ボタン
       this.overlay.querySelector('#dr-register').onclick = () => this.register();
@@ -2190,6 +2231,7 @@
 
     updateDiseaseList(query) {
       const list = this.overlay.querySelector('#dr-disease-list');
+      this.diseaseSelectedIndex = -1; // キーボード選択をリセット
 
       // 検索文字が空の場合は候補を表示しない
       if (!query || !query.trim()) {
@@ -2238,6 +2280,7 @@
 
     updateModifierList(query) {
       const list = this.overlay.querySelector('#dr-modifier-list');
+      this.modifierSelectedIndex = -1; // キーボード選択をリセット
 
       // 検索文字が空の場合は候補を表示しない
       if (!query || !query.trim()) {
@@ -2278,6 +2321,127 @@
       });
     }
 
+    // キーボード操作: 病名検索
+    handleDiseaseKeydown(e) {
+      const list = this.overlay.querySelector('#dr-disease-list');
+      const items = list.querySelectorAll('.dr-list-item');
+      if (items.length === 0) return;
+
+      switch (e.key) {
+        case 'ArrowDown':
+          e.preventDefault();
+          this.diseaseSelectedIndex = Math.min(this.diseaseSelectedIndex + 1, items.length - 1);
+          this.updateDiseaseHighlight(items);
+          break;
+        case 'ArrowUp':
+          e.preventDefault();
+          this.diseaseSelectedIndex = Math.max(this.diseaseSelectedIndex - 1, 0);
+          this.updateDiseaseHighlight(items);
+          break;
+        case 'Enter':
+          e.preventDefault();
+          if (this.diseaseSelectedIndex >= 0 && items[this.diseaseSelectedIndex]) {
+            items[this.diseaseSelectedIndex].click();
+          }
+          break;
+        case 'Escape':
+          e.preventDefault();
+          this.diseaseSelectedIndex = -1;
+          this.updateDiseaseHighlight(items);
+          break;
+      }
+    }
+
+    updateDiseaseHighlight(items) {
+      items.forEach((item, i) => {
+        item.classList.toggle('keyboard-selected', i === this.diseaseSelectedIndex);
+        if (i === this.diseaseSelectedIndex) {
+          item.scrollIntoView({ block: 'nearest' });
+        }
+      });
+    }
+
+    // キーボード操作: 修飾語検索
+    handleModifierKeydown(e) {
+      const list = this.overlay.querySelector('#dr-modifier-list');
+      const items = list.querySelectorAll('.dr-list-item');
+      if (items.length === 0) return;
+
+      switch (e.key) {
+        case 'ArrowDown':
+          e.preventDefault();
+          this.modifierSelectedIndex = Math.min(this.modifierSelectedIndex + 1, items.length - 1);
+          this.updateModifierHighlight(items);
+          break;
+        case 'ArrowUp':
+          e.preventDefault();
+          this.modifierSelectedIndex = Math.max(this.modifierSelectedIndex - 1, 0);
+          this.updateModifierHighlight(items);
+          break;
+        case 'Enter':
+          e.preventDefault();
+          if (this.modifierSelectedIndex >= 0 && items[this.modifierSelectedIndex]) {
+            items[this.modifierSelectedIndex].click();
+          }
+          break;
+        case 'Escape':
+          e.preventDefault();
+          this.modifierSelectedIndex = -1;
+          this.updateModifierHighlight(items);
+          break;
+      }
+    }
+
+    updateModifierHighlight(items) {
+      items.forEach((item, i) => {
+        item.classList.toggle('keyboard-selected', i === this.modifierSelectedIndex);
+        if (i === this.modifierSelectedIndex) {
+          item.scrollIntoView({ block: 'nearest' });
+        }
+      });
+    }
+
+    handleCandidateKeydown(e) {
+      const container = this.overlay.querySelector('#dr-candidates');
+      if (container.style.display === 'none') return;
+
+      const items = container.querySelectorAll('.dr-candidate-item');
+      if (items.length === 0) return;
+
+      switch (e.key) {
+        case 'ArrowDown':
+          e.preventDefault();
+          this.candidateSelectedIndex = Math.min(this.candidateSelectedIndex + 1, items.length - 1);
+          this.updateCandidateHighlight(items);
+          break;
+        case 'ArrowUp':
+          e.preventDefault();
+          this.candidateSelectedIndex = Math.max(this.candidateSelectedIndex - 1, 0);
+          this.updateCandidateHighlight(items);
+          break;
+        case 'Enter':
+          e.preventDefault();
+          if (this.candidateSelectedIndex >= 0 && items[this.candidateSelectedIndex]) {
+            items[this.candidateSelectedIndex].click();
+          }
+          break;
+        case 'Escape':
+          e.preventDefault();
+          this.candidateSelectedIndex = -1;
+          this.updateCandidateHighlight(items);
+          break;
+      }
+    }
+
+    updateCandidateHighlight(items) {
+      items.forEach((item, i) => {
+        item.classList.toggle('keyboard-selected', i === this.candidateSelectedIndex);
+        if (i === this.candidateSelectedIndex) {
+          item.scrollIntoView({ block: 'nearest' });
+        }
+      });
+    }
+
     updateModifierTags() {
       const container = this.overlay.querySelector('#dr-modifier-tags');
 
@@ -2308,6 +2472,7 @@
     // 自然言語入力の候補を更新
     updateCandidates(input) {
       const container = this.overlay.querySelector('#dr-candidates');
+      this.candidateSelectedIndex = -1; // キーボード選択をリセット
 
       if (!input || input.trim().length === 0) {
         container.style.display = 'none';
@@ -2552,6 +2717,10 @@
         <div class="dr-edit-popup-row" id="dr-edit-end-date-row" style="display: ${disease.outcome && disease.outcome !== 'CONTINUED' ? 'flex' : 'none'};">
           <label>終了日:</label>
           <input type="date" class="dr-date-input" id="dr-edit-end-date" value="${disease.endDate?.year || today.year}-${String(disease.endDate?.month || today.month).padStart(2, '0')}-${String(disease.endDate?.day || today.day).padStart(2, '0')}">
+          <div class="dr-custom-dropdown" id="dr-edit-end-date-dropdown">
+            <div class="dr-dropdown-toggle" id="dr-edit-end-date-toggle">本日</div>
+            <div class="dr-dropdown-menu" id="dr-edit-end-date-menu"></div>
+          </div>
         </div>
         <div class="dr-edit-popup-row">
           <input type="checkbox" id="dr-edit-is-main" ${disease.isMain ? 'checked' : ''}>
@@ -2584,6 +2753,9 @@
         }
       };
 
+      // 終了日ドロップダウンの初期化
+      this.initEndDateDropdown(popup, today);
+
       // キャンセル
       popup.querySelector('#dr-edit-cancel').onclick = () => this.hideEditPopup();
 
@@ -2600,6 +2772,138 @@
       }, 0);
     }
 
+    // 終了日ドロップダウンの初期化
+    initEndDateDropdown(popup, today) {
+      const toggle = popup.querySelector('#dr-edit-end-date-toggle');
+      const menu = popup.querySelector('#dr-edit-end-date-menu');
+      const endDateInput = popup.querySelector('#dr-edit-end-date');
+
+      if (!toggle || !menu || !this.lastVisitData) {
+        // lastVisitDataがない場合は「本日」のみ
+        toggle.textContent = '本日';
+        toggle.onclick = () => {
+          const dateStr = `${today.year}-${String(today.month).padStart(2, '0')}-${String(today.day).padStart(2, '0')}`;
+          endDateInput.value = dateStr;
+        };
+        return;
+      }
+
+      // ログイン医師の名前を取得（既にloadLastVisitDataで取得済みの場合はキャッシュを使用）
+      const getLastName = async () => {
+        const myName = await HenryCore.getMyName();
+        return myName ? myName.split(/[\s　]+/)[0] : '';
+      };
+
+      getLastName().then(lastName => {
+        const doctorLabel = lastName ? `${lastName}医師` : '自分';
+
+        // 選択肢データを構築
+        const items = [
+          { value: 'today', label: '本日', dateObj: today, tooltip: null }
+        ];
+
+        if (this.lastVisitData.lastVisit) {
+          const d = this.lastVisitData.lastVisit;
+          const dateStr = `${d.year}/${d.month}/${d.day}`;
+          const karteText = this.lastVisitData.lastKarteText;
+          const doctorName = this.lastVisitData.lastDoctorName;
+          const header = doctorName ? `【${dateStr}のカルテ】（${doctorName}）` : `【${dateStr}のカルテ】`;
+          items.push({
+            value: 'last',
+            label: `前回受診日（${dateStr}）`,
+            dateObj: d,
+            tooltip: karteText ? `${header}\n${karteText}` : `${dateStr}（カルテ内容なし）`
+          });
+        }
+
+        if (this.lastVisitData.myLastVisit) {
+          const d = this.lastVisitData.myLastVisit;
+          const dateStr = `${d.year}/${d.month}/${d.day}`;
+          const karteText = this.lastVisitData.myLastKarteText;
+          items.push({
+            value: 'myLast',
+            label: `${doctorLabel}前回受診日（${dateStr}）`,
+            dateObj: d,
+            tooltip: karteText ? `【${dateStr}のカルテ】\n${karteText}` : `${dateStr}（カルテ内容なし）`
+          });
+        }
+
+        // メニュー構築
+        menu.innerHTML = items.map(item => `
+          <div class="dr-dropdown-item" data-value="${item.value}"
+               data-tooltip="${item.tooltip ? encodeURIComponent(item.tooltip) : ''}">
+            ${item.label}
+          </div>
+        `).join('');
+
+        // トグルクリック
+        toggle.onclick = (e) => {
+          e.stopPropagation();
+          menu.classList.toggle('open');
+        };
+
+        // 選択肢のイベント
+        menu.querySelectorAll('.dr-dropdown-item').forEach(item => {
+          // クリック
+          item.onclick = (e) => {
+            e.stopPropagation();
+            const value = item.dataset.value;
+            const selected = items.find(i => i.value === value);
+            if (selected?.dateObj) {
+              const d = selected.dateObj;
+              const dateStr = `${d.year}-${String(d.month).padStart(2, '0')}-${String(d.day).padStart(2, '0')}`;
+              endDateInput.value = dateStr;
+            }
+            toggle.textContent = item.textContent.trim();
+            menu.classList.remove('open');
+          };
+
+          // ホバー（ツールチップ表示）
+          item.onmouseenter = (e) => {
+            const tooltipText = item.dataset.tooltip;
+            if (tooltipText) {
+              this.showEndDateTooltip(e, decodeURIComponent(tooltipText), menu);
+            }
+          };
+
+          item.onmouseleave = () => {
+            this.hideEndDateTooltip();
+          };
+        });
+
+        // メニュー外クリックで閉じる
+        popup.addEventListener('click', (e) => {
+          if (!popup.querySelector('#dr-edit-end-date-dropdown').contains(e.target)) {
+            menu.classList.remove('open');
+          }
+        });
+      });
+    }
+
+    showEndDateTooltip(e, text, menu) {
+      this.hideEndDateTooltip();
+      const tooltip = document.createElement('div');
+      tooltip.className = 'dr-tooltip';
+      tooltip.textContent = text;
+      tooltip.id = 'dr-end-date-tooltip';
+      document.body.appendChild(tooltip);
+
+      // メニューの幅に合わせる
+      const menuRect = menu.getBoundingClientRect();
+      tooltip.style.width = `${menuRect.width}px`;
+      tooltip.style.boxSizing = 'border-box';
+
+      // メニューの上に固定配置
+      const tooltipHeight = tooltip.offsetHeight;
+      tooltip.style.left = `${menuRect.left}px`;
+      tooltip.style.top = `${menuRect.top - tooltipHeight - 5}px`;
+    }
+
+    hideEndDateTooltip() {
+      const existing = document.getElementById('dr-end-date-tooltip');
+      if (existing) existing.remove();
+    }
+
     hideEditPopup() {
       if (this.editPopup) {
         this.editPopup.remove();
@@ -2609,6 +2913,8 @@
         document.removeEventListener('click', this.handleOutsideClick);
         this.handleOutsideClick = null;
       }
+      // ツールチップも閉じる
+      this.hideEndDateTooltip();
     }
 
     async updateDisease(disease) {

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry セット展開検索ヘルパー
 // @namespace    https://henry-app.jp/
-// @version      2.4.0
+// @version      2.5.0
 // @description  セット展開画面の検索ボックス上にクイック検索ボタンを追加
 // @author       sk powered by Claude & Gemini
 // @match        https://henry-app.jp/*
@@ -566,9 +566,24 @@
             }
           };
           input.onkeydown = (e) => {
+            if (e.isComposing) return;
             if (e.key === 'Enter') {
               e.preventDefault();
-              input.blur();
+              // 変更を保存
+              const newValue = input.value.trim();
+              if (newValue && newValue !== subItem) {
+                item.items[subIndex] = newValue;
+                callbacks.saveItems(items);
+              }
+              // 次の入力欄にフォーカス
+              const allInputs = itemsList.querySelectorAll('.hss-edit-popup-item-input');
+              if (subIndex < allInputs.length - 1) {
+                allInputs[subIndex + 1].focus();
+              } else {
+                // 最後の項目なら新規追加欄へ
+                const addInput = popup.querySelector('.hss-edit-popup-add input');
+                if (addInput) addInput.focus();
+              }
             }
           };
           const deleteBtn = document.createElement('button');

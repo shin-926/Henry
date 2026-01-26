@@ -72,7 +72,7 @@
       "file": "henry_order_history.user.js",
       "match": ["henry-app.jp"],
       "order": 10,
-      "enabled": false
+      "beta": true
     },
     {
       "name": "henry_prescription_history",
@@ -88,7 +88,7 @@
       "file": "henry_karte_history.user.js",
       "match": ["henry-app.jp"],
       "order": 10,
-      "enabled": false
+      "beta": true
     },
     {
       "name": "henry_note_reader",
@@ -96,7 +96,7 @@
       "file": "henry_note_reader.user.js",
       "match": ["henry-app.jp"],
       "order": 10,
-      "enabled": false
+      "beta": true
     },
     {
       "name": "henry_ikensho_form",
@@ -110,6 +110,14 @@
       "name": "henry_referral_form",
       "label": "診療情報提供書",
       "file": "henry_referral_form.user.js",
+      "match": ["henry-app.jp"],
+      "order": 10,
+      "enabled": true
+    },
+    {
+      "name": "henry_police_certificate",
+      "label": "警察診断書",
+      "file": "henry_police_certificate.user.js",
       "match": ["henry-app.jp"],
       "order": 10,
       "enabled": true
@@ -176,7 +184,7 @@
       "file": "henry_test_helper.user.js",
       "match": ["henry-app.jp"],
       "order": 10,
-      "enabled": false
+      "beta": true
     }
   ]
 }
