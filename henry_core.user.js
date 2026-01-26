@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry Core
 // @namespace    https://henry-app.jp/
-// @version      2.17.0
+// @version      2.18.0
 // @description  Henry スクリプト実行基盤 (GoogleAuth統合 / Google Docs対応)
 // @author       sk powered by Claude & Gemini
 // @match        https://henry-app.jp/*
@@ -521,31 +521,47 @@
       transitionBase: '0.2s ease',
     },
 
+    // TODO: CSS変数名とトークン名の命名規則を統一することを検討
+    // 現状: --henry-text-high vs colorText のような不一致がある
+    // 統一する場合は既存スクリプトへの影響を考慮し、破壊的変更として計画的に行う
+
+    // トークンからCSS変数へのマッピング（Single Source of Truth）
+    _cssVarMapping: {
+      colorPrimary: '--henry-primary',
+      colorPrimaryHover: '--henry-primary-hover',
+      colorText: '--henry-text-high',
+      colorTextSecondary: '--henry-text-secondary',
+      colorTextMuted: '--henry-text-med',
+      colorTextDisabled: '--henry-text-disabled',
+      colorSurface: '--henry-bg-base',
+      colorSurfaceAlt: '--henry-bg-sub',
+      colorSurfaceHover: '--henry-bg-hover',
+      colorBorder: '--henry-border',
+      colorOverlay: '--henry-overlay',
+      shadowMedium: '--henry-shadow-card',
+      shadowDialog: '--henry-shadow-dialog',
+      radiusSmall: '--henry-radius',
+      radiusDialog: '--henry-radius-dialog',
+      fontSizeXLarge: '--henry-font-size-xlarge',
+      fontWeightMedium: '--henry-font-weight-medium',
+    },
+
     init: () => {
       if (UI._initialized) return;
       UI._initialized = true;
 
       if (document.getElementById('henry-core-styles')) return;
 
+      // トークンからCSS変数を動的生成
+      const cssVars = Object.entries(UI._cssVarMapping)
+        .map(([tokenKey, cssVar]) => `${cssVar}: ${UI.tokens[tokenKey]};`)
+        .join('\n          ');
+
       const style = document.createElement('style');
       style.id = 'henry-core-styles';
       style.textContent = `
         :root {
-          --henry-primary: rgb(0, 204, 146);
-          --henry-primary-hover: rgb(0, 180, 130);
-          --henry-text-high: rgba(0, 0, 0, 0.82);
-          --henry-text-secondary: rgba(0, 0, 0, 0.73);
-          --henry-text-med: rgba(0, 0, 0, 0.57);
-          --henry-text-disabled: rgba(0, 0, 0, 0.38);
-          --henry-bg-base: #FFFFFF;
-          --henry-bg-sub: #F5F7FA;
-          --henry-bg-hover: rgba(0, 0, 0, 0.04);
-          --henry-border: rgba(0, 0, 0, 0.13);
-          --henry-overlay: rgba(0, 0, 0, 0.4);
-          --henry-shadow-card: 0 1px 3px rgba(0,0,0,0.12), 0 1px 2px rgba(0,0,0,0.24);
-          --henry-shadow-dialog: rgba(0,0,0,0.13) 0px 7px 8px 0px, rgba(0,0,0,0.03) 0px 5px 22px 0px, rgba(0,0,0,0.06) 0px 12px 17px 0px, rgba(0,0,0,0.13) 0px 0px 1px 0px;
-          --henry-radius: 4px;
-          --henry-radius-dialog: 4px;
+          ${cssVars}
         }
         .henry-btn {
           font-family: "Noto Sans JP", sans-serif;
@@ -595,8 +611,8 @@
           max-width: 90vw;
         }
         .henry-modal-title {
-          font-size: 24px;
-          font-weight: 600;
+          font-size: var(--henry-font-size-xlarge);
+          font-weight: var(--henry-font-weight-medium);
           color: var(--henry-text-high);
           margin-bottom: 16px;
         }
