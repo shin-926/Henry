@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         ツールボックス
 // @namespace    https://haru-chan.example
-// @version      5.7.1
+// @version      5.7.2
 // @description  プラグイン方式。シンプルUI、Noto Sans JP、ドラッグ＆ドロップ並び替え対応。
 // @author       sk powered by Claude & Gemini
 // @match        https://henry-app.jp/*
@@ -517,7 +517,7 @@
     btn.className = 'ht-item-btn';
 
     const labelSpan = document.createElement('span');
-    labelSpan.textContent = `${groupData.icon} ${groupData.name}`;
+    labelSpan.textContent = groupData.name;
     btn.appendChild(labelSpan);
 
     row.appendChild(btn);
