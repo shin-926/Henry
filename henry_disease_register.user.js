@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry Disease Register
 // @namespace    https://henry-app.jp/
-// @version      3.23.1
+// @version      3.24.0
 // @description  高速病名検索・登録
 // @author       sk powered by Claude & Gemini
 // @match        https://henry-app.jp/*
@@ -36,6 +36,9 @@
  * - henry_disease_data.js: 病名マスタデータ（@require で読み込み）
  *
  * ■ 変更履歴
+ * v3.24.0 (2026-01-27) - 登録済み病名の削除機能を追加
+ *   - 編集ポップアップに「削除」ボタンを追加
+ *   - 確認ダイアログ付きで安全に削除可能
  * v3.22.0 (2026-01-26) - キーボード操作での候補選択機能を追加
  *   - ↑↓キーで候補間を移動、Enterで選択確定
  *   - 病名検索・修飾語検索の両方に対応
@@ -1354,6 +1357,13 @@
     }
     .dr-btn-secondary:hover {
       background: #d0d0d0;
+    }
+    .dr-btn-danger {
+      background: #dc3545;
+      color: white;
+    }
+    .dr-btn-danger:hover {
+      background: #c82333;
     }
     .dr-empty {
       padding: 16px;
@@ -2729,6 +2739,8 @@
           <label for="dr-edit-is-suspected">疑い</label>
         </div>
         <div class="dr-edit-popup-footer">
+          <button class="dr-btn dr-btn-danger" id="dr-edit-delete">削除</button>
+          <div style="flex: 1;"></div>
           <button class="dr-btn dr-btn-secondary" id="dr-edit-cancel">キャンセル</button>
           <button class="dr-btn dr-btn-primary" id="dr-edit-save">保存</button>
         </div>
@@ -2761,6 +2773,9 @@
 
       // 保存
       popup.querySelector('#dr-edit-save').onclick = () => this.updateDisease(disease);
+
+      // 削除
+      popup.querySelector('#dr-edit-delete').onclick = () => this.deleteDisease(disease);
 
       // 外部クリックで閉じる
       setTimeout(() => {
@@ -3015,6 +3030,100 @@
         alert('更新に失敗しました: ' + e.message);
         saveBtn.disabled = false;
         saveBtn.textContent = '保存';
+      }
+    }
+
+    async deleteDisease(disease) {
+      // 病名表示名を構築（確認ダイアログ用）
+      let baseName;
+      if (disease.masterDisease?.code === '0000999' && disease.customDiseaseName?.value) {
+        baseName = disease.customDiseaseName.value;
+      } else {
+        baseName = disease.masterDisease?.name || '（名称なし）';
+      }
+      const displayName = this.applyModifiers(baseName, disease.masterModifiers || []);
+
+      // 確認ダイアログ（Henry本体と同じ形式）
+      if (!confirm('本当に削除しますか？')) {
+        return;
+      }
+
+      const popup = this.editPopup;
+      const deleteBtn = popup?.querySelector('#dr-edit-delete');
+      if (deleteBtn) {
+        deleteBtn.disabled = true;
+        deleteBtn.textContent = '削除中...';
+      }
+
+      // 開始日
+      const startDate = disease.startDate || getToday();
+
+      // 終了日
+      let endDateStr = 'null';
+      if (disease.endDate) {
+        endDateStr = `{ year: ${disease.endDate.year}, month: ${disease.endDate.month}, day: ${disease.endDate.day} }`;
+      }
+
+      // 修飾語コード
+      const modifierCodes = (disease.masterModifiers || []).map(m => `"${m.code}"`).join(', ');
+
+      // カスタム病名
+      const customDiseaseNameStr = disease.customDiseaseName?.value
+        ? `"${disease.customDiseaseName.value}"`
+        : 'null';
+
+      const MUTATION = `
+        mutation {
+          updateMultiPatientReceiptDiseases(input: {
+            records: [{
+              recordOperation: RECORD_OPERATION_DELETE,
+              patientReceiptDisease: {
+                patientUuid: "${this.patientUuid}",
+                uuid: "${disease.uuid}",
+                masterDiseaseCode: "${disease.masterDisease?.code || ''}",
+                isMain: ${disease.isMain || false},
+                isSuspected: ${disease.isSuspected || false},
+                excludeReceipt: ${disease.excludeReceipt || false},
+                masterModifierCodes: [${modifierCodes}],
+                startDate: { year: ${startDate.year}, month: ${startDate.month}, day: ${startDate.day} },
+                outcome: ${disease.outcome || 'CONTINUED'},
+                endDate: ${endDateStr},
+                customDiseaseName: ${customDiseaseNameStr},
+                intractableDiseaseType: ${disease.intractableDiseaseType || 'NOT_APPLICABLE'},
+                patientCareType: ${disease.patientCareType || 'PATIENT_CARE_TYPE_ANY'}
+              }
+            }]
+          }) {
+            patientReceiptDiseases {
+              uuid
+            }
+          }
+        }
+      `;
+
+      try {
+        const result = await HenryCore.query(MUTATION);
+
+        if (result.data?.updateMultiPatientReceiptDiseases) {
+          console.log(`[${SCRIPT_NAME}] 病名削除完了: ${displayName}`);
+          this.hideEditPopup();
+          this.showSuccessMessage('削除しました');
+          this.loadRegisteredDiseases();
+
+          // 画面更新（Apollo Client refetch）
+          if (window.__APOLLO_CLIENT__) {
+            window.__APOLLO_CLIENT__.refetchQueries({ include: 'active' });
+          }
+        } else {
+          throw new Error('削除に失敗しました');
+        }
+      } catch (e) {
+        console.error(`[${SCRIPT_NAME}]`, e);
+        alert('削除に失敗しました: ' + e.message);
+        if (deleteBtn) {
+          deleteBtn.disabled = false;
+          deleteBtn.textContent = '削除';
+        }
       }
     }
   }
