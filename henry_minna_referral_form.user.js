@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         高松市立みんなの病院 診療申込書
 // @namespace    https://henry-app.jp/
-// @version      1.0.0
+// @version      1.0.1
 // @description  高松市立みんなの病院へのFAX診療申込書を作成
 // @author       sk powered by Claude
 // @match        https://henry-app.jp/*
@@ -1173,6 +1173,7 @@
                     <button type="button" class="mrf-combobox-toggle" ${!formData.destination_department ? 'disabled' : ''} title="リストから選択">▼</button>
                     <div class="mrf-combobox-dropdown" id="mrf-doctor-dropdown"></div>
                   </div>
+                  <button type="button" class="mrf-btn mrf-btn-link" id="mrf-open-schedule" title="外来担当表を見る">📅 外来表</button>
                 </div>
               </div>
             </div>
@@ -1370,7 +1371,6 @@
         </div>
         <div class="mrf-footer">
           <div class="mrf-footer-left">
-            <button class="mrf-btn mrf-btn-link" id="mrf-open-outpatient" title="外来受付ページを開く">🏥 外来受付ページ</button>
             ${lastSavedAt ? `<span>下書き: ${new Date(lastSavedAt).toLocaleString('ja-JP')}</span>` : ''}
           </div>
           <div class="mrf-footer-right">
@@ -1392,9 +1392,9 @@
       if (e.target === modal) modal.remove();
     });
 
-    // 外来受付ページボタン
-    modal.querySelector('#mrf-open-outpatient').addEventListener('click', () => {
-      window.open('https://www.takamatsu-municipal-hospital.jp/archives/74', '_blank');
+    // 外来担当表ボタン
+    modal.querySelector('#mrf-open-schedule').addEventListener('click', () => {
+      window.open('https://www.takamatsu-municipal-hospital.jp/archives/60', '_blank');
     });
 
     // 診療科・医師コンボボックスの連携

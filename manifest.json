@@ -191,12 +191,12 @@
     },
     {
       "name": "henry_auto_approver",
-      "label": "一括承認",
+      "label": "一括承認（ベータ版）",
       "file": "henry_auto_approver.user.js",
       "match": ["henry-app.jp"],
       "category": "efficiency",
       "order": 10,
-      "enabled": true
+      "beta": true
     },
     {
       "name": "henry_login_helper",
@@ -227,12 +227,12 @@
     },
     {
       "name": "henry_memo",
-      "label": "メモ帳",
+      "label": "メモ帳（ベータ版）",
       "file": "henry_memo.user.js",
       "match": ["henry-app.jp"],
       "category": "efficiency",
       "order": 10,
-      "enabled": true
+      "beta": true
     },
     {
       "name": "henry_hospitalization_data",

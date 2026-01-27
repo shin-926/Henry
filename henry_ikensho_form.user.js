@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         主治医意見書作成フォーム
 // @namespace    https://henry-app.jp/
-// @version      2.6.7
+// @version      2.6.11
 // @description  主治医意見書の入力フォームとGoogle Docs出力（GAS不要版・API直接呼び出し）
 // @author       sk powered by Claude & Gemini
 // @match        https://henry-app.jp/*
@@ -501,7 +501,6 @@
     { placeholder: '{{郵便番号}}', jsonKey: 'basic_info.postal_code', inputType: '自動入力' },
     { placeholder: '{{住所}}', jsonKey: 'basic_info.address', inputType: '自動入力' },
     { placeholder: '{{連絡先電話番号}}', jsonKey: 'basic_info.phone', inputType: '自動入力' },
-    { placeholder: '{{医師氏名}}', jsonKey: 'basic_info.physician_name', inputType: '自動入力' },
     { placeholder: '{{医療機関名}}', jsonKey: 'basic_info.institution_name', inputType: '自動入力' },
     { placeholder: '{{医療機関郵便番号}}', jsonKey: 'basic_info.institution_postal_code', inputType: '自動入力' },
     { placeholder: '{{医療機関所在地}}', jsonKey: 'basic_info.institution_address', inputType: '自動入力' },
@@ -592,7 +591,9 @@
     { placeholder: '{{その他の状態名}}', jsonKey: 'life_function.other_condition_name', inputType: '記述' },
     { placeholder: '{{対処方針内容}}', jsonKey: 'life_function.response_policy', inputType: '記述' },
     { placeholder: '{{生活機能改善見通し}}', jsonKey: 'life_function.life_function_improvement_outlook', inputType: 'ラジオボタン' },
-    { placeholder: '{{医学的管理の必要性}}', jsonKey: 'life_function.medical_management_necessity', inputType: 'チェックボックス' },
+    { placeholder: '{{医学的管理の必要性1}}', jsonKey: 'life_function.medical_management_necessity', inputType: 'custom_medical_management_1' },
+    { placeholder: '{{医学的管理の必要性2}}', jsonKey: 'life_function.medical_management_necessity', inputType: 'custom_medical_management_2' },
+    { placeholder: '{{医学的管理の必要性3}}', jsonKey: 'life_function.medical_management_necessity', inputType: 'custom_medical_management_3' },
     { placeholder: '{{その他の医学管理の必要性}}', jsonKey: 'life_function.medical_management_necessity', inputType: 'custom_other_medical_flag' },
     { placeholder: '{{その他の医学的管理}}', jsonKey: 'life_function.other_medical_management', inputType: '記述' },
     { placeholder: '{{サービス提供血圧}}', jsonKey: 'life_function.service_blood_pressure', inputType: 'ラジオボタン' },
@@ -645,6 +646,15 @@
       case 'custom_other_medical_flag':
         // 医学的管理の必要性の「その他」フラグ（インデックス10）
         return (value && value.charAt(10) === '1') ? '■' : '□';
+      case 'custom_medical_management_1':
+        // 医学的管理の必要性1（インデックス0-3: 訪問診療〜訪問歯科診療）
+        return convertMedicalManagement(value, 0, 4);
+      case 'custom_medical_management_2':
+        // 医学的管理の必要性2（インデックス4-7: 訪問薬剤管理指導〜訪問歯科衛生指導）
+        return convertMedicalManagement(value, 4, 4);
+      case 'custom_medical_management_3':
+        // 医学的管理の必要性3（インデックス8-9: 訪問栄養食事指導〜通所リハビリテーション）
+        return convertMedicalManagement(value, 8, 2);
       case 'custom_possible_conditions_1':
         // 発生可能性状態1（インデックス0-7: 尿失禁〜徘徊）
         return convertPossibleConditions(value, 0, 8, mapping);
@@ -802,7 +812,6 @@
       '{{失禁への対応}}': "□カテーテル（コンドームカテーテル、留置カテーテル等）",
       '{{発生可能性状態1}}': "□尿失禁\t□転倒・骨折\t□移動能力の低下\t□褥瘡\t□心肺機能の低下\t□閉じこもり\t□意欲低下\t□徘徊",
       '{{発生可能性状態2}}': "□低栄養\t□摂食・嚥下機能低下\t□脱水\t□易感染性\t□がん等による疼痛",
-      '{{医学的管理の必要性}}': "□訪問診療\t□訪問看護\t□看護職員の訪問による相談・支援\t□訪問歯科診療\n\t□訪問薬剤管理指導\t□訪問リハビリテーション\t□短期入所療養介護\t□訪問歯科衛生指導\n\t□訪問栄養食事指導\t□通所リハビリテーション",
       '{{歩行補助具・装具の使用}}': "□杖\t□歩行器・歩行車\t□装具",
       '{{失調不随意運動上肢}}': "□右\t□左",
       '{{失調不随意運動下肢}}': "□右\t□左",
@@ -873,6 +882,34 @@
   }
 
   /**
+   * 医学的管理の必要性のビットフラグを部分的に変換
+   * @param {string} value - ビットフラグ文字列
+   * @param {number} startIndex - 開始インデックス
+   * @param {number} count - 処理する項目数
+   */
+  function convertMedicalManagement(value, startIndex, count) {
+    const templates = {
+      0: "□訪問診療\t□訪問看護\t□看護職員の訪問による相談・支援\t□訪問歯科診療",
+      4: "□訪問薬剤管理指導\t□訪問リハビリテーション\t□短期入所療養介護\t□訪問歯科衛生指導",
+      8: "□訪問栄養食事指導\t□通所リハビリテーション"
+    };
+
+    const template = templates[startIndex];
+    if (!template) return '';
+
+    const parts = template.split('□');
+    const bitString = String(value || '').padStart(11, '0');
+    let newString = parts[0];
+
+    for (let i = 0; i < count; i++) {
+      const mark = bitString[startIndex + i] === '1' ? '■' : '□';
+      newString += mark + parts[i + 1];
+    }
+
+    return newString;
+  }
+
+  /**
    * 日付値をフォーマット（和暦）
    */
   function formatDateValueForDoc(value) {
@@ -899,6 +936,11 @@
    * @returns {Promise<Object>} 結果
    */
   async function createGoogleDoc(formData, fileName) {
+    // スピナー表示
+    const HenryCore = pageWindow.HenryCore;
+    const spinner = HenryCore?.ui?.showSpinner?.('Google Docsを生成中...');
+
+    try {
     // 認証チェック（デバッグログ付き）
     const googleAuth = getGoogleAuth();
     console.log('[OpinionForm] getGoogleAuth():', googleAuth);
@@ -999,12 +1041,17 @@
     // 5. ファイル情報を取得
     const fileInfo = await DriveAPI.getFileMetadata(documentId, 'id,name,webViewLink');
 
+    spinner?.close();
     return {
       success: true,
       documentId: fileInfo.id,
       documentUrl: fileInfo.webViewLink,
       fileName: fileInfo.name
     };
+    } catch (e) {
+      spinner?.close();
+      throw e;
+    }
   }
 
   /**
@@ -3592,19 +3639,9 @@
               // ファイル名生成
               const fileName = generateFileName(collected);
 
-              // 処理中表示（スピナー付き）
+              // 処理中表示
               button.disabled = true;
-              button.innerHTML = '';
-              const spinner = document.createElement('span');
-              spinner.style.cssText = 'display:inline-block;width:14px;height:14px;border:2px solid #fff;border-top-color:transparent;border-radius:50%;animation:henrySpinnerRotate 0.8s linear infinite;margin-right:6px;vertical-align:middle;';
-              if (!document.getElementById('henry-spinner-style')) {
-                const style = document.createElement('style');
-                style.id = 'henry-spinner-style';
-                style.textContent = '@keyframes henrySpinnerRotate { to { transform: rotate(360deg); } }';
-                document.head.appendChild(style);
-              }
-              button.appendChild(spinner);
-              button.appendChild(document.createTextNode('ドキュメント作成中...'));
+              button.textContent = '作成中...';
 
               // 一時保存（Googleドキュメントを閉じても編集内容が残るように）
               saveDraft(formData.basic_info.patient_uuid, collected);

@@ -16,3 +16,8 @@ package-lock.json
 .playwright-mcp/
 playwright-report/
 test-results/
+playwright.config.js
+tests/
+
+# npm
+package.json

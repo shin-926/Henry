@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         警察診断書フォーム
 // @namespace    https://henry-app.jp/
-// @version      1.0.2
+// @version      1.0.3
 // @description  警察提出用診断書の入力フォームとGoogle Docs出力
 // @author       sk powered by Claude
 // @match        https://henry-app.jp/*
@@ -993,12 +993,17 @@
   // ==========================================
 
   async function generateGoogleDoc(formData) {
-    // アクセストークン確認
-    const googleAuth = getGoogleAuth();
-    await googleAuth.getValidAccessToken();
+    // スピナー表示
+    const HenryCore = pageWindow.HenryCore;
+    const spinner = HenryCore?.ui?.showSpinner?.('Google Docsを生成中...');
 
-    // 出力フォルダ取得/作成
-    const folder = await DriveAPI.getOrCreateFolder(TEMPLATE_CONFIG.OUTPUT_FOLDER_NAME);
+    try {
+      // アクセストークン確認
+      const googleAuth = getGoogleAuth();
+      await googleAuth.getValidAccessToken();
+
+      // 出力フォルダ取得/作成
+      const folder = await DriveAPI.getOrCreateFolder(TEMPLATE_CONFIG.OUTPUT_FOLDER_NAME);
 
     // テンプレートをコピー（メタデータ付き）
     const fileName = `警察診断書_${formData.patient_name}_${new Date().toISOString().slice(0, 10)}`;
@@ -1041,9 +1046,14 @@
 
     // 新しいドキュメントを開く
     const docUrl = `https://docs.google.com/document/d/${newDoc.id}/edit`;
+    spinner?.close();
     GM_openInTab(docUrl, { active: true });
 
     console.log(`[${SCRIPT_NAME}] Google Docs生成完了: ${docUrl}`);
+    } catch (e) {
+      spinner?.close();
+      throw e;
+    }
   }
 
   // ==========================================
