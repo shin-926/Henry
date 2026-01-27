@@ -236,6 +236,7 @@
             description: 'テストデータを自動入力',
             version: '1.0.0',
             order: 900,
+            group: '開発',
             onClick: () => fillImagingOrder(TEST_PATTERNS.imaging_shoulder)
         });
 

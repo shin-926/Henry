@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry Loader (Dev)
 // @namespace    https://henry-app.jp/
-// @version      1.9.0
+// @version      1.10.0
 // @description  Henryスクリプトの動的ローダー（開発版・Google Docs対応）
 // @author       sk powered by Claude
 // @match        https://henry-app.jp/*
@@ -286,10 +286,13 @@ const unsafeWindow = window;
         .filter(s => matchesHost(s.match) && s.enabled !== false)
         .sort((a, b) => a.order - b.order);
 
-      // Toolbox用にmanifest情報を公開
+      // Toolbox用にmanifest情報を公開（hidden は設定パネルに非表示）
+      const visibleScripts = matchingScripts.filter(s => !s.hidden);
       const loadedScripts = new Set();
       pageWindow.HenryLoaderConfig = {
-        scripts: matchingScripts,
+        loaderName: 'henry_loader_dev',  // 開発版識別用
+        scripts: visibleScripts,
+        categories: manifest.categories || [],
         disabledScripts: disabledScripts,
         loadedScripts: loadedScripts,
         setDisabledScripts: (names) => {

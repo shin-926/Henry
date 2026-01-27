@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         診療情報提供書フォーム
 // @namespace    https://henry-app.jp/
-// @version      1.0.10
+// @version      1.4.2
 // @description  診療情報提供書の入力フォームとGoogle Docs出力
 // @author       sk powered by Claude
 // @match        https://henry-app.jp/*
@@ -28,7 +28,7 @@
  * 1. 自動入力
  *    - 患者情報（氏名、生年月日、住所等）
  *    - 診療科、作成者（医師名）
- *    - 病名（選択式）、処方（選択式）
+ *    - 病名（選択式）、処方（過去5件から複数選択可、院内/院外区別）
  *
  * 2. Google Docs出力
  *    - 入力内容をGoogle Docsテンプレートに反映
@@ -135,6 +135,7 @@
               ... on PrescriptionOrder {
                 startDate
                 orderStatus
+                medicationCategory
                 rps {
                   uuid
                   dosageText
@@ -175,6 +176,7 @@
     16: '錠', 17: '丸', 18: '枚', 19: '個', 20: '滴',
     21: 'mL', 22: 'mg', 23: 'μg'
   };
+
 
   // ==========================================
   // GoogleAuth取得ヘルパー
@@ -573,7 +575,7 @@
         patientId: patientUuid,
         startDate: startDate,
         endDate: null,
-        pageSize: 10,
+        pageSize: 30,
         pageToken: null
       }, { endpoint: '/graphql-v2' });
 
@@ -613,8 +615,12 @@
 
             if (medicines.length > 0) {
               prescriptions.push({
-                date: rec.startDate || enc.firstPublishTime,
-                medicines
+                recordId: rec.id,
+                encounterId: enc.id,
+                date: enc.firstPublishTime,
+                startDate: rec.startDate,
+                medicines,
+                category: rec.medicationCategory || null
               });
             }
           }
@@ -622,32 +628,87 @@
       }
 
       // 日付でソート（新しい順）
-      prescriptions.sort((a, b) => new Date(b.date) - new Date(a.date));
+      prescriptions.sort((a, b) => new Date(b.startDate || b.date) - new Date(a.startDate || a.date));
 
-      return prescriptions;
+      // 最新5件に絞る
+      return prescriptions.slice(0, 5);
     } catch (e) {
       console.error(`[${SCRIPT_NAME}] 処方取得エラー:`, e.message);
       return [];
     }
   }
 
-  // 処方を文字列にフォーマット
-  function formatPrescriptions(prescriptions) {
-    if (!prescriptions || prescriptions.length === 0) return '';
+  // カテゴリを日本語に変換
+  function categoryToLabel(category) {
+    if (category === 'MEDICATION_CATEGORY_OUT_OF_HOSPITAL') return '院外';
+    if (category === 'MEDICATION_CATEGORY_IN_HOSPITAL') return '院内';
+    return '';
+  }
 
-    // 最新の処方のみ使用
-    const latest = prescriptions[0];
-    if (!latest) return '';
+  // 日付フォーマット（短縮形式）
+  function formatDateShort(dateStr) {
+    if (!dateStr) return '-';
+    const d = new Date(dateStr);
+    const y = String(d.getFullYear()).slice(-2);
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    const weekdays = ['日', '月', '火', '水', '木', '金', '土'];
+    const w = weekdays[d.getDay()];
+    return `${y}/${m}/${day}(${w})`;
+  }
+
+  // 処方を文字列にフォーマット（単一処方）
+  function formatSinglePrescription(rx) {
+    if (!rx || !rx.medicines || rx.medicines.length === 0) return '';
 
     const lines = [];
-    for (const m of latest.medicines) {
+    for (const m of rx.medicines) {
       // メーカー名（「〜」）を削除
       let line = m.name.replace(/「[^」]*」/g, '').trim();
       if (m.quantity) line += ` ${m.quantity}${m.unit}`;
       if (m.usage) line += ` ${m.usage}`;
-      if (m.days) line += ` ${m.days}日分`;
-      else if (m.asNeeded) line += ' 頓用';
+      if (m.asNeeded) line += ' 頓用';
       lines.push(line);
+    }
+    return lines.join('\n');
+  }
+
+  // 処方を文字列にフォーマット（複数処方対応）
+  function formatPrescriptions(prescriptions) {
+    if (!prescriptions || prescriptions.length === 0) return '';
+
+    // 最新の処方のみ使用（後方互換性のため）
+    const latest = prescriptions[0];
+    return formatSinglePrescription(latest);
+  }
+
+  // 全角英数字を半角に変換
+  function toHalfWidth(str) {
+    if (!str) return '';
+    return str
+      // 全角英数字を半角に
+      .replace(/[Ａ-Ｚａ-ｚ０-９]/g, s => String.fromCharCode(s.charCodeAt(0) - 0xFEE0))
+      // 全角スペースを半角に
+      .replace(/　/g, ' ')
+      // 全角記号を半角に
+      .replace(/％/g, '%')
+      .replace(/．/g, '.')
+      .replace(/，/g, ',');
+  }
+
+  // 選択された処方を文字列にフォーマット（Google Docs出力用）
+  function formatSelectedPrescriptions(prescriptions, selectedIds) {
+    if (!prescriptions || prescriptions.length === 0 || !selectedIds || selectedIds.length === 0) return '';
+
+    const selected = prescriptions.filter(rx => selectedIds.includes(rx.recordId));
+    if (selected.length === 0) return '';
+
+    const lines = [];
+    for (const rx of selected) {
+      const rxLines = formatSinglePrescription(rx);
+      if (rxLines) {
+        lines.push(toHalfWidth(rxLines));
+      }
     }
     return lines.join('\n');
   }
@@ -727,6 +788,7 @@
         use_family_diseases: false,
         selected_diseases: [],
         selected_family_diseases: [],
+        selected_prescriptions: [],
 
         // 手入力項目
         destination_hospital: '',
@@ -852,7 +914,7 @@
           color: #666;
           margin-bottom: 4px;
         }
-        .rf-field input, .rf-field textarea {
+        .rf-field input, .rf-field textarea, .rf-field select {
           width: 100%;
           padding: 10px 12px;
           border: 1px solid #ddd;
@@ -860,10 +922,98 @@
           font-size: 14px;
           box-sizing: border-box;
         }
-        .rf-field input:focus, .rf-field textarea:focus {
+        .rf-field input:focus, .rf-field textarea:focus, .rf-field select:focus {
           outline: none;
           border-color: #1976d2;
           box-shadow: 0 0 0 3px rgba(25, 118, 210, 0.1);
+        }
+        .rf-field select {
+          background: #fff;
+          cursor: pointer;
+        }
+        .rf-field select:disabled {
+          background: #f5f5f5;
+          color: #999;
+          cursor: not-allowed;
+        }
+        .rf-combobox {
+          position: relative;
+        }
+        .rf-combobox-input {
+          width: 100%;
+          padding: 10px 36px 10px 12px;
+          border: 1px solid #ddd;
+          border-radius: 6px;
+          font-size: 14px;
+          box-sizing: border-box;
+        }
+        .rf-combobox-input:focus {
+          outline: none;
+          border-color: #1976d2;
+          box-shadow: 0 0 0 3px rgba(25, 118, 210, 0.1);
+        }
+        .rf-combobox-input:disabled {
+          background: #f5f5f5;
+          color: #999;
+        }
+        .rf-combobox-toggle {
+          position: absolute;
+          right: 1px;
+          top: 1px;
+          bottom: 1px;
+          width: 32px;
+          background: #f5f5f5;
+          border: none;
+          border-left: 1px solid #ddd;
+          border-radius: 0 5px 5px 0;
+          cursor: pointer;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          color: #666;
+          font-size: 12px;
+        }
+        .rf-combobox-toggle:hover {
+          background: #e8e8e8;
+        }
+        .rf-combobox-toggle:disabled {
+          cursor: not-allowed;
+          color: #bbb;
+        }
+        .rf-combobox-dropdown {
+          display: none;
+          position: absolute;
+          top: 100%;
+          left: 0;
+          right: 0;
+          max-height: 200px;
+          overflow-y: auto;
+          background: #fff;
+          border: 1px solid #ddd;
+          border-top: none;
+          border-radius: 0 0 6px 6px;
+          box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+          z-index: 1000;
+        }
+        .rf-combobox-dropdown.open {
+          display: block;
+        }
+        .rf-combobox-option {
+          padding: 10px 12px;
+          cursor: pointer;
+          font-size: 14px;
+        }
+        .rf-combobox-option:hover {
+          background: #f0f7ff;
+        }
+        .rf-combobox-option.selected {
+          background: #e3f2fd;
+          color: #1565c0;
+        }
+        .rf-combobox-empty {
+          padding: 10px 12px;
+          color: #999;
+          font-size: 14px;
         }
         .rf-field textarea {
           resize: vertical;
@@ -969,6 +1119,43 @@
           max-height: 150px;
           overflow-y: auto;
         }
+        .rf-prescription-item {
+          align-items: flex-start !important;
+        }
+        .rf-prescription-item input[type="checkbox"] {
+          margin-top: 4px;
+        }
+        .rf-prescription-content {
+          flex: 1;
+          min-width: 0;
+        }
+        .rf-prescription-header {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          margin-bottom: 4px;
+        }
+        .rf-prescription-date {
+          font-weight: 600;
+          color: #333;
+          font-size: 13px;
+        }
+        .rf-prescription-category {
+          padding: 2px 8px;
+          border-radius: 4px;
+          font-size: 11px;
+          white-space: nowrap;
+        }
+        .rf-prescription-meds {
+          font-size: 12px;
+          color: #666;
+          line-height: 1.4;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          display: -webkit-box;
+          -webkit-line-clamp: 2;
+          -webkit-box-orient: vertical;
+        }
       </style>
       <div class="rf-container">
         <div class="rf-header">
@@ -1029,15 +1216,27 @@
             <div class="rf-row">
               <div class="rf-field">
                 <label>病院名</label>
-                <input type="text" id="rf-dest-hospital" value="${escapeHtml(formData.destination_hospital)}" placeholder="○○病院">
+                <div class="rf-combobox" data-field="hospital">
+                  <input type="text" class="rf-combobox-input" id="rf-dest-hospital" value="${escapeHtml(formData.destination_hospital)}" placeholder="病院名を入力">
+                  <button type="button" class="rf-combobox-toggle" title="リストから選択">▼</button>
+                  <div class="rf-combobox-dropdown" id="rf-hospital-dropdown"></div>
+                </div>
               </div>
               <div class="rf-field">
                 <label>診療科</label>
-                <input type="text" id="rf-dest-department" value="${escapeHtml(formData.destination_department)}" placeholder="内科">
+                <div class="rf-combobox" data-field="department">
+                  <input type="text" class="rf-combobox-input" id="rf-dest-department" value="${escapeHtml(formData.destination_department)}" placeholder="診療科を入力" ${!formData.destination_hospital ? 'disabled' : ''}>
+                  <button type="button" class="rf-combobox-toggle" ${!formData.destination_hospital ? 'disabled' : ''} title="リストから選択">▼</button>
+                  <div class="rf-combobox-dropdown" id="rf-department-dropdown"></div>
+                </div>
               </div>
               <div class="rf-field">
                 <label>医師名</label>
-                <input type="text" id="rf-dest-doctor" value="${escapeHtml(formData.destination_doctor)}" placeholder="○○先生">
+                <div class="rf-combobox" data-field="doctor">
+                  <input type="text" class="rf-combobox-input" id="rf-dest-doctor" value="${escapeHtml(formData.destination_doctor)}" placeholder="医師名を入力" ${!formData.destination_department ? 'disabled' : ''}>
+                  <button type="button" class="rf-combobox-toggle" ${!formData.destination_department ? 'disabled' : ''} title="リストから選択">▼</button>
+                  <div class="rf-combobox-dropdown" id="rf-doctor-dropdown"></div>
+                </div>
               </div>
             </div>
           </div>
@@ -1079,9 +1278,39 @@
             ${formData.prescriptions.length > 0 ? `
               <div class="rf-use-toggle">
                 <input type="checkbox" id="rf-use-prescriptions" ${formData.use_prescriptions ? 'checked' : ''}>
-                <label for="rf-use-prescriptions">最新の処方を使用する</label>
+                <label for="rf-use-prescriptions">処方履歴から選択する</label>
               </div>
-              <div id="rf-prescriptions-preview" class="rf-prescription-preview" ${formData.use_prescriptions ? '' : 'style="display:none;"'}>${escapeHtml(formatPrescriptions(formData.prescriptions))}</div>
+              <div id="rf-prescriptions-list" class="rf-checkbox-group" ${formData.use_prescriptions ? '' : 'style="display:none;"'}>
+                ${formData.prescriptions.map(rx => {
+                  const dateStr = formatDateShort(rx.startDate || rx.date);
+                  const category = categoryToLabel(rx.category);
+                  const categoryStyle = rx.category === 'MEDICATION_CATEGORY_OUT_OF_HOSPITAL'
+                    ? 'background: #e3f2fd; color: #1565c0; border: 1px solid #90caf9;'
+                    : rx.category === 'MEDICATION_CATEGORY_IN_HOSPITAL'
+                      ? 'background: #fff3e0; color: #e65100; border: 1px solid #ffcc80;'
+                      : 'background: #f5f5f5; color: #666;';
+                  const medsPreview = rx.medicines.map(m => {
+                    let text = m.name.replace(/「[^」]*」/g, '').trim();
+                    if (m.quantity) text += ` ${m.quantity}${m.unit}`;
+                    if (m.days) text += ` ${m.days}日分`;
+                    else if (m.asNeeded) text += ' 頓用';
+                    return text;
+                  }).join('、');
+                  const isSelected = formData.selected_prescriptions?.includes(rx.recordId);
+                  return `
+                    <div class="rf-checkbox-item rf-prescription-item">
+                      <input type="checkbox" id="rf-prescription-${rx.recordId}" value="${rx.recordId}" ${isSelected ? 'checked' : ''}>
+                      <div class="rf-prescription-content">
+                        <div class="rf-prescription-header">
+                          <span class="rf-prescription-date">${dateStr}</span>
+                          ${category ? `<span class="rf-prescription-category" style="${categoryStyle}">${category}</span>` : ''}
+                        </div>
+                        <div class="rf-prescription-meds">${escapeHtml(medsPreview)}</div>
+                      </div>
+                    </div>
+                  `;
+                }).join('')}
+              </div>
               <div id="rf-prescription-manual" style="${formData.use_prescriptions ? 'display:none;' : ''}">
                 <div class="rf-field">
                   <label>処方内容（手入力）</label>
@@ -1158,6 +1387,164 @@
       if (e.target === modal) modal.remove();
     });
 
+    // 紹介先コンボボックスの連携
+    const hospitalInput = modal.querySelector('#rf-dest-hospital');
+    const hospitalDropdown = modal.querySelector('#rf-hospital-dropdown');
+    const hospitalCombobox = modal.querySelector('.rf-combobox[data-field="hospital"]');
+    const deptInput = modal.querySelector('#rf-dest-department');
+    const deptDropdown = modal.querySelector('#rf-department-dropdown');
+    const deptCombobox = modal.querySelector('.rf-combobox[data-field="department"]');
+    const doctorInput = modal.querySelector('#rf-dest-doctor');
+    const doctorDropdown = modal.querySelector('#rf-doctor-dropdown');
+    const doctorCombobox = modal.querySelector('.rf-combobox[data-field="doctor"]');
+
+    // ドロップダウンを閉じる
+    function closeAllDropdowns() {
+      modal.querySelectorAll('.rf-combobox-dropdown').forEach(d => d.classList.remove('open'));
+    }
+
+    // ドロップダウンの選択肢を生成
+    function renderDropdownOptions(dropdown, options, currentValue) {
+      if (options.length === 0) {
+        dropdown.innerHTML = '<div class="rf-combobox-empty">選択肢がありません</div>';
+      } else {
+        dropdown.innerHTML = options.map(opt =>
+          `<div class="rf-combobox-option ${opt === currentValue ? 'selected' : ''}" data-value="${escapeHtml(opt)}">${escapeHtml(opt)}</div>`
+        ).join('');
+      }
+    }
+
+    // 病院ドロップダウンを開く
+    function openHospitalDropdown() {
+      closeAllDropdowns();
+      const api = getHospitalsAPI();
+      const hospitals = api ? api.getHospitalNames() : [];
+      renderDropdownOptions(hospitalDropdown, hospitals, hospitalInput.value);
+      hospitalDropdown.classList.add('open');
+    }
+
+    // 診療科ドロップダウンを開く
+    function openDepartmentDropdown() {
+      closeAllDropdowns();
+      const api = getHospitalsAPI();
+      const hospitalName = hospitalInput.value;
+      const departments = (api && hospitalName) ? api.getDepartments(hospitalName) : [];
+      renderDropdownOptions(deptDropdown, departments, deptInput.value);
+      deptDropdown.classList.add('open');
+    }
+
+    // 医師ドロップダウンを開く
+    function openDoctorDropdown() {
+      closeAllDropdowns();
+      const api = getHospitalsAPI();
+      const hospitalName = hospitalInput.value;
+      const deptName = deptInput.value;
+      let doctors = (api && hospitalName && deptName) ? api.getDoctors(hospitalName, deptName) : [];
+      // 「担当医」を常に追加
+      if (!doctors.includes('担当医')) {
+        doctors = [...doctors, '担当医'];
+      }
+      renderDropdownOptions(doctorDropdown, doctors, doctorInput.value);
+      doctorDropdown.classList.add('open');
+    }
+
+    // 病院▼ボタン
+    hospitalCombobox.querySelector('.rf-combobox-toggle').addEventListener('click', (e) => {
+      e.stopPropagation();
+      if (hospitalDropdown.classList.contains('open')) {
+        closeAllDropdowns();
+      } else {
+        openHospitalDropdown();
+      }
+    });
+
+    // 病院選択肢クリック
+    hospitalDropdown.addEventListener('click', (e) => {
+      const option = e.target.closest('.rf-combobox-option');
+      if (option) {
+        hospitalInput.value = option.dataset.value;
+        closeAllDropdowns();
+        updateDepartmentState();
+      }
+    });
+
+    // 病院入力時
+    hospitalInput.addEventListener('input', () => {
+      updateDepartmentState();
+    });
+
+    // 診療科の状態を更新
+    function updateDepartmentState() {
+      const hasHospital = !!hospitalInput.value;
+      deptInput.disabled = !hasHospital;
+      deptCombobox.querySelector('.rf-combobox-toggle').disabled = !hasHospital;
+      if (!hasHospital) {
+        deptInput.value = '';
+        updateDoctorState();
+      }
+    }
+
+    // 診療科▼ボタン
+    deptCombobox.querySelector('.rf-combobox-toggle').addEventListener('click', (e) => {
+      e.stopPropagation();
+      if (deptDropdown.classList.contains('open')) {
+        closeAllDropdowns();
+      } else {
+        openDepartmentDropdown();
+      }
+    });
+
+    // 診療科選択肢クリック
+    deptDropdown.addEventListener('click', (e) => {
+      const option = e.target.closest('.rf-combobox-option');
+      if (option) {
+        deptInput.value = option.dataset.value;
+        closeAllDropdowns();
+        updateDoctorState();
+      }
+    });
+
+    // 診療科入力時
+    deptInput.addEventListener('input', () => {
+      updateDoctorState();
+    });
+
+    // 医師の状態を更新
+    function updateDoctorState() {
+      const hasDept = !!deptInput.value;
+      doctorInput.disabled = !hasDept;
+      doctorCombobox.querySelector('.rf-combobox-toggle').disabled = !hasDept;
+      if (!hasDept) {
+        doctorInput.value = '';
+      }
+    }
+
+    // 医師▼ボタン
+    doctorCombobox.querySelector('.rf-combobox-toggle').addEventListener('click', (e) => {
+      e.stopPropagation();
+      if (doctorDropdown.classList.contains('open')) {
+        closeAllDropdowns();
+      } else {
+        openDoctorDropdown();
+      }
+    });
+
+    // 医師選択肢クリック
+    doctorDropdown.addEventListener('click', (e) => {
+      const option = e.target.closest('.rf-combobox-option');
+      if (option) {
+        doctorInput.value = option.dataset.value;
+        closeAllDropdowns();
+      }
+    });
+
+    // モーダル内クリックでドロップダウンを閉じる
+    modal.addEventListener('click', (e) => {
+      if (!e.target.closest('.rf-combobox')) {
+        closeAllDropdowns();
+      }
+    });
+
     // 病名使用トグル
     const useDiseases = modal.querySelector('#rf-use-diseases');
     if (useDiseases) {
@@ -1178,13 +1565,13 @@
     const usePrescriptions = modal.querySelector('#rf-use-prescriptions');
     if (usePrescriptions) {
       usePrescriptions.addEventListener('change', () => {
-        const prescriptionsPreview = modal.querySelector('#rf-prescriptions-preview');
+        const prescriptionsList = modal.querySelector('#rf-prescriptions-list');
         const prescriptionManual = modal.querySelector('#rf-prescription-manual');
         if (usePrescriptions.checked) {
-          prescriptionsPreview.style.display = '';
+          prescriptionsList.style.display = '';
           prescriptionManual.style.display = 'none';
         } else {
-          prescriptionsPreview.style.display = 'none';
+          prescriptionsList.style.display = 'none';
           prescriptionManual.style.display = '';
         }
       });
@@ -1244,6 +1631,40 @@
       .replace(/'/g, '&#039;');
   }
 
+  // ==========================================
+  // 病院データ連携（HenryHospitals）
+  // ==========================================
+
+  function getHospitalsAPI() {
+    return pageWindow.HenryHospitals || null;
+  }
+
+  // 値が病院リストに存在するかチェック
+  function isHospitalInList(hospitalName) {
+    if (!hospitalName) return false;
+    const api = getHospitalsAPI();
+    if (!api) return false;
+    return api.getHospitalNames().includes(hospitalName);
+  }
+
+  // 値が診療科リストに存在するかチェック
+  function isDepartmentInList(hospitalName, departmentName) {
+    if (!hospitalName || !departmentName) return false;
+    const api = getHospitalsAPI();
+    if (!api) return false;
+    return api.getDepartments(hospitalName).includes(departmentName);
+  }
+
+  // 値が医師リストに存在するかチェック
+  function isDoctorInList(hospitalName, departmentName, doctorName) {
+    if (!hospitalName || !departmentName || !doctorName) return false;
+    // 「担当医」は常にリスト内として扱う
+    if (doctorName === '担当医') return true;
+    const api = getHospitalsAPI();
+    if (!api) return false;
+    return api.getDoctors(hospitalName, departmentName).includes(doctorName);
+  }
+
   // 電話番号フォーマット
   function formatPhoneNumber(phone) {
     if (!phone) return '';
@@ -1277,9 +1698,11 @@
   function collectFormData(modal, originalData) {
     const data = { ...originalData };
 
+    // 紹介先（コンボボックスから取得）
     data.destination_hospital = modal.querySelector('#rf-dest-hospital')?.value || '';
     data.destination_department = modal.querySelector('#rf-dest-department')?.value || '';
     data.destination_doctor = modal.querySelector('#rf-dest-doctor')?.value || '';
+
     data.purpose_and_history = modal.querySelector('#rf-purpose')?.value || '';
     data.family_history_text = modal.querySelector('#rf-family-history')?.value || '';
     data.remarks = modal.querySelector('#rf-remarks')?.value || '';
@@ -1318,7 +1741,15 @@
     const usePrescriptions = modal.querySelector('#rf-use-prescriptions');
     data.use_prescriptions = usePrescriptions?.checked ?? false;
 
-    if (!data.use_prescriptions) {
+    if (data.use_prescriptions && data.prescriptions.length > 0) {
+      data.selected_prescriptions = [];
+      data.prescriptions.forEach(rx => {
+        const cb = modal.querySelector(`#rf-prescription-${rx.recordId}`);
+        if (cb?.checked) {
+          data.selected_prescriptions.push(rx.recordId);
+        }
+      });
+    } else {
       data.prescription_text = modal.querySelector('#rf-prescription-text')?.value || '';
     }
 
@@ -1358,8 +1789,8 @@
 
     // 処方テキスト作成
     let prescriptionText = '';
-    if (formData.use_prescriptions && formData.prescriptions.length > 0) {
-      prescriptionText = formatPrescriptions(formData.prescriptions);
+    if (formData.use_prescriptions && formData.prescriptions.length > 0 && formData.selected_prescriptions?.length > 0) {
+      prescriptionText = formatSelectedPrescriptions(formData.prescriptions, formData.selected_prescriptions);
     } else {
       prescriptionText = formData.prescription_text || '';
     }

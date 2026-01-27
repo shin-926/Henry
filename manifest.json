@@ -1,6 +1,14 @@
 {
-  "version": "1.4.1",
+  "version": "1.6.0",
   "description": "Henryスクリプト動的ローダー用マニフェスト",
+  "categories": [
+    { "id": "documents", "label": "書類作成", "order": 1 },
+    { "id": "karte", "label": "カルテ", "order": 2 },
+    { "id": "efficiency", "label": "業務効率化", "order": 3 },
+    { "id": "reserve", "label": "予約連携", "order": 4 },
+    { "id": "google", "label": "Google連携", "order": 5 },
+    { "id": "dev", "label": "開発", "order": 99, "devOnly": true }
+  ],
   "scripts": [
     {
       "name": "henry_core",
@@ -23,6 +31,7 @@
       "label": "Google認証設定",
       "file": "henry_google_auth_settings.user.js",
       "match": ["henry-app.jp"],
+      "category": "google",
       "order": 5,
       "enabled": true
     },
@@ -31,6 +40,7 @@
       "label": "Google Drive連携",
       "file": "henry_google_drive_bridge.user.js",
       "match": ["henry-app.jp"],
+      "category": "google",
       "order": 10,
       "enabled": true
     },
@@ -39,6 +49,7 @@
       "label": "予約システム連携",
       "file": "henry_reserve_integration.user.js",
       "match": ["henry-app.jp", "manage-maokahp.reserve.ne.jp"],
+      "category": "reserve",
       "order": 10,
       "enabled": true
     },
@@ -47,6 +58,7 @@
       "label": "予約カレンダーUI",
       "file": "reserve_calendar_ui.user.js",
       "match": ["manage-maokahp.reserve.ne.jp"],
+      "category": "reserve",
       "order": 10,
       "enabled": true
     },
@@ -55,6 +67,7 @@
       "label": "照射オーダー補助",
       "file": "henry_imaging_order_helper.user.js",
       "match": ["henry-app.jp"],
+      "category": "efficiency",
       "order": 10,
       "enabled": true
     },
@@ -63,6 +76,7 @@
       "label": "病名登録",
       "file": "henry_disease_register.user.js",
       "match": ["henry-app.jp"],
+      "category": "karte",
       "order": 10,
       "enabled": true
     },
@@ -71,22 +85,25 @@
       "label": "オーダー履歴（ベータ版）",
       "file": "henry_order_history.user.js",
       "match": ["henry-app.jp"],
+      "category": "karte",
       "order": 10,
       "beta": true
     },
     {
       "name": "henry_prescription_history",
-      "label": "処方歴",
+      "label": "処方歴（ベータ版）",
       "file": "henry_prescription_history.user.js",
       "match": ["henry-app.jp"],
+      "category": "karte",
       "order": 10,
-      "enabled": true
+      "beta": true
     },
     {
-      "name": "henry_karte_history",
-      "label": "カルテ履歴（ベータ版）",
-      "file": "henry_karte_history.user.js",
+      "name": "henry_outpatient_karte_history",
+      "label": "外来カルテ履歴（ベータ版）",
+      "file": "henry_outpatient_karte_history.user.js",
       "match": ["henry-app.jp"],
+      "category": "karte",
       "order": 10,
       "beta": true
     },
@@ -95,14 +112,26 @@
       "label": "カルテ内容表示（ベータ版）",
       "file": "henry_note_reader.user.js",
       "match": ["henry-app.jp"],
+      "category": "karte",
       "order": 10,
       "beta": true
+    },
+    {
+      "name": "henry_hospitals",
+      "label": "近隣病院データ",
+      "file": "henry_hospitals.user.js",
+      "match": ["henry-app.jp"],
+      "category": "documents",
+      "order": 9,
+      "enabled": true,
+      "hidden": true
     },
     {
       "name": "henry_ikensho_form",
       "label": "主治医意見書",
       "file": "henry_ikensho_form.user.js",
       "match": ["henry-app.jp"],
+      "category": "documents",
       "order": 10,
       "enabled": true
     },
@@ -111,6 +140,43 @@
       "label": "診療情報提供書",
       "file": "henry_referral_form.user.js",
       "match": ["henry-app.jp"],
+      "category": "documents",
+      "order": 10,
+      "enabled": true
+    },
+    {
+      "name": "henry_ritsurin_referral_form",
+      "label": "りつりん病院 診療申込書",
+      "file": "henry_ritsurin_referral_form.user.js",
+      "match": ["henry-app.jp"],
+      "category": "documents",
+      "order": 10,
+      "enabled": true
+    },
+    {
+      "name": "henry_chuo_referral_form",
+      "label": "県立中央病院 診療申込書",
+      "file": "henry_chuo_referral_form.user.js",
+      "match": ["henry-app.jp"],
+      "category": "documents",
+      "order": 10,
+      "enabled": true
+    },
+    {
+      "name": "henry_sekijuji_referral_form",
+      "label": "高松赤十字病院 診療申込書",
+      "file": "henry_sekijuji_referral_form.user.js",
+      "match": ["henry-app.jp"],
+      "category": "documents",
+      "order": 10,
+      "enabled": true
+    },
+    {
+      "name": "henry_minna_referral_form",
+      "label": "みんなの病院 診療申込書",
+      "file": "henry_minna_referral_form.user.js",
+      "match": ["henry-app.jp"],
+      "category": "documents",
       "order": 10,
       "enabled": true
     },
@@ -119,6 +185,7 @@
       "label": "警察診断書",
       "file": "henry_police_certificate.user.js",
       "match": ["henry-app.jp"],
+      "category": "documents",
       "order": 10,
       "enabled": true
     },
@@ -127,6 +194,7 @@
       "label": "一括承認",
       "file": "henry_auto_approver.user.js",
       "match": ["henry-app.jp"],
+      "category": "efficiency",
       "order": 10,
       "enabled": true
     },
@@ -135,6 +203,7 @@
       "label": "ログイン補助",
       "file": "henry_login_helper.user.js",
       "match": ["henry-app.jp"],
+      "category": "efficiency",
       "order": 10,
       "enabled": true
     },
@@ -143,22 +212,25 @@
       "label": "セット検索",
       "file": "henry_set_search_helper.user.js",
       "match": ["henry-app.jp"],
+      "category": "efficiency",
       "order": 10,
       "enabled": true
     },
     {
       "name": "henry_reception_filter",
-      "label": "受付フィルタ",
+      "label": "受付フィルタ（ベータ版）",
       "file": "henry_reception_filter.user.js",
       "match": ["henry-app.jp"],
+      "category": "efficiency",
       "order": 10,
-      "enabled": true
+      "beta": true
     },
     {
       "name": "henry_memo",
       "label": "メモ帳",
       "file": "henry_memo.user.js",
       "match": ["henry-app.jp"],
+      "category": "efficiency",
       "order": 10,
       "enabled": true
     },
@@ -167,6 +239,7 @@
       "label": "入院データ取得（ベータ版）",
       "file": "henry_hospitalization_data.user.js",
       "match": ["henry-app.jp"],
+      "category": "karte",
       "order": 10,
       "beta": true
     },
@@ -175,6 +248,7 @@
       "label": "カルテ記録検索",
       "file": "henry_hospitalization_search.user.js",
       "match": ["henry-app.jp"],
+      "category": "karte",
       "order": 10,
       "enabled": true
     },
@@ -183,6 +257,7 @@
       "label": "テストヘルパー（ベータ版）",
       "file": "henry_test_helper.user.js",
       "match": ["henry-app.jp"],
+      "category": "dev",
       "order": 10,
       "beta": true
     },
@@ -191,6 +266,7 @@
       "label": "UI Mockup（ベータ版）",
       "file": "henry_ui_mockup.user.js",
       "match": ["henry-app.jp"],
+      "category": "dev",
       "order": 99,
       "beta": true
     }

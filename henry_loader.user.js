@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry Loader
 // @namespace    https://henry-app.jp/
-// @version      1.7.0
+// @version      1.8.0
 // @description  Henryスクリプトの動的ローダー（リリース版）
 // @author       sk powered by Claude
 // @match        https://henry-app.jp/*
@@ -60,7 +60,7 @@
     // 配布版でデフォルト無効にするスクリプト
     DEFAULT_DISABLED: [
       'henry_order_history',
-      'henry_karte_history',
+      'henry_outpatient_karte_history',
       'henry_note_reader',
       'henry_hospitalization_data',
       'henry_test_helper'
@@ -258,11 +258,13 @@ const unsafeWindow = window;
         .filter(s => matchesHost(s.match) && s.enabled !== false && s.beta !== true)
         .sort((a, b) => a.order - b.order);
 
-      // Toolbox用にmanifest情報を公開（ベータ版は設定パネルに非表示）
-      const visibleScripts = matchingScripts.filter(s => !(s.label || '').includes('ベータ版'));
+      // Toolbox用にmanifest情報を公開（ベータ版・hidden は設定パネルに非表示）
+      const visibleScripts = matchingScripts.filter(s => !(s.label || '').includes('ベータ版') && !s.hidden);
       const loadedScripts = new Set();
       pageWindow.HenryLoaderConfig = {
+        loaderName: 'henry_loader',  // 本番版識別用
         scripts: visibleScripts,
+        categories: manifest.categories || [],
         disabledScripts: disabledScripts,
         loadedScripts: loadedScripts,
         setDisabledScripts: (names) => {

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         ツールボックス
 // @namespace    https://haru-chan.example
-// @version      5.7.2
+// @version      5.8.1
 // @description  プラグイン方式。シンプルUI、Noto Sans JP、ドラッグ＆ドロップ並び替え対応。
 // @author       sk powered by Claude & Gemini
 // @match        https://henry-app.jp/*
@@ -137,8 +137,8 @@
     /* スクリプト設定パネル */
     #ht-settings-panel {
       position: fixed;
-      width: 320px;
-      max-height: 70vh;
+      width: 520px;
+      max-height: 80vh;
       background-color: #fff;
       border-radius: 8px;
       box-shadow: 0 4px 20px rgba(0,0,0,0.2);
@@ -171,8 +171,8 @@
       color: #374151;
     }
     .ht-settings-body {
-      padding: 8px 0;
-      max-height: calc(70vh - 100px);
+      padding: 12px 16px;
+      max-height: calc(80vh - 100px);
       overflow-y: auto;
     }
     .ht-scroll-indicator {
@@ -187,28 +187,60 @@
     .ht-scroll-indicator.visible {
       opacity: 1;
     }
+    /* カテゴリセクション（カード風） */
+    .ht-settings-category {
+      margin-bottom: 16px;
+    }
+    .ht-settings-category:last-child {
+      margin-bottom: 0;
+    }
+    .ht-settings-category-header {
+      font-size: 11px;
+      font-weight: 500;
+      color: #6B7280;
+      margin-bottom: 6px;
+      padding-left: 2px;
+    }
+    .ht-settings-card {
+      background: #f9fafb;
+      border-radius: 8px;
+      padding: 6px;
+      border: 1px solid #e5e7eb;
+    }
+    .ht-settings-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 2px;
+    }
     .ht-settings-item {
       display: flex;
       align-items: center;
       justify-content: space-between;
-      padding: 8px 16px;
+      padding: 6px 10px;
+      border-radius: 6px;
+      background: transparent;
     }
     .ht-settings-item:hover {
-      background: #f9fafb;
+      background: #f0f1f3;
     }
     .ht-settings-item-name {
-      font-size: 13px;
+      font-size: 12px;
       color: #374151;
       display: flex;
       align-items: center;
-      gap: 8px;
+      gap: 6px;
+      flex: 1;
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
     }
     .ht-settings-item-name.disabled {
       color: #9CA3AF;
     }
     .ht-status-dot {
-      width: 8px;
-      height: 8px;
+      width: 6px;
+      height: 6px;
       border-radius: 50%;
       flex-shrink: 0;
     }
@@ -220,12 +252,13 @@
     }
     .ht-settings-toggle {
       position: relative;
-      width: 40px;
-      height: 22px;
+      width: 36px;
+      height: 20px;
       background: #e5e7eb;
-      border-radius: 11px;
+      border-radius: 10px;
       cursor: pointer;
       transition: background 0.2s;
+      flex-shrink: 0;
     }
     .ht-settings-toggle.active {
       background: #10B981;
@@ -235,14 +268,14 @@
       position: absolute;
       top: 2px;
       left: 2px;
-      width: 18px;
-      height: 18px;
+      width: 16px;
+      height: 16px;
       background: #fff;
       border-radius: 50%;
       transition: transform 0.2s;
     }
     .ht-settings-toggle.active::after {
-      transform: translateX(18px);
+      transform: translateX(16px);
     }
     .ht-settings-footer {
       padding: 12px 16px;
@@ -301,7 +334,7 @@
       position: absolute;
       left: 100%;
       top: 0;
-      min-width: 180px;
+      min-width: 220px;
       background: #fff;
       border-radius: 8px;
       box-shadow: 0 4px 20px rgba(0,0,0,0.15);
@@ -671,6 +704,9 @@
     // 外部スクリプトの無効化状態を取得（Loaderがなくても動作）
     const externalDisabled = new Set(GM_getValue('loader-disabled-scripts', []));
 
+    // 開発版かどうか（ローダー名に dev が含まれるか）
+    const isDevMode = loaderConfig?.loaderName?.includes('dev') || false;
+
     if (!loaderConfig) {
       // Loader未検出でも外部スクリプトの設定は可能
       let html = `
@@ -682,8 +718,10 @@
           <div style="padding: 16px; color: #9CA3AF; text-align: center;">
             Loader未検出<br><small>Henry Loader経由で起動してください</small>
           </div>
-          <hr class="ht-settings-divider">
-          <div style="padding: 8px 16px 4px; font-size: 11px; color: #9CA3AF; font-weight: 500;">外部スクリプト</div>
+          <div class="ht-settings-category">
+            <div class="ht-settings-category-header">外部スクリプト</div>
+            <div class="ht-settings-card">
+              <div class="ht-settings-grid">
       `;
 
       EXTERNAL_SCRIPTS.forEach(script => {
@@ -702,6 +740,9 @@
       });
 
       html += `
+              </div>
+            </div>
+          </div>
         </div>
         <div class="ht-settings-footer">
           <small style="color: #9CA3AF;">外部スクリプトは対象サイトで反映</small>
@@ -734,21 +775,44 @@
     }
 
     const scripts = loaderConfig.scripts || [];
+    const categories = loaderConfig.categories || [];
     const disabled = loaderConfig.disabledScripts || new Set();
     const loaded = loaderConfig.loadedScripts || new Set();
 
     // 設定と実際の読み込み状態に差分があるかチェック
-    // loaderConfig.disabledScriptsを直接参照（setDisabledScriptsで更新されるため）
     const hasPendingChanges = () => {
       const currentDisabled = loaderConfig.disabledScripts || new Set();
       for (const script of scripts) {
         if (script.name === 'henry_core' || script.name === 'henry_toolbox') continue;
+        if (script.hidden) continue;
         const shouldBeLoaded = !currentDisabled.has(script.name);
         const isLoaded = loaded.has(script.name);
         if (shouldBeLoaded !== isLoaded) return true;
       }
       return false;
     };
+
+    // スクリプトをカテゴリごとにグループ化
+    const scriptsByCategory = {};
+    const uncategorized = [];
+
+    scripts.forEach(script => {
+      // henry_core と henry_toolbox と hidden は除外
+      if (script.name === 'henry_core' || script.name === 'henry_toolbox') return;
+      if (script.hidden) return;
+
+      if (script.category) {
+        if (!scriptsByCategory[script.category]) {
+          scriptsByCategory[script.category] = [];
+        }
+        scriptsByCategory[script.category].push(script);
+      } else {
+        uncategorized.push(script);
+      }
+    });
+
+    // カテゴリをorder順にソート
+    const sortedCategories = [...categories].sort((a, b) => (a.order || 99) - (b.order || 99));
 
     let html = `
       <div class="ht-settings-header">
@@ -758,40 +822,98 @@
       <div class="ht-settings-body">
     `;
 
-    // ベータ版を下に表示するためソート
-    const sortedScripts = [...scripts].sort((a, b) => {
-      const aIsBeta = (a.label || '').includes('ベータ版');
-      const bIsBeta = (b.label || '').includes('ベータ版');
-      if (aIsBeta && !bIsBeta) return 1;
-      if (!aIsBeta && bIsBeta) return -1;
-      return 0;
-    });
+    // カテゴリごとにセクションを生成
+    sortedCategories.forEach(category => {
+      // 開発カテゴリは開発版のみ表示
+      if (category.devOnly && !isDevMode) return;
 
-    sortedScripts.forEach(script => {
-      // henry_core と henry_toolbox は必須のため非表示
-      if (script.name === 'henry_core' || script.name === 'henry_toolbox') return;
+      const categoryScripts = scriptsByCategory[category.id] || [];
+      if (categoryScripts.length === 0) return;
 
-      const isEnabled = !disabled.has(script.name);
-      const isLoaded = loaded.has(script.name);
-      const nameClass = isEnabled ? '' : 'disabled';
-      const toggleClass = isEnabled ? 'active' : '';
-      const dotClass = isLoaded ? 'loaded' : 'not-loaded';
+      // カテゴリ内でソート（ベータ版を下に）
+      categoryScripts.sort((a, b) => {
+        const aIsBeta = (a.label || '').includes('ベータ版');
+        const bIsBeta = (b.label || '').includes('ベータ版');
+        if (aIsBeta && !bIsBeta) return 1;
+        if (!aIsBeta && bIsBeta) return -1;
+        return (a.order || 99) - (b.order || 99);
+      });
 
       html += `
-        <div class="ht-settings-item" data-script="${script.name}">
-          <span class="ht-settings-item-name ${nameClass}">
-            <span class="ht-status-dot ${dotClass}"></span>
-            ${script.label || script.name}
-          </span>
-          <div class="ht-settings-toggle ${toggleClass}" data-script="${script.name}"></div>
+        <div class="ht-settings-category">
+          <div class="ht-settings-category-header">${category.label}</div>
+          <div class="ht-settings-card">
+            <div class="ht-settings-grid">
+      `;
+
+      categoryScripts.forEach(script => {
+        const isEnabled = !disabled.has(script.name);
+        const isLoaded = loaded.has(script.name);
+        const nameClass = isEnabled ? '' : 'disabled';
+        const toggleClass = isEnabled ? 'active' : '';
+        const dotClass = isLoaded ? 'loaded' : 'not-loaded';
+        // ラベルから「（ベータ版）」を除去して短くする
+        const displayLabel = (script.label || script.name).replace('（ベータ版）', '').trim();
+
+        html += `
+          <div class="ht-settings-item" data-script="${script.name}">
+            <span class="ht-settings-item-name ${nameClass}">
+              <span class="ht-status-dot ${dotClass}"></span>
+              ${displayLabel}
+            </span>
+            <div class="ht-settings-toggle ${toggleClass}" data-script="${script.name}"></div>
+          </div>
+        `;
+      });
+
+      html += `
+            </div>
+          </div>
         </div>
       `;
     });
 
+    // 未分類があれば表示
+    if (uncategorized.length > 0) {
+      html += `
+        <div class="ht-settings-category">
+          <div class="ht-settings-category-header">その他</div>
+          <div class="ht-settings-card">
+            <div class="ht-settings-grid">
+      `;
+
+      uncategorized.forEach(script => {
+        const isEnabled = !disabled.has(script.name);
+        const isLoaded = loaded.has(script.name);
+        const nameClass = isEnabled ? '' : 'disabled';
+        const toggleClass = isEnabled ? 'active' : '';
+        const dotClass = isLoaded ? 'loaded' : 'not-loaded';
+        const displayLabel = (script.label || script.name).replace('（ベータ版）', '').trim();
+
+        html += `
+          <div class="ht-settings-item" data-script="${script.name}">
+            <span class="ht-settings-item-name ${nameClass}">
+              <span class="ht-status-dot ${dotClass}"></span>
+              ${displayLabel}
+            </span>
+            <div class="ht-settings-toggle ${toggleClass}" data-script="${script.name}"></div>
+          </div>
+        `;
+      });
+
+      html += `
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
     // 外部スクリプトセクション
     html += `
-      <hr class="ht-settings-divider">
-      <div style="padding: 8px 16px 4px; font-size: 11px; color: #9CA3AF; font-weight: 500;">外部スクリプト（他サイト）</div>
+      <div class="ht-settings-category">
+        <div class="ht-settings-category-header">外部スクリプト（他サイト）</div>
+        <div class="ht-settings-card">
+          <div class="ht-settings-grid">
     `;
 
     EXTERNAL_SCRIPTS.forEach(script => {
@@ -808,6 +930,12 @@
         </div>
       `;
     });
+
+    html += `
+          </div>
+        </div>
+      </div>
+    `;
 
     // 差分があれば「リロードして反映」を有効化
     const reloadClass = hasPendingChanges() ? '' : 'disabled';
