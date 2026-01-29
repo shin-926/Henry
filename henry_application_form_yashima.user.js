@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name         香川県立中央病院 診療申込書
+// @name         屋島総合病院 FAX診療申込書
 // @namespace    https://henry-app.jp/
-// @version      1.0.0
-// @description  香川県立中央病院への診療FAX予約申込書を作成
+// @version      1.0.1
+// @description  屋島総合病院へのFAX診療申込書を作成
 // @author       sk powered by Claude
 // @match        https://henry-app.jp/*
 // @grant        GM_xmlhttpRequest
@@ -13,46 +13,43 @@
 // @connect      www.googleapis.com
 // @connect      docs.googleapis.com
 // @run-at       document-idle
-// @updateURL    https://raw.githubusercontent.com/shin-926/Henry/main/henry_chuo_referral_form.user.js
-// @downloadURL  https://raw.githubusercontent.com/shin-926/Henry/main/henry_chuo_referral_form.user.js
+// @updateURL    https://raw.githubusercontent.com/shin-926/Henry/main/henry_application_form_yashima.user.js
+// @downloadURL  https://raw.githubusercontent.com/shin-926/Henry/main/henry_application_form_yashima.user.js
 // ==/UserScript==
 
 /*
- * 【香川県立中央病院 診療申込書フォーム】
+ * 【屋島総合病院 FAX診療申込書フォーム】
  *
  * ■ 使用場面
- * - 香川県立中央病院への診療FAX予約申込書を作成する場合
+ * - 屋島総合病院へのFAX診療申込書を作成する場合
  * - Henryから患者情報・病名を取得してフォームに自動入力
  *
  * ■ 主な機能
  * 1. 自動入力
- *    - 患者情報（氏名、ふりがな、生年月日等）
+ *    - 患者情報（氏名、ふりがな、生年月日、住所等）
  *    - 医師名（ログインユーザー）
  *    - 病名（選択式 or 手入力）
  *
- * 2. 中央病院固有の入力項目
- *    - 受診希望科（中央病院の診療科）
- *    - 希望医師名（診療科連動）
- *    - 第1希望日、第2希望日
- *    - 旧姓
- *    - 医師への連絡（無/済）
- *    - 紹介元医療機関の状況（入院中/通院中）
- *    - CD-R等の有無
- *    - 受診歴（有/無/不明）
+ * 2. 屋島総合病院固有の入力項目
+ *    - 受診希望科
+ *    - 希望医師名
+ *    - 希望来院日・時間
+ *    - 当院受診歴（有/無/不明）
+ *    - 新型コロナ問診（5項目）
  *
  * 3. Google Docs出力
  *    - 入力内容をGoogle Docsテンプレートに反映
  *
  * ■ 依存関係
  * - henry_core.user.js: GoogleAuth API（OAuth認証）
- * - henry_hospitals.user.js: 中央病院の診療科・医師データ
+ * - henry_hospitals.user.js: 屋島総合病院の診療科・医師データ
  * - Google Docs API: 文書の作成・編集
  */
 
 (function() {
   'use strict';
 
-  const SCRIPT_NAME = 'ChuoReferralForm';
+  const SCRIPT_NAME = 'YashimaReferralForm';
   const VERSION = GM_info.script.version;
 
   const pageWindow = typeof unsafeWindow !== 'undefined' ? unsafeWindow : window;
@@ -67,16 +64,24 @@
   };
 
   const TEMPLATE_CONFIG = {
-    TEMPLATE_ID: '1X-yv6Y8TWZsAr_ONBRF2D0Ipx3UcZ8s1NyBZxUvWgTE',
+    TEMPLATE_ID: '1qkfxrrKvypdUnm_J2BSHy7sPPWC902GZKm1A3PeaaOY',
     OUTPUT_FOLDER_NAME: 'Henry一時ファイル'
   };
 
-  // 香川県立中央病院固定
-  const HOSPITAL_NAME = '香川県立中央病院';
+  // 屋島総合病院固定
+  const HOSPITAL_NAME = '屋島総合病院';
 
   // localStorage設定
-  const STORAGE_KEY_PREFIX = 'henry_chuo_draft_';
+  const STORAGE_KEY_PREFIX = 'henry_yashima_draft_';
   const DRAFT_SCHEMA_VERSION = 1;
+
+  // テーマカラー（緑系）
+  const THEME = {
+    primary: '#616161',
+    primaryDark: '#424242',
+    primaryLight: '#e0e0e0',
+    accent: '#f5f5f5'
+  };
 
   let log = null;
 
@@ -96,6 +101,7 @@
             sexType
             postalCode
             addressLine_1
+            phoneNumber
           }
         }
       }
@@ -355,13 +361,36 @@
     return '';
   }
 
+  function formatPhoneNumber(phone) {
+    if (!phone) return '';
+
+    let normalized = phone.replace(/[０-９]/g, s => String.fromCharCode(s.charCodeAt(0) - 0xFEE0));
+    normalized = normalized.replace(/[ー−‐―]/g, '-');
+    const digitsOnly = normalized.replace(/[^0-9]/g, '');
+
+    if (digitsOnly.length === 11 && /^0[6789]0/.test(digitsOnly)) {
+      return `${digitsOnly.slice(0, 3)}-${digitsOnly.slice(3, 7)}-${digitsOnly.slice(7)}`;
+    }
+
+    if (digitsOnly.length === 7) {
+      return `${digitsOnly.slice(0, 3)}-${digitsOnly.slice(3)}`;
+    }
+
+    if (digitsOnly.length === 8) {
+      return `${digitsOnly.slice(0, 4)}-${digitsOnly.slice(4)}`;
+    }
+
+    return normalized;
+  }
+
   /**
-   * 希望日のフォーマット: "○年○月○日"
+   * 希望日のフォーマット: "○月○日　曜曜日"
    */
   function formatHopeDate(dateStr) {
     if (!dateStr) return '';
     const d = new Date(dateStr);
-    return `${d.getFullYear()}年${d.getMonth() + 1}月${d.getDate()}日`;
+    const weekdays = ['日', '月', '火', '水', '木', '金', '土'];
+    return `${d.getMonth() + 1}月${d.getDate()}日　${weekdays[d.getDay()]}曜日`;
   }
 
   function escapeHtml(str) {
@@ -454,7 +483,8 @@
         age: birthYear ? calculateAge(birthYear, birthMonth, birthDay) : '',
         sex: formatSex(p.detail?.sexType),
         postal_code: p.detail?.postalCode || '',
-        address: p.detail?.addressLine_1 || ''
+        address: p.detail?.addressLine_1 || '',
+        phone: p.detail?.phoneNumber || ''
       };
     } catch (e) {
       console.error(`[${SCRIPT_NAME}] 患者情報取得エラー:`, e.message);
@@ -498,7 +528,6 @@
 
       const diseases = result.data?.listPatientReceiptDiseases?.patientReceiptDiseases || [];
 
-      // 終了していない病名のみ、主病名優先でソート
       return diseases
         .filter(d => !d.endDate && d.outcome !== 'OUTCOME_CURED' && d.outcome !== 'OUTCOME_DIED')
         .sort((a, b) => {
@@ -533,13 +562,13 @@
     return pageWindow.HenryHospitals || null;
   }
 
-  function getChuoDepartments() {
+  function getYashimaDepartments() {
     const api = getHospitalsAPI();
     if (!api) return [];
     return api.getDepartments(HOSPITAL_NAME);
   }
 
-  function getChuoDoctors(departmentName) {
+  function getYashimaDoctors(departmentName) {
     const api = getHospitalsAPI();
     if (!api || !departmentName) return [];
     return api.getDoctors(HOSPITAL_NAME, departmentName);
@@ -549,7 +578,7 @@
   // フォーム表示
   // ==========================================
 
-  async function showChuoForm() {
+  async function showYashimaForm() {
     const HenryCore = pageWindow.HenryCore;
     if (!HenryCore) {
       alert('HenryCoreが見つかりません');
@@ -562,18 +591,15 @@
       return;
     }
 
-    // Google認証チェック
     const googleAuth = getGoogleAuth();
     if (!googleAuth) {
       alert('Google認証が設定されていません。\nHenry Toolboxの設定からGoogle認証を行ってください。');
       return;
     }
 
-    // スピナー表示
     const spinner = HenryCore.ui?.showSpinner?.('データを取得中...');
 
     try {
-      // データ取得（並列実行）
       const [patientInfo, physicianName, diseases] = await Promise.all([
         fetchPatientInfo(),
         fetchPhysicianName(),
@@ -587,10 +613,8 @@
         return;
       }
 
-      // 下書き読み込み
       const savedDraft = loadDraft(patientUuid);
 
-      // フォームデータ作成
       const formData = savedDraft?.data || {
         // 自動入力項目
         patient_uuid: patientUuid,
@@ -601,7 +625,7 @@
         sex: patientInfo.sex,
         postal_code: patientInfo.postal_code,
         address: patientInfo.address,
-        former_name: '',
+        phone: formatPhoneNumber(patientInfo.phone),
         physician_name: physicianName,
         creation_date_wareki: getTodayWareki(),
 
@@ -610,17 +634,26 @@
         selected_diseases: [],
         diagnosis_text: '',
 
-        // 中央病院固有
+        // 屋島総合病院固有
         destination_department: '',
         destination_doctor: '',
-        doctor_contact: 'none',
         hope_date_1: '',
-        hope_date_2: '',
+        hope_time_hour: '',
+        hope_time_minute: '',
         visit_history: 'unknown',
-        referral_status: 'outpatient',
-        attachment_notes: '',
-        cdr_status: 'none',
-        cdr_content: ''
+
+        // 新型コロナ問診
+        covid_infected: 'no',
+        covid_infected_date: '',
+        covid_contact: 'no',
+        covid_contact_detail: '',
+        covid_gathering: 'no',
+        covid_gathering_detail: '',
+        covid_symptoms: 'no',
+        covid_symptoms_detail: '',
+        covid_vaccine: 'done',
+        covid_vaccine_year: '',
+        covid_vaccine_month: ''
       };
 
       // 常に最新の自動取得データで更新
@@ -632,11 +665,11 @@
       formData.sex = patientInfo.sex;
       formData.postal_code = patientInfo.postal_code;
       formData.address = patientInfo.address;
+      formData.phone = formatPhoneNumber(patientInfo.phone);
       formData.physician_name = physicianName;
       formData.creation_date_wareki = getTodayWareki();
       formData.diseases = diseases;
 
-      // モーダル表示
       showFormModal(formData, savedDraft?.savedAt);
 
     } catch (e) {
@@ -647,17 +680,20 @@
   }
 
   function showFormModal(formData, lastSavedAt) {
-    // 既存モーダルを削除
-    const existingModal = document.getElementById('chuo-form-modal');
+    const existingModal = document.getElementById('yashima-form-modal');
     if (existingModal) existingModal.remove();
 
-    const departments = getChuoDepartments();
+    const departments = getYashimaDepartments();
+
+    // 時間選択肢を生成
+    const hourOptions = Array.from({ length: 10 }, (_, i) => 8 + i); // 8-17時
+    const minuteOptions = ['00', '15', '30', '45'];
 
     const modal = document.createElement('div');
-    modal.id = 'chuo-form-modal';
+    modal.id = 'yashima-form-modal';
     modal.innerHTML = `
       <style>
-        #chuo-form-modal {
+        #yashima-form-modal {
           position: fixed;
           top: 0;
           left: 0;
@@ -670,7 +706,7 @@
           justify-content: center;
           font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
         }
-        .crf-container {
+        .yrf-container {
           background: #fff;
           border-radius: 12px;
           width: 90%;
@@ -680,21 +716,21 @@
           flex-direction: column;
           box-shadow: 0 20px 60px rgba(0,0,0,0.3);
         }
-        .crf-header {
+        .yrf-header {
           padding: 20px 24px;
-          background: linear-gradient(135deg, #1976d2 0%, #1565c0 100%);
+          background: linear-gradient(135deg, ${THEME.primary} 0%, ${THEME.primaryDark} 100%);
           color: white;
           border-radius: 12px 12px 0 0;
           display: flex;
           justify-content: space-between;
           align-items: center;
         }
-        .crf-header h2 {
+        .yrf-header h2 {
           margin: 0;
           font-size: 20px;
           font-weight: 600;
         }
-        .crf-close {
+        .yrf-close {
           background: rgba(255,255,255,0.2);
           border: none;
           color: white;
@@ -704,41 +740,41 @@
           cursor: pointer;
           font-size: 20px;
         }
-        .crf-close:hover {
+        .yrf-close:hover {
           background: rgba(255,255,255,0.3);
         }
-        .crf-body {
+        .yrf-body {
           flex: 1;
           overflow-y: auto;
           padding: 24px;
         }
-        .crf-section {
+        .yrf-section {
           margin-bottom: 24px;
         }
-        .crf-section-title {
+        .yrf-section-title {
           font-size: 16px;
           font-weight: 600;
-          color: #1976d2;
+          color: ${THEME.primary};
           margin-bottom: 12px;
           padding-bottom: 8px;
-          border-bottom: 2px solid #bbdefb;
+          border-bottom: 2px solid ${THEME.primaryLight};
         }
-        .crf-row {
+        .yrf-row {
           display: flex;
           gap: 16px;
           margin-bottom: 12px;
         }
-        .crf-field {
+        .yrf-field {
           flex: 1;
         }
-        .crf-field label {
+        .yrf-field label {
           display: block;
           font-size: 13px;
           font-weight: 500;
           color: #666;
           margin-bottom: 4px;
         }
-        .crf-field input, .crf-field textarea, .crf-field select {
+        .yrf-field input, .yrf-field textarea, .yrf-field select {
           width: 100%;
           padding: 10px 12px;
           border: 1px solid #ddd;
@@ -746,32 +782,32 @@
           font-size: 14px;
           box-sizing: border-box;
         }
-        .crf-field input:focus, .crf-field textarea:focus, .crf-field select:focus {
+        .yrf-field input:focus, .yrf-field textarea:focus, .yrf-field select:focus {
           outline: none;
-          border-color: #1976d2;
-          box-shadow: 0 0 0 3px rgba(25, 118, 210, 0.1);
+          border-color: ${THEME.primary};
+          box-shadow: 0 0 0 3px rgba(46, 125, 50, 0.1);
         }
-        .crf-field select {
+        .yrf-field select {
           background: #fff;
           cursor: pointer;
         }
-        .crf-field select:disabled {
+        .yrf-field select:disabled {
           background: #f5f5f5;
           color: #999;
           cursor: not-allowed;
         }
-        .crf-field textarea {
+        .yrf-field textarea {
           resize: vertical;
           min-height: 60px;
         }
-        .crf-field.readonly input {
+        .yrf-field.readonly input {
           background: #f5f5f5;
           color: #666;
         }
-        .crf-combobox {
+        .yrf-combobox {
           position: relative;
         }
-        .crf-combobox-input {
+        .yrf-combobox-input {
           width: 100%;
           padding: 10px 36px 10px 12px;
           border: 1px solid #ddd;
@@ -779,16 +815,16 @@
           font-size: 14px;
           box-sizing: border-box;
         }
-        .crf-combobox-input:focus {
+        .yrf-combobox-input:focus {
           outline: none;
-          border-color: #1976d2;
-          box-shadow: 0 0 0 3px rgba(25, 118, 210, 0.1);
+          border-color: ${THEME.primary};
+          box-shadow: 0 0 0 3px rgba(46, 125, 50, 0.1);
         }
-        .crf-combobox-input:disabled {
+        .yrf-combobox-input:disabled {
           background: #f5f5f5;
           color: #999;
         }
-        .crf-combobox-toggle {
+        .yrf-combobox-toggle {
           position: absolute;
           right: 1px;
           top: 1px;
@@ -805,14 +841,14 @@
           color: #666;
           font-size: 12px;
         }
-        .crf-combobox-toggle:hover {
+        .yrf-combobox-toggle:hover {
           background: #e8e8e8;
         }
-        .crf-combobox-toggle:disabled {
+        .yrf-combobox-toggle:disabled {
           cursor: not-allowed;
           color: #bbb;
         }
-        .crf-combobox-dropdown {
+        .yrf-combobox-dropdown {
           display: none;
           position: absolute;
           top: 100%;
@@ -827,30 +863,30 @@
           box-shadow: 0 4px 12px rgba(0,0,0,0.15);
           z-index: 1000;
         }
-        .crf-combobox-dropdown.open {
+        .yrf-combobox-dropdown.open {
           display: block;
         }
-        .crf-combobox-option {
+        .yrf-combobox-option {
           padding: 10px 12px;
           cursor: pointer;
           font-size: 14px;
         }
-        .crf-combobox-option:hover {
-          background: #e3f2fd;
+        .yrf-combobox-option:hover {
+          background: ${THEME.accent};
         }
-        .crf-combobox-option.selected {
-          background: #bbdefb;
-          color: #1565c0;
+        .yrf-combobox-option.selected {
+          background: ${THEME.primaryLight};
+          color: ${THEME.primaryDark};
         }
-        .crf-combobox-empty {
+        .yrf-combobox-empty {
           padding: 10px 12px;
           color: #999;
           font-size: 14px;
         }
-        .crf-checkbox-group {
+        .yrf-checkbox-group {
           margin-top: 8px;
         }
-        .crf-checkbox-item {
+        .yrf-checkbox-item {
           display: flex;
           align-items: center;
           gap: 8px;
@@ -859,56 +895,96 @@
           border-radius: 6px;
           margin-bottom: 6px;
         }
-        .crf-checkbox-item input[type="checkbox"] {
+        .yrf-checkbox-item input[type="checkbox"] {
           width: 18px;
           height: 18px;
         }
-        .crf-checkbox-item label {
+        .yrf-checkbox-item label {
           margin: 0;
           flex: 1;
           font-size: 14px;
           color: #333;
         }
-        .crf-checkbox-item.main-disease {
-          background: #e3f2fd;
-          border: 1px solid #90caf9;
+        .yrf-checkbox-item.main-disease {
+          background: ${THEME.accent};
+          border: 1px solid ${THEME.primaryLight};
         }
-        .crf-radio-group {
+        .yrf-radio-group {
           display: flex;
           gap: 16px;
           margin-top: 8px;
         }
-        .crf-radio-item {
+        .yrf-radio-item {
           display: flex;
           align-items: center;
           gap: 6px;
         }
-        .crf-radio-item input[type="radio"] {
+        .yrf-radio-item input[type="radio"] {
           width: 18px;
           height: 18px;
         }
-        .crf-radio-item label {
+        .yrf-radio-item label {
           font-size: 14px;
           color: #333;
           margin: 0;
         }
-        .crf-inline-field {
+        .yrf-time-row {
           display: flex;
-          align-items: center;
           gap: 8px;
+          align-items: center;
         }
-        .crf-inline-field input[type="text"] {
-          flex: 1;
-          padding: 8px 12px;
-          border: 1px solid #ddd;
+        .yrf-time-row select {
+          width: 80px;
+        }
+        .yrf-covid-section {
+          background: #fff8e1;
+          border: 1px solid #ffe082;
+          border-radius: 8px;
+          padding: 16px;
+        }
+        .yrf-covid-section .yrf-section-title {
+          color: #f57c00;
+          border-bottom-color: #ffe082;
+        }
+        .yrf-covid-row {
+          display: flex;
+          gap: 12px;
+          align-items: center;
+          margin-bottom: 12px;
+          padding: 10px 12px;
+          background: #fffde7;
           border-radius: 6px;
+          flex-wrap: wrap;
+        }
+        .yrf-covid-row .question {
+          flex: 1;
+          min-width: 200px;
+          font-size: 13px;
+          color: #333;
+        }
+        .yrf-covid-row .question-num {
+          font-weight: 600;
+          color: #f57c00;
+          margin-right: 4px;
+        }
+        .yrf-covid-row input[type="text"],
+        .yrf-covid-row input[type="date"],
+        .yrf-covid-row select {
+          padding: 6px 10px;
+          border: 1px solid #ddd;
+          border-radius: 4px;
           font-size: 14px;
         }
-        .crf-inline-field input[type="text"]:disabled {
-          background: #f5f5f5;
-          color: #999;
+        .yrf-covid-row input[type="text"] {
+          width: 120px;
         }
-        .crf-footer {
+        .yrf-covid-row input[type="date"] {
+          width: 150px;
+        }
+        .yrf-covid-row select {
+          width: 70px;
+        }
+        .yrf-footer {
           padding: 16px 24px;
           background: #f5f5f5;
           border-radius: 0 0 12px 12px;
@@ -916,15 +992,15 @@
           justify-content: space-between;
           align-items: center;
         }
-        .crf-footer-left {
+        .yrf-footer-left {
           font-size: 12px;
           color: #888;
         }
-        .crf-footer-right {
+        .yrf-footer-right {
           display: flex;
           gap: 12px;
         }
-        .crf-btn {
+        .yrf-btn {
           padding: 10px 24px;
           border: none;
           border-radius: 6px;
@@ -933,112 +1009,105 @@
           cursor: pointer;
           transition: all 0.2s;
         }
-        .crf-btn-secondary {
+        .yrf-btn-secondary {
           background: #e0e0e0;
           color: #333;
         }
-        .crf-btn-secondary:hover {
+        .yrf-btn-secondary:hover {
           background: #d0d0d0;
         }
-        .crf-btn-primary {
-          background: #1976d2;
+        .yrf-btn-primary {
+          background: ${THEME.primary};
           color: white;
         }
-        .crf-btn-primary:hover {
-          background: #1565c0;
+        .yrf-btn-primary:hover {
+          background: ${THEME.primaryDark};
         }
-        .crf-btn-primary:disabled {
+        .yrf-btn-primary:disabled {
           background: #ccc;
           cursor: not-allowed;
         }
-        .crf-btn-link {
-          background: #e3f2fd;
-          color: #1976d2;
-          border: 1px solid #90caf9;
+        .yrf-btn-link {
+          background: ${THEME.accent};
+          color: ${THEME.primaryDark};
+          border: 1px solid ${THEME.primaryLight};
           padding: 8px 12px;
           white-space: nowrap;
           font-size: 13px;
         }
-        .crf-btn-link:hover {
-          background: #bbdefb;
+        .yrf-btn-link:hover {
+          background: ${THEME.primaryLight};
         }
       </style>
-      <div class="crf-container">
-        <div class="crf-header">
-          <h2>香川県立中央病院 診療申込書</h2>
-          <button class="crf-close" title="閉じる">&times;</button>
+      <div class="yrf-container">
+        <div class="yrf-header">
+          <h2>屋島総合病院 FAX診療申込書</h2>
+          <button class="yrf-close" title="閉じる">&times;</button>
         </div>
-        <div class="crf-body">
+        <div class="yrf-body">
           <!-- 患者情報（自動入力） -->
-          <div class="crf-section">
-            <div class="crf-section-title">患者情報（自動入力）</div>
-            <div class="crf-row">
-              <div class="crf-field readonly">
-                <label>フリガナ</label>
+          <div class="yrf-section">
+            <div class="yrf-section-title">患者情報（自動入力）</div>
+            <div class="yrf-row">
+              <div class="yrf-field readonly">
+                <label>ふりがな</label>
                 <input type="text" value="${escapeHtml(formData.patient_name_kana)}" readonly>
               </div>
-              <div class="crf-field readonly">
+              <div class="yrf-field readonly">
                 <label>患者氏名</label>
                 <input type="text" value="${escapeHtml(formData.patient_name)}" readonly>
               </div>
-              <div class="crf-field" style="flex: 0.5;">
-                <label>旧姓</label>
-                <input type="text" id="crf-former-name" value="${escapeHtml(formData.former_name)}" placeholder="旧姓があれば入力">
-              </div>
-            </div>
-            <div class="crf-row">
-              <div class="crf-field readonly" style="flex: 0.3;">
+              <div class="yrf-field readonly" style="flex: 0.3;">
                 <label>性別</label>
                 <input type="text" value="${escapeHtml(formData.sex)}" readonly>
               </div>
-              <div class="crf-field readonly">
+            </div>
+            <div class="yrf-row">
+              <div class="yrf-field readonly">
                 <label>生年月日</label>
                 <input type="text" value="${escapeHtml(formData.birth_date_wareki)}" readonly>
               </div>
-              <div class="crf-field readonly" style="flex: 0.3;">
+              <div class="yrf-field readonly" style="flex: 0.3;">
                 <label>年齢</label>
                 <input type="text" value="${formData.age}歳" readonly>
+              </div>
+            </div>
+            <div class="yrf-row">
+              <div class="yrf-field readonly">
+                <label>住所</label>
+                <input type="text" value="${escapeHtml(formData.address)}" readonly>
+              </div>
+            </div>
+            <div class="yrf-row">
+              <div class="yrf-field readonly">
+                <label>電話番号</label>
+                <input type="text" value="${escapeHtml(formData.phone)}" readonly>
               </div>
             </div>
           </div>
 
           <!-- 紹介元情報（自動入力） -->
-          <div class="crf-section">
-            <div class="crf-section-title">紹介元情報（自動入力）</div>
-            <div class="crf-row">
-              <div class="crf-field readonly">
+          <div class="yrf-section">
+            <div class="yrf-section-title">紹介元情報（自動入力）</div>
+            <div class="yrf-row">
+              <div class="yrf-field readonly">
                 <label>医師名</label>
                 <input type="text" value="${escapeHtml(formData.physician_name)}" readonly>
               </div>
-              <div class="crf-field readonly" style="flex: 0.5;">
+              <div class="yrf-field readonly" style="flex: 0.5;">
                 <label>作成日</label>
                 <input type="text" value="${escapeHtml(formData.creation_date_wareki)}" readonly>
               </div>
             </div>
-            <div class="crf-row">
-              <div class="crf-field">
-                <label>紹介元医療機関の状況</label>
-                <div class="crf-radio-group">
-                  <div class="crf-radio-item">
-                    <input type="radio" name="crf-referral-status" id="crf-referral-outpatient" value="outpatient" ${formData.referral_status === 'outpatient' ? 'checked' : ''}>
-                    <label for="crf-referral-outpatient">通院中</label>
-                  </div>
-                  <div class="crf-radio-item">
-                    <input type="radio" name="crf-referral-status" id="crf-referral-inpatient" value="inpatient" ${formData.referral_status === 'inpatient' ? 'checked' : ''}>
-                    <label for="crf-referral-inpatient">入院中</label>
-                  </div>
-                </div>
-              </div>
-            </div>
           </div>
 
-          <!-- 中央病院 受診希望 -->
-          <div class="crf-section">
-            <div class="crf-section-title">中央病院 受診希望</div>
-            <div class="crf-row">
-              <div class="crf-field">
-                <label>希望受診科</label>
-                <select id="crf-dest-department">
+          <!-- 屋島総合病院 受診希望 -->
+          <div class="yrf-section">
+            <div class="yrf-section-title">屋島総合病院 受診希望</div>
+            <div class="yrf-row">
+              <div class="yrf-field">
+                <label>受診希望科</label>
+                <select id="yrf-dest-department">
                   <option value="">選択してください</option>
                   ${departments.map(dept => `
                     <option value="${escapeHtml(dept)}" ${formData.destination_department === dept ? 'selected' : ''}>
@@ -1047,128 +1116,184 @@
                   `).join('')}
                 </select>
               </div>
-              <div class="crf-field">
+              <div class="yrf-field">
                 <label>希望医師名</label>
                 <div style="display: flex; gap: 8px; align-items: flex-start;">
-                  <div class="crf-combobox" data-field="doctor" style="flex: 1;">
-                    <input type="text" class="crf-combobox-input" id="crf-dest-doctor" value="${escapeHtml(formData.destination_doctor)}" placeholder="医師名を入力" ${!formData.destination_department ? 'disabled' : ''}>
-                    <button type="button" class="crf-combobox-toggle" ${!formData.destination_department ? 'disabled' : ''} title="リストから選択">▼</button>
-                    <div class="crf-combobox-dropdown" id="crf-doctor-dropdown"></div>
+                  <div class="yrf-combobox" data-field="doctor" style="flex: 1;">
+                    <input type="text" class="yrf-combobox-input" id="yrf-dest-doctor" value="${escapeHtml(formData.destination_doctor)}" placeholder="医師名を入力" ${!formData.destination_department ? 'disabled' : ''}>
+                    <button type="button" class="yrf-combobox-toggle" ${!formData.destination_department ? 'disabled' : ''} title="リストから選択">▼</button>
+                    <div class="yrf-combobox-dropdown" id="yrf-doctor-dropdown"></div>
                   </div>
-                  <button type="button" class="crf-btn crf-btn-link" id="crf-open-schedule" title="外来診療予定表を見る">📅 外来表</button>
-                </div>
-              </div>
-            </div>
-            <div class="crf-row">
-              <div class="crf-field">
-                <label>医師への連絡</label>
-                <div class="crf-radio-group">
-                  <div class="crf-radio-item">
-                    <input type="radio" name="crf-doctor-contact" id="crf-contact-none" value="none" ${formData.doctor_contact === 'none' ? 'checked' : ''}>
-                    <label for="crf-contact-none">無</label>
-                  </div>
-                  <div class="crf-radio-item">
-                    <input type="radio" name="crf-doctor-contact" id="crf-contact-done" value="done" ${formData.doctor_contact === 'done' ? 'checked' : ''}>
-                    <label for="crf-contact-done">済</label>
-                  </div>
+                  <button type="button" class="yrf-btn yrf-btn-link" id="yrf-open-schedule" title="外来診療担当表を見る">外来表</button>
                 </div>
               </div>
             </div>
           </div>
 
-          <!-- 受診希望日 -->
-          <div class="crf-section">
-            <div class="crf-section-title">受診希望日</div>
-            <div class="crf-row">
-              <div class="crf-field">
-                <label>第1希望日</label>
-                <input type="date" id="crf-hope-date-1" value="${escapeHtml(formData.hope_date_1)}">
+          <!-- 希望来院日 -->
+          <div class="yrf-section">
+            <div class="yrf-section-title">希望来院日</div>
+            <div class="yrf-row">
+              <div class="yrf-field">
+                <label>希望日</label>
+                <input type="date" id="yrf-hope-date-1" value="${escapeHtml(formData.hope_date_1)}">
               </div>
-              <div class="crf-field">
-                <label>第2希望日</label>
-                <input type="date" id="crf-hope-date-2" value="${escapeHtml(formData.hope_date_2)}">
-              </div>
-            </div>
-          </div>
-
-          <!-- 中央病院受診歴 -->
-          <div class="crf-section">
-            <div class="crf-section-title">中央病院 受診歴</div>
-            <div class="crf-radio-group">
-              <div class="crf-radio-item">
-                <input type="radio" name="crf-visit-history" id="crf-visit-yes" value="yes" ${formData.visit_history === 'yes' ? 'checked' : ''}>
-                <label for="crf-visit-yes">有</label>
-              </div>
-              <div class="crf-radio-item">
-                <input type="radio" name="crf-visit-history" id="crf-visit-no" value="no" ${formData.visit_history === 'no' ? 'checked' : ''}>
-                <label for="crf-visit-no">無</label>
-              </div>
-              <div class="crf-radio-item">
-                <input type="radio" name="crf-visit-history" id="crf-visit-unknown" value="unknown" ${formData.visit_history === 'unknown' ? 'checked' : ''}>
-                <label for="crf-visit-unknown">不明</label>
+              <div class="yrf-field">
+                <label>希望時間</label>
+                <div class="yrf-time-row">
+                  <select id="yrf-hope-time-hour">
+                    <option value="">時</option>
+                    ${hourOptions.map(h => `
+                      <option value="${h}" ${formData.hope_time_hour === String(h) ? 'selected' : ''}>${h}</option>
+                    `).join('')}
+                  </select>
+                  <span>時</span>
+                  <select id="yrf-hope-time-minute">
+                    <option value="">分</option>
+                    ${minuteOptions.map(m => `
+                      <option value="${m}" ${formData.hope_time_minute === m ? 'selected' : ''}>${m}</option>
+                    `).join('')}
+                  </select>
+                  <span>分</span>
+                </div>
               </div>
             </div>
           </div>
 
-          <!-- 診療依頼目的・病名 -->
-          <div class="crf-section">
-            <div class="crf-section-title">受診依頼目的・病名</div>
+          <!-- 当院受診歴 -->
+          <div class="yrf-section">
+            <div class="yrf-section-title">屋島総合病院 受診歴</div>
+            <div class="yrf-radio-group">
+              <div class="yrf-radio-item">
+                <input type="radio" name="yrf-visit-history" id="yrf-visit-yes" value="yes" ${formData.visit_history === 'yes' ? 'checked' : ''}>
+                <label for="yrf-visit-yes">有</label>
+              </div>
+              <div class="yrf-radio-item">
+                <input type="radio" name="yrf-visit-history" id="yrf-visit-no" value="no" ${formData.visit_history === 'no' ? 'checked' : ''}>
+                <label for="yrf-visit-no">無</label>
+              </div>
+              <div class="yrf-radio-item">
+                <input type="radio" name="yrf-visit-history" id="yrf-visit-unknown" value="unknown" ${formData.visit_history === 'unknown' ? 'checked' : ''}>
+                <label for="yrf-visit-unknown">不明</label>
+              </div>
+            </div>
+          </div>
+
+          <!-- 主訴又は傷病名 -->
+          <div class="yrf-section">
+            <div class="yrf-section-title">主訴又は傷病名</div>
             ${formData.diseases.length > 0 ? `
               <div style="margin-bottom: 12px;">
                 <label style="display: block; font-size: 13px; font-weight: 500; color: #666; margin-bottom: 8px;">登録済み病名から選択</label>
-                <div id="crf-diseases-list" class="crf-checkbox-group">
+                <div id="yrf-diseases-list" class="yrf-checkbox-group">
                   ${formData.diseases.map(d => `
-                    <div class="crf-checkbox-item ${d.isMain ? 'main-disease' : ''}">
-                      <input type="checkbox" id="crf-disease-${d.uuid}" value="${d.uuid}"
+                    <div class="yrf-checkbox-item ${d.isMain ? 'main-disease' : ''}">
+                      <input type="checkbox" id="yrf-disease-${d.uuid}" value="${d.uuid}"
                         ${formData.selected_diseases?.includes(d.uuid) ? 'checked' : ''}>
-                      <label for="crf-disease-${d.uuid}">${escapeHtml(d.name)}${d.isMain ? ' (主病名)' : ''}${d.isSuspected ? ' (疑い)' : ''}</label>
+                      <label for="yrf-disease-${d.uuid}">${escapeHtml(d.name)}${d.isMain ? ' (主病名)' : ''}${d.isSuspected ? ' (疑い)' : ''}</label>
                     </div>
                   `).join('')}
                 </div>
               </div>
             ` : ''}
-            <div class="crf-field">
-              <label>自由記述（受診依頼目的など）</label>
-              <textarea id="crf-diagnosis-text" placeholder="受診依頼目的や追加の病名を入力">${escapeHtml(formData.diagnosis_text)}</textarea>
+            <div class="yrf-field">
+              <label>自由記述</label>
+              <textarea id="yrf-diagnosis-text" placeholder="主訴又は傷病名を入力">${escapeHtml(formData.diagnosis_text)}</textarea>
             </div>
           </div>
 
-          <!-- 紹介状添付資料・CD-R -->
-          <div class="crf-section">
-            <div class="crf-section-title">紹介状添付資料</div>
-            <div class="crf-row">
-              <div class="crf-field">
-                <label>紹介状添付資料（備考）</label>
-                <input type="text" id="crf-attachment-notes" value="${escapeHtml(formData.attachment_notes)}" placeholder="添付資料があれば記入">
-              </div>
-            </div>
-            <div class="crf-row">
-              <div class="crf-field">
-                <label>CD-R等の有無</label>
-                <div class="crf-inline-field">
-                  <div class="crf-radio-group" style="margin-top: 0;">
-                    <div class="crf-radio-item">
-                      <input type="radio" name="crf-cdr-status" id="crf-cdr-yes" value="yes" ${formData.cdr_status === 'yes' ? 'checked' : ''}>
-                      <label for="crf-cdr-yes">有</label>
-                    </div>
-                    <div class="crf-radio-item">
-                      <input type="radio" name="crf-cdr-status" id="crf-cdr-no" value="none" ${formData.cdr_status === 'none' ? 'checked' : ''}>
-                      <label for="crf-cdr-no">無</label>
-                    </div>
-                  </div>
-                  <input type="text" id="crf-cdr-content" value="${escapeHtml(formData.cdr_content)}" placeholder="内容（CT画像など）" ${formData.cdr_status !== 'yes' ? 'disabled' : ''} style="max-width: 300px;">
+          <!-- 新型コロナ問診 -->
+          <div class="yrf-section yrf-covid-section">
+            <div class="yrf-section-title">新型コロナウイルス感染症への対策</div>
+
+            <div class="yrf-covid-row">
+              <div class="question"><span class="question-num">①</span>2ヶ月以内に、コロナに感染しましたか？</div>
+              <div class="yrf-radio-group">
+                <div class="yrf-radio-item">
+                  <input type="radio" name="yrf-covid-infected" id="yrf-covid-infected-no" value="no" ${formData.covid_infected === 'no' ? 'checked' : ''}>
+                  <label for="yrf-covid-infected-no">いいえ</label>
+                </div>
+                <div class="yrf-radio-item">
+                  <input type="radio" name="yrf-covid-infected" id="yrf-covid-infected-yes" value="yes" ${formData.covid_infected === 'yes' ? 'checked' : ''}>
+                  <label for="yrf-covid-infected-yes">はい</label>
                 </div>
               </div>
+              <span style="font-size: 13px;">診断日:</span>
+              <input type="date" id="yrf-covid-infected-date" value="${escapeHtml(formData.covid_infected_date)}" ${formData.covid_infected !== 'yes' ? 'disabled' : ''}>
+            </div>
+
+            <div class="yrf-covid-row">
+              <div class="question"><span class="question-num">②</span>2週間以内に、コロナ感染者との接触や、発生施設等との関連がありませんか？</div>
+              <div class="yrf-radio-group">
+                <div class="yrf-radio-item">
+                  <input type="radio" name="yrf-covid-contact" id="yrf-covid-contact-no" value="no" ${formData.covid_contact === 'no' ? 'checked' : ''}>
+                  <label for="yrf-covid-contact-no">なし</label>
+                </div>
+                <div class="yrf-radio-item">
+                  <input type="radio" name="yrf-covid-contact" id="yrf-covid-contact-yes" value="yes" ${formData.covid_contact === 'yes' ? 'checked' : ''}>
+                  <label for="yrf-covid-contact-yes">あり</label>
+                </div>
+              </div>
+              <input type="text" id="yrf-covid-contact-detail" value="${escapeHtml(formData.covid_contact_detail)}" placeholder="詳細" ${formData.covid_contact !== 'yes' ? 'disabled' : ''}>
+            </div>
+
+            <div class="yrf-covid-row">
+              <div class="question"><span class="question-num">③</span>2週間以内に、同居家族以外との会食、大勢が集まるイベントなどへの参加はありませんか？</div>
+              <div class="yrf-radio-group">
+                <div class="yrf-radio-item">
+                  <input type="radio" name="yrf-covid-gathering" id="yrf-covid-gathering-no" value="no" ${formData.covid_gathering === 'no' ? 'checked' : ''}>
+                  <label for="yrf-covid-gathering-no">なし</label>
+                </div>
+                <div class="yrf-radio-item">
+                  <input type="radio" name="yrf-covid-gathering" id="yrf-covid-gathering-yes" value="yes" ${formData.covid_gathering === 'yes' ? 'checked' : ''}>
+                  <label for="yrf-covid-gathering-yes">あり</label>
+                </div>
+              </div>
+              <input type="text" id="yrf-covid-gathering-detail" value="${escapeHtml(formData.covid_gathering_detail)}" placeholder="詳細" ${formData.covid_gathering !== 'yes' ? 'disabled' : ''}>
+            </div>
+
+            <div class="yrf-covid-row">
+              <div class="question"><span class="question-num">④</span>1週間以内に、37度以上の発熱、咳、のどの痛み、鼻みず、嘔吐・下痢等の症状はありませんか？</div>
+              <div class="yrf-radio-group">
+                <div class="yrf-radio-item">
+                  <input type="radio" name="yrf-covid-symptoms" id="yrf-covid-symptoms-no" value="no" ${formData.covid_symptoms === 'no' ? 'checked' : ''}>
+                  <label for="yrf-covid-symptoms-no">なし</label>
+                </div>
+                <div class="yrf-radio-item">
+                  <input type="radio" name="yrf-covid-symptoms" id="yrf-covid-symptoms-yes" value="yes" ${formData.covid_symptoms === 'yes' ? 'checked' : ''}>
+                  <label for="yrf-covid-symptoms-yes">あり</label>
+                </div>
+              </div>
+              <input type="text" id="yrf-covid-symptoms-detail" value="${escapeHtml(formData.covid_symptoms_detail)}" placeholder="詳細" ${formData.covid_symptoms !== 'yes' ? 'disabled' : ''}>
+            </div>
+
+            <div class="yrf-covid-row">
+              <div class="question"><span class="question-num">⑤</span>コロナワクチン接種状況</div>
+              <div class="yrf-radio-group">
+                <div class="yrf-radio-item">
+                  <input type="radio" name="yrf-covid-vaccine" id="yrf-covid-vaccine-done" value="done" ${formData.covid_vaccine === 'done' ? 'checked' : ''}>
+                  <label for="yrf-covid-vaccine-done">済</label>
+                </div>
+                <div class="yrf-radio-item">
+                  <input type="radio" name="yrf-covid-vaccine" id="yrf-covid-vaccine-not" value="not" ${formData.covid_vaccine === 'not' ? 'checked' : ''}>
+                  <label for="yrf-covid-vaccine-not">未</label>
+                </div>
+              </div>
+              <span style="font-size: 13px;">最終:</span>
+              <input type="text" id="yrf-covid-vaccine-year" value="${escapeHtml(formData.covid_vaccine_year)}" placeholder="年" style="width: 60px;" ${formData.covid_vaccine !== 'done' ? 'disabled' : ''}>
+              <span style="font-size: 13px;">年</span>
+              <input type="text" id="yrf-covid-vaccine-month" value="${escapeHtml(formData.covid_vaccine_month)}" placeholder="月" style="width: 50px;" ${formData.covid_vaccine !== 'done' ? 'disabled' : ''}>
+              <span style="font-size: 13px;">月頃</span>
             </div>
           </div>
         </div>
-        <div class="crf-footer">
-          <div class="crf-footer-left">
+        <div class="yrf-footer">
+          <div class="yrf-footer-left">
             ${lastSavedAt ? `下書き: ${new Date(lastSavedAt).toLocaleString('ja-JP')}` : ''}
           </div>
-          <div class="crf-footer-right">
-            <button class="crf-btn crf-btn-secondary" id="crf-save-draft">下書き保存</button>
-            <button class="crf-btn crf-btn-primary" id="crf-generate">Google Docsに出力</button>
+          <div class="yrf-footer-right">
+            <button class="yrf-btn yrf-btn-secondary" id="yrf-save-draft">下書き保存</button>
+            <button class="yrf-btn yrf-btn-primary" id="yrf-generate">Google Docsに出力</button>
           </div>
         </div>
       </div>
@@ -1177,39 +1302,40 @@
     document.body.appendChild(modal);
 
     // イベントリスナー
-    modal.querySelector('.crf-close').addEventListener('click', () => modal.remove());
+    modal.querySelector('.yrf-close').addEventListener('click', () => modal.remove());
     modal.addEventListener('click', (e) => {
       if (e.target === modal) modal.remove();
     });
 
-    // 診療科・医師コンボボックスの連携
-    const deptSelect = modal.querySelector('#crf-dest-department');
-    const doctorInput = modal.querySelector('#crf-dest-doctor');
-    const doctorDropdown = modal.querySelector('#crf-doctor-dropdown');
-    const doctorCombobox = modal.querySelector('.crf-combobox[data-field="doctor"]');
+    // 外来診療担当表ボタン
+    modal.querySelector('#yrf-open-schedule').addEventListener('click', () => {
+      window.open('https://www.yashima-hp.com/outpatient/doctor/', '_blank');
+    });
 
-    // ドロップダウンを閉じる
+    // 診療科・医師コンボボックスの連携
+    const deptSelect = modal.querySelector('#yrf-dest-department');
+    const doctorInput = modal.querySelector('#yrf-dest-doctor');
+    const doctorDropdown = modal.querySelector('#yrf-doctor-dropdown');
+    const doctorCombobox = modal.querySelector('.yrf-combobox[data-field="doctor"]');
+
     function closeAllDropdowns() {
-      modal.querySelectorAll('.crf-combobox-dropdown').forEach(d => d.classList.remove('open'));
+      modal.querySelectorAll('.yrf-combobox-dropdown').forEach(d => d.classList.remove('open'));
     }
 
-    // ドロップダウンの選択肢を生成
     function renderDropdownOptions(dropdown, options, currentValue) {
       if (options.length === 0) {
-        dropdown.innerHTML = '<div class="crf-combobox-empty">選択肢がありません</div>';
+        dropdown.innerHTML = '<div class="yrf-combobox-empty">選択肢がありません</div>';
       } else {
         dropdown.innerHTML = options.map(opt =>
-          `<div class="crf-combobox-option ${opt === currentValue ? 'selected' : ''}" data-value="${escapeHtml(opt)}">${escapeHtml(opt)}</div>`
+          `<div class="yrf-combobox-option ${opt === currentValue ? 'selected' : ''}" data-value="${escapeHtml(opt)}">${escapeHtml(opt)}</div>`
         ).join('');
       }
     }
 
-    // 医師ドロップダウンを開く
     function openDoctorDropdown() {
       closeAllDropdowns();
       const deptName = deptSelect.value;
-      let doctors = getChuoDoctors(deptName);
-      // 「担当医」を常に追加
+      let doctors = getYashimaDoctors(deptName);
       if (!doctors.includes('担当医')) {
         doctors = [...doctors, '担当医'];
       }
@@ -1217,18 +1343,16 @@
       doctorDropdown.classList.add('open');
     }
 
-    // 診療科変更時
     deptSelect.addEventListener('change', () => {
       const hasValue = !!deptSelect.value;
       doctorInput.disabled = !hasValue;
-      doctorCombobox.querySelector('.crf-combobox-toggle').disabled = !hasValue;
+      doctorCombobox.querySelector('.yrf-combobox-toggle').disabled = !hasValue;
       if (!hasValue) {
         doctorInput.value = '';
       }
     });
 
-    // 医師▼ボタン
-    doctorCombobox.querySelector('.crf-combobox-toggle').addEventListener('click', (e) => {
+    doctorCombobox.querySelector('.yrf-combobox-toggle').addEventListener('click', (e) => {
       e.stopPropagation();
       if (doctorDropdown.classList.contains('open')) {
         closeAllDropdowns();
@@ -1237,44 +1361,69 @@
       }
     });
 
-    // 医師選択肢クリック
     doctorDropdown.addEventListener('click', (e) => {
-      const option = e.target.closest('.crf-combobox-option');
+      const option = e.target.closest('.yrf-combobox-option');
       if (option) {
         doctorInput.value = option.dataset.value;
         closeAllDropdowns();
       }
     });
 
-    // モーダル内クリックでドロップダウンを閉じる
     modal.addEventListener('click', (e) => {
-      if (!e.target.closest('.crf-combobox')) {
+      if (!e.target.closest('.yrf-combobox')) {
         closeAllDropdowns();
       }
     });
 
-    // 外来診療表ボタン
-    modal.querySelector('#crf-open-schedule').addEventListener('click', () => {
-      window.open('https://www.chp-kagawa.jp/guide/gairai/shinryouyotei/', '_blank');
+    // コロナ問診の連動
+    modal.querySelectorAll('input[name="yrf-covid-infected"]').forEach(radio => {
+      radio.addEventListener('change', () => {
+        const dateInput = modal.querySelector('#yrf-covid-infected-date');
+        dateInput.disabled = radio.value !== 'yes' || !radio.checked;
+        if (dateInput.disabled) dateInput.value = '';
+      });
     });
 
-    // CD-R有無の連動
-    const cdrYes = modal.querySelector('#crf-cdr-yes');
-    const cdrNo = modal.querySelector('#crf-cdr-no');
-    const cdrContent = modal.querySelector('#crf-cdr-content');
+    modal.querySelectorAll('input[name="yrf-covid-contact"]').forEach(radio => {
+      radio.addEventListener('change', () => {
+        const detailInput = modal.querySelector('#yrf-covid-contact-detail');
+        detailInput.disabled = radio.value !== 'yes' || !radio.checked;
+        if (detailInput.disabled) detailInput.value = '';
+      });
+    });
 
-    function updateCdrContentState() {
-      cdrContent.disabled = !cdrYes.checked;
-      if (!cdrYes.checked) {
-        cdrContent.value = '';
-      }
-    }
+    modal.querySelectorAll('input[name="yrf-covid-gathering"]').forEach(radio => {
+      radio.addEventListener('change', () => {
+        const detailInput = modal.querySelector('#yrf-covid-gathering-detail');
+        detailInput.disabled = radio.value !== 'yes' || !radio.checked;
+        if (detailInput.disabled) detailInput.value = '';
+      });
+    });
 
-    cdrYes.addEventListener('change', updateCdrContentState);
-    cdrNo.addEventListener('change', updateCdrContentState);
+    modal.querySelectorAll('input[name="yrf-covid-symptoms"]').forEach(radio => {
+      radio.addEventListener('change', () => {
+        const detailInput = modal.querySelector('#yrf-covid-symptoms-detail');
+        detailInput.disabled = radio.value !== 'yes' || !radio.checked;
+        if (detailInput.disabled) detailInput.value = '';
+      });
+    });
+
+    modal.querySelectorAll('input[name="yrf-covid-vaccine"]').forEach(radio => {
+      radio.addEventListener('change', () => {
+        const isDone = radio.value === 'done' && radio.checked;
+        const yearInput = modal.querySelector('#yrf-covid-vaccine-year');
+        const monthInput = modal.querySelector('#yrf-covid-vaccine-month');
+        yearInput.disabled = !isDone;
+        monthInput.disabled = !isDone;
+        if (!isDone) {
+          yearInput.value = '';
+          monthInput.value = '';
+        }
+      });
+    });
 
     // 下書き保存
-    modal.querySelector('#crf-save-draft').addEventListener('click', () => {
+    modal.querySelector('#yrf-save-draft').addEventListener('click', () => {
       const data = collectFormData(modal, formData);
       if (saveDraft(formData.patient_uuid, data)) {
         const HenryCore = pageWindow.HenryCore;
@@ -1283,8 +1432,8 @@
     });
 
     // Google Docs出力
-    modal.querySelector('#crf-generate').addEventListener('click', async () => {
-      const btn = modal.querySelector('#crf-generate');
+    modal.querySelector('#yrf-generate').addEventListener('click', async () => {
+      const btn = modal.querySelector('#yrf-generate');
       btn.disabled = true;
       btn.textContent = '生成中...';
 
@@ -1305,40 +1454,42 @@
   function collectFormData(modal, originalData) {
     const data = { ...originalData };
 
-    // 患者情報
-    data.former_name = modal.querySelector('#crf-former-name')?.value || '';
+    // 屋島総合病院固有
+    data.destination_department = modal.querySelector('#yrf-dest-department')?.value || '';
+    data.destination_doctor = modal.querySelector('#yrf-dest-doctor')?.value || '';
 
-    // 紹介元状況
-    data.referral_status = modal.querySelector('input[name="crf-referral-status"]:checked')?.value || 'outpatient';
-
-    // 中央病院固有
-    data.destination_department = modal.querySelector('#crf-dest-department')?.value || '';
-    data.destination_doctor = modal.querySelector('#crf-dest-doctor')?.value || '';
-    data.doctor_contact = modal.querySelector('input[name="crf-doctor-contact"]:checked')?.value || 'none';
-
-    // 希望日
-    data.hope_date_1 = modal.querySelector('#crf-hope-date-1')?.value || '';
-    data.hope_date_2 = modal.querySelector('#crf-hope-date-2')?.value || '';
+    // 希望来院日・時間
+    data.hope_date_1 = modal.querySelector('#yrf-hope-date-1')?.value || '';
+    data.hope_time_hour = modal.querySelector('#yrf-hope-time-hour')?.value || '';
+    data.hope_time_minute = modal.querySelector('#yrf-hope-time-minute')?.value || '';
 
     // 受診歴
-    data.visit_history = modal.querySelector('input[name="crf-visit-history"]:checked')?.value || 'unknown';
+    data.visit_history = modal.querySelector('input[name="yrf-visit-history"]:checked')?.value || 'unknown';
 
-    // 病名（選択と自由記述の両方を取得）
+    // 病名
     data.selected_diseases = [];
     if (data.diseases.length > 0) {
       data.diseases.forEach(d => {
-        const cb = modal.querySelector(`#crf-disease-${d.uuid}`);
+        const cb = modal.querySelector(`#yrf-disease-${d.uuid}`);
         if (cb?.checked) {
           data.selected_diseases.push(d.uuid);
         }
       });
     }
-    data.diagnosis_text = modal.querySelector('#crf-diagnosis-text')?.value || '';
+    data.diagnosis_text = modal.querySelector('#yrf-diagnosis-text')?.value || '';
 
-    // 添付資料・CD-R
-    data.attachment_notes = modal.querySelector('#crf-attachment-notes')?.value || '';
-    data.cdr_status = modal.querySelector('input[name="crf-cdr-status"]:checked')?.value || 'none';
-    data.cdr_content = modal.querySelector('#crf-cdr-content')?.value || '';
+    // コロナ問診
+    data.covid_infected = modal.querySelector('input[name="yrf-covid-infected"]:checked')?.value || 'no';
+    data.covid_infected_date = modal.querySelector('#yrf-covid-infected-date')?.value || '';
+    data.covid_contact = modal.querySelector('input[name="yrf-covid-contact"]:checked')?.value || 'no';
+    data.covid_contact_detail = modal.querySelector('#yrf-covid-contact-detail')?.value || '';
+    data.covid_gathering = modal.querySelector('input[name="yrf-covid-gathering"]:checked')?.value || 'no';
+    data.covid_gathering_detail = modal.querySelector('#yrf-covid-gathering-detail')?.value || '';
+    data.covid_symptoms = modal.querySelector('input[name="yrf-covid-symptoms"]:checked')?.value || 'no';
+    data.covid_symptoms_detail = modal.querySelector('#yrf-covid-symptoms-detail')?.value || '';
+    data.covid_vaccine = modal.querySelector('input[name="yrf-covid-vaccine"]:checked')?.value || 'done';
+    data.covid_vaccine_year = modal.querySelector('#yrf-covid-vaccine-year')?.value || '';
+    data.covid_vaccine_month = modal.querySelector('#yrf-covid-vaccine-month')?.value || '';
 
     return data;
   }
@@ -1348,32 +1499,26 @@
   // ==========================================
 
   async function generateGoogleDoc(formData) {
-    // スピナー表示
     const HenryCore = pageWindow.HenryCore;
     const spinner = HenryCore?.ui?.showSpinner?.('Google Docsを生成中...');
 
     try {
-      // アクセストークン確認
       const googleAuth = getGoogleAuth();
       await googleAuth.getValidAccessToken();
 
-      // 出力フォルダ取得/作成
       const folder = await DriveAPI.getOrCreateFolder(TEMPLATE_CONFIG.OUTPUT_FOLDER_NAME);
 
-      // テンプレートをコピー（メタデータ付き）
-      const fileName = `診療申込書_県立中央病院_${formData.patient_name}_${new Date().toISOString().slice(0, 10)}`;
+      const fileName = `FAX診療申込書_屋島総合病院_${formData.patient_name}_${new Date().toISOString().slice(0, 10)}`;
       const properties = {
         henryPatientUuid: formData.patient_uuid || '',
         henryFileUuid: '',
         henryFolderUuid: folder.id,
-        henrySource: 'chuo-referral-form'
+        henrySource: 'yashima-referral-form'
       };
       const newDoc = await DriveAPI.copyFile(TEMPLATE_CONFIG.TEMPLATE_ID, fileName, folder.id, properties);
 
-      // 診断名テキスト作成（病名選択 + 自由記述）
+      // 主訴又は傷病名テキスト作成
       const diagnosisParts = [];
-
-      // 選択された病名
       if (formData.diseases.length > 0 && formData.selected_diseases?.length > 0) {
         const selectedDiseases = formData.diseases.filter(d => formData.selected_diseases.includes(d.uuid));
         const diseaseText = selectedDiseases.map(d => d.name + (d.isSuspected ? '（疑い）' : '')).join('，');
@@ -1381,15 +1526,12 @@
           diagnosisParts.push(diseaseText);
         }
       }
-
-      // 自由記述
       if (formData.diagnosis_text) {
         diagnosisParts.push(formData.diagnosis_text);
       }
-
       const diagnosisText = diagnosisParts.join('\n');
 
-      // 受診歴テキスト作成
+      // 受診歴テキスト
       let visitHistoryText = '';
       if (formData.visit_history === 'yes') {
         visitHistoryText = '有';
@@ -1399,54 +1541,73 @@
         visitHistoryText = '不明';
       }
 
-      // 紹介元状況テキスト
-      const referralStatusText = formData.referral_status === 'inpatient' ? '入院中' : '通院中';
-
-      // 医師への連絡テキスト
-      const doctorContactText = formData.doctor_contact === 'done' ? '済' : '無';
-
-      // CD-R有無テキスト
-      let cdrText = '';
-      if (formData.cdr_status === 'yes') {
-        cdrText = formData.cdr_content ? `有（${formData.cdr_content}）` : '有';
-      } else {
-        cdrText = '無';
+      // 希望来院日・時間
+      const hopeDateText = formatHopeDate(formData.hope_date_1);
+      let hopeTimeText = '';
+      if (formData.hope_time_hour && formData.hope_time_minute) {
+        hopeTimeText = `${formData.hope_time_hour}時${formData.hope_time_minute}分`;
       }
 
-      // 希望日フォーマット
-      const hopeDate1Text = formatHopeDate(formData.hope_date_1);
-      const hopeDate2Text = formatHopeDate(formData.hope_date_2);
+      // コロナ問診テキスト
+      // ①感染歴
+      let covidInfectedText = formData.covid_infected === 'yes' ? 'はい' : 'いいえ';
+      if (formData.covid_infected === 'yes' && formData.covid_infected_date) {
+        const d = new Date(formData.covid_infected_date);
+        covidInfectedText += `　診断日（${d.getMonth() + 1}月${d.getDate()}日）`;
+      }
+
+      // ②接触歴
+      let covidContactText = formData.covid_contact === 'yes' ? 'あり' : 'なし';
+      if (formData.covid_contact === 'yes' && formData.covid_contact_detail) {
+        covidContactText += `（${formData.covid_contact_detail}）`;
+      }
+
+      // ③会食等
+      let covidGatheringText = formData.covid_gathering === 'yes' ? 'あり' : 'なし';
+      if (formData.covid_gathering === 'yes' && formData.covid_gathering_detail) {
+        covidGatheringText += `（${formData.covid_gathering_detail}）`;
+      }
+
+      // ④風邪症状
+      let covidSymptomsText = formData.covid_symptoms === 'yes' ? 'あり' : 'なし';
+      if (formData.covid_symptoms === 'yes' && formData.covid_symptoms_detail) {
+        covidSymptomsText += `（${formData.covid_symptoms_detail}）`;
+      }
+
+      // ⑤ワクチン接種
+      let covidVaccineText = formData.covid_vaccine === 'done' ? '済' : '未';
+      if (formData.covid_vaccine === 'done' && formData.covid_vaccine_year) {
+        covidVaccineText += `　最終（${formData.covid_vaccine_year}年${formData.covid_vaccine_month || ''}月頃）`;
+      }
 
       // プレースホルダー置換リクエスト作成
       const requests = [
         DocsAPI.createReplaceTextRequest('{{作成日}}', formData.creation_date_wareki),
-        DocsAPI.createReplaceTextRequest('{{フリガナ}}', formData.patient_name_kana),
+        DocsAPI.createReplaceTextRequest('{{医師名}}', formData.physician_name),
+        DocsAPI.createReplaceTextRequest('{{ふりがな}}', formData.patient_name_kana),
         DocsAPI.createReplaceTextRequest('{{患者氏名}}', formData.patient_name),
-        DocsAPI.createReplaceTextRequest('{{旧姓}}', formData.former_name),
         DocsAPI.createReplaceTextRequest('{{性別}}', formData.sex),
         DocsAPI.createReplaceTextRequest('{{生年月日}}', formData.birth_date_wareki),
-        DocsAPI.createReplaceTextRequest('{{年齢}}', formData.age),
-        DocsAPI.createReplaceTextRequest('{{郵便番号}}', formData.postal_code),
+        DocsAPI.createReplaceTextRequest('{{年齢}}', formData.age + '歳'),
         DocsAPI.createReplaceTextRequest('{{住所}}', formData.address),
-        DocsAPI.createReplaceTextRequest('{{医師名}}', formData.physician_name),
+        DocsAPI.createReplaceTextRequest('{{電話番号}}', formData.phone),
         DocsAPI.createReplaceTextRequest('{{受診希望科}}', formData.destination_department),
         DocsAPI.createReplaceTextRequest('{{希望医師名}}', formData.destination_doctor),
-        DocsAPI.createReplaceTextRequest('{{医師への連絡}}', doctorContactText),
-        DocsAPI.createReplaceTextRequest('{{第1希望日}}', hopeDate1Text),
-        DocsAPI.createReplaceTextRequest('{{第2希望日}}', hopeDate2Text),
+        DocsAPI.createReplaceTextRequest('{{第1希望日}}', hopeDateText),
+        DocsAPI.createReplaceTextRequest('{{希望来院時間}}', hopeTimeText),
         DocsAPI.createReplaceTextRequest('{{受診歴}}', visitHistoryText),
-        DocsAPI.createReplaceTextRequest('{{紹介元医療機関の状況}}', referralStatusText),
-        DocsAPI.createReplaceTextRequest('{{受診依頼目的・病名}}', diagnosisText),
-        DocsAPI.createReplaceTextRequest('{{紹介状添付資料}}', formData.attachment_notes),
-        DocsAPI.createReplaceTextRequest('{{CD-R等の有無}}', cdrText)
+        DocsAPI.createReplaceTextRequest('{{主訴または傷病名}}', diagnosisText),
+        DocsAPI.createReplaceTextRequest('{{感染ありなし}}', covidInfectedText),
+        DocsAPI.createReplaceTextRequest('{{接触ありなし}}', covidContactText),
+        DocsAPI.createReplaceTextRequest('{{会食等ありなし}}', covidGatheringText),
+        DocsAPI.createReplaceTextRequest('{{風邪症状ありなし}}', covidSymptomsText),
+        DocsAPI.createReplaceTextRequest('{{ワクチン接種済未}}', covidVaccineText)
       ];
 
-      // 置換実行
       await DocsAPI.batchUpdate(newDoc.id, requests);
 
       spinner?.close();
 
-      // 新しいドキュメントを開く
       const docUrl = `https://docs.google.com/document/d/${newDoc.id}/edit`;
       GM_openInTab(docUrl, { active: true });
 
@@ -1463,7 +1624,6 @@
   // ==========================================
 
   async function init() {
-    // HenryCore待機
     let waited = 0;
     while (!pageWindow.HenryCore) {
       await new Promise(r => setTimeout(r, 100));
@@ -1476,17 +1636,16 @@
 
     log = pageWindow.HenryCore.utils?.createLogger?.(SCRIPT_NAME);
 
-    // プラグイン登録
     await pageWindow.HenryCore.registerPlugin({
-      id: 'chuo-referral-form',
-      name: '県立中央病院 診療申込',
+      id: 'yashima-referral-form',
+      name: '診療申込書（屋島総合病院）',
       icon: '🏥',
-      description: '香川県立中央病院への診療申込書を作成',
+      description: '屋島総合病院へのFAX診療申込書を作成',
       version: VERSION,
-      order: 211,
-      group: '文書作成',
-      groupIcon: '📝',
-      onClick: showChuoForm
+      order: 220,
+      group: '診療申込書',
+      groupIcon: '📋',
+      onClick: showYashimaForm
     });
 
     console.log(`[${SCRIPT_NAME}] Ready (v${VERSION})`);

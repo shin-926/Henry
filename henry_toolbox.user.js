@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         ツールボックス
 // @namespace    https://haru-chan.example
-// @version      5.8.1
+// @version      5.10.0
 // @description  プラグイン方式。シンプルUI、Noto Sans JP、ドラッグ＆ドロップ並び替え対応。
 // @author       sk powered by Claude & Gemini
 // @match        https://henry-app.jp/*
@@ -302,6 +302,29 @@
       border-top: 1px solid #e5e7eb;
       margin: 6px 0;
     }
+    /* サブカテゴリ区切り */
+    .ht-settings-subcategory {
+      grid-column: 1 / -1;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 10px 4px;
+      font-size: 11px;
+      color: #9CA3AF;
+    }
+    .ht-settings-subcategory::before,
+    .ht-settings-subcategory::after {
+      content: '';
+      flex: 1;
+      height: 1px;
+      background: #e5e7eb;
+    }
+    .ht-settings-subcategory-items {
+      grid-column: 1 / -1;
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 2px;
+    }
     .ht-settings-btn {
       display: flex;
       align-items: center;
@@ -378,6 +401,44 @@
     .ht-submenu .ht-item-btn {
       padding: 8px 12px;
     }
+
+    /* 2階層目のサブメニュー（子グループ）*/
+    .ht-submenu .ht-subgroup-row {
+      position: relative;
+    }
+    .ht-submenu .ht-subgroup-row > .ht-item-btn::after {
+      content: '▶';
+      margin-left: auto;
+      font-size: 10px;
+      color: #9CA3AF;
+    }
+    .ht-subsubmenu {
+      position: absolute;
+      left: 100%;
+      top: 0;
+      min-width: 180px;
+      background: #fff;
+      border-radius: 8px;
+      box-shadow: 0 4px 20px rgba(0,0,0,0.15);
+      border: 1px solid #e5e7eb;
+      padding: 6px 0;
+      opacity: 0;
+      visibility: hidden;
+      transform: translateX(-8px);
+      transition: opacity 0.15s, transform 0.15s, visibility 0.15s;
+      z-index: 1402;
+    }
+    .ht-subgroup-row:hover > .ht-subsubmenu {
+      opacity: 1;
+      visibility: visible;
+      transform: translateX(0);
+    }
+    .ht-subsubmenu .ht-row {
+      padding: 0 6px;
+    }
+    .ht-subsubmenu .ht-item-btn {
+      padding: 8px 12px;
+    }
   `);
 
   // ============================================
@@ -391,6 +452,11 @@
   let userOrder = GM_getValue('toolbox-user-order', {});
   let groupOrder = GM_getValue('toolbox-group-order', {});  // グループ用のorder
   let groupItemOrder = GM_getValue('toolbox-group-item-order', {});  // グループ内アイテムの順序
+
+  // グループ階層定義（子グループ → 親グループ）
+  const GROUP_HIERARCHY = {
+    '診療申込書': '文書作成'
+  };
 
   // 現在の表示アイテム（ドラッグ用）
   let currentDisplayItems = [];
@@ -465,7 +531,7 @@
     return panel;
   }
 
-  // アイテムをグループ化する
+  // アイテムをグループ化する（階層対応）
   function groupItems(items) {
     const groups = {};
     const ungrouped = [];
@@ -477,6 +543,7 @@
             name: item.group,
             icon: item.groupIcon || '📁',
             items: [],
+            childGroups: [],  // 子グループ用
             order: groupOrder[item.group] ?? item.order  // groupOrderを優先
           };
         }
@@ -489,6 +556,16 @@
         // ungroupedもuserOrderを参照
         const order = userOrder[item.event] ?? item.order ?? 99;
         ungrouped.push({ ...item, originalIndex: index, order });
+      }
+    });
+
+    // 階層構造を適用: 子グループを親グループ内に移動
+    Object.entries(GROUP_HIERARCHY).forEach(([childName, parentName]) => {
+      if (groups[childName] && groups[parentName]) {
+        // 子グループを親の childGroups に追加
+        groups[parentName].childGroups.push(groups[childName]);
+        // トップレベルから削除
+        delete groups[childName];
       }
     });
 
@@ -531,7 +608,7 @@
     return row;
   }
 
-  // グループ行を作成（サブメニュー付き）
+  // グループ行を作成（サブメニュー付き、子グループ対応）
   function createGroupRow(groupData, index) {
     const row = document.createElement('div');
     row.className = 'ht-row ht-group-row';
@@ -604,6 +681,78 @@
       subRow.appendChild(subBtn);
       submenu.appendChild(subRow);
     });
+
+    // 子グループがあれば2階層目のサブメニューを追加
+    if (groupData.childGroups && groupData.childGroups.length > 0) {
+      groupData.childGroups.forEach(childGroup => {
+        const subgroupRow = document.createElement('div');
+        subgroupRow.className = 'ht-row ht-subgroup-row';
+
+        const subgroupBtn = document.createElement('div');
+        subgroupBtn.className = 'ht-item-btn';
+
+        const subgroupLabel = document.createElement('span');
+        subgroupLabel.textContent = childGroup.name;
+        subgroupBtn.appendChild(subgroupLabel);
+
+        subgroupRow.appendChild(subgroupBtn);
+
+        // 2階層目のサブメニュー
+        const subsubmenu = document.createElement('div');
+        subsubmenu.className = 'ht-subsubmenu';
+        subsubmenu.dataset.groupName = childGroup.name;
+
+        // 子グループ内アイテムをソート
+        const sortedChildItems = [...childGroup.items].sort((a, b) => {
+          const orderA = groupItemOrder[childGroup.name]?.[a.event] ?? a.order ?? 99;
+          const orderB = groupItemOrder[childGroup.name]?.[b.event] ?? b.order ?? 99;
+          return orderA - orderB;
+        });
+
+        sortedChildItems.forEach((item, childIndex) => {
+          const childRow = document.createElement('div');
+          childRow.className = 'ht-row ht-submenu-row';
+          childRow.draggable = true;
+          childRow.dataset.subIndex = childIndex;
+          childRow.dataset.event = item.event;
+          childRow.dataset.groupName = childGroup.name;
+
+          // サブメニュー用ドラッグイベント
+          childRow.addEventListener('dragstart', handleSubmenuDragStart);
+          childRow.addEventListener('dragenter', handleSubmenuDragEnter);
+          childRow.addEventListener('dragover', handleSubmenuDragOver);
+          childRow.addEventListener('dragleave', handleSubmenuDragLeave);
+          childRow.addEventListener('drop', handleSubmenuDrop);
+          childRow.addEventListener('dragend', handleSubmenuDragEnd);
+
+          const childBtn = document.createElement('div');
+          childBtn.className = 'ht-item-btn';
+
+          const childLabelSpan = document.createElement('span');
+          // ラベルから「診療申込書（」と「）」を除去して病院名のみ表示
+          const displayLabel = item.label.replace(/^診療申込書（(.+)）$/, '$1');
+          childLabelSpan.textContent = displayLabel;
+          childBtn.appendChild(childLabelSpan);
+
+          childBtn.addEventListener('click', (e) => {
+            if (item.event.startsWith('henrycore:plugin:') && item.onClick) {
+              item.onClick();
+            } else {
+              window.dispatchEvent(new CustomEvent(item.event, {
+                detail: { triggerElement: childBtn }
+              }));
+            }
+            closePanel();
+          });
+
+          childRow.appendChild(childBtn);
+          subsubmenu.appendChild(childRow);
+        });
+
+        subgroupRow.appendChild(subsubmenu);
+        submenu.appendChild(subgroupRow);
+      });
+    }
 
     row.appendChild(submenu);
     return row;
@@ -830,8 +979,23 @@
       const categoryScripts = scriptsByCategory[category.id] || [];
       if (categoryScripts.length === 0) return;
 
-      // カテゴリ内でソート（ベータ版を下に）
-      categoryScripts.sort((a, b) => {
+      // サブカテゴリでグループ化
+      const subcategoryGroups = {};
+      const noSubcategory = [];
+
+      categoryScripts.forEach(script => {
+        if (script.subcategory) {
+          if (!subcategoryGroups[script.subcategory]) {
+            subcategoryGroups[script.subcategory] = [];
+          }
+          subcategoryGroups[script.subcategory].push(script);
+        } else {
+          noSubcategory.push(script);
+        }
+      });
+
+      // サブカテゴリなしをソート（ベータ版を下に）
+      noSubcategory.sort((a, b) => {
         const aIsBeta = (a.label || '').includes('ベータ版');
         const bIsBeta = (b.label || '').includes('ベータ版');
         if (aIsBeta && !bIsBeta) return 1;
@@ -839,23 +1003,27 @@
         return (a.order || 99) - (b.order || 99);
       });
 
-      html += `
-        <div class="ht-settings-category">
-          <div class="ht-settings-category-header">${category.label}</div>
-          <div class="ht-settings-card">
-            <div class="ht-settings-grid">
-      `;
+      // サブカテゴリ内もソート
+      Object.values(subcategoryGroups).forEach(group => {
+        group.sort((a, b) => {
+          const aIsBeta = (a.label || '').includes('ベータ版');
+          const bIsBeta = (b.label || '').includes('ベータ版');
+          if (aIsBeta && !bIsBeta) return 1;
+          if (!aIsBeta && bIsBeta) return -1;
+          return (a.order || 99) - (b.order || 99);
+        });
+      });
 
-      categoryScripts.forEach(script => {
+      // スクリプトアイテムのHTML生成ヘルパー
+      const renderScriptItem = (script) => {
         const isEnabled = !disabled.has(script.name);
         const isLoaded = loaded.has(script.name);
         const nameClass = isEnabled ? '' : 'disabled';
         const toggleClass = isEnabled ? 'active' : '';
         const dotClass = isLoaded ? 'loaded' : 'not-loaded';
-        // ラベルから「（ベータ版）」を除去して短くする
         const displayLabel = (script.label || script.name).replace('（ベータ版）', '').trim();
 
-        html += `
+        return `
           <div class="ht-settings-item" data-script="${script.name}">
             <span class="ht-settings-item-name ${nameClass}">
               <span class="ht-status-dot ${dotClass}"></span>
@@ -864,6 +1032,30 @@
             <div class="ht-settings-toggle ${toggleClass}" data-script="${script.name}"></div>
           </div>
         `;
+      };
+
+      html += `
+        <div class="ht-settings-category">
+          <div class="ht-settings-category-header">${category.label}</div>
+          <div class="ht-settings-card">
+            <div class="ht-settings-grid">
+      `;
+
+      // サブカテゴリなしのスクリプトを先に表示
+      noSubcategory.forEach(script => {
+        html += renderScriptItem(script);
+      });
+
+      // サブカテゴリごとに表示
+      Object.entries(subcategoryGroups).forEach(([subcategoryName, scripts]) => {
+        html += `
+          <div class="ht-settings-subcategory">${subcategoryName}</div>
+          <div class="ht-settings-subcategory-items">
+        `;
+        scripts.forEach(script => {
+          html += renderScriptItem(script);
+        });
+        html += `</div>`;
       });
 
       html += `
@@ -1419,8 +1611,52 @@
     setupObserver();
   });
 
+  // ============================================
+  // 8. ログイン画面対応
+  // ============================================
+
+  function isLoginScreen() {
+    return document.title.includes('ログイン');
+  }
+
+  function hideToolbox() {
+    const toolboxBtn = document.querySelector('button[data-tm-toolbox]');
+    if (toolboxBtn) {
+      toolboxBtn.closest('li').style.display = 'none';
+    }
+    closePanel();
+    closeSettingsPanel();
+  }
+
+  function showToolbox() {
+    const toolboxBtn = document.querySelector('button[data-tm-toolbox]');
+    if (toolboxBtn) {
+      toolboxBtn.closest('li').style.display = '';
+    }
+  }
+
+  function setupTitleObserver() {
+    const titleEl = document.querySelector('title');
+    if (!titleEl) return;
+
+    const titleObserver = new MutationObserver(() => {
+      if (isLoginScreen()) {
+        hideToolbox();
+      } else {
+        showToolbox();
+      }
+    });
+    titleObserver.observe(titleEl, { childList: true });
+
+    // 初回チェック
+    if (isLoginScreen()) {
+      hideToolbox();
+    }
+  }
+
   init();  // 初回実行
   setupObserver();  // 初回observer設定
+  setupTitleObserver();  // ログイン画面監視
 
   console.log(`[Toolbox] Ready v${VERSION}`);
 })();
