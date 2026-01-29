@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         高松赤十字病院 診療申込書
 // @namespace    https://henry-app.jp/
-// @version      1.2.1
+// @version      1.2.3
 // @description  高松赤十字病院への診療情報提供書兼FAX診療申込書を作成
 // @author       sk powered by Claude
 // @match        https://henry-app.jp/*
@@ -927,7 +927,7 @@
         }
         .srf-header {
           padding: 20px 24px;
-          background: #616161;
+          background: #3F51B5;
           color: white;
           border-radius: 12px 12px 0 0;
           display: flex;
@@ -963,10 +963,10 @@
         .srf-section-title {
           font-size: 16px;
           font-weight: 600;
-          color: #c62828;
+          color: #3F51B5;
           margin-bottom: 12px;
           padding-bottom: 8px;
-          border-bottom: 2px solid #ffcdd2;
+          border-bottom: 2px solid #C5CAE9;
         }
         .srf-row {
           display: flex;
@@ -993,8 +993,8 @@
         }
         .srf-field input:focus, .srf-field textarea:focus, .srf-field select:focus {
           outline: none;
-          border-color: #c62828;
-          box-shadow: 0 0 0 3px rgba(198, 40, 40, 0.1);
+          border-color: #3F51B5;
+          box-shadow: 0 0 0 3px rgba(63, 81, 181, 0.2);
         }
         .srf-field select {
           background: #fff;
@@ -1026,8 +1026,8 @@
         }
         .srf-combobox-input:focus {
           outline: none;
-          border-color: #c62828;
-          box-shadow: 0 0 0 3px rgba(198, 40, 40, 0.1);
+          border-color: #3F51B5;
+          box-shadow: 0 0 0 3px rgba(63, 81, 181, 0.2);
         }
         .srf-combobox-input:disabled {
           background: #f5f5f5;
@@ -1081,11 +1081,11 @@
           font-size: 14px;
         }
         .srf-combobox-option:hover {
-          background: #ffebee;
+          background: #E8EAF6;
         }
         .srf-combobox-option.selected {
-          background: #ffcdd2;
-          color: #b71c1c;
+          background: #C5CAE9;
+          color: #303F9F;
         }
         .srf-combobox-empty {
           padding: 10px 12px;
@@ -1117,8 +1117,8 @@
           color: #333;
         }
         .srf-checkbox-item.main-disease {
-          background: #ffebee;
-          border: 1px solid #ffcdd2;
+          background: #E8EAF6;
+          border: 1px solid #C5CAE9;
         }
         .srf-radio-group {
           display: flex;
@@ -1187,26 +1187,26 @@
           background: #d0d0d0;
         }
         .srf-btn-primary {
-          background: #c62828;
+          background: #3F51B5;
           color: white;
         }
         .srf-btn-primary:hover {
-          background: #b71c1c;
+          background: #303F9F;
         }
         .srf-btn-primary:disabled {
           background: #ccc;
           cursor: not-allowed;
         }
         .srf-btn-link {
-          background: #ffebee;
-          color: #c62828;
-          border: 1px solid #ef9a9a;
+          background: #E8EAF6;
+          color: #3F51B5;
+          border: 1px solid #9FA8DA;
           padding: 8px 12px;
           white-space: nowrap;
           font-size: 13px;
         }
         .srf-btn-link:hover {
-          background: #ffcdd2;
+          background: #C5CAE9;
         }
         /* 処方履歴選択 */
         .srf-use-toggle {

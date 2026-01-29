@@ -1,6 +1,6 @@
-# Henry EMR 開発ガイドライン (Core Rules v4.40)
+# Henry EMR 開発ガイドライン (Core Rules v4.42)
 
-<!-- 📝 UPDATED: v4.40 - 共通UI関数使用ルール追加 -->
+<!-- 📝 UPDATED: v4.42 - 処理フロー最適化ルール追加 -->
 
 > このドキュメントはAIアシスタントとの協働開発における必須ルール集です。HenryCore APIの詳細は `henry_core.user.js` 冒頭のAPI目次と実装を参照。
 
@@ -392,9 +392,11 @@ GitHubから各スクリプトを動的に読み込む仕組み。詳細は `NOT
 | | henry_google_drive_bridge.user.js | Google Drive API直接連携 |
 | | henry_ikensho_form.user.js | 主治医意見書作成フォーム |
 | | henry_referral_form.user.js | 診療情報提供書フォーム |
-| | henry_ritsurin_referral_form.user.js | りつりん病院診療申込書 |
-| | henry_sekijuji_referral_form.user.js | 高松赤十字病院診療申込書 |
-| | henry_minna_referral_form.user.js | 高松市立みんなの病院診療申込書 |
+| | henry_application_form_ritsurin.user.js | りつりん病院診療申込書 |
+| | henry_application_form_sekijuji.user.js | 高松赤十字病院診療申込書 |
+| | henry_application_form_saiseikai.user.js | 香川県済生会病院診療申込書 |
+| | henry_application_form_heiwa.user.js | 高松平和病院診療申込書 |
+| | henry_application_form_minna.user.js | 高松市立みんなの病院診療申込書 |
 | **開発用** | henry_test_helper.user.js | テストデータ自動入力 |
 
 ---
@@ -525,12 +527,26 @@ GitHubから各スクリプトを動的に読み込む仕組み。詳細は `NOT
   - 詳細は `NOTES.md` の「Google Docs 文書作成ルール」を参照
   - 新規スクリプト作成時は、実装前にユーザーに確認すること
 
+- **YOU MUST**: 情報を提供する際は、確実性を明示すること：
+  - **確認できた情報**（ドキュメント参照、ツール実行結果など）→ そのまま伝える
+  - **推測・記憶に基づく情報** → 「推測ですが」「記憶では」と明示する
+  - **不確かな場合** → 調べてから回答する、または「確認が必要」と伝える
+  - **理由**: 誤った情報を確定的に伝えると、ユーザーが誤解したまま作業を進めてしまう
+
+- **IMPORTANT**: 実装時は処理フローの最適化を常に検討すること：
+  - **直列 → 並列**: 独立した処理は `Promise.all` で同時実行
+  - **遅延取得 → プリフェッチ**: ユーザーの操作待ち時間にデータを先行取得
+  - **再取得 → キャッシュ/フィルタリング**: 既存データを活用し無駄なAPI呼び出しを削減
+  - コードの複雑な最適化より、処理の流れを見直す方が効果が大きいことが多い
+
 ---
 
 ## 変更履歴
 
 | Version | Date | Changes |
 |---------|------|---------|
+| v4.42 | 2026-01-28 | 処理フロー最適化ルール追加（並列化、プリフェッチ、キャッシュ活用） |
+| v4.41 | 2026-01-28 | 情報提供時の確実性明示ルール追加（推測は推測と伝える） |
 | v4.40 | 2026-01-26 | 共通UI関数（HenryCore.ui.*）使用ルール追加 |
 | v4.39 | 2026-01-26 | スクリプト読み込み方式（@require vs eval）の説明追加 |
 | v4.38 | 2026-01-26 | Google Docs文書作成ルール追加（詳細はNOTES.md） |

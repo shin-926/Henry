@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         予約システム連携
 // @namespace    https://github.com/shin-926/Henry
-// @version      4.2.2
+// @version      4.3.0
 // @description  Henryカルテと予約システム間の双方向連携（再診予約・照射オーダー自動予約・自動印刷・患者プレビュー）
 // @author       sk powered by Claude & Gemini
 // @match        https://henry-app.jp/*
@@ -281,6 +281,18 @@
           }
         }
       }
+    `,
+    ListPatientHospitalizations: `
+      query ListPatientHospitalizations($input: ListPatientHospitalizationsRequestInput!) {
+        listPatientHospitalizations(input: $input) {
+          hospitalizations {
+            uuid
+            state
+            startDate { year month day }
+            endDate { year month day }
+          }
+        }
+      }
     `
   };
 
@@ -301,6 +313,38 @@
   function escapeHtml(str) {
     if (!str) return '';
     return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  }
+
+  // 日付オブジェクトを比較用の数値に変換（YYYYMMDD形式）
+  function dateToNumber(dateObj) {
+    return dateObj.year * 10000 + dateObj.month * 100 + dateObj.day;
+  }
+
+  // 患者が指定日時点で入院中/入院予定かどうかを判定
+  async function isHospitalizedOnDate(HenryCore, patientUuid, orderDateObj) {
+    try {
+      const result = await HenryCore.query(QUERIES.ListPatientHospitalizations, {
+        input: { patientUuid, pageSize: 50, pageToken: '' }
+      });
+      const hospitalizations = result.data?.listPatientHospitalizations?.hospitalizations || [];
+      const orderDate = dateToNumber(orderDateObj);
+
+      return hospitalizations.some(h => {
+        if (h.state === 'ADMITTED') {
+          // 入院中 → 常にtrue
+          return true;
+        }
+        if (h.state === 'WILL_ADMIT' && h.startDate) {
+          // 入院予定 → 照射オーダー日が入院予定日以降ならtrue
+          const admitDate = dateToNumber(h.startDate);
+          return orderDate >= admitDate;
+        }
+        return false;
+      });
+    } catch (e) {
+      log.error('入院状態取得エラー: ' + e.message);
+      return false; // エラー時は外来扱い（安全側に倒す）
+    }
   }
 
   // ==========================================
@@ -1654,8 +1698,16 @@ html, body { margin: 0; padding: 0; }
         log.info('モダリティを取得: ' + modality);
       }
 
-      // 確認ダイアログ
-      const confirmMessage = `未来日付（${dateObj.year}/${dateObj.month}/${dateObj.day}）の照射オーダーです。\n\n予約システムで予約を取りますか？\n\n患者: ${patientInfo.id} ${patientInfo.name}`;
+      // 入院状態をチェック（照射オーダー日時点で入院中/入院予定か）
+      const isHospitalized = await isHospitalizedOnDate(HenryCore, patientUuid, dateObj);
+      if (isHospitalized) {
+        log.info('入院中/入院予定の患者を検出');
+      }
+
+      // 確認ダイアログ（入院患者の場合はメッセージを変える）
+      const confirmMessage = isHospitalized
+        ? `未来日付（${dateObj.year}/${dateObj.month}/${dateObj.day}）の照射オーダーです。\n\n予約システムで予約を取りますか？\n（入院患者のため外来予約は作成されません）\n\n患者: ${patientInfo.id} ${patientInfo.name}`
+        : `未来日付（${dateObj.year}/${dateObj.month}/${dateObj.day}）の照射オーダーです。\n\n予約システムで予約を取りますか？\n\n患者: ${patientInfo.id} ${patientInfo.name}`;
       if (!confirm(confirmMessage)) {
         log.info('ユーザーが予約システム連携をキャンセル - オーダー保存せず終了');
         showImagingNotification('キャンセルしました', 'info');
@@ -1670,6 +1722,33 @@ html, body { margin: 0; padding: 0; }
       showImagingNotification('予約システムで予約を取ってください', 'info');
       const reservationResult = await openReserveForImagingOrder(patientInfo, dateObj, modality);
       log.info('予約日時: ' + JSON.stringify(reservationResult));
+
+      // 入院中/入院予定の場合：外来予約を作成せず、オーダーをそのまま保存
+      if (isHospitalized) {
+        log.info('入院中/入院予定の患者のため、外来予約をスキップ');
+
+        // 日付のみ更新（encounterIdは変更しない）
+        if (reservationResult.date) {
+          const [year, month, day] = reservationResult.date.split('-').map(Number);
+          body.variables.input.date = { year, month, day };
+        }
+
+        const newOptions = { ...options, body: JSON.stringify(body) };
+
+        // オーダーをそのまま保存
+        const response = await originalFetch.call(fetchContext, url, newOptions);
+
+        // 通知・印刷
+        const displayDate = reservationResult.date
+          ? reservationResult.date.replace(/-/g, '/')
+          : `${dateObj.year}/${dateObj.month}/${dateObj.day}`;
+        showImagingNotification(`${displayDate} ${reservationResult.time} の予約を取りました（入院患者）`, 'success');
+        await printOrderFromResponse(response, '入院患者の照射オーダー印刷');
+
+        return response;
+      }
+
+      // 以下、外来患者向け処理（外来予約作成）
 
       // 予約日付を使用
       let actualDateObj = dateObj;

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         診療情報提供書フォーム
 // @namespace    https://henry-app.jp/
-// @version      1.4.3
+// @version      1.4.4
 // @description  診療情報提供書の入力フォームとGoogle Docs出力
 // @author       sk powered by Claude
 // @match        https://henry-app.jp/*
@@ -785,7 +785,7 @@
         prescriptions: prescriptions,
         use_diseases: true,
         use_prescriptions: true,
-        use_family_diseases: false,
+        use_family_diseases: true,
         selected_diseases: [],
         selected_family_diseases: [],
         selected_prescriptions: [],

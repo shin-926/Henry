@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         りつりん病院 診療申込書
 // @namespace    https://henry-app.jp/
-// @version      1.0.1
+// @version      1.0.3
 // @description  りつりん病院への診療FAX予約申込書を作成
 // @author       sk powered by Claude
 // @match        https://henry-app.jp/*
@@ -711,7 +711,7 @@
         }
         .rrf-header {
           padding: 20px 24px;
-          background: #616161;
+          background: #3F51B5;
           color: white;
           border-radius: 12px 12px 0 0;
           display: flex;
@@ -747,10 +747,10 @@
         .rrf-section-title {
           font-size: 16px;
           font-weight: 600;
-          color: #43a047;
+          color: #3F51B5;
           margin-bottom: 12px;
           padding-bottom: 8px;
-          border-bottom: 2px solid #c8e6c9;
+          border-bottom: 2px solid #C5CAE9;
         }
         .rrf-row {
           display: flex;
@@ -777,8 +777,8 @@
         }
         .rrf-field input:focus, .rrf-field textarea:focus, .rrf-field select:focus {
           outline: none;
-          border-color: #43a047;
-          box-shadow: 0 0 0 3px rgba(67, 160, 71, 0.1);
+          border-color: #3F51B5;
+          box-shadow: 0 0 0 3px rgba(63, 81, 181, 0.2);
         }
         .rrf-field select {
           background: #fff;
@@ -810,8 +810,8 @@
         }
         .rrf-combobox-input:focus {
           outline: none;
-          border-color: #43a047;
-          box-shadow: 0 0 0 3px rgba(67, 160, 71, 0.1);
+          border-color: #3F51B5;
+          box-shadow: 0 0 0 3px rgba(63, 81, 181, 0.2);
         }
         .rrf-combobox-input:disabled {
           background: #f5f5f5;
@@ -865,11 +865,11 @@
           font-size: 14px;
         }
         .rrf-combobox-option:hover {
-          background: #e8f5e9;
+          background: #E8EAF6;
         }
         .rrf-combobox-option.selected {
-          background: #c8e6c9;
-          color: #2e7d32;
+          background: #C5CAE9;
+          color: #303F9F;
         }
         .rrf-combobox-empty {
           padding: 10px 12px;
@@ -899,8 +899,8 @@
           color: #333;
         }
         .rrf-checkbox-item.main-disease {
-          background: #e8f5e9;
-          border: 1px solid #a5d6a7;
+          background: #E8EAF6;
+          border: 1px solid #9FA8DA;
         }
         .rrf-use-toggle {
           display: flex;
@@ -993,26 +993,26 @@
           background: #d0d0d0;
         }
         .rrf-btn-primary {
-          background: #43a047;
+          background: #3F51B5;
           color: white;
         }
         .rrf-btn-primary:hover {
-          background: #388e3c;
+          background: #3949AB;
         }
         .rrf-btn-primary:disabled {
           background: #ccc;
           cursor: not-allowed;
         }
         .rrf-btn-link {
-          background: #e8f5e9;
-          color: #2e7d32;
-          border: 1px solid #a5d6a7;
+          background: #E8EAF6;
+          color: #303F9F;
+          border: 1px solid #9FA8DA;
           padding: 8px 12px;
           white-space: nowrap;
           font-size: 13px;
         }
         .rrf-btn-link:hover {
-          background: #c8e6c9;
+          background: #C5CAE9;
         }
       </style>
       <div class="rrf-container">

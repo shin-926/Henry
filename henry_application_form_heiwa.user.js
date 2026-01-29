@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         高松平和病院 診療申込書
 // @namespace    https://henry-app.jp/
-// @version      1.2.1
+// @version      1.2.3
 // @description  高松平和病院への診療申込書を作成
 // @author       sk powered by Claude
 // @match        https://henry-app.jp/*
@@ -88,12 +88,12 @@
   // 超音波検査の種類
   const ULTRASOUND_TYPES = ['腹部', '心', '下肢動脈', '頚動脈', '甲状腺'];
 
-  // テーマカラー
+  // テーマカラー（ネイビーブルー系）
   const THEME = {
-    primary: '#616161',
-    primaryDark: '#424242',
-    primaryLight: '#e0e0e0',
-    accent: '#f5f5f5'
+    primary: '#3F51B5',
+    primaryDark: '#303F9F',
+    primaryLight: '#E8EAF6',
+    accent: '#C5CAE9'
   };
 
   let log = null;
@@ -843,7 +843,7 @@
         .hrf-field input:focus, .hrf-field textarea:focus, .hrf-field select:focus {
           outline: none;
           border-color: ${THEME.primary};
-          box-shadow: 0 0 0 3px rgba(21, 101, 192, 0.1);
+          box-shadow: 0 0 0 3px rgba(63, 81, 181, 0.2);
         }
         .hrf-field select {
           background: #fff;
@@ -876,7 +876,7 @@
         .hrf-combobox-input:focus {
           outline: none;
           border-color: ${THEME.primary};
-          box-shadow: 0 0 0 3px rgba(21, 101, 192, 0.1);
+          box-shadow: 0 0 0 3px rgba(63, 81, 181, 0.2);
         }
         .hrf-combobox-input:disabled {
           background: #f5f5f5;

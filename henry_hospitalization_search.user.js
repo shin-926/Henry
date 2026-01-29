@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry Hospitalization Search
 // @namespace    https://github.com/shin-926/Henry
-// @version      1.6.1
+// @version      1.8.0
 // @description  カルテの医師記録（入院・外来）から特定文字列を検索
 // @author       sk powered by Claude
 // @match        https://henry-app.jp/*
@@ -74,6 +74,16 @@
     }
   `;
 
+  // 患者情報取得クエリ
+  const GET_PATIENT_QUERY = `
+    query GetPatient($input: GetPatientRequestInput!) {
+      getPatient(input: $input) {
+        serialNumber
+        fullName
+      }
+    }
+  `;
+
   // 入院情報取得クエリを生成
   function buildHospitalizationsQuery(patientUuid) {
     return `
@@ -123,6 +133,19 @@
   function formatDate(dateObj) {
     if (!dateObj) return '-';
     return `${dateObj.year}/${dateObj.month}/${dateObj.day}`;
+  }
+
+  // 患者情報を取得
+  async function fetchPatientInfo(patientUuid) {
+    try {
+      const result = await window.HenryCore.query(GET_PATIENT_QUERY, {
+        input: { uuid: patientUuid }
+      });
+      return result?.data?.getPatient || null;
+    } catch (e) {
+      console.error(`[${SCRIPT_NAME}] 患者情報取得エラー:`, e);
+      return null;
+    }
   }
 
   // 入院情報を取得
@@ -229,34 +252,29 @@
     }
   }
 
-  // 全記録を取得（入院・外来を選択に応じて取得）
-  async function fetchAllDocuments(patientUuid, includeHospitalization, includeOutpatient) {
-    const results = [];
-
-    if (includeHospitalization) {
-      const hospDocs = await fetchHospitalizationDocuments(patientUuid);
-      results.push(...hospDocs);
-    }
-
-    if (includeOutpatient) {
-      const outDocs = await fetchOutpatientDocuments(patientUuid);
-      results.push(...outDocs);
-    }
-
-    return results;
+  // 全記録を取得（入院・外来を並列取得）
+  async function fetchAllDocuments(patientUuid) {
+    const [hospDocs, outDocs] = await Promise.all([
+      fetchHospitalizationDocuments(patientUuid),
+      fetchOutpatientDocuments(patientUuid)
+    ]);
+    return { hospitalizationDocs: hospDocs, outpatientDocs: outDocs };
   }
 
   // 文字列を検索してハイライト用の情報を返す
   function searchInDocuments(documents, searchText) {
-    if (!searchText.trim()) return [];
-
-    const lowerSearch = searchText.toLowerCase();
     const results = [];
 
-    for (const doc of documents) {
-      const lowerText = doc.text.toLowerCase();
-      if (lowerText.includes(lowerSearch)) {
-        results.push({ ...doc });
+    // 検索テキストが空の場合は全件返す
+    if (!searchText.trim()) {
+      results.push(...documents.map(doc => ({ ...doc })));
+    } else {
+      const lowerSearch = searchText.toLowerCase();
+      for (const doc of documents) {
+        const lowerText = doc.text.toLowerCase();
+        if (lowerText.includes(lowerSearch)) {
+          results.push({ ...doc });
+        }
       }
     }
 
@@ -289,16 +307,389 @@
     return div.innerHTML;
   }
 
+  // 入院期間でフィルタリング
+  function filterByHospitalizationPeriod(docs, hospitalization) {
+    if (!hospitalization) return docs;
+
+    const startDate = new Date(
+      hospitalization.startDate.year,
+      hospitalization.startDate.month - 1,
+      hospitalization.startDate.day
+    );
+    startDate.setHours(0, 0, 0, 0);
+
+    let endDate;
+    if (hospitalization.endDate) {
+      endDate = new Date(
+        hospitalization.endDate.year,
+        hospitalization.endDate.month - 1,
+        hospitalization.endDate.day
+      );
+      endDate.setHours(23, 59, 59, 999);
+    } else {
+      // 入院中の場合は現在日時まで
+      endDate = new Date();
+    }
+
+    return docs.filter(doc => {
+      if (!doc.performTime) return false;
+      return doc.performTime >= startDate && doc.performTime <= endDate;
+    });
+  }
+
+  // テキストコンテンツを生成
+  function generateTextContent(results, options) {
+    const { searchText, patientInfo, sortOrder, includeHospitalization, includeOutpatient, selectedHospitalization, hospitalizations } = options;
+
+    // ソート
+    const sortedResults = [...results].sort((a, b) => {
+      if (!a.performTime) return 1;
+      if (!b.performTime) return -1;
+      return sortOrder === 'asc'
+        ? a.performTime - b.performTime
+        : b.performTime - a.performTime;
+    });
+
+    const lines = [];
+
+    // ヘッダー
+    lines.push('カルテ記録検索結果');
+    lines.push('==================');
+    lines.push(`検索キーワード: ${searchText}`);
+    lines.push(`患者: ${patientInfo?.serialNumber || '-'} ${patientInfo?.fullName || '-'}`);
+    lines.push(`出力日: ${new Date().toLocaleDateString('ja-JP')}`);
+
+    // 対象種別
+    const targetTypes = [];
+    if (includeHospitalization) targetTypes.push('入院記録');
+    if (includeOutpatient) targetTypes.push('外来記録');
+    lines.push(`対象: ${targetTypes.join('・')}`);
+
+    // 期間
+    if (selectedHospitalization) {
+      const hosp = hospitalizations.find(h => h.uuid === selectedHospitalization);
+      if (hosp) {
+        const start = formatDate(hosp.startDate);
+        const end = hosp.endDate ? formatDate(hosp.endDate) : '入院中';
+        lines.push(`期間: ${start}〜${end}`);
+      }
+    } else {
+      lines.push('期間: 全期間');
+    }
+
+    lines.push(`並び順: ${sortOrder === 'asc' ? '古い順' : '新しい順'}`);
+    lines.push('');
+    lines.push('--------------------------------------------------');
+    lines.push('');
+
+    // 各記録
+    for (const doc of sortedResults) {
+      const dateStr = doc.performTime ? formatDateTime(doc.performTime) : '-';
+      const typeStr = doc.docType === 'HOSPITALIZATION_CONSULTATION' ? '入院' : '外来';
+      lines.push(`【${dateStr}】${typeStr} - ${doc.author}`);
+      lines.push(doc.text);
+      lines.push('');
+      lines.push('--------------------------------------------------');
+      lines.push('');
+    }
+
+    lines.push(`全 ${sortedResults.length} 件`);
+
+    return lines.join('\n');
+  }
+
+  // ファイルダウンロード
+  function downloadTextFile(content, filename) {
+    const blob = new Blob([content], { type: 'text/plain; charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }
+
+  // 保存ダイアログを表示
+  function showSaveDialog(searchText, results, hospitalizations, patientUuid, hospitalizationDocs, outpatientDocs) {
+    // 既存ダイアログを削除
+    document.getElementById('hosp-search-save-dialog')?.remove();
+
+    let patientInfo = null;
+
+    const dialog = document.createElement('div');
+    dialog.id = 'hosp-search-save-dialog';
+    dialog.innerHTML = `
+      <style>
+        #hosp-search-save-dialog {
+          position: fixed;
+          top: 0;
+          left: 0;
+          right: 0;
+          bottom: 0;
+          background: rgba(0,0,0,0.5);
+          z-index: 1600;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+        }
+        #hosp-search-save-dialog .dialog-content {
+          background: white;
+          border-radius: 8px;
+          width: 400px;
+          max-width: 90vw;
+          font-family: sans-serif;
+        }
+        #hosp-search-save-dialog .dialog-header {
+          padding: 16px 20px;
+          border-bottom: 1px solid #e0e0e0;
+          font-size: 16px;
+          font-weight: bold;
+        }
+        #hosp-search-save-dialog .dialog-body {
+          padding: 20px;
+        }
+        #hosp-search-save-dialog .dialog-footer {
+          padding: 12px 20px;
+          border-top: 1px solid #e0e0e0;
+          display: flex;
+          justify-content: flex-end;
+          gap: 8px;
+        }
+        #hosp-search-save-dialog .form-group {
+          margin-bottom: 16px;
+        }
+        #hosp-search-save-dialog .form-group:last-child {
+          margin-bottom: 0;
+        }
+        #hosp-search-save-dialog .form-label {
+          display: block;
+          margin-bottom: 8px;
+          font-size: 14px;
+          font-weight: 500;
+        }
+        #hosp-search-save-dialog .radio-group {
+          display: flex;
+          gap: 16px;
+        }
+        #hosp-search-save-dialog .radio-group label {
+          display: flex;
+          align-items: center;
+          gap: 6px;
+          font-size: 14px;
+          cursor: pointer;
+        }
+        #hosp-search-save-dialog .checkbox-group {
+          display: flex;
+          gap: 16px;
+        }
+        #hosp-search-save-dialog .checkbox-group label {
+          display: flex;
+          align-items: center;
+          gap: 6px;
+          font-size: 14px;
+          cursor: pointer;
+        }
+        #hosp-search-save-dialog select {
+          width: 100%;
+          padding: 8px 12px;
+          border: 1px solid #ccc;
+          border-radius: 4px;
+          font-size: 14px;
+        }
+        #hosp-search-save-dialog select:focus {
+          outline: none;
+          border-color: #2196F3;
+        }
+        #hosp-search-save-dialog .btn {
+          padding: 8px 16px;
+          border: none;
+          border-radius: 4px;
+          font-size: 14px;
+          cursor: pointer;
+        }
+        #hosp-search-save-dialog .btn-cancel {
+          background: #f5f5f5;
+          color: #333;
+        }
+        #hosp-search-save-dialog .btn-cancel:hover {
+          background: #e0e0e0;
+        }
+        #hosp-search-save-dialog .btn-save {
+          background: #2196F3;
+          color: white;
+        }
+        #hosp-search-save-dialog .btn-save:hover {
+          background: #1976D2;
+        }
+        #hosp-search-save-dialog .btn-save:disabled {
+          background: #ccc;
+          cursor: not-allowed;
+        }
+        #hosp-search-save-dialog .note {
+          font-size: 12px;
+          color: #666;
+          margin-top: 4px;
+        }
+      </style>
+      <div class="dialog-content">
+        <div class="dialog-header">検索結果を保存</div>
+        <div class="dialog-body">
+          <div class="form-group">
+            <div class="form-label">並び順</div>
+            <div class="radio-group">
+              <label>
+                <input type="radio" name="sort-order" value="asc" checked>
+                古い順
+              </label>
+              <label>
+                <input type="radio" name="sort-order" value="desc">
+                新しい順
+              </label>
+            </div>
+          </div>
+          <div class="form-group">
+            <div class="form-label">記録種別</div>
+            <div class="checkbox-group">
+              <label>
+                <input type="checkbox" id="save-include-hosp" checked>
+                入院記録
+              </label>
+              <label>
+                <input type="checkbox" id="save-include-out" checked>
+                外来記録
+              </label>
+            </div>
+          </div>
+          <div class="form-group">
+            <div class="form-label">入院期間</div>
+            <select id="save-hosp-period">
+              <option value="">全期間</option>
+            </select>
+            <div class="note" id="period-note"></div>
+          </div>
+        </div>
+        <div class="dialog-footer">
+          <button class="btn btn-cancel" id="save-cancel-btn">キャンセル</button>
+          <button class="btn btn-save" id="save-confirm-btn">保存</button>
+        </div>
+      </div>
+    `;
+
+    const cancelBtn = dialog.querySelector('#save-cancel-btn');
+    const confirmBtn = dialog.querySelector('#save-confirm-btn');
+    const periodSelect = dialog.querySelector('#save-hosp-period');
+    const periodNote = dialog.querySelector('#period-note');
+    const includeHospCheckbox = dialog.querySelector('#save-include-hosp');
+    const includeOutCheckbox = dialog.querySelector('#save-include-out');
+
+    // 入院期間ドロップダウンを構築
+    for (const hosp of hospitalizations) {
+      const option = document.createElement('option');
+      option.value = hosp.uuid;
+      const start = formatDate(hosp.startDate);
+      const end = hosp.endDate ? formatDate(hosp.endDate) : '入院中';
+      const suffix = hosp.state === 'ADMITTED' ? '（入院中）' : '';
+      option.textContent = `${start}〜${end}${suffix}`;
+      periodSelect.appendChild(option);
+    }
+
+    // 入院期間選択時の注意表示
+    function updatePeriodNote() {
+      if (periodSelect.value) {
+        periodNote.textContent = '※ 入院期間を選択すると、外来記録は除外されます';
+        includeOutCheckbox.disabled = true;
+        includeOutCheckbox.checked = false;
+      } else {
+        periodNote.textContent = '';
+        includeOutCheckbox.disabled = false;
+      }
+    }
+
+    periodSelect.addEventListener('change', updatePeriodNote);
+
+    // 閉じる
+    cancelBtn.onclick = () => dialog.remove();
+    dialog.addEventListener('click', (e) => {
+      if (e.target === dialog) dialog.remove();
+    });
+
+    // 保存実行
+    confirmBtn.onclick = async () => {
+      // 患者情報を取得
+      if (!patientInfo) {
+        confirmBtn.disabled = true;
+        confirmBtn.textContent = '読込中...';
+        patientInfo = await fetchPatientInfo(patientUuid);
+        confirmBtn.disabled = false;
+        confirmBtn.textContent = '保存';
+      }
+
+      const sortOrder = dialog.querySelector('input[name="sort-order"]:checked').value;
+      const includeHospitalization = includeHospCheckbox.checked;
+      const includeOutpatient = includeOutCheckbox.checked;
+      const selectedHospitalization = periodSelect.value;
+
+      if (!includeHospitalization && !includeOutpatient) {
+        alert('記録種別を少なくとも1つ選択してください');
+        return;
+      }
+
+      // フィルタリング
+      let filteredResults = [];
+
+      if (selectedHospitalization) {
+        // 入院期間指定時は入院記録のみ
+        const hosp = hospitalizations.find(h => h.uuid === selectedHospitalization);
+        const hospFiltered = filterByHospitalizationPeriod(hospitalizationDocs, hosp);
+        filteredResults = searchInDocuments(hospFiltered, searchText);
+      } else {
+        // 全期間
+        const targetDocs = [
+          ...(includeHospitalization ? hospitalizationDocs : []),
+          ...(includeOutpatient ? outpatientDocs : [])
+        ];
+        filteredResults = searchInDocuments(targetDocs, searchText);
+      }
+
+      // テキスト生成
+      const content = generateTextContent(filteredResults, {
+        searchText,
+        patientInfo,
+        sortOrder,
+        includeHospitalization: selectedHospitalization ? true : includeHospitalization,
+        includeOutpatient: selectedHospitalization ? false : includeOutpatient,
+        selectedHospitalization,
+        hospitalizations
+      });
+
+      // ファイル名生成
+      const today = new Date();
+      const dateStr = `${today.getFullYear()}${(today.getMonth() + 1).toString().padStart(2, '0')}${today.getDate().toString().padStart(2, '0')}`;
+      const patientId = patientInfo?.serialNumber || 'unknown';
+      const filename = `カルテ検索_ID${patientId}_${dateStr}.txt`;
+
+      // ダウンロード
+      downloadTextFile(content, filename);
+
+      dialog.remove();
+    };
+
+    document.body.appendChild(dialog);
+  }
+
   // 検索モーダルを表示
   function showSearchModal(patientUuid) {
     // 既存モーダルを削除
     document.getElementById('hosp-search-modal')?.remove();
 
     // 状態管理
-    let allDocuments = [];
+    let hospitalizationDocs = [];
+    let outpatientDocs = [];
     let hospitalizations = [];
-    let includeHistory = false;
     let isLoading = false;
+    let isPreloading = false;
 
     const modal = document.createElement('div');
     modal.id = 'hosp-search-modal';
@@ -419,6 +810,18 @@
         #hosp-search-modal .results-count {
           font-size: 14px;
           color: #666;
+        }
+        #hosp-search-modal .save-btn {
+          padding: 6px 12px;
+          background: #4caf50;
+          color: white;
+          border: none;
+          border-radius: 4px;
+          cursor: pointer;
+          font-size: 13px;
+        }
+        #hosp-search-modal .save-btn:hover {
+          background: #388e3c;
         }
         #hosp-search-modal .results-list {
           display: flex;
@@ -561,16 +964,9 @@
       return typeMap[type] || type;
     }
 
-    // キャッシュ管理用
-    let cachedSelections = { hospitalization: false, outpatient: false };
-
     // 検索実行
     async function doSearch() {
       const searchText = searchInput.value.trim();
-      if (!searchText) {
-        resultsContainer.innerHTML = '<div class="no-results">検索キーワードを入力してください</div>';
-        return;
-      }
 
       const selections = getSelections();
       if (!selections.hospitalization && !selections.outpatient) {
@@ -578,31 +974,42 @@
         return;
       }
 
-      if (isLoading) return;
+      if (isLoading || isPreloading) {
+        resultsContainer.innerHTML = '<div class="loading">データ読み込み中...</div>';
+        return;
+      }
       isLoading = true;
       searchBtn.disabled = true;
       resultsContainer.innerHTML = '<div class="loading">検索中...</div>';
 
       try {
-        // 選択が変わったらデータを再取得
-        const selectionsChanged =
-          selections.hospitalization !== cachedSelections.hospitalization ||
-          selections.outpatient !== cachedSelections.outpatient;
-        if (allDocuments.length === 0 || selectionsChanged) {
-          allDocuments = await fetchAllDocuments(patientUuid, selections.hospitalization, selections.outpatient);
-          cachedSelections = { ...selections };
+        // データ未取得の場合は取得
+        if (hospitalizationDocs.length === 0 && outpatientDocs.length === 0) {
+          const result = await fetchAllDocuments(patientUuid);
+          hospitalizationDocs = result.hospitalizationDocs;
+          outpatientDocs = result.outpatientDocs;
         }
 
+        // 選択状態に応じてフィルタリング
+        const targetDocs = [
+          ...(selections.hospitalization ? hospitalizationDocs : []),
+          ...(selections.outpatient ? outpatientDocs : [])
+        ];
+
         // 検索
-        const results = searchInDocuments(allDocuments, searchText);
+        const results = searchInDocuments(targetDocs, searchText);
 
         // 結果表示
         if (results.length === 0) {
-          resultsContainer.innerHTML = `<div class="no-results">「${escapeHtml(searchText)}」に一致する記録はありません</div>`;
+          const noResultsMsg = searchText
+            ? `「${escapeHtml(searchText)}」に一致する記録はありません`
+            : '記録がありません';
+          resultsContainer.innerHTML = `<div class="no-results">${noResultsMsg}</div>`;
         } else {
           resultsContainer.innerHTML = `
             <div class="results-header">
               <span class="results-count">${results.length}件の記録が見つかりました</span>
+              <button class="save-btn" id="save-results-btn">保存</button>
             </div>
             <div class="results-list">
               ${results.map(doc => `
@@ -619,6 +1026,12 @@
               `).join('')}
             </div>
           `;
+
+          // 保存ボタンのイベント設定
+          const saveBtn = resultsContainer.querySelector('#save-results-btn');
+          saveBtn.onclick = () => {
+            showSaveDialog(searchText, results, hospitalizations, patientUuid, hospitalizationDocs, outpatientDocs);
+          };
         }
       } catch (e) {
         console.error(`[${SCRIPT_NAME}] 検索エラー:`, e);
@@ -635,15 +1048,13 @@
       if (e.key === 'Enter') doSearch();
     });
 
-    // チェックボックス変更時にキャッシュをクリアして再検索
+    // チェックボックス変更時に再検索（データは再取得しない）
     includeHospitalizationCheckbox.addEventListener('change', () => {
-      allDocuments = [];
       if (searchInput.value.trim()) {
         doSearch();
       }
     });
     includeOutpatientCheckbox.addEventListener('change', () => {
-      allDocuments = [];
       if (searchInput.value.trim()) {
         doSearch();
       }
@@ -653,6 +1064,21 @@
 
     // 初期データ読み込み
     loadHospitalizations();
+
+    // プリフェッチ開始（入院・外来を並列取得）
+    isPreloading = true;
+    fetchAllDocuments(patientUuid)
+      .then(result => {
+        hospitalizationDocs = result.hospitalizationDocs;
+        outpatientDocs = result.outpatientDocs;
+        console.log(`[${SCRIPT_NAME}] プリフェッチ完了: 入院${hospitalizationDocs.length}件, 外来${outpatientDocs.length}件`);
+      })
+      .catch(e => {
+        console.error(`[${SCRIPT_NAME}] プリフェッチエラー:`, e);
+      })
+      .finally(() => {
+        isPreloading = false;
+      });
 
     // 入力欄にフォーカス
     setTimeout(() => searchInput.focus(), 100);

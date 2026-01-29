@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry Disease Register
 // @namespace    https://henry-app.jp/
-// @version      3.24.0
+// @version      3.25.1
 // @description  高速病名検索・登録
 // @author       sk powered by Claude & Gemini
 // @match        https://henry-app.jp/*
@@ -36,6 +36,13 @@
  * - henry_disease_data.js: 病名マスタデータ（@require で読み込み）
  *
  * ■ 変更履歴
+ * v3.25.1 (2026-01-28) - 「登録済み病名」→「現在有効な病名」に表記変更
+ * v3.25.0 (2026-01-28) - 編集中ハイライト表示、リハビリ病名表示改善
+ *   - 編集中の病名を青色ハイライトで表示
+ *   - リハビリ病名は背景ハイライトをやめてバッジのみに変更
+ * v3.24.1 (2026-01-28) - Firestoreエラー修正
+ *   - 病名登録/更新/削除後のrefetchQueries呼び出しを削除
+ *   - Apollo Client refetchがFirestoreストリーミング接続をリセットしていた問題を解消
  * v3.24.0 (2026-01-27) - 登録済み病名の削除機能を追加
  *   - 編集ポップアップに「削除」ボタンを追加
  *   - 確認ダイアログ付きで安全に削除可能
@@ -1095,10 +1102,6 @@
       color: #888;
       font-size: 12px;
     }
-    .dr-rehab-match {
-      background: #fff8e1;
-      border-left: 3px solid #ffc107;
-    }
     .dr-rehab-badge {
       font-size: 10px;
       padding: 1px 6px;
@@ -1669,6 +1672,10 @@
     .dr-registered-item:hover {
       background: #f0f4ff;
     }
+    .dr-registered-item.editing {
+      background: #e3f2fd;
+      border-left: 3px solid #1976d2;
+    }
   `;
 
   // ============================================
@@ -1939,7 +1946,6 @@
         if (existingBadge) existingBadge.remove();
 
         if (this.latestRehabDiseaseNames.has(name)) {
-          item.classList.add('dr-rehab-match');
           // リハビリ病名バッジを追加
           const metaEl = item.querySelector('.dr-registered-meta');
           if (metaEl) {
@@ -1948,8 +1954,6 @@
             badge.textContent = 'リハビリ病名';
             metaEl.appendChild(badge);
           }
-        } else {
-          item.classList.remove('dr-rehab-match');
         }
       });
     }
@@ -1978,7 +1982,7 @@
       );
 
       if (diseases.length === 0) {
-        container.innerHTML = '<div class="dr-registered-empty">登録済みの病名はありません</div>';
+        container.innerHTML = '<div class="dr-registered-empty">現在有効な病名はありません</div>';
       } else {
         container.innerHTML = diseases.map((d, index) => {
           // 未コード化病名（code: 0000999）の場合は customDiseaseName を優先
@@ -2068,7 +2072,7 @@
               <div class="dr-left-panel">
                 <div class="dr-left-panel-header">
                   <span class="dr-panel-toggle" id="dr-rehab-open">&lt;</span>
-                  <span class="dr-left-panel-header-text">登録済み病名</span>
+                  <span class="dr-left-panel-header-text">現在有効な病名</span>
                 </div>
                 <div class="dr-left-panel-body" id="dr-registered-diseases">
                   <div class="dr-registered-empty">読み込み中...</div>
@@ -2660,11 +2664,6 @@
 
           // 登録済み病名を再取得して表示更新
           this.loadRegisteredDiseases();
-
-          // 画面更新（Apollo Client refetch）
-          if (window.__APOLLO_CLIENT__) {
-            window.__APOLLO_CLIENT__.refetchQueries({ include: 'active' });
-          }
         } else {
           throw new Error('登録に失敗しました');
         }
@@ -2696,6 +2695,13 @@
 
     showEditPopup(e, disease) {
       this.hideEditPopup();
+
+      // 編集中の項目をハイライト
+      const targetItem = e.target.closest('.dr-registered-item');
+      if (targetItem) {
+        targetItem.classList.add('editing');
+        this.editingItem = targetItem;
+      }
 
       // 病名表示名を構築
       let baseName;
@@ -2928,6 +2934,11 @@
         document.removeEventListener('click', this.handleOutsideClick);
         this.handleOutsideClick = null;
       }
+      // 編集中ハイライトを解除
+      if (this.editingItem) {
+        this.editingItem.classList.remove('editing');
+        this.editingItem = null;
+      }
       // ツールチップも閉じる
       this.hideEndDateTooltip();
     }
@@ -3017,11 +3028,6 @@
           this.hideEditPopup();
           this.showSuccessMessage('更新しました');
           this.loadRegisteredDiseases();
-
-          // 画面更新（Apollo Client refetch）
-          if (window.__APOLLO_CLIENT__) {
-            window.__APOLLO_CLIENT__.refetchQueries({ include: 'active' });
-          }
         } else {
           throw new Error('更新に失敗しました');
         }
@@ -3109,11 +3115,6 @@
           this.hideEditPopup();
           this.showSuccessMessage('削除しました');
           this.loadRegisteredDiseases();
-
-          // 画面更新（Apollo Client refetch）
-          if (window.__APOLLO_CLIENT__) {
-            window.__APOLLO_CLIENT__.refetchQueries({ include: 'active' });
-          }
         } else {
           throw new Error('削除に失敗しました');
         }

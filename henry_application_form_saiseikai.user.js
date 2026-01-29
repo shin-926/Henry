@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         香川県済生会病院 診療申込書
 // @namespace    https://henry-app.jp/
-// @version      1.0.1
+// @version      1.0.3
 // @description  香川県済生会病院への診療申込書を作成
 // @author       sk powered by Claude
 // @match        https://henry-app.jp/*
@@ -739,7 +739,7 @@
         }
         .ssf-header {
           padding: 20px 24px;
-          background: #616161;
+          background: #3F51B5;
           color: white;
           border-radius: 12px 12px 0 0;
           display: flex;
@@ -775,10 +775,10 @@
         .ssf-section-title {
           font-size: 16px;
           font-weight: 600;
-          color: #2e7d32;
+          color: #3F51B5;
           margin-bottom: 12px;
           padding-bottom: 8px;
-          border-bottom: 2px solid #a5d6a7;
+          border-bottom: 2px solid #9FA8DA;
         }
         .ssf-row {
           display: flex;
@@ -805,8 +805,8 @@
         }
         .ssf-field input:focus, .ssf-field textarea:focus, .ssf-field select:focus {
           outline: none;
-          border-color: #2e7d32;
-          box-shadow: 0 0 0 3px rgba(46, 125, 50, 0.1);
+          border-color: #3F51B5;
+          box-shadow: 0 0 0 3px rgba(63, 81, 181, 0.2);
         }
         .ssf-field select {
           background: #fff;
@@ -838,8 +838,8 @@
         }
         .ssf-combobox-input:focus {
           outline: none;
-          border-color: #2e7d32;
-          box-shadow: 0 0 0 3px rgba(46, 125, 50, 0.1);
+          border-color: #3F51B5;
+          box-shadow: 0 0 0 3px rgba(63, 81, 181, 0.2);
         }
         .ssf-combobox-input:disabled {
           background: #f5f5f5;
@@ -893,11 +893,11 @@
           font-size: 14px;
         }
         .ssf-combobox-option:hover {
-          background: #e8f5e9;
+          background: #E8EAF6;
         }
         .ssf-combobox-option.selected {
-          background: #c8e6c9;
-          color: #1b5e20;
+          background: #C5CAE9;
+          color: #303F9F;
         }
         .ssf-combobox-empty {
           padding: 10px 12px;
@@ -929,8 +929,8 @@
           color: #333;
         }
         .ssf-checkbox-item.main-disease {
-          background: #e8f5e9;
-          border: 1px solid #a5d6a7;
+          background: #E8EAF6;
+          border: 1px solid #9FA8DA;
         }
         .ssf-radio-group {
           display: flex;
@@ -999,26 +999,26 @@
           background: #d0d0d0;
         }
         .ssf-btn-primary {
-          background: #2e7d32;
+          background: #3F51B5;
           color: white;
         }
         .ssf-btn-primary:hover {
-          background: #1b5e20;
+          background: #303F9F;
         }
         .ssf-btn-primary:disabled {
           background: #ccc;
           cursor: not-allowed;
         }
         .ssf-btn-link {
-          background: #e8f5e9;
-          color: #2e7d32;
-          border: 1px solid #81c784;
+          background: #E8EAF6;
+          color: #3F51B5;
+          border: 1px solid #9FA8DA;
           padding: 8px 12px;
           white-space: nowrap;
           font-size: 13px;
         }
         .ssf-btn-link:hover {
-          background: #c8e6c9;
+          background: #C5CAE9;
         }
         .ssf-hope-date-row {
           display: flex;
@@ -1041,8 +1041,8 @@
           border: 1px solid #ddd;
         }
         .ssf-ampm-group .ssf-radio-item:has(input:checked) {
-          background: #e8f5e9;
-          border-color: #2e7d32;
+          background: #E8EAF6;
+          border-color: #3F51B5;
         }
       </style>
       <div class="ssf-container">

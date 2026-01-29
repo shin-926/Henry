@@ -1,12 +1,12 @@
 {
-  "version": "1.6.0",
+  "version": "1.7.0",
   "description": "Henryスクリプト動的ローダー用マニフェスト",
   "categories": [
     { "id": "documents", "label": "書類作成", "order": 1 },
-    { "id": "karte", "label": "カルテ", "order": 2 },
-    { "id": "efficiency", "label": "業務効率化", "order": 3 },
-    { "id": "reserve", "label": "予約連携", "order": 4 },
-    { "id": "google", "label": "Google連携", "order": 5 },
+    { "id": "karte", "label": "カルテ", "order": 3 },
+    { "id": "efficiency", "label": "業務効率化", "order": 4 },
+    { "id": "reserve", "label": "予約連携", "order": 5 },
+    { "id": "google", "label": "Google連携", "order": 6 },
     { "id": "dev", "label": "開発", "order": 99, "devOnly": true }
   ],
   "scripts": [
@@ -145,39 +145,93 @@
       "enabled": true
     },
     {
-      "name": "henry_ritsurin_referral_form",
-      "label": "りつりん病院 診療申込書",
-      "file": "henry_ritsurin_referral_form.user.js",
+      "name": "henry_application_form_ritsurin",
+      "label": "りつりん病院",
+      "file": "henry_application_form_ritsurin.user.js",
       "match": ["henry-app.jp"],
       "category": "documents",
-      "order": 10,
+      "subcategory": "診療申込書",
+      "order": 20,
       "enabled": true
     },
     {
-      "name": "henry_chuo_referral_form",
-      "label": "県立中央病院 診療申込書",
-      "file": "henry_chuo_referral_form.user.js",
+      "name": "henry_application_form_chuo",
+      "label": "県立中央病院",
+      "file": "henry_application_form_chuo.user.js",
       "match": ["henry-app.jp"],
       "category": "documents",
-      "order": 10,
+      "subcategory": "診療申込書",
+      "order": 20,
       "enabled": true
     },
     {
-      "name": "henry_sekijuji_referral_form",
-      "label": "高松赤十字病院 診療申込書",
-      "file": "henry_sekijuji_referral_form.user.js",
+      "name": "henry_application_form_sekijuji",
+      "label": "高松赤十字病院",
+      "file": "henry_application_form_sekijuji.user.js",
       "match": ["henry-app.jp"],
       "category": "documents",
-      "order": 10,
+      "subcategory": "診療申込書",
+      "order": 20,
       "enabled": true
     },
     {
-      "name": "henry_minna_referral_form",
-      "label": "みんなの病院 診療申込書",
-      "file": "henry_minna_referral_form.user.js",
+      "name": "henry_application_form_saiseikai",
+      "label": "済生会病院",
+      "file": "henry_application_form_saiseikai.user.js",
       "match": ["henry-app.jp"],
       "category": "documents",
-      "order": 10,
+      "subcategory": "診療申込書",
+      "order": 20,
+      "enabled": true
+    },
+    {
+      "name": "henry_application_form_minna",
+      "label": "みんなの病院",
+      "file": "henry_application_form_minna.user.js",
+      "match": ["henry-app.jp"],
+      "category": "documents",
+      "subcategory": "診療申込書",
+      "order": 20,
+      "enabled": true
+    },
+    {
+      "name": "henry_application_form_heiwa",
+      "label": "高松平和病院",
+      "file": "henry_application_form_heiwa.user.js",
+      "match": ["henry-app.jp"],
+      "category": "documents",
+      "subcategory": "診療申込書",
+      "order": 20,
+      "enabled": true
+    },
+    {
+      "name": "henry_application_form_kkr",
+      "label": "KKR高松病院",
+      "file": "henry_application_form_kkr.user.js",
+      "match": ["henry-app.jp"],
+      "category": "documents",
+      "subcategory": "診療申込書",
+      "order": 20,
+      "enabled": true
+    },
+    {
+      "name": "henry_application_form_yashima",
+      "label": "屋島総合病院",
+      "file": "henry_application_form_yashima.user.js",
+      "match": ["henry-app.jp"],
+      "category": "documents",
+      "subcategory": "診療申込書",
+      "order": 20,
+      "enabled": true
+    },
+    {
+      "name": "henry_application_form_university",
+      "label": "香川大学病院",
+      "file": "henry_application_form_university.user.js",
+      "match": ["henry-app.jp"],
+      "category": "documents",
+      "subcategory": "診療申込書",
+      "order": 20,
       "enabled": true
     },
     {
@@ -250,6 +304,15 @@
       "match": ["henry-app.jp"],
       "category": "karte",
       "order": 10,
+      "enabled": true
+    },
+    {
+      "name": "henry_patient_timeline",
+      "label": "入院タイムライン",
+      "file": "henry_patient_timeline.user.js",
+      "match": ["henry-app.jp"],
+      "category": "karte",
+      "order": 11,
       "enabled": true
     },
     {

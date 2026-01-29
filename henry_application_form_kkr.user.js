@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         KKR高松病院 FAX診療/検査申込書
 // @namespace    https://henry-app.jp/
-// @version      1.0.1
+// @version      1.0.3
 // @description  KKR高松病院へのFAX診療/検査申込書を作成
 // @author       sk powered by Claude
 // @match        https://henry-app.jp/*
@@ -78,12 +78,12 @@
   const STORAGE_KEY_PREFIX = 'henry_kkr_draft_';
   const DRAFT_SCHEMA_VERSION = 1;
 
-  // テーマカラー（青系）
+  // テーマカラー（ネイビーブルー系）
   const THEME = {
-    primary: '#616161',
-    primaryDark: '#424242',
-    primaryLight: '#e0e0e0',
-    accent: '#f5f5f5'
+    primary: '#3F51B5',
+    primaryDark: '#303F9F',
+    primaryLight: '#E8EAF6',
+    accent: '#C5CAE9'
   };
 
   let log = null;
@@ -802,7 +802,7 @@
         .krf-field input:focus, .krf-field textarea:focus, .krf-field select:focus {
           outline: none;
           border-color: ${THEME.primary};
-          box-shadow: 0 0 0 3px rgba(21, 101, 192, 0.1);
+          box-shadow: 0 0 0 3px rgba(79, 195, 247, 0.2);
         }
         .krf-field select {
           background: #fff;
@@ -835,7 +835,7 @@
         .krf-combobox-input:focus {
           outline: none;
           border-color: ${THEME.primary};
-          box-shadow: 0 0 0 3px rgba(21, 101, 192, 0.1);
+          box-shadow: 0 0 0 3px rgba(79, 195, 247, 0.2);
         }
         .krf-combobox-input:disabled {
           background: #f5f5f5;

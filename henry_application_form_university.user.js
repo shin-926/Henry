@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         香川大学医学部附属病院 FAX診療予約申込書
 // @namespace    https://henry-app.jp/
-// @version      1.1.1
+// @version      1.1.3
 // @description  香川大学医学部附属病院へのFAX診療予約申込書を作成
 // @author       sk powered by Claude
 // @match        https://henry-app.jp/*
@@ -132,12 +132,12 @@
     '膵臓・胆道センター': []
   };
 
-  // テーマカラー（香川大学カラー）
+  // テーマカラー（ネイビーブルー系）
   const THEME = {
-    primary: '#616161',
-    primaryDark: '#424242',
-    primaryLight: '#e0e0e0',
-    accent: '#f5f5f5'
+    primary: '#3F51B5',
+    primaryDark: '#303F9F',
+    primaryLight: '#E8EAF6',
+    accent: '#C5CAE9'
   };
 
 
@@ -874,7 +874,7 @@
         .urf-field input:focus, .urf-field textarea:focus, .urf-field select:focus {
           outline: none;
           border-color: ${THEME.primary};
-          box-shadow: 0 0 0 3px rgba(123, 31, 162, 0.1);
+          box-shadow: 0 0 0 3px rgba(79, 195, 247, 0.2);
         }
         .urf-field select {
           background: #fff;
@@ -902,7 +902,7 @@
         .urf-combobox-input:focus {
           outline: none;
           border-color: ${THEME.primary};
-          box-shadow: 0 0 0 3px rgba(123, 31, 162, 0.1);
+          box-shadow: 0 0 0 3px rgba(79, 195, 247, 0.2);
         }
         .urf-combobox-toggle {
           position: absolute;
@@ -1088,7 +1088,7 @@
         .urf-time-select-wrapper select:focus {
           outline: none;
           border-color: ${THEME.primary};
-          box-shadow: 0 0 0 3px rgba(123, 31, 162, 0.1);
+          box-shadow: 0 0 0 3px rgba(79, 195, 247, 0.2);
         }
         .urf-time-suffix {
           font-size: 14px;

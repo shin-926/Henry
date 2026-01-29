@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         高松市立みんなの病院 診療申込書
 // @namespace    https://henry-app.jp/
-// @version      1.0.2
+// @version      1.0.4
 // @description  高松市立みんなの病院へのFAX診療申込書を作成
 // @author       sk powered by Claude
 // @match        https://henry-app.jp/*
@@ -772,7 +772,7 @@
         }
         .mrf-header {
           padding: 20px 24px;
-          background: #616161;
+          background: #3F51B5;
           color: white;
           border-radius: 12px 12px 0 0;
           display: flex;
@@ -808,10 +808,10 @@
         .mrf-section-title {
           font-size: 16px;
           font-weight: 600;
-          color: #1976d2;
+          color: #3F51B5;
           margin-bottom: 12px;
           padding-bottom: 8px;
-          border-bottom: 2px solid #bbdefb;
+          border-bottom: 2px solid #C5CAE9;
         }
         .mrf-row {
           display: flex;
@@ -838,8 +838,8 @@
         }
         .mrf-field input:focus, .mrf-field textarea:focus, .mrf-field select:focus {
           outline: none;
-          border-color: #1976d2;
-          box-shadow: 0 0 0 3px rgba(25, 118, 210, 0.1);
+          border-color: #3F51B5;
+          box-shadow: 0 0 0 3px rgba(63, 81, 181, 0.2);
         }
         .mrf-field select {
           background: #fff;
@@ -871,8 +871,8 @@
         }
         .mrf-combobox-input:focus {
           outline: none;
-          border-color: #1976d2;
-          box-shadow: 0 0 0 3px rgba(25, 118, 210, 0.1);
+          border-color: #3F51B5;
+          box-shadow: 0 0 0 3px rgba(63, 81, 181, 0.2);
         }
         .mrf-combobox-input:disabled {
           background: #f5f5f5;
@@ -926,11 +926,11 @@
           font-size: 14px;
         }
         .mrf-combobox-option:hover {
-          background: #e3f2fd;
+          background: #E8EAF6;
         }
         .mrf-combobox-option.selected {
-          background: #bbdefb;
-          color: #1565c0;
+          background: #C5CAE9;
+          color: #303F9F;
         }
         .mrf-combobox-empty {
           padding: 10px 12px;
@@ -962,8 +962,8 @@
           color: #333;
         }
         .mrf-checkbox-item.main-disease {
-          background: #e3f2fd;
-          border: 1px solid #bbdefb;
+          background: #E8EAF6;
+          border: 1px solid #C5CAE9;
         }
         .mrf-radio-group {
           display: flex;
@@ -1054,26 +1054,26 @@
           background: #d0d0d0;
         }
         .mrf-btn-primary {
-          background: #1976d2;
+          background: #3F51B5;
           color: white;
         }
         .mrf-btn-primary:hover {
-          background: #1565c0;
+          background: #303F9F;
         }
         .mrf-btn-primary:disabled {
           background: #ccc;
           cursor: not-allowed;
         }
         .mrf-btn-link {
-          background: #e3f2fd;
-          color: #1976d2;
-          border: 1px solid #90caf9;
+          background: #E8EAF6;
+          color: #3F51B5;
+          border: 1px solid #9FA8DA;
           padding: 8px 12px;
           white-space: nowrap;
           font-size: 13px;
         }
         .mrf-btn-link:hover {
-          background: #bbdefb;
+          background: #C5CAE9;
         }
         .mrf-current-status-detail {
           margin-top: 8px;
