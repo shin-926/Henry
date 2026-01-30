@@ -259,7 +259,7 @@
       "match": ["henry-app.jp"],
       "category": "efficiency",
       "order": 10,
-      "enabled": true
+      "beta": true
     },
     {
       "name": "henry_set_search_helper",
@@ -313,7 +313,7 @@
       "match": ["henry-app.jp"],
       "category": "karte",
       "order": 11,
-      "enabled": true
+      "beta": true
     },
     {
       "name": "henry_test_helper",

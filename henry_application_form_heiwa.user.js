@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         高松平和病院 診療申込書
 // @namespace    https://henry-app.jp/
-// @version      1.2.3
+// @version      1.3.0
 // @description  高松平和病院への診療申込書を作成
 // @author       sk powered by Claude
 // @match        https://henry-app.jp/*
@@ -1115,62 +1115,6 @@
           <button class="hrf-close" title="閉じる">&times;</button>
         </div>
         <div class="hrf-body">
-          <!-- 患者情報（自動入力） -->
-          <div class="hrf-section">
-            <div class="hrf-section-title">患者情報（自動入力）</div>
-            <div class="hrf-row">
-              <div class="hrf-field readonly">
-                <label>ふりがな</label>
-                <input type="text" value="${escapeHtml(formData.patient_name_kana)}" readonly>
-              </div>
-              <div class="hrf-field readonly">
-                <label>患者氏名</label>
-                <input type="text" value="${escapeHtml(formData.patient_name)}" readonly>
-              </div>
-              <div class="hrf-field readonly" style="flex: 0.3;">
-                <label>性別</label>
-                <input type="text" value="${escapeHtml(formData.sex)}" readonly>
-              </div>
-            </div>
-            <div class="hrf-row">
-              <div class="hrf-field readonly">
-                <label>生年月日</label>
-                <input type="text" value="${escapeHtml(formData.birth_date_wareki)}" readonly>
-              </div>
-              <div class="hrf-field readonly" style="flex: 0.4;">
-                <label>郵便番号</label>
-                <input type="text" value="${escapeHtml(formData.postal_code)}" readonly>
-              </div>
-            </div>
-            <div class="hrf-row">
-              <div class="hrf-field readonly">
-                <label>住所</label>
-                <input type="text" value="${escapeHtml(formData.address)}" readonly>
-              </div>
-            </div>
-            <div class="hrf-row">
-              <div class="hrf-field readonly">
-                <label>電話番号</label>
-                <input type="text" value="${escapeHtml(formData.phone)}" readonly>
-              </div>
-            </div>
-          </div>
-
-          <!-- 紹介元情報（自動入力） -->
-          <div class="hrf-section">
-            <div class="hrf-section-title">紹介元情報（自動入力）</div>
-            <div class="hrf-row">
-              <div class="hrf-field readonly">
-                <label>医師名</label>
-                <input type="text" value="${escapeHtml(formData.physician_name)}" readonly>
-              </div>
-              <div class="hrf-field readonly" style="flex: 0.5;">
-                <label>作成日</label>
-                <input type="text" value="${escapeHtml(formData.creation_date_wareki)}" readonly>
-              </div>
-            </div>
-          </div>
-
           <!-- 診察・検査 -->
           <div class="hrf-section">
             <div class="hrf-section-title">診察・検査</div>

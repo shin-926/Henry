@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         香川県済生会病院 診療申込書
 // @namespace    https://henry-app.jp/
-// @version      1.0.3
+// @version      1.1.0
 // @description  香川県済生会病院への診療申込書を作成
 // @author       sk powered by Claude
 // @match        https://henry-app.jp/*
@@ -1051,71 +1051,17 @@
           <button class="ssf-close" title="閉じる">&times;</button>
         </div>
         <div class="ssf-body">
-          <!-- 患者情報（自動入力） -->
-          <div class="ssf-section">
-            <div class="ssf-section-title">患者情報（自動入力）</div>
-            <div class="ssf-row">
-              <div class="ssf-field readonly">
-                <label>フリガナ</label>
-                <input type="text" value="${escapeHtml(formData.patient_name_kana)}" readonly>
-              </div>
-              <div class="ssf-field readonly">
-                <label>患者氏名</label>
-                <input type="text" value="${escapeHtml(formData.patient_name)}" readonly>
-              </div>
-              <div class="ssf-field readonly" style="flex: 0.3;">
-                <label>性別</label>
-                <input type="text" value="${escapeHtml(formData.sex)}" readonly>
-              </div>
-            </div>
-            <div class="ssf-row">
-              <div class="ssf-field readonly">
-                <label>生年月日</label>
-                <input type="text" value="${escapeHtml(formData.birth_date_wareki)}" readonly>
-              </div>
-              <div class="ssf-field">
-                <label>旧姓（任意）</label>
-                <input type="text" id="ssf-maiden-name" value="${escapeHtml(formData.maiden_name)}" placeholder="旧姓があれば入力">
-              </div>
-            </div>
-            <div class="ssf-row">
-              <div class="ssf-field readonly" style="flex: 0.3;">
-                <label>郵便番号</label>
-                <input type="text" value="${escapeHtml(formData.postal_code)}" readonly>
-              </div>
-              <div class="ssf-field readonly">
-                <label>住所</label>
-                <input type="text" value="${escapeHtml(formData.address)}" readonly>
-              </div>
-            </div>
-            <div class="ssf-row">
-              <div class="ssf-field readonly">
-                <label>電話番号</label>
-                <input type="text" value="${escapeHtml(formData.phone)}" readonly>
-              </div>
-            </div>
-          </div>
-
-          <!-- 紹介元情報（自動入力） -->
-          <div class="ssf-section">
-            <div class="ssf-section-title">紹介元情報（自動入力）</div>
-            <div class="ssf-row">
-              <div class="ssf-field readonly">
-                <label>医師名</label>
-                <input type="text" value="${escapeHtml(formData.physician_name)}" readonly>
-              </div>
-              <div class="ssf-field readonly" style="flex: 0.5;">
-                <label>作成日</label>
-                <input type="text" value="${escapeHtml(formData.creation_date_wareki)}" readonly>
-              </div>
-            </div>
-          </div>
-
           <!-- 香川県済生会病院 受診希望 -->
           <div class="ssf-section">
             <div class="ssf-section-title">香川県済生会病院 受診希望</div>
             <div class="ssf-notice" style="background: #fff3e0; border: 1px solid #ffb74d; border-radius: 6px; padding: 10px 14px; margin-bottom: 16px; font-size: 13px; color: #e65100;">
               <strong>整形外科について：</strong>地域連携室では予約をお取りすることができません。担当医の診療時間内（8:30〜11:00）に直接お越しください。
+            </div>
+            <div class="ssf-row">
+              <div class="ssf-field">
+                <label>旧姓（任意）</label>
+                <input type="text" id="ssf-maiden-name" value="${escapeHtml(formData.maiden_name)}" placeholder="旧姓があれば入力">
+              </div>
             </div>
             <div class="ssf-row">
               <div class="ssf-field">

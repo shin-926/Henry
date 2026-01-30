@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         香川県立中央病院 診療申込書
 // @namespace    https://henry-app.jp/
-// @version      1.0.3
+// @version      1.1.0
 // @description  香川県立中央病院への診療FAX予約申込書を作成
 // @author       sk powered by Claude
 // @match        https://henry-app.jp/*
@@ -969,53 +969,14 @@
           <button class="crf-close" title="閉じる">&times;</button>
         </div>
         <div class="crf-body">
-          <!-- 患者情報（自動入力） -->
+          <!-- 中央病院 受診希望 -->
           <div class="crf-section">
-            <div class="crf-section-title">患者情報（自動入力）</div>
+            <div class="crf-section-title">中央病院 受診希望</div>
             <div class="crf-row">
-              <div class="crf-field readonly">
-                <label>フリガナ</label>
-                <input type="text" value="${escapeHtml(formData.patient_name_kana)}" readonly>
-              </div>
-              <div class="crf-field readonly">
-                <label>患者氏名</label>
-                <input type="text" value="${escapeHtml(formData.patient_name)}" readonly>
-              </div>
               <div class="crf-field" style="flex: 0.5;">
                 <label>旧姓</label>
                 <input type="text" id="crf-former-name" value="${escapeHtml(formData.former_name)}" placeholder="旧姓があれば入力">
               </div>
-            </div>
-            <div class="crf-row">
-              <div class="crf-field readonly" style="flex: 0.3;">
-                <label>性別</label>
-                <input type="text" value="${escapeHtml(formData.sex)}" readonly>
-              </div>
-              <div class="crf-field readonly">
-                <label>生年月日</label>
-                <input type="text" value="${escapeHtml(formData.birth_date_wareki)}" readonly>
-              </div>
-              <div class="crf-field readonly" style="flex: 0.3;">
-                <label>年齢</label>
-                <input type="text" value="${formData.age}歳" readonly>
-              </div>
-            </div>
-          </div>
-
-          <!-- 紹介元情報（自動入力） -->
-          <div class="crf-section">
-            <div class="crf-section-title">紹介元情報（自動入力）</div>
-            <div class="crf-row">
-              <div class="crf-field readonly">
-                <label>医師名</label>
-                <input type="text" value="${escapeHtml(formData.physician_name)}" readonly>
-              </div>
-              <div class="crf-field readonly" style="flex: 0.5;">
-                <label>作成日</label>
-                <input type="text" value="${escapeHtml(formData.creation_date_wareki)}" readonly>
-              </div>
-            </div>
-            <div class="crf-row">
               <div class="crf-field">
                 <label>紹介元医療機関の状況</label>
                 <div class="crf-radio-group">
@@ -1030,11 +991,6 @@
                 </div>
               </div>
             </div>
-          </div>
-
-          <!-- 中央病院 受診希望 -->
-          <div class="crf-section">
-            <div class="crf-section-title">中央病院 受診希望</div>
             <div class="crf-row">
               <div class="crf-field">
                 <label>希望受診科</label>

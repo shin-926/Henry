@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         ツールボックス
 // @namespace    https://haru-chan.example
-// @version      5.10.0
+// @version      5.11.0
 // @description  プラグイン方式。シンプルUI、Noto Sans JP、ドラッグ＆ドロップ並び替え対応。
 // @author       sk powered by Claude & Gemini
 // @match        https://henry-app.jp/*
@@ -1021,7 +1021,8 @@
         const nameClass = isEnabled ? '' : 'disabled';
         const toggleClass = isEnabled ? 'active' : '';
         const dotClass = isLoaded ? 'loaded' : 'not-loaded';
-        const displayLabel = (script.label || script.name).replace('（ベータ版）', '').trim();
+        const baseLabel = (script.label || script.name).replace('（ベータ版）', '').trim();
+        const displayLabel = script.beta ? `${baseLabel}（β）` : baseLabel;
 
         return `
           <div class="ht-settings-item" data-script="${script.name}">
@@ -1080,7 +1081,8 @@
         const nameClass = isEnabled ? '' : 'disabled';
         const toggleClass = isEnabled ? 'active' : '';
         const dotClass = isLoaded ? 'loaded' : 'not-loaded';
-        const displayLabel = (script.label || script.name).replace('（ベータ版）', '').trim();
+        const baseLabel = (script.label || script.name).replace('（ベータ版）', '').trim();
+        const displayLabel = script.beta ? `${baseLabel}（β）` : baseLabel;
 
         html += `
           <div class="ht-settings-item" data-script="${script.name}">

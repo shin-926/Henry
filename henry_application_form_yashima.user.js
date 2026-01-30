@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         屋島総合病院 FAX診療申込書
 // @namespace    https://henry-app.jp/
-// @version      1.0.3
+// @version      1.1.0
 // @description  屋島総合病院へのFAX診療申込書を作成
 // @author       sk powered by Claude
 // @match        https://henry-app.jp/*
@@ -1045,62 +1045,6 @@
           <button class="yrf-close" title="閉じる">&times;</button>
         </div>
         <div class="yrf-body">
-          <!-- 患者情報（自動入力） -->
-          <div class="yrf-section">
-            <div class="yrf-section-title">患者情報（自動入力）</div>
-            <div class="yrf-row">
-              <div class="yrf-field readonly">
-                <label>ふりがな</label>
-                <input type="text" value="${escapeHtml(formData.patient_name_kana)}" readonly>
-              </div>
-              <div class="yrf-field readonly">
-                <label>患者氏名</label>
-                <input type="text" value="${escapeHtml(formData.patient_name)}" readonly>
-              </div>
-              <div class="yrf-field readonly" style="flex: 0.3;">
-                <label>性別</label>
-                <input type="text" value="${escapeHtml(formData.sex)}" readonly>
-              </div>
-            </div>
-            <div class="yrf-row">
-              <div class="yrf-field readonly">
-                <label>生年月日</label>
-                <input type="text" value="${escapeHtml(formData.birth_date_wareki)}" readonly>
-              </div>
-              <div class="yrf-field readonly" style="flex: 0.3;">
-                <label>年齢</label>
-                <input type="text" value="${formData.age}歳" readonly>
-              </div>
-            </div>
-            <div class="yrf-row">
-              <div class="yrf-field readonly">
-                <label>住所</label>
-                <input type="text" value="${escapeHtml(formData.address)}" readonly>
-              </div>
-            </div>
-            <div class="yrf-row">
-              <div class="yrf-field readonly">
-                <label>電話番号</label>
-                <input type="text" value="${escapeHtml(formData.phone)}" readonly>
-              </div>
-            </div>
-          </div>
-
-          <!-- 紹介元情報（自動入力） -->
-          <div class="yrf-section">
-            <div class="yrf-section-title">紹介元情報（自動入力）</div>
-            <div class="yrf-row">
-              <div class="yrf-field readonly">
-                <label>医師名</label>
-                <input type="text" value="${escapeHtml(formData.physician_name)}" readonly>
-              </div>
-              <div class="yrf-field readonly" style="flex: 0.5;">
-                <label>作成日</label>
-                <input type="text" value="${escapeHtml(formData.creation_date_wareki)}" readonly>
-              </div>
-            </div>
-          </div>
-
           <!-- 屋島総合病院 受診希望 -->
           <div class="yrf-section">
             <div class="yrf-section-title">屋島総合病院 受診希望</div>

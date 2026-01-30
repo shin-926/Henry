@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         りつりん病院 診療申込書
 // @namespace    https://henry-app.jp/
-// @version      1.0.3
+// @version      1.1.0
 // @description  りつりん病院への診療FAX予約申込書を作成
 // @author       sk powered by Claude
 // @match        https://henry-app.jp/*
@@ -1021,66 +1021,6 @@
           <button class="rrf-close" title="閉じる">&times;</button>
         </div>
         <div class="rrf-body">
-          <!-- 患者情報（自動入力） -->
-          <div class="rrf-section">
-            <div class="rrf-section-title">患者情報（自動入力）</div>
-            <div class="rrf-row">
-              <div class="rrf-field readonly">
-                <label>ふりがな</label>
-                <input type="text" value="${escapeHtml(formData.patient_name_kana)}" readonly>
-              </div>
-              <div class="rrf-field readonly">
-                <label>患者氏名</label>
-                <input type="text" value="${escapeHtml(formData.patient_name)}" readonly>
-              </div>
-              <div class="rrf-field readonly" style="flex: 0.3;">
-                <label>性別</label>
-                <input type="text" value="${escapeHtml(formData.sex)}" readonly>
-              </div>
-            </div>
-            <div class="rrf-row">
-              <div class="rrf-field readonly">
-                <label>生年月日</label>
-                <input type="text" value="${escapeHtml(formData.birth_date_wareki)}" readonly>
-              </div>
-              <div class="rrf-field readonly" style="flex: 0.3;">
-                <label>年齢</label>
-                <input type="text" value="${formData.age}歳" readonly>
-              </div>
-            </div>
-            <div class="rrf-row">
-              <div class="rrf-field readonly" style="flex: 0.3;">
-                <label>郵便番号</label>
-                <input type="text" value="${escapeHtml(formData.postal_code)}" readonly>
-              </div>
-              <div class="rrf-field readonly">
-                <label>住所</label>
-                <input type="text" value="${escapeHtml(formData.address)}" readonly>
-              </div>
-            </div>
-            <div class="rrf-row">
-              <div class="rrf-field readonly">
-                <label>電話番号</label>
-                <input type="text" value="${escapeHtml(formData.phone)}" readonly>
-              </div>
-            </div>
-          </div>
-
-          <!-- 紹介元情報（自動入力） -->
-          <div class="rrf-section">
-            <div class="rrf-section-title">紹介元情報（自動入力）</div>
-            <div class="rrf-row">
-              <div class="rrf-field readonly">
-                <label>医師名</label>
-                <input type="text" value="${escapeHtml(formData.physician_name)}" readonly>
-              </div>
-              <div class="rrf-field readonly" style="flex: 0.5;">
-                <label>作成日</label>
-                <input type="text" value="${escapeHtml(formData.creation_date_wareki)}" readonly>
-              </div>
-            </div>
-          </div>
-
           <!-- りつりん病院 受診希望 -->
           <div class="rrf-section">
             <div class="rrf-section-title">りつりん病院 受診希望</div>

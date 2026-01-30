@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         香川大学医学部附属病院 FAX診療予約申込書
 // @namespace    https://henry-app.jp/
-// @version      1.1.3
+// @version      1.2.0
 // @description  香川大学医学部附属病院へのFAX診療予約申込書を作成
 // @author       sk powered by Claude
 // @match        https://henry-app.jp/*
@@ -1171,85 +1171,15 @@
           <button class="urf-close" title="閉じる">&times;</button>
         </div>
         <div class="urf-body">
-          <!-- 患者情報（自動入力） -->
+          <!-- 受診希望科（ラジオボタン） -->
           <div class="urf-section">
-            <div class="urf-section-title">患者情報（自動入力）</div>
-            <div class="urf-row">
-              <div class="urf-field readonly">
-                <label>フリガナ</label>
-                <input type="text" value="${escapeHtml(formData.patient_name_kana)}" readonly>
-              </div>
-              <div class="urf-field readonly">
-                <label>患者氏名</label>
-                <input type="text" value="${escapeHtml(formData.patient_name)}" readonly>
-              </div>
-              <div class="urf-field readonly" style="flex: 0.3;">
-                <label>性別</label>
-                <input type="text" value="${escapeHtml(formData.sex)}" readonly>
-              </div>
-            </div>
-            <div class="urf-row">
-              <div class="urf-field readonly">
-                <label>生年月日</label>
-                <input type="text" value="${escapeHtml(formData.birth_date_wareki)}" readonly>
-              </div>
-              <div class="urf-field readonly" style="flex: 0.3;">
-                <label>年齢</label>
-                <input type="text" value="${escapeHtml(formData.age)}" readonly>
-              </div>
-            </div>
-            <div class="urf-row">
-              <div class="urf-field readonly">
-                <label>住所</label>
-                <input type="text" value="${escapeHtml(formData.address)}" readonly>
-              </div>
-            </div>
-            <div class="urf-row">
-              <div class="urf-field readonly">
-                <label>電話番号（自宅）</label>
-                <input type="text" value="${escapeHtml(formData.phone)}" readonly>
-              </div>
-              <div class="urf-field readonly">
-                <label>携帯電話</label>
-                <input type="text" id="urf-mobile-phone" value="${escapeHtml(formData.mobile_phone)}" readonly>
-              </div>
-            </div>
-            <div class="urf-row">
+            <div class="urf-section-title">受診希望科</div>
+            <div class="urf-row" style="margin-bottom: 16px;">
               <div class="urf-field">
                 <label>旧姓（任意）</label>
                 <input type="text" id="urf-maiden-name" value="${escapeHtml(formData.maiden_name)}" placeholder="旧姓があれば入力">
               </div>
             </div>
-          </div>
-
-          <!-- 紹介元情報（自動入力） -->
-          <div class="urf-section">
-            <div class="urf-section-title">紹介元情報（自動入力）</div>
-            <div class="urf-row">
-              <div class="urf-field readonly">
-                <label>医師名</label>
-                <input type="text" value="${escapeHtml(formData.physician_name)}" readonly>
-              </div>
-              <div class="urf-field readonly" style="flex: 0.3;">
-                <label>診療科</label>
-                <input type="text" value="${escapeHtml(formData.department_name)}" readonly>
-              </div>
-              <div class="urf-field readonly" style="flex: 0.5;">
-                <label>作成日</label>
-                <input type="text" value="${escapeHtml(formData.creation_date_wareki)}" readonly>
-              </div>
-            </div>
-            <div class="urf-row">
-              <div class="urf-field readonly">
-                <label>連絡担当者名</label>
-                <input type="text" id="urf-contact-person" value="${escapeHtml(formData.contact_person)}" readonly>
-              </div>
-            </div>
-          </div>
-
-          <!-- 受診希望科（ラジオボタン） -->
-          <div class="urf-section">
-            <div class="urf-section-title">受診希望科</div>
             <div class="urf-departments-grid">
               ${DEPARTMENTS.map((dept, idx) => `
                 <div class="urf-dept-item">

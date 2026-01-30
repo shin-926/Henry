@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         高松市立みんなの病院 診療申込書
 // @namespace    https://henry-app.jp/
-// @version      1.0.4
+// @version      1.1.0
 // @description  高松市立みんなの病院へのFAX診療申込書を作成
 // @author       sk powered by Claude
 // @match        https://henry-app.jp/*
@@ -1090,69 +1090,15 @@
           <button class="mrf-close" title="閉じる">&times;</button>
         </div>
         <div class="mrf-body">
-          <!-- 患者情報（自動入力） -->
+          <!-- 高松市立みんなの病院 受診希望 -->
           <div class="mrf-section">
-            <div class="mrf-section-title">患者情報（自動入力）</div>
+            <div class="mrf-section-title">高松市立みんなの病院 受診希望</div>
             <div class="mrf-row">
-              <div class="mrf-field readonly">
-                <label>フリガナ</label>
-                <input type="text" value="${escapeHtml(formData.patient_name_kana)}" readonly>
-              </div>
-              <div class="mrf-field readonly">
-                <label>患者氏名</label>
-                <input type="text" value="${escapeHtml(formData.patient_name)}" readonly>
-              </div>
-              <div class="mrf-field readonly" style="flex: 0.3;">
-                <label>性別</label>
-                <input type="text" value="${escapeHtml(formData.sex)}" readonly>
-              </div>
-            </div>
-            <div class="mrf-row">
-              <div class="mrf-field readonly">
-                <label>生年月日</label>
-                <input type="text" value="${escapeHtml(formData.birth_date_wareki)}" readonly>
-              </div>
               <div class="mrf-field">
                 <label>旧姓（任意）</label>
                 <input type="text" id="mrf-maiden-name" value="${escapeHtml(formData.maiden_name)}" placeholder="旧姓があれば入力">
               </div>
             </div>
-            <div class="mrf-row">
-              <div class="mrf-field readonly" style="flex: 0.3;">
-                <label>郵便番号</label>
-                <input type="text" value="${escapeHtml(formData.postal_code)}" readonly>
-              </div>
-              <div class="mrf-field readonly">
-                <label>住所</label>
-                <input type="text" value="${escapeHtml(formData.address)}" readonly>
-              </div>
-            </div>
-            <div class="mrf-row">
-              <div class="mrf-field readonly">
-                <label>電話番号</label>
-                <input type="text" value="${escapeHtml(formData.phone)}" readonly>
-              </div>
-            </div>
-          </div>
-
-          <!-- 紹介元情報（自動入力） -->
-          <div class="mrf-section">
-            <div class="mrf-section-title">紹介元情報（自動入力）</div>
-            <div class="mrf-row">
-              <div class="mrf-field readonly">
-                <label>医師名</label>
-                <input type="text" value="${escapeHtml(formData.physician_name)}" readonly>
-              </div>
-              <div class="mrf-field readonly">
-                <label>診療科</label>
-                <input type="text" value="${escapeHtml(formData.my_department)}" readonly>
-              </div>
-            </div>
-          </div>
-
-          <!-- 高松市立みんなの病院 受診希望 -->
-          <div class="mrf-section">
-            <div class="mrf-section-title">高松市立みんなの病院 受診希望</div>
             <div class="mrf-row">
               <div class="mrf-field">
                 <label>受診希望科</label>

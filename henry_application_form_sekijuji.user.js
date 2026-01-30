@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         高松赤十字病院 診療申込書
 // @namespace    https://henry-app.jp/
-// @version      1.2.3
+// @version      1.3.0
 // @description  高松赤十字病院への診療情報提供書兼FAX診療申込書を作成
 // @author       sk powered by Claude
 // @match        https://henry-app.jp/*
@@ -1286,73 +1286,15 @@
           <button class="srf-close" title="閉じる">&times;</button>
         </div>
         <div class="srf-body">
-          <!-- 患者情報（自動入力） -->
+          <!-- 高松赤十字病院 受診希望 -->
           <div class="srf-section">
-            <div class="srf-section-title">患者情報（自動入力）</div>
+            <div class="srf-section-title">高松赤十字病院 受診希望</div>
             <div class="srf-row">
-              <div class="srf-field readonly">
-                <label>フリガナ</label>
-                <input type="text" value="${escapeHtml(formData.patient_name_kana)}" readonly>
-              </div>
-              <div class="srf-field readonly">
-                <label>患者氏名</label>
-                <input type="text" value="${escapeHtml(formData.patient_name)}" readonly>
-              </div>
-              <div class="srf-field readonly" style="flex: 0.3;">
-                <label>性別</label>
-                <input type="text" value="${escapeHtml(formData.sex)}" readonly>
-              </div>
-            </div>
-            <div class="srf-row">
-              <div class="srf-field readonly">
-                <label>生年月日</label>
-                <input type="text" value="${escapeHtml(formData.birth_date_wareki)}" readonly>
-              </div>
               <div class="srf-field">
                 <label>旧姓（任意）</label>
                 <input type="text" id="srf-maiden-name" value="${escapeHtml(formData.maiden_name)}" placeholder="旧姓があれば入力">
               </div>
             </div>
-            <div class="srf-row">
-              <div class="srf-field readonly" style="flex: 0.3;">
-                <label>郵便番号</label>
-                <input type="text" value="${escapeHtml(formData.postal_code)}" readonly>
-              </div>
-              <div class="srf-field readonly">
-                <label>住所</label>
-                <input type="text" value="${escapeHtml(formData.address)}" readonly>
-              </div>
-            </div>
-            <div class="srf-row">
-              <div class="srf-field readonly">
-                <label>電話番号</label>
-                <input type="text" value="${escapeHtml(formData.phone)}" readonly>
-              </div>
-              <div class="srf-field">
-                <label>携帯電話（任意）</label>
-                <input type="text" id="srf-mobile-phone" value="${escapeHtml(formData.mobile_phone)}" placeholder="携帯電話番号">
-              </div>
-            </div>
-          </div>
-
-          <!-- 紹介元情報（自動入力） -->
-          <div class="srf-section">
-            <div class="srf-section-title">紹介元情報（自動入力）</div>
-            <div class="srf-row">
-              <div class="srf-field readonly">
-                <label>医師名</label>
-                <input type="text" value="${escapeHtml(formData.physician_name)}" readonly>
-              </div>
-              <div class="srf-field readonly" style="flex: 0.5;">
-                <label>作成日</label>
-                <input type="text" value="${escapeHtml(formData.creation_date_wareki)}" readonly>
-              </div>
-            </div>
-          </div>
-
-          <!-- 高松赤十字病院 受診希望 -->
-          <div class="srf-section">
-            <div class="srf-section-title">高松赤十字病院 受診希望</div>
             <div class="srf-row">
               <div class="srf-field">
                 <label>受診希望科</label>
