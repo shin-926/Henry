@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry Patient Timeline
 // @namespace    https://github.com/shin-926/Henry
-// @version      2.36.0
+// @version      2.36.1
 // @description  入院患者の各種記録・オーダーをガントチャート風タイムラインで表示
 // @author       sk powered by Claude
 // @match        https://henry-app.jp/*
@@ -2265,8 +2265,8 @@
         switchToTimeline({
           uuid: patient.patient.uuid,
           fullName: patient.patient.fullName,
-          sex: patient.patient.sex,
-          birthDate: patient.patient.birthDate,
+          sexType: patient.patient.detail?.sexType,
+          birthDate: patient.patient.detail?.birthDate,
           wardName: patient.statusHospitalizationLocation?.ward?.name,
           roomName: patient.statusHospitalizationLocation?.room?.name,
           hospitalizationDayCount: patient.hospitalizationDayCount
@@ -2283,8 +2283,8 @@
         switchToTimeline({
           uuid: patient.patient.uuid,
           fullName: patient.patient.fullName,
-          sex: patient.patient.sex,
-          birthDate: patient.patient.birthDate,
+          sexType: patient.patient.detail?.sexType,
+          birthDate: patient.patient.detail?.birthDate,
           wardName: patient.statusHospitalizationLocation?.ward?.name,
           roomName: patient.statusHospitalizationLocation?.room?.name,
           hospitalizationDayCount: patient.hospitalizationDayCount
@@ -2355,7 +2355,7 @@
       updateNavButtons();
       // 年齢・性別を表示（患者IDは非表示）
       const age = patient.birthDate ? calculateAge(patient.birthDate) : null;
-      const sexLabel = patient.sex === 'MALE' ? '男性' : patient.sex === 'FEMALE' ? '女性' : '';
+      const sexLabel = patient.sexType === 'SEX_TYPE_MALE' ? '男性' : patient.sexType === 'SEX_TYPE_FEMALE' ? '女性' : '';
       const info = [age ? `${age}歳` : null, sexLabel].filter(Boolean).join('・');
       modalTitle.textContent = info ? `${patient.fullName}（${info}）` : patient.fullName;
       hospInfo.textContent = '読み込み中...';
@@ -2622,8 +2622,8 @@
             switchToTimeline({
               uuid: patient.patient.uuid,
               fullName: patient.patient.fullName,
-              sex: patient.patient.sex,
-              birthDate: patient.patient.birthDate,
+              sexType: patient.patient.detail?.sexType,
+              birthDate: patient.patient.detail?.birthDate,
               wardName: patient.statusHospitalizationLocation?.ward?.name,
               roomName: patient.statusHospitalizationLocation?.room?.name,
               hospitalizationDayCount: patient.hospitalizationDayCount
