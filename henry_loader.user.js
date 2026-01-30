@@ -61,7 +61,6 @@
     DEFAULT_DISABLED: [
       'henry_order_history',
       'henry_outpatient_karte_history',
-      'henry_note_reader',
       'henry_hospitalization_data',
       'henry_test_helper'
     ]

@@ -99,24 +99,6 @@
       "beta": true
     },
     {
-      "name": "henry_outpatient_karte_history",
-      "label": "外来カルテ履歴（ベータ版）",
-      "file": "henry_outpatient_karte_history.user.js",
-      "match": ["henry-app.jp"],
-      "category": "karte",
-      "order": 10,
-      "beta": true
-    },
-    {
-      "name": "henry_note_reader",
-      "label": "カルテ内容表示（ベータ版）",
-      "file": "henry_note_reader.user.js",
-      "match": ["henry-app.jp"],
-      "category": "karte",
-      "order": 10,
-      "beta": true
-    },
-    {
       "name": "henry_hospitals",
       "label": "近隣病院データ",
       "file": "henry_hospitals.user.js",

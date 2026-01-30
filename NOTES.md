@@ -227,6 +227,61 @@ API調査で手間取ったり、ハマったポイントを記録する。全AP
 |----------------|---------------|--------|
 | `getPatient` | `/graphql` | `input: {uuid: patientUuid}` - encounterUuidではない |
 
+### 入院診療録（ClinicalDocument）
+
+| クエリ/Mutation | エンドポイント | 注意点 |
+|----------------|---------------|--------|
+| `CreateClinicalDocument` | `/graphql` | 新規作成時は `uuid: ""` を指定 |
+| `UpdateClinicalDocument` | `/graphql` | `updateMask.paths` で更新フィールドを指定 |
+
+**CreateClinicalDocument 入力形式:**
+```javascript
+{
+  uuid: "",                    // 新規作成時は空文字
+  patientUuid: "患者UUID",
+  editorData: "Draft.js JSON文字列",
+  type: {
+    type: "HOSPITALIZATION_CONSULTATION",
+    clinicalDocumentCustomTypeUuid: null
+  },
+  performTime: { seconds: Unix秒, nanos: 0 },
+  hospitalizationUuid: { value: "入院UUID" }
+}
+```
+
+**UpdateClinicalDocument 入力形式:**
+```javascript
+{
+  clinicalDocument: {
+    uuid: "ドキュメントUUID",
+    patientUuid: "患者UUID",
+    editorData: "Draft.js JSON文字列",
+    type: { type: "HOSPITALIZATION_CONSULTATION", clinicalDocumentCustomTypeUuid: null },
+    performTime: { seconds: Unix秒, nanos: 0 },
+    hospitalizationUuid: { value: "入院UUID" }
+  },
+  updateMask: { paths: ["editor_data", "perform_time"] }
+}
+```
+
+**editorData形式（Draft.js RawContentState）:**
+```json
+{
+  "blocks": [
+    {
+      "key": "5文字英数字",
+      "type": "unstyled",
+      "text": "テキスト内容",
+      "depth": 0,
+      "inlineStyleRanges": [],
+      "entityRanges": [],
+      "data": {}
+    }
+  ],
+  "entityMap": {}
+}
+```
+
 ### 病名
 
 | クエリ/Mutation | エンドポイント | 注意点 |
@@ -607,7 +662,7 @@ registerPlugin({ id, name, icon?, description?, version?, order?, onClick, group
 
 ### MutationObserver未使用（11ファイル）
 
-henry_auto_approver, henry_note_reader, henry_error_logger, henry_disease_list, henry_karte_history, henry_order_history, henry_hospitalization_data, henry_memo, henry_disease_register, henry_search_focus, henry_ikensho_form
+henry_auto_approver, henry_error_logger, henry_disease_list, henry_karte_history, henry_order_history, henry_hospitalization_data, henry_memo, henry_disease_register, henry_search_focus, henry_ikensho_form
 
 ### 統計
 
@@ -882,7 +937,6 @@ const progressNotes = Object.entries(cache)
 **目的**: カルテ内容を読み取り、登録すべき病名をClaudeで推論・提案する
 
 ### 完了済み
-- カルテ内容読み取りスクリプト (`henry_note_reader.user.js` v1.0.1)
 - Claude API (claude-haiku-4-5) 動作確認
 - 病名登録API (`UpdateMultiPatientReceiptDiseases`) 動作確認
 - 整形外科病名リスト (ICD-10 Mコード 1989件) → `整形外科病名リスト.csv`
@@ -1050,7 +1104,6 @@ HenryはSPA（Single Page Application）のため、ページ遷移してもリ�
 | henry_ikensho_form.user.js | 要確認 |
 | henry_karte_history.user.js | 要確認 |
 | henry_memo.user.js | 要確認 |
-| henry_note_reader.user.js | 要確認 |
 | henry_order_history.user.js | 要確認 |
 | henry_reserve_integration.user.js | **必要**（MutationObserver 4つ） |
 | henry_toolbox.user.js | 要確認 |

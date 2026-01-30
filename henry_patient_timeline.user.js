@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry Patient Timeline
 // @namespace    https://github.com/shin-926/Henry
-// @version      2.14.0
+// @version      2.36.0
 // @description  入院患者の各種記録・オーダーをガントチャート風タイムラインで表示
 // @author       sk powered by Claude
 // @match        https://henry-app.jp/*
@@ -19,10 +19,11 @@
  * - 特定の日に何があったか確認したい場合
  *
  * ■ 機能
- * - 3カラムレイアウト（日付リスト | 記録 | オーダー）
- * - 日付選択で該当日の記録・オーダーを表示
+ * - 4カラムレイアウト（日付リスト | 記録 | データ | 処方・注射）
+ * - 日付選択で該当日の記録・データを表示
  * - 記録カラム: 医師記録、看護記録、リハビリ（時系列：古→新）
- * - オーダーカラム: バイタル、注射、処方（固定順序）
+ * - データカラム: バイタル、食事摂取量（時系列：古→新）
+ * - 処方・注射カラム: 現在の処方、本日の注射
  * - カテゴリフィルタ、キーワード検索
  *
  * ■ データソース
@@ -46,7 +47,8 @@
     rehab: { id: 'rehab', name: 'リハビリ', color: '#9C27B0', bgColor: '#f3e5f5' },
     prescription: { id: 'prescription', name: '処方', color: '#3F51B5', bgColor: '#e8eaf6' },
     injection: { id: 'injection', name: '注射', color: '#009688', bgColor: '#e0f2f1' },
-    vital: { id: 'vital', name: 'バイタル', color: '#E91E63', bgColor: '#fce4ec' }
+    vital: { id: 'vital', name: 'バイタル', color: '#E91E63', bgColor: '#fce4ec' },
+    meal: { id: 'meal', name: '食事摂取', color: '#795548', bgColor: '#efebe9' }
   };
 
   // カテゴリのグループ分け
@@ -76,8 +78,20 @@
   const CALENDAR_RESOURCES = [
     '//henry-app.jp/clinicalResource/vitalSign',
     '//henry-app.jp/clinicalResource/prescriptionOrder',
-    '//henry-app.jp/clinicalResource/injectionOrder'
+    '//henry-app.jp/clinicalResource/injectionOrder',
+    // 食事摂取量（マオカ病院固有のカスタム定量データ）
+    '//henry-app.jp/clinicalResource/clinicalQuantitativeDataDefCustom/fb5d9b7b-8857-40b6-a82b-2547a6ae9e56',
+    // 酸素投与量・その他カスタム定量データ
+    '//henry-app.jp/clinicalResource/clinicalQuantitativeDataDefCustom/e54f72b3-ee52-45e9-9dfb-fda4615f9722',
+    '//henry-app.jp/clinicalResource/clinicalQuantitativeDataDefCustom/38c01268-1ffb-4a2f-a227-85f0fafe4780',
+    '//henry-app.jp/clinicalResource/clinicalQuantitativeDataDefCustom/2b5d1d50-d162-46b5-a3b9-34608ea8e805',
+    '//henry-app.jp/clinicalResource/clinicalQuantitativeDataDefCustom/d4c6e8b3-81ee-431f-adbe-dc113294a356',
+    // 栄養オーダー（食種）
+    '//henry-app.jp/clinicalResource/nutritionOrder'
   ];
+
+  // バイタルデータキャッシュ（グラフ表示用）
+  let cachedVitalsByDate = new Map();
 
   // GraphQL Queries
   const QUERIES = {
@@ -89,6 +103,7 @@
             editorData
             performTime { seconds }
             updateTime { seconds }
+            creatorUuid
             creator { name }
             type { type }
           }
@@ -97,6 +112,72 @@
       }
     `
   };
+
+  // GraphQL Mutations（インライン方式 - HenryのGraphQLサーバーは入力型を公開していないため）
+  function buildCreateClinicalDocumentMutation(patientUuid, editorData, performTimeSeconds, hospitalizationUuid) {
+    // editorDataはJSON文字列なので、GraphQL用にエスケープ
+    const escapedEditorData = editorData.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\n/g, '\\n');
+    return `
+      mutation {
+        createClinicalDocument(input: {
+          uuid: "",
+          patientUuid: "${patientUuid}",
+          editorData: "${escapedEditorData}",
+          type: {
+            type: HOSPITALIZATION_CONSULTATION,
+            clinicalDocumentCustomTypeUuid: null
+          },
+          performTime: { seconds: ${performTimeSeconds}, nanos: 0 },
+          hospitalizationUuid: { value: "${hospitalizationUuid}" }
+        }) {
+          uuid
+          performTime { seconds }
+          creator { name }
+        }
+      }
+    `;
+  }
+
+  function buildUpdateClinicalDocumentMutation(docUuid, patientUuid, editorData, performTimeSeconds, hospitalizationUuid) {
+    const escapedEditorData = editorData.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\n/g, '\\n');
+    return `
+      mutation {
+        updateClinicalDocument(input: {
+          clinicalDocument: {
+            uuid: "${docUuid}",
+            patientUuid: "${patientUuid}",
+            editorData: "${escapedEditorData}",
+            type: {
+              type: HOSPITALIZATION_CONSULTATION,
+              clinicalDocumentCustomTypeUuid: null
+            },
+            performTime: { seconds: ${performTimeSeconds}, nanos: 0 },
+            hospitalizationUuid: { value: "${hospitalizationUuid}" }
+          },
+          updateMask: { paths: ["editor_data", "perform_time"] }
+        }) {
+          uuid
+          performTime { seconds }
+          lastAuthor { name }
+        }
+      }
+    `;
+  }
+
+  // テキストをDraft.js形式に変換
+  function textToEditorData(text) {
+    const lines = text.split('\n');
+    const blocks = lines.map((line, index) => ({
+      key: Math.random().toString(36).substring(2, 7),
+      type: 'unstyled',
+      text: line,
+      depth: 0,
+      inlineStyleRanges: [],
+      entityRanges: [],
+      data: {}
+    }));
+    return JSON.stringify({ blocks, entityMap: {} }, null, 2);
+  }
 
   // editorDataをテキストに変換
   function parseEditorData(editorDataStr) {
@@ -170,6 +251,19 @@
     if (!name) return '';
     // 全角・半角スペースをすべて除去して比較用キーを作成
     return name.replace(/[\s\u3000]+/g, '');
+  }
+
+  // 年齢を計算
+  function calculateAge(birthDate) {
+    if (!birthDate?.year) return null;
+    const today = new Date();
+    const birth = new Date(birthDate.year, (birthDate.month || 1) - 1, birthDate.day || 1);
+    let age = today.getFullYear() - birth.getFullYear();
+    const monthDiff = today.getMonth() - birth.getMonth();
+    if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < birth.getDate())) {
+      age--;
+    }
+    return age;
   }
 
   // 担当医→色のマッピングを構築（名前で統合）
@@ -320,7 +414,9 @@
               date: doc.performTime?.seconds ? new Date(doc.performTime.seconds * 1000) : null,
               title: '入院診察',
               text,
-              author: doc.creator?.name || '不明'
+              author: doc.creator?.name || '不明',
+              creatorUuid: doc.creatorUuid || null,
+              editorData: doc.editorData  // 編集時に必要
             });
           }
         }
@@ -581,15 +677,46 @@
 
       const data = result?.data?.getClinicalCalendarView;
 
-      // バイタルサイン
-      const vitalSigns = (data?.vitalSigns || []).map(vs => ({
-        id: vs.uuid,
+      // 酸素投与データを抽出（日付ごとにグループ化）
+      const oxygenData = extractOxygenData(data?.clinicalQuantitativeDataModuleCollections || []);
+
+      // バイタルサイン - 日付ごとに集約してテーブル形式で表示
+      const rawVitalSigns = (data?.vitalSigns || [])
+        .map(vs => {
+          const date = vs.recordTime?.seconds ? new Date(vs.recordTime.seconds * 1000) : null;
+          const key = date ? dateKey(date) : null;
+          return {
+            date,
+            rawData: vs,
+            author: vs.createUser?.name || '不明',
+            oxygen: key ? oxygenData.get(key) : null // 同日の酸素データを付与
+          };
+        })
+        .filter(vs => vs.date);
+
+      // 日付ごとにグループ化
+      const vitalsByDate = new Map();
+      for (const vs of rawVitalSigns) {
+        const key = dateKey(vs.date);
+        if (!vitalsByDate.has(key)) {
+          vitalsByDate.set(key, []);
+        }
+        vitalsByDate.get(key).push(vs);
+      }
+
+      // キャッシュに保存（グラフ表示用）- 現在は使用していないがテーブル表示用に維持
+      cachedVitalsByDate = vitalsByDate;
+
+      // 日付ごとに1つのタイムラインアイテムを作成
+      const vitalSigns = Array.from(vitalsByDate.entries()).map(([key, vitals]) => ({
+        id: `vital-${key}`,
         category: 'vital',
-        date: vs.recordTime?.seconds ? new Date(vs.recordTime.seconds * 1000) : null,
+        date: vitals[0].date, // 代表日付（ソート用）
         title: 'バイタルサイン',
-        text: formatVitalSign(vs),
-        author: vs.createUser?.name || '不明'
-      })).filter(vs => vs.date);
+        text: formatVitalSignsTable(vitals),
+        author: '', // テーブル内で複数の記録者がいる可能性があるため空欄
+        vitals: vitals // 元データ保持（将来の拡張用）
+      }));
 
       // 処方オーダー（タイムライン用アイテム）
       const prescriptionItems = (data?.prescriptionOrders || []).flatMap(rx => {
@@ -634,8 +761,17 @@
       // 処方オーダーの生データ
       const prescriptionOrdersRaw = data?.prescriptionOrders || [];
 
+      // 栄養オーダー（食種情報）
+      const nutritionOrdersRaw = data?.nutritionOrders || [];
+
+      // 食事摂取量データ（カスタム定量データモジュール）+ 食種情報
+      const mealIntakeItems = extractMealIntakeData(
+        data?.clinicalQuantitativeDataModuleCollections || [],
+        nutritionOrdersRaw
+      );
+
       return {
-        timelineItems: [...vitalSigns, ...prescriptionItems, ...injectionItems],
+        timelineItems: [...vitalSigns, ...prescriptionItems, ...injectionItems, ...mealIntakeItems],
         activePrescriptions: prescriptionOrdersRaw.filter(rx => rx.orderStatus === 'ORDER_STATUS_ACTIVE'),
         activeInjections: injectionOrdersRaw.filter(inj => inj.orderStatus === 'ORDER_STATUS_ACTIVE')
       };
@@ -646,10 +782,187 @@
     }
   }
 
-  // バイタルサインをテキストに整形
+  // 酸素投与データを抽出
+  // clinicalQuantitativeDataModuleCollections から酸素投与量・投与方法を抽出
+  // 日付ごとにグループ化して返す
+  function extractOxygenData(moduleCollections) {
+    const byDate = new Map();
+
+    for (const collection of moduleCollections) {
+      const modules = collection?.clinicalQuantitativeDataModules || [];
+      for (const mod of modules) {
+        const dateRange = mod.recordDateRange;
+        if (!dateRange?.start) continue;
+
+        const { year, month, day } = dateRange.start;
+        const key = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+
+        if (!byDate.has(key)) {
+          byDate.set(key, { flow: null, method: null });
+        }
+
+        const entries = mod.entries || [];
+        for (const entry of entries) {
+          const name = entry.name || '';
+          if (name.includes('酸素投与量')) {
+            byDate.get(key).flow = entry.value;
+          } else if (name.includes('酸素投与方法')) {
+            byDate.get(key).method = entry.value;
+          }
+        }
+      }
+    }
+
+    return byDate; // Map<dateKey, { flow, method }>
+  }
+
+  // 食事摂取量データを抽出・整形
+  // clinicalQuantitativeDataModuleCollections から食事データを抽出
+  // nutritionOrders から食種情報を取得
+  // 日付ごとにグループ化し、タイムラインアイテムに変換
+  function extractMealIntakeData(moduleCollections, nutritionOrders = []) {
+    // 食事関連の項目名パターン（APIレスポンスでは「朝食(主)」形式）
+    const mealPatterns = ['朝食(主)', '朝食(副)', '昼食(主)', '昼食(副)', '夕食(主)', '夕食(副)'];
+
+    // 日付ごとにグループ化
+    const byDate = new Map();
+
+    for (const collection of moduleCollections) {
+      const modules = collection?.clinicalQuantitativeDataModules || [];
+      for (const mod of modules) {
+        // recordDateRangeから日付を取得
+        const dateRange = mod.recordDateRange;
+        if (!dateRange?.start) continue;
+
+        const { year, month, day } = dateRange.start;
+        const date = new Date(year, month - 1, day);
+        const key = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+
+        if (!byDate.has(key)) {
+          byDate.set(key, {
+            date: date,
+            entries: []
+          });
+        }
+
+        // entriesから食事データを抽出
+        const entries = mod.entries || [];
+        for (const entry of entries) {
+          const name = entry.name || '';
+          if (mealPatterns.some(pattern => name.includes(pattern))) {
+            byDate.get(key).entries.push({
+              name: name,
+              value: entry.value
+            });
+          }
+        }
+      }
+    }
+
+    // 各日付のデータをタイムラインアイテムに変換
+    const result = [];
+    for (const [key, dayData] of byDate) {
+      if (dayData.entries.length === 0) continue;
+
+      // その日の食種を取得
+      const dietType = getDietTypeForDate(dayData.date, nutritionOrders);
+      const mealText = formatMealIntake(dayData.entries);
+      // 食種を【】で囲んで表示
+      const text = dietType
+        ? `【${dietType}】 ${mealText}`
+        : mealText;
+
+      if (text) {
+        result.push({
+          id: `meal-${key}`,
+          category: 'meal',
+          date: dayData.date,
+          title: '食事摂取',
+          text: text,
+          author: ''
+        });
+      }
+    }
+
+    return result;
+  }
+
+  // 指定日に有効な食種を取得
+  function getDietTypeForDate(date, nutritionOrders) {
+    for (const order of nutritionOrders) {
+      // 下書きはスキップ（isDraftフィールドを優先）
+      if (order.isDraft === true) continue;
+
+      const start = order.startDate;
+      const end = order.endDate;
+      if (!start) continue;
+
+      const startDate = new Date(start.year, start.month - 1, start.day);
+      const endDate = end ? new Date(end.year, end.month - 1, end.day) : new Date(9999, 11, 31);
+
+      // 日付が範囲内かチェック
+      if (date >= startDate && date <= endDate) {
+        return order.detail?.dietaryRegimen?.name || null;
+      }
+    }
+    return null;
+  }
+
+  // 食事摂取量を簡潔形式にフォーマット
+  // 例: 「朝10/10 昼4/4 夕10/10」
+  function formatMealIntake(entries) {
+    const meals = {
+      breakfast: { main: null, side: null },
+      lunch: { main: null, side: null },
+      dinner: { main: null, side: null }
+    };
+
+    for (const entry of entries) {
+      const name = entry.name || '';
+      // 値は文字列で「2」などと記録されている（割単位）
+      const value = entry.value != null ? parseInt(entry.value, 10) : null;
+
+      if (name.includes('朝食(主)')) meals.breakfast.main = value;
+      else if (name.includes('朝食(副)')) meals.breakfast.side = value;
+      else if (name.includes('昼食(主)')) meals.lunch.main = value;
+      else if (name.includes('昼食(副)')) meals.lunch.side = value;
+      else if (name.includes('夕食(主)')) meals.dinner.main = value;
+      else if (name.includes('夕食(副)')) meals.dinner.side = value;
+    }
+
+    const parts = [];
+    if (meals.breakfast.main != null || meals.breakfast.side != null) {
+      const main = meals.breakfast.main ?? '-';
+      const side = meals.breakfast.side ?? '-';
+      parts.push(`朝${main}/${side}`);
+    }
+    if (meals.lunch.main != null || meals.lunch.side != null) {
+      const main = meals.lunch.main ?? '-';
+      const side = meals.lunch.side ?? '-';
+      parts.push(`昼${main}/${side}`);
+    }
+    if (meals.dinner.main != null || meals.dinner.side != null) {
+      const main = meals.dinner.main ?? '-';
+      const side = meals.dinner.side ?? '-';
+      parts.push(`夕${main}/${side}`);
+    }
+
+    return parts.join(' ');
+  }
+
+  // バイタルサインをテキストに整形（単体用 - 後方互換性のため残す）
   function formatVitalSign(vs) {
     const parts = [];
-    if (vs.temperature?.value) parts.push(`T: ${vs.temperature.value / 10}℃`);
+    if (vs.temperature?.value) {
+      const temp = vs.temperature.value / 10;
+      if (temp >= 37) {
+        parts.push(`<span class="temp-high">T: ${temp}℃</span>`);
+      } else if (temp < 36) {
+        parts.push(`<span class="temp-low">T: ${temp}℃</span>`);
+      } else {
+        parts.push(`T: ${temp}℃`);
+      }
+    }
     if (vs.bloodPressureUpperBound?.value && vs.bloodPressureLowerBound?.value) {
       parts.push(`BP: ${vs.bloodPressureUpperBound.value / 10}/${vs.bloodPressureLowerBound.value / 10}mmHg`);
     }
@@ -658,6 +971,72 @@
     if (vs.respiration?.value) parts.push(`呼吸: ${vs.respiration.value / 10}回/分`);
     if (vs.bloodSugar?.value) parts.push(`血糖: ${vs.bloodSugar.value / 10}mg/dL`);
     return parts.join('\n') || 'データなし';
+  }
+
+  // 複数のバイタルサインをテーブル形式でHTML化
+  function formatVitalSignsTable(vitalSigns) {
+    if (!vitalSigns || vitalSigns.length === 0) return 'データなし';
+
+    // 時刻順（古→新）にソート
+    const sorted = [...vitalSigns].sort((a, b) => (a.date || 0) - (b.date || 0));
+
+    // テーブル構築（O2カラムは削除、tfootで表示）
+    let html = '<table class="vital-table"><thead><tr>';
+    html += '<th></th><th>T</th><th>BP</th><th>P</th><th>SpO2</th>';
+    html += '</tr></thead><tbody>';
+
+    for (const vs of sorted) {
+      const time = vs.date
+        ? `${vs.date.getHours()}:${String(vs.date.getMinutes()).padStart(2, '0')}`
+        : '-';
+
+      // 体温（ハイライト処理含む）
+      let tempCell = '-';
+      if (vs.rawData?.temperature?.value) {
+        const temp = vs.rawData.temperature.value / 10;
+        if (temp >= 37) {
+          tempCell = `<span class="temp-high">${temp}</span>`;
+        } else if (temp < 36) {
+          tempCell = `<span class="temp-low">${temp}</span>`;
+        } else {
+          tempCell = String(temp);
+        }
+      }
+
+      // 血圧
+      let bpCell = '-';
+      if (vs.rawData?.bloodPressureUpperBound?.value && vs.rawData?.bloodPressureLowerBound?.value) {
+        const upper = vs.rawData.bloodPressureUpperBound.value / 10;
+        const lower = vs.rawData.bloodPressureLowerBound.value / 10;
+        bpCell = `${upper}/${lower}`;
+      }
+
+      // 脈拍
+      const pulseCell = vs.rawData?.pulseRate?.value
+        ? String(vs.rawData.pulseRate.value / 10)
+        : '-';
+
+      // SpO2
+      const spo2Cell = vs.rawData?.spo2?.value
+        ? String(vs.rawData.spo2.value / 10)
+        : '-';
+
+      html += `<tr><td>${time}</td><td>${tempCell}</td><td>${bpCell}</td><td>${pulseCell}</td><td>${spo2Cell}</td></tr>`;
+    }
+
+    html += '</tbody>';
+
+    // 酸素投与はtfootに表示（日付単位のデータなので同一日は同じ値）
+    const oxygen = sorted[0]?.oxygen;
+    if (oxygen?.flow) {
+      const o2Text = oxygen.method
+        ? `O2: ${oxygen.flow}L ${oxygen.method}`
+        : `O2: ${oxygen.flow}L`;
+      html += `<tfoot><tr><td colspan="5" style="text-align:right;padding:4px 0;"><span style="background:#e3f2fd;font-weight:bold;padding:2px 8px;border-radius:4px;">${o2Text}</span></td></tr></tfoot>`;
+    }
+
+    html += '</table>';
+    return html;
   }
 
   // 注射オーダーをテキストに整形
@@ -778,6 +1157,8 @@
     // 固定情報エリアのUI状態
     let fixedInfoCollapsed = false;
     let fixedInfoHeight = '150px';
+    // 現在のユーザーUUID（編集権限判定用）
+    let myUuid = null;
     // プリフェッチ用キャッシュ
     let patientDataCache = new Map(); // key: patientUuid, value: { hospitalizations, currentHospitalization, allData }
 
@@ -897,20 +1278,24 @@
           outline: none;
           border-color: #2196F3;
         }
-        #patient-timeline-modal .category-filters {
+        #patient-timeline-modal .column-filters {
           display: flex;
-          gap: 8px;
+          gap: 4px;
+          flex: 1;
+          justify-content: flex-end;
+          margin: 0 8px;
         }
         #patient-timeline-modal .category-chip {
           display: flex;
           align-items: center;
           gap: 4px;
-          padding: 6px 12px;
-          border-radius: 16px;
-          font-size: 13px;
+          padding: 3px 8px;
+          border-radius: 12px;
+          font-size: 11px;
           cursor: pointer;
           border: 1px solid;
           transition: all 0.2s;
+          white-space: nowrap;
         }
         #patient-timeline-modal .category-chip.active {
           opacity: 1;
@@ -972,13 +1357,15 @@
           overflow: hidden;
         }
         #patient-timeline-modal .record-column,
-        #patient-timeline-modal .order-column {
+        #patient-timeline-modal .vital-column,
+        #patient-timeline-modal .prescription-order-column {
           flex: 1;
           display: flex;
           flex-direction: column;
           overflow: hidden;
         }
-        #patient-timeline-modal .record-column {
+        #patient-timeline-modal .record-column,
+        #patient-timeline-modal .vital-column {
           border-right: 1px solid #e0e0e0;
         }
         #patient-timeline-modal .column-header {
@@ -988,6 +1375,35 @@
           background: #f5f5f5;
           border-bottom: 1px solid #e0e0e0;
           flex-shrink: 0;
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+        }
+        #patient-timeline-modal .add-record-btn {
+          background: #4CAF50;
+          color: white;
+          border: none;
+          padding: 4px 10px;
+          border-radius: 4px;
+          font-size: 12px;
+          font-weight: 500;
+          cursor: pointer;
+          transition: background 0.2s;
+        }
+        #patient-timeline-modal .add-record-btn:hover {
+          background: #388E3C;
+        }
+        #patient-timeline-modal .edit-record-btn {
+          background: transparent;
+          border: none;
+          padding: 2px 6px;
+          font-size: 14px;
+          cursor: pointer;
+          opacity: 0.6;
+          transition: opacity 0.2s;
+        }
+        #patient-timeline-modal .edit-record-btn:hover {
+          opacity: 1;
         }
         #patient-timeline-modal .column-content {
           flex: 1;
@@ -1014,6 +1430,8 @@
         }
         #patient-timeline-modal .record-card-author {
           color: #666;
+          margin-left: 8px;
+          flex: 1;
         }
         #patient-timeline-modal .record-card-category {
           display: inline-block;
@@ -1027,6 +1445,64 @@
           line-height: 1.6;
           white-space: pre-wrap;
           color: #333;
+        }
+        #patient-timeline-modal .temp-high {
+          background: #ffebee;
+          color: #c62828;
+          padding: 2px 6px;
+          border-radius: 4px;
+          font-weight: 600;
+        }
+        #patient-timeline-modal .temp-low {
+          background: #e3f2fd;
+          color: #1565c0;
+          padding: 2px 6px;
+          border-radius: 4px;
+          font-weight: 600;
+        }
+        #patient-timeline-modal .vital-table {
+          font-family: monospace;
+          font-size: 13px;
+          border-collapse: collapse;
+          table-layout: fixed;
+          width: 100%;
+        }
+        #patient-timeline-modal .vital-table th,
+        #patient-timeline-modal .vital-table td {
+          padding: 4px 8px;
+          text-align: center;
+        }
+        #patient-timeline-modal .vital-table th:first-child,
+        #patient-timeline-modal .vital-table td:first-child {
+          text-align: left;
+          width: 50px;
+        }
+        #patient-timeline-modal .vital-table th:nth-child(2),
+        #patient-timeline-modal .vital-table td:nth-child(2) {
+          width: 55px;
+        }
+        #patient-timeline-modal .vital-table th:nth-child(3),
+        #patient-timeline-modal .vital-table td:nth-child(3) {
+          width: 70px;
+        }
+        #patient-timeline-modal .vital-table th:nth-child(4),
+        #patient-timeline-modal .vital-table td:nth-child(4) {
+          width: 45px;
+        }
+        #patient-timeline-modal .vital-table th:nth-child(5),
+        #patient-timeline-modal .vital-table td:nth-child(5) {
+          width: 50px;
+        }
+        #patient-timeline-modal .vital-table th {
+          font-weight: 600;
+          color: #666;
+          border-bottom: 1px solid #ddd;
+        }
+        #patient-timeline-modal .vital-table td {
+          border-bottom: 1px solid #f0f0f0;
+        }
+        #patient-timeline-modal .vital-table tr:last-child td {
+          border-bottom: none;
         }
         #patient-timeline-modal .no-records {
           text-align: center;
@@ -1160,9 +1636,15 @@
         #patient-timeline-modal .info-card-content .med-name {
           font-weight: 500;
         }
-        #patient-timeline-modal .info-card-content .med-usage {
+        #patient-timeline-modal .info-card-content .med-usage,
+        #patient-timeline-modal .column-content .med-usage {
           font-size: 12px;
-          color: #666;
+          color: #e65100;
+          background: #fff3e0;
+          padding: 2px 8px;
+          border-radius: 4px;
+          margin-bottom: 4px;
+          display: inline-block;
         }
         /* 用法グループ */
         #patient-timeline-modal .usage-group {
@@ -1186,6 +1668,34 @@
         }
         #patient-timeline-modal .usage-medicines .med-name {
           padding: 2px 0;
+        }
+        #patient-timeline-modal .med-link {
+          color: inherit;
+          text-decoration: none;
+          cursor: pointer;
+        }
+        #patient-timeline-modal .med-link:hover {
+          text-decoration: underline;
+          color: #1976D2;
+        }
+        /* 処方・注射カラム */
+        #patient-timeline-modal .prescription-section,
+        #patient-timeline-modal .injection-section {
+          padding: 12px 16px;
+        }
+        #patient-timeline-modal .prescription-section {
+          border-bottom: 1px solid #e0e0e0;
+        }
+        #patient-timeline-modal .section-title {
+          font-weight: 600;
+          font-size: 13px;
+          color: #333;
+          margin-bottom: 8px;
+        }
+        #patient-timeline-modal .empty-message {
+          color: #999;
+          font-size: 13px;
+          padding: 8px 0;
         }
         /* 患者選択画面のスタイル */
         #patient-timeline-modal .patient-list-container {
@@ -1250,6 +1760,14 @@
         }
         #patient-timeline-modal .patient-chip:hover {
           filter: brightness(0.95);
+        }
+        #patient-timeline-modal .patient-chip.scheduled {
+          border-style: dashed;
+        }
+        #patient-timeline-modal .patient-chip .scheduled-date {
+          font-size: 11px;
+          color: #666;
+          margin-left: 2px;
         }
         /* 凡例（レジェンド） */
         #patient-timeline-modal .legend-container {
@@ -1332,17 +1850,9 @@
                 <span class="toggle-icon">▼</span>
               </div>
               <div class="fixed-info-area" id="fixed-info-area">
-                <div class="info-card">
+                <div class="info-card" style="flex: 1;">
                   <div class="info-card-header">プロフィール</div>
                   <div class="info-card-content" id="profile-content"><span class="empty">-</span></div>
-                </div>
-                <div class="info-card">
-                  <div class="info-card-header">現在の処方</div>
-                  <div class="info-card-content" id="prescription-content"><span class="empty">-</span></div>
-                </div>
-                <div class="info-card">
-                  <div class="info-card-header">本日の注射</div>
-                  <div class="info-card-content" id="injection-content"><span class="empty">-</span></div>
                 </div>
               </div>
               <div class="fixed-info-resizer" id="fixed-info-resizer"></div>
@@ -1351,12 +1861,26 @@
               <div class="date-list" id="date-list"></div>
               <div class="content-columns">
                 <div class="record-column">
-                  <div class="column-header">記録</div>
+                  <div class="column-header">
+                    <span>記録</span>
+                    <div class="column-filters" id="record-filters"></div>
+                    <button id="add-record-btn" class="add-record-btn">＋記録を追加</button>
+                  </div>
                   <div class="column-content" id="record-content"></div>
                 </div>
-                <div class="order-column">
-                  <div class="column-header">オーダー</div>
-                  <div class="column-content" id="order-content"></div>
+                <div class="vital-column">
+                  <div class="column-header">
+                    <span>データ</span>
+                    <div class="column-filters" id="data-filters"></div>
+                  </div>
+                  <div class="column-content" id="vital-content"></div>
+                </div>
+                <div class="prescription-order-column">
+                  <div class="column-header">
+                    <span>処方・注射</span>
+                    <div class="column-filters" id="order-filters"></div>
+                  </div>
+                  <div class="column-content" id="prescription-order-content"></div>
                 </div>
               </div>
             </div>
@@ -1378,16 +1902,233 @@
     const timelineContainer = modal.querySelector('#timeline-container');
     const dateListEl = modal.querySelector('#date-list');
     const recordContent = modal.querySelector('#record-content');
-    const orderContent = modal.querySelector('#order-content');
+    const vitalContent = modal.querySelector('#vital-content');
+    const prescriptionOrderContent = modal.querySelector('#prescription-order-content');
     const hospInfo = modal.querySelector('#hosp-info');
     const doctorLegend = modal.querySelector('#doctor-legend');
     const profileContent = modal.querySelector('#profile-content');
-    const prescriptionContent = modal.querySelector('#prescription-content');
-    const injectionContent = modal.querySelector('#injection-content');
     const fixedInfoWrapper = modal.querySelector('#fixed-info-wrapper');
     const fixedInfoHeader = modal.querySelector('#fixed-info-header');
     const fixedInfoArea = modal.querySelector('#fixed-info-area');
     const fixedInfoResizer = modal.querySelector('#fixed-info-resizer');
+    const addRecordBtn = modal.querySelector('#add-record-btn');
+
+    // 記録追加モーダル表示
+    function showAddRecordModal(existingRecord = null) {
+      if (!selectedPatient || !currentHospitalization) {
+        window.HenryCore.ui.showToast('患者が選択されていません', 'error');
+        return;
+      }
+
+      const isEdit = !!existingRecord;
+      const title = isEdit ? '医師記録を編集' : '医師記録を追加';
+      const buttonLabel = isEdit ? '更新' : '保存';
+      const initialContent = isEdit ? parseEditorData(existingRecord.editorData) : '';
+
+      // 現在時刻（分を5分単位に丸める）
+      const now = new Date();
+      const minutes = Math.round(now.getMinutes() / 5) * 5;
+      now.setMinutes(minutes);
+      const currentTimeStr = `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`;
+
+      // 編集モードの場合は元の時刻を使用、新規作成は現在時刻
+      let timeStr = currentTimeStr;
+      if (isEdit && existingRecord.performTime) {
+        const originalDate = new Date(existingRecord.performTime);
+        timeStr = `${originalDate.getHours().toString().padStart(2, '0')}:${originalDate.getMinutes().toString().padStart(2, '0')}`;
+      }
+
+      // DOM要素を作成（HenryCore.ui.showModalはcontentが文字列だとtextContentとして設定するため）
+      const contentDiv = document.createElement('div');
+      contentDiv.style.padding = '16px';
+
+      // 実施日時
+      const timeSection = document.createElement('div');
+      timeSection.style.marginBottom = '12px';
+
+      const timeLabel = document.createElement('label');
+      timeLabel.style.cssText = 'display: block; margin-bottom: 4px; font-weight: 500; font-size: 13px;';
+      timeLabel.textContent = '実施日時';
+      timeSection.appendChild(timeLabel);
+
+      const timeInputWrapper = document.createElement('div');
+      timeInputWrapper.style.cssText = 'display: flex; align-items: center; gap: 12px;';
+
+      const timeInput = document.createElement('input');
+      timeInput.type = 'time';
+      timeInput.id = 'record-time-input';
+      timeInput.value = timeStr;
+      timeInput.style.cssText = 'padding: 8px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px;';
+      timeInputWrapper.appendChild(timeInput);
+
+      // 編集モードの場合のみ「現在時刻に変更」チェックボックスを表示
+      if (isEdit) {
+        const checkboxWrapper = document.createElement('label');
+        checkboxWrapper.style.cssText = 'display: flex; align-items: center; gap: 4px; cursor: pointer; font-size: 13px; color: #666;';
+
+        const checkbox = document.createElement('input');
+        checkbox.type = 'checkbox';
+        checkbox.id = 'use-current-time-checkbox';
+        checkbox.style.cursor = 'pointer';
+        checkbox.addEventListener('change', () => {
+          if (checkbox.checked) {
+            timeInput.value = currentTimeStr;
+          } else {
+            timeInput.value = timeStr;  // 元の時刻に戻す
+          }
+        });
+        checkboxWrapper.appendChild(checkbox);
+
+        const checkboxLabel = document.createTextNode('現在時刻に変更');
+        checkboxWrapper.appendChild(checkboxLabel);
+
+        timeInputWrapper.appendChild(checkboxWrapper);
+      }
+
+      timeSection.appendChild(timeInputWrapper);
+
+      contentDiv.appendChild(timeSection);
+
+      // 記録内容
+      const contentSection = document.createElement('div');
+
+      const contentLabel = document.createElement('label');
+      contentLabel.style.cssText = 'display: block; margin-bottom: 4px; font-weight: 500; font-size: 13px;';
+      contentLabel.textContent = '記録内容';
+      contentSection.appendChild(contentLabel);
+
+      const textarea = document.createElement('textarea');
+      textarea.id = 'record-content-input';
+      textarea.placeholder = '記録内容を入力...';
+      textarea.value = initialContent;
+      textarea.style.cssText = 'width: 100%; height: 250px; padding: 12px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px; line-height: 1.6; resize: vertical; box-sizing: border-box;';
+      contentSection.appendChild(textarea);
+
+      contentDiv.appendChild(contentSection);
+
+      let recordModal;
+      recordModal = window.HenryCore.ui.showModal({
+        title: title,
+        width: '600px',
+        content: contentDiv,
+        actions: [
+          { label: 'キャンセル', variant: 'secondary', onClick: () => recordModal.close() },
+          { label: buttonLabel, variant: 'primary', onClick: () => saveRecord(recordModal, isEdit ? existingRecord : null) }
+        ]
+      });
+
+      // テキストエリアにフォーカス
+      setTimeout(() => {
+        textarea.focus();
+      }, 100);
+    }
+
+    // 記録保存
+    async function saveRecord(recordModal, existingRecord = null) {
+      const contentInput = document.getElementById('record-content-input');
+      const timeInput = document.getElementById('record-time-input');
+      const content = contentInput?.value?.trim();
+
+      if (!content) {
+        window.HenryCore.ui.showToast('記録内容を入力してください', 'error');
+        return;
+      }
+
+      // 実施日時を計算（選択中の日付 + 入力時刻）
+      const [hours, minutes] = (timeInput?.value || '12:00').split(':').map(Number);
+      // selectedDateKeyはYYYY-MM-DD形式
+      const [year, month, day] = selectedDateKey.split('-').map(Number);
+      const performDate = new Date(year, month - 1, day, hours, minutes, 0, 0);
+      const performTimeSeconds = Math.floor(performDate.getTime() / 1000);
+
+      const editorData = textToEditorData(content);
+      const spinner = window.HenryCore.ui.showSpinner('保存中...');
+
+      try {
+        const isEdit = !!existingRecord;
+
+        if (isEdit) {
+          // 更新（インライン方式）
+          const mutation = buildUpdateClinicalDocumentMutation(
+            existingRecord.uuid,
+            selectedPatient.uuid,
+            editorData,
+            performTimeSeconds,
+            currentHospitalization.uuid
+          );
+          await window.HenryCore.query(mutation);
+        } else {
+          // 新規作成（インライン方式）
+          const mutation = buildCreateClinicalDocumentMutation(
+            selectedPatient.uuid,
+            editorData,
+            performTimeSeconds,
+            currentHospitalization.uuid
+          );
+          await window.HenryCore.query(mutation);
+        }
+
+        recordModal.close();
+        window.HenryCore.ui.showToast(isEdit ? '記録を更新しました' : '記録を保存しました', 'success');
+
+        // タイムラインを再読み込み
+        await refreshTimelineData();
+      } catch (e) {
+        console.error(`[${SCRIPT_NAME}] 記録保存エラー:`, e);
+        window.HenryCore.ui.showToast('保存に失敗しました: ' + e.message, 'error');
+      } finally {
+        spinner.close();
+      }
+    }
+
+    // タイムラインデータを再読み込み
+    async function refreshTimelineData() {
+      if (!selectedPatient) return;
+
+      // キャッシュをクリア
+      patientDataCache.delete(selectedPatient.uuid);
+
+      // 現在の選択日を保持
+      const currentSelectedDateKey = selectedDateKey;
+
+      // データを再取得して表示を更新
+      await loadTimelineData(selectedPatient.uuid);
+
+      // 選択日を復元
+      if (currentSelectedDateKey) {
+        selectedDateKey = currentSelectedDateKey;
+        renderTimeline();
+      }
+    }
+
+    // 記録追加ボタンのイベント
+    addRecordBtn.addEventListener('click', () => {
+      if (currentView !== 'timeline') return;
+      showAddRecordModal();
+    });
+
+    // 編集ボタンのクリックイベント（イベントデリゲーション）
+    recordContent.addEventListener('click', (e) => {
+      const editBtn = e.target.closest('.edit-record-btn');
+      if (!editBtn) return;
+
+      const recordId = editBtn.dataset.recordId;
+      if (!recordId) return;
+
+      // allItemsから対象の記録を取得
+      const record = allItems.find(item => item.id === recordId && item.category === 'doctor');
+      if (!record) {
+        console.error(`[${SCRIPT_NAME}] 記録が見つかりません: ${recordId}`);
+        return;
+      }
+
+      // 編集モーダルを表示
+      showAddRecordModal({
+        uuid: record.id,
+        editorData: record.editorData,
+        performTime: record.date  // 元の実施日時を渡す
+      });
+    });
 
     // 折りたたみ機能のセットアップ
     function setupToggle() {
@@ -1435,14 +2176,55 @@
       if (e.target === modal) modal.remove();
     });
 
-    // ESCキーで閉じる
+    // キーボードショートカット
     const handleKeydown = (e) => {
       if (e.key === 'Escape') {
         modal.remove();
         document.removeEventListener('keydown', handleKeydown);
+        return;
+      }
+
+      // タイムラインビューでのみ矢印キーを処理
+      if (currentView !== 'timeline') return;
+
+      // 入力フィールドにフォーカス中は無視
+      if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+
+      switch (e.key) {
+        case 'ArrowUp': // 前の日付（新しい方）
+          e.preventDefault();
+          navigateDate(-1);
+          break;
+        case 'ArrowDown': // 次の日付（古い方）
+          e.preventDefault();
+          navigateDate(1);
+          break;
+        case 'ArrowLeft': // 前の患者
+          e.preventDefault();
+          navigateToPreviousPatient();
+          break;
+        case 'ArrowRight': // 次の患者
+          e.preventDefault();
+          navigateToNextPatient();
+          break;
       }
     };
     document.addEventListener('keydown', handleKeydown);
+
+    // 日付ナビゲーション（direction: -1=上/新しい方、1=下/古い方）
+    function navigateDate(direction) {
+      const dateItems = dateListEl.querySelectorAll('.date-item');
+      const dateKeys = Array.from(dateItems).map(el => el.dataset.dateKey);
+      const currentIndex = dateKeys.indexOf(selectedDateKey);
+
+      if (currentIndex === -1) return;
+
+      const newIndex = currentIndex + direction;
+      if (newIndex >= 0 && newIndex < dateKeys.length) {
+        selectedDateKey = dateKeys[newIndex];
+        renderTimeline();
+      }
+    }
 
     // 戻るボタン
     backBtn.onclick = () => {
@@ -1483,7 +2265,8 @@
         switchToTimeline({
           uuid: patient.patient.uuid,
           fullName: patient.patient.fullName,
-          serialNumber: patient.patient.serialNumber,
+          sex: patient.patient.sex,
+          birthDate: patient.patient.birthDate,
           wardName: patient.statusHospitalizationLocation?.ward?.name,
           roomName: patient.statusHospitalizationLocation?.room?.name,
           hospitalizationDayCount: patient.hospitalizationDayCount
@@ -1500,7 +2283,8 @@
         switchToTimeline({
           uuid: patient.patient.uuid,
           fullName: patient.patient.fullName,
-          serialNumber: patient.patient.serialNumber,
+          sex: patient.patient.sex,
+          birthDate: patient.patient.birthDate,
           wardName: patient.statusHospitalizationLocation?.ward?.name,
           roomName: patient.statusHospitalizationLocation?.room?.name,
           hospitalizationDayCount: patient.hospitalizationDayCount
@@ -1569,16 +2353,18 @@
 
       backBtn.style.display = 'block';
       updateNavButtons();
-      modalTitle.textContent = `${patient.fullName}（${patient.serialNumber}）`;
+      // 年齢・性別を表示（患者IDは非表示）
+      const age = patient.birthDate ? calculateAge(patient.birthDate) : null;
+      const sexLabel = patient.sex === 'MALE' ? '男性' : patient.sex === 'FEMALE' ? '女性' : '';
+      const info = [age ? `${age}歳` : null, sexLabel].filter(Boolean).join('・');
+      modalTitle.textContent = info ? `${patient.fullName}（${info}）` : patient.fullName;
       hospInfo.textContent = '読み込み中...';
 
       // 検索コントロールをタイムライン用に切り替え
       controlsArea.innerHTML = `
         <input type="text" class="search-input" placeholder="キーワード検索..." id="timeline-search-input">
-        <div class="category-filters" id="category-filters"></div>
       `;
       setupTimelineSearchEvent();
-      renderCategoryFilters();
 
       patientSelectView.style.display = 'none';
       timelineContainer.style.display = 'flex';
@@ -1599,7 +2385,8 @@
       // ローディング表示
       dateListEl.innerHTML = '<div class="no-records">読み込み中...</div>';
       recordContent.innerHTML = '<div class="no-records">読み込み中...</div>';
-      orderContent.innerHTML = '<div class="no-records">読み込み中...</div>';
+      vitalContent.innerHTML = '<div class="no-records">読み込み中...</div>';
+      prescriptionOrderContent.innerHTML = '<div class="no-records">読み込み中...</div>';
 
       loadTimelineData(patient.uuid);
     }
@@ -1785,9 +2572,21 @@
               const doctorUuid = item.hospitalizationDoctor?.doctor?.uuid;
               const doctorName = item.hospitalizationDoctor?.doctor?.name || '担当医不明';
               const color = doctorColorMap.get(doctorUuid) || { bg: '#f5f5f5', border: '#bdbdbd' };
+
+              // 入院予定患者の場合は日付を表示
+              let displayName = escapeHtml(p.fullName || '名前不明');
+              let tooltip = `${days}日目 / ${escapeHtml(doctorName)}`;
+              let chipStyle = `background: ${color.bg}; border-color: ${color.border};`;
+
+              if (item.isScheduled && item.scheduledDate) {
+                displayName += `<span class="scheduled-date">（${item.scheduledDate.month}/${item.scheduledDate.day}入院予定）</span>`;
+                tooltip = `${item.scheduledDate.month}/${item.scheduledDate.day}入院予定 / ${escapeHtml(doctorName)}`;
+                chipStyle += ' opacity: 0.85;';
+              }
+
               sectionsHtml += `
-                <div class="patient-chip" data-uuid="${p.uuid}" title="${days}日目 / ${escapeHtml(doctorName)}" style="background: ${color.bg}; border-color: ${color.border};">
-                  ${escapeHtml(p.fullName || '名前不明')}
+                <div class="patient-chip${item.isScheduled ? ' scheduled' : ''}" data-uuid="${p.uuid}" title="${tooltip}" style="${chipStyle}">
+                  ${displayName}
                 </div>
               `;
             }
@@ -1823,7 +2622,8 @@
             switchToTimeline({
               uuid: patient.patient.uuid,
               fullName: patient.patient.fullName,
-              serialNumber: patient.patient.serialNumber,
+              sex: patient.patient.sex,
+              birthDate: patient.patient.birthDate,
               wardName: patient.statusHospitalizationLocation?.ward?.name,
               roomName: patient.statusHospitalizationLocation?.room?.name,
               hospitalizationDayCount: patient.hospitalizationDayCount
@@ -1833,32 +2633,46 @@
       });
     }
 
-    // カテゴリフィルタを描画
+    // カテゴリフィルタを描画（各カラムヘッダーに配置）
     function renderCategoryFilters() {
-      const categoryFilters = modal.querySelector('#category-filters');
-      if (!categoryFilters) return;
+      // カテゴリのグループ分け
+      const filterGroups = {
+        'record-filters': ['doctor', 'nursing', 'rehab'],
+        'data-filters': ['vital', 'meal'],
+        'order-filters': ['prescription', 'injection']
+      };
 
-      categoryFilters.innerHTML = Object.values(CATEGORIES).map(cat => `
-        <div class="category-chip ${selectedCategories.has(cat.id) ? 'active' : 'inactive'}"
-             data-category="${cat.id}"
-             style="background: ${cat.bgColor}; border-color: ${cat.color}; color: ${cat.color};">
-          ${cat.name}
-        </div>
-      `).join('');
+      // 各グループにフィルターを描画
+      Object.entries(filterGroups).forEach(([containerId, categoryIds]) => {
+        const container = modal.querySelector(`#${containerId}`);
+        if (!container) return;
 
-      // イベント設定
-      categoryFilters.querySelectorAll('.category-chip').forEach(chip => {
-        chip.onclick = () => {
-          const catId = chip.dataset.category;
-          if (selectedCategories.has(catId)) {
-            selectedCategories.delete(catId);
-          } else {
-            selectedCategories.add(catId);
-          }
-          renderCategoryFilters();
-          applyFilters();
-          renderTimeline();
-        };
+        container.innerHTML = categoryIds.map(catId => {
+          const cat = CATEGORIES[catId];
+          if (!cat) return '';
+          return `
+            <div class="category-chip ${selectedCategories.has(cat.id) ? 'active' : 'inactive'}"
+                 data-category="${cat.id}"
+                 style="background: ${cat.bgColor}; border-color: ${cat.color}; color: ${cat.color};">
+              ${cat.name}
+            </div>
+          `;
+        }).join('');
+
+        // イベント設定
+        container.querySelectorAll('.category-chip').forEach(chip => {
+          chip.onclick = () => {
+            const catId = chip.dataset.category;
+            if (selectedCategories.has(catId)) {
+              selectedCategories.delete(catId);
+            } else {
+              selectedCategories.add(catId);
+            }
+            renderCategoryFilters();
+            applyFilters();
+            renderTimeline();
+          };
+        });
       });
     }
 
@@ -1885,7 +2699,8 @@
       if (!currentHospitalization) {
         dateListEl.innerHTML = '<div class="no-records">入院情報なし</div>';
         recordContent.innerHTML = '';
-        orderContent.innerHTML = '';
+        vitalContent.innerHTML = '';
+        prescriptionOrderContent.innerHTML = '';
         return;
       }
 
@@ -1944,51 +2759,333 @@
       // 選択された日付のアイテムを取得
       const selectedItems = itemsByDate.get(selectedDateKey) || [];
 
-      // 記録とオーダーに分類
+      // 記録とデータ（バイタル+食事摂取）に分類
       const records = selectedItems.filter(item => RECORD_CATEGORIES.includes(item.category));
-      const orders = selectedItems.filter(item => ORDER_CATEGORIES.includes(item.category));
+      const dataItems = selectedItems.filter(item => item.category === 'vital' || item.category === 'meal');
 
-      // 記録は時系列（古→新）でソート
-      records.sort((a, b) => (a.date || 0) - (b.date || 0));
+      // 記録は時系列（新→古）でソート
+      records.sort((a, b) => (b.date || 0) - (a.date || 0));
 
-      // オーダーは固定順序（バイタル→注射→処方）でソート
-      orders.sort((a, b) => {
-        const orderA = ORDER_CATEGORIES.indexOf(a.category);
-        const orderB = ORDER_CATEGORIES.indexOf(b.category);
-        if (orderA !== orderB) return orderA - orderB;
-        // 同じカテゴリ内は時系列（古→新）
-        return (a.date || 0) - (b.date || 0);
-      });
+      // データは時系列（新→古）でソート
+      dataItems.sort((a, b) => (b.date || 0) - (a.date || 0));
 
       // 記録カラム描画
       recordContent.innerHTML = records.length > 0
         ? records.map(item => renderRecordCard(item)).join('')
         : '<div class="no-records">この日の記録はありません</div>';
 
-      // オーダーカラム描画
-      orderContent.innerHTML = orders.length > 0
-        ? orders.map(item => renderRecordCard(item)).join('')
-        : '<div class="no-records">この日のオーダーはありません</div>';
+      // データカラム描画（バイタル+食事摂取）
+      vitalContent.innerHTML = dataItems.length > 0
+        ? dataItems.map(item => renderRecordCard(item)).join('')
+        : '<div class="no-records">この日のデータはありません</div>';
+
+      // バイタルカードにクリックイベント追加（グラフ表示）
+      vitalContent.querySelectorAll('.record-card[data-record-id^="vital-"]').forEach(card => {
+        card.style.cursor = 'pointer';
+        card.title = 'クリックで過去1週間の推移グラフを表示';
+        card.onclick = () => {
+          // data-record-id="vital-YYYY-MM-DD" から日付を抽出
+          const recordId = card.dataset.recordId;
+          const dateStr = recordId.replace('vital-', '');
+          showVitalGraph(dateStr);
+        };
+      });
+
+      // 処方・注射カラム描画
+      renderPrescriptionOrderColumn(selectedDateKey);
     }
 
     // 記録カードを描画
     function renderRecordCard(item) {
       const cat = CATEGORIES[item.category];
-      const time = item.date ? `${item.date.getHours()}:${String(item.date.getMinutes()).padStart(2, '0')}` : '-';
+      // mealカテゴリは時刻を非表示（食事データには時刻情報がないため）
+      // vitalカテゴリは時刻を非表示（テーブル内の各行に時刻があるため冗長）
+      const time = (item.category === 'meal' || item.category === 'vital') ? '' :
+        (item.date ? `${item.date.getHours()}:${String(item.date.getMinutes()).padStart(2, '0')}` : '-');
+
+      // バイタルカードは体温ハイライト用HTMLを含むためエスケープしない
+      const textHtml = item.category === 'vital'
+        ? item.text.replace(/\n/g, '<br>')
+        : highlightText(item.text, searchText).replace(/\n/g, '<br>');
+
+      // 医師記録かつ自分が作成したものに編集ボタンを表示
+      const canEdit = item.category === 'doctor' && item.creatorUuid && myUuid && item.creatorUuid === myUuid;
+      const editButton = canEdit
+        ? `<button class="edit-record-btn" data-record-id="${item.id}" title="編集">✏️</button>`
+        : '';
 
       return `
-        <div class="record-card" style="background: ${cat.bgColor}; border-left-color: ${cat.color};">
+        <div class="record-card" style="background: ${cat.bgColor}; border-left-color: ${cat.color};" data-record-id="${item.id || ''}">
           <div class="record-card-header">
             <span class="record-card-time">${time}</span>
+            <span class="record-card-author">${escapeHtml(item.author.replace(/\u3000/g, ' '))}</span>
+            ${editButton}
             <span class="record-card-category" style="background: ${cat.color}; color: white;">${cat.name}</span>
           </div>
-          <div class="record-card-author">${escapeHtml(item.author)}</div>
-          <div class="record-card-text">${highlightText(item.text, searchText).replace(/\n/g, '<br>')}</div>
+          <div class="record-card-text">${textHtml}</div>
         </div>
       `;
     }
 
-    // 固定情報エリアを描画
+    // バイタル経時変化グラフを表示
+    function showVitalGraph(endDateStr) {
+      // endDateStrは YYYY-MM-DD 形式
+      const endDate = new Date(endDateStr + 'T23:59:59');
+      const startDate = new Date(endDate);
+      startDate.setDate(startDate.getDate() - 6);
+      startDate.setHours(0, 0, 0, 0);
+
+      // 過去7日分の日付キーを生成
+      const dateKeys = [];
+      const dateKeySet = new Set();
+      for (let i = 6; i >= 0; i--) {
+        const d = new Date(endDate);
+        d.setDate(d.getDate() - i);
+        const key = dateKey(d);
+        dateKeys.push(key);
+        dateKeySet.add(key);
+      }
+
+      // allItemsからバイタルデータを収集（プリフェッチによるキャッシュ上書き問題を回避）
+      const allVitals = [];
+      for (const item of allItems) {
+        if (item.category !== 'vital' || !item.vitals) continue;
+        // 日付範囲内のアイテムのみ
+        const itemKey = dateKey(item.date);
+        if (!dateKeySet.has(itemKey)) continue;
+
+        for (const vs of item.vitals) {
+          const raw = vs.rawData;
+          allVitals.push({
+            timestamp: vs.date.getTime(),
+            date: vs.date,
+            T: raw?.temperature?.value ? raw.temperature.value / 10 : null,
+            BPupper: raw?.bloodPressureUpperBound?.value ? raw.bloodPressureUpperBound.value / 10 : null,
+            BPlower: raw?.bloodPressureLowerBound?.value ? raw.bloodPressureLowerBound.value / 10 : null,
+            P: raw?.pulseRate?.value ? raw.pulseRate.value / 10 : null
+          });
+        }
+      }
+
+      // 時系列でソート
+      allVitals.sort((a, b) => a.timestamp - b.timestamp);
+
+      // データがあるか確認
+      const hasData = allVitals.some(d => d.T !== null || d.BPupper !== null || d.P !== null);
+      if (!hasData) {
+        window.HenryCore.ui.showToast('この期間のバイタルデータがありません', 'info');
+        return;
+      }
+
+      // 期間表示用の日付フォーマット
+      const startLabel = `${parseInt(dateKeys[0].split('-')[1])}/${parseInt(dateKeys[0].split('-')[2])}`;
+      const endLabel = `${parseInt(dateKeys[6].split('-')[1])}/${parseInt(dateKeys[6].split('-')[2])}`;
+
+      // グラフを描画
+      const svgContainer = document.createElement('div');
+      svgContainer.innerHTML = renderVitalSVG(allVitals, startDate.getTime(), endDate.getTime(), dateKeys);
+
+      window.HenryCore.ui.showModal({
+        title: `バイタル推移（${startLabel} - ${endLabel}）`,
+        content: svgContainer,
+        width: '750px'
+      });
+    }
+
+    // SVGでバイタル折れ線グラフを描画（3つの独立したグラフ）
+    function renderVitalSVG(data, minTime, maxTime, dateKeys) {
+      const width = 700;
+      const chartHeight = 140; // 各グラフの高さ
+      const gap = 50; // グラフ間の余白（日付ラベル用）
+      const margin = { top: 35, right: 50, bottom: 25, left: 50 };
+      const chartWidth = width - margin.left - margin.right;
+      const totalHeight = margin.top + (chartHeight + gap) * 3 - gap + margin.bottom;
+
+      // 正常範囲の定義
+      const normalRanges = {
+        temp: { min: 36.0, max: 37.0 },
+        bpUpper: { min: 90, max: 140 },
+        bpLower: { min: 60, max: 90 },
+        pulse: { min: 60, max: 100 }
+      };
+
+      // 各指標の値域を決定
+      const temps = data.map(d => d.T).filter(v => v !== null);
+      const bpUppers = data.map(d => d.BPupper).filter(v => v !== null);
+      const bpLowers = data.map(d => d.BPlower).filter(v => v !== null);
+      const pulses = data.map(d => d.P).filter(v => v !== null);
+
+      // 体温用スケール（35-40°C固定）
+      const tempMin = 35, tempMax = 40;
+
+      // 血圧用スケール（動的）
+      const bpValues = [...bpUppers, ...bpLowers];
+      const bpMin = bpValues.length > 0 ? Math.floor(Math.min(...bpValues) / 10) * 10 - 10 : 40;
+      const bpMax = bpValues.length > 0 ? Math.ceil(Math.max(...bpValues) / 10) * 10 + 10 : 180;
+
+      // 脈拍用スケール（動的）
+      const pulseMin = pulses.length > 0 ? Math.floor(Math.min(...pulses) / 10) * 10 - 10 : 40;
+      const pulseMax = pulses.length > 0 ? Math.ceil(Math.max(...pulses) / 10) * 10 + 10 : 120;
+
+      // X軸スケール（タイムスタンプベース）
+      const timeRange = maxTime - minTime;
+      const xScale = (timestamp) => margin.left + ((timestamp - minTime) / timeRange) * chartWidth;
+
+      // Y軸スケール生成関数
+      const createYScale = (min, max, top) => {
+        return (v) => top + chartHeight - ((v - min) / (max - min)) * chartHeight;
+      };
+
+      // 各グラフのY位置
+      const tempTop = margin.top;
+      const bpTop = margin.top + chartHeight + gap;
+      const pulseTop = margin.top + (chartHeight + gap) * 2;
+
+      const yScaleTemp = createYScale(tempMin, tempMax, tempTop);
+      const yScaleBP = createYScale(bpMin, bpMax, bpTop);
+      const yScalePulse = createYScale(pulseMin, pulseMax, pulseTop);
+
+      // パス生成関数
+      const generatePath = (points, getValue, yScale) => {
+        const validPoints = points.filter(p => getValue(p) !== null);
+        if (validPoints.length === 0) return '';
+        return validPoints.map((p, idx) => {
+          const x = xScale(p.timestamp);
+          const y = yScale(getValue(p));
+          return `${idx === 0 ? 'M' : 'L'}${x},${y}`;
+        }).join(' ');
+      };
+
+      // ドット生成関数
+      const generateDots = (points, getValue, yScale, color) => {
+        return points.map(p => {
+          const v = getValue(p);
+          if (v === null) return '';
+          const x = xScale(p.timestamp);
+          const y = yScale(v);
+          return `<circle cx="${x}" cy="${y}" r="3" fill="${color}" />`;
+        }).join('');
+      };
+
+      // X軸の日付境界線生成（各グラフ用）
+      const dayBoundaries = dateKeys.map(key => {
+        const [year, month, day] = key.split('-').map(Number);
+        const dayStart = new Date(year, month - 1, day, 0, 0, 0).getTime();
+        return { key, timestamp: dayStart, month, day };
+      });
+
+      // 日の境界線とラベルを生成（ラベルは区切り線の中央に配置）
+      const generateDayLinesAndLabels = (top, height) => {
+        return dayBoundaries.map((d, i) => {
+          const x = xScale(d.timestamp);
+          if (x < margin.left || x > margin.left + chartWidth) return '';
+
+          // ラベル位置: 現在の縦線と次の縦線（または右端）の中央
+          const nextX = (i < dayBoundaries.length - 1)
+            ? xScale(dayBoundaries[i + 1].timestamp)
+            : margin.left + chartWidth;
+          const labelX = (x + nextX) / 2;
+
+          return `
+            <line x1="${x}" y1="${top}" x2="${x}" y2="${top + height}" stroke="#ddd" stroke-width="1" />
+            <text x="${labelX}" y="${top + height + 12}" text-anchor="middle" font-size="10" fill="#666">${d.month}/${d.day}</text>
+          `;
+        }).join('');
+      };
+
+      // Y軸目盛り生成関数（左右両方に表示）
+      const generateYTicks = (min, max, step, top, color) => {
+        const ticks = [];
+        for (let v = min; v <= max; v += step) {
+          ticks.push(v);
+        }
+        const yScale = createYScale(min, max, top);
+        return ticks.map(v => {
+          return `
+            <text x="${margin.left - 5}" y="${yScale(v) + 3}" text-anchor="end" font-size="9" fill="${color}">${v}</text>
+            <text x="${margin.left + chartWidth + 5}" y="${yScale(v) + 3}" text-anchor="start" font-size="9" fill="${color}">${v}</text>
+            <line x1="${margin.left}" y1="${yScale(v)}" x2="${margin.left + chartWidth}" y2="${yScale(v)}" stroke="#eee" stroke-dasharray="2,2" />
+          `;
+        }).join('');
+      };
+
+      // 正常範囲帯の描画関数
+      const generateNormalBand = (rangeMin, rangeMax, scaleMin, scaleMax, top, color) => {
+        // 範囲がスケール外の場合はクリップ
+        const clampedMin = Math.max(rangeMin, scaleMin);
+        const clampedMax = Math.min(rangeMax, scaleMax);
+        if (clampedMin >= clampedMax) return '';
+        const yScale = createYScale(scaleMin, scaleMax, top);
+        const y1 = yScale(clampedMax); // 上端（値が大きい方）
+        const y2 = yScale(clampedMin); // 下端（値が小さい方）
+        const height = y2 - y1;
+        return `<rect x="${margin.left}" y="${y1}" width="${chartWidth}" height="${height}" fill="${color}" />`;
+      };
+
+
+      // グラフタイトル
+      const titles = `
+        <text x="${margin.left}" y="${tempTop - 5}" font-size="11" font-weight="bold" fill="#333">体温 (°C)</text>
+        <text x="${margin.left}" y="${bpTop - 5}" font-size="11" font-weight="bold" fill="#333">血圧 (mmHg)</text>
+        <text x="${margin.left}" y="${pulseTop - 5}" font-size="11" font-weight="bold" fill="#333">脈拍 (/min)</text>
+      `;
+
+      // パスとドット
+      const tempPath = generatePath(data, d => d.T, yScaleTemp);
+      const bpUpperPath = generatePath(data, d => d.BPupper, yScaleBP);
+      const bpLowerPath = generatePath(data, d => d.BPlower, yScaleBP);
+      const pulsePath = generatePath(data, d => d.P, yScalePulse);
+
+      const tempDots = generateDots(data, d => d.T, yScaleTemp, '#FF5722');
+      const bpUpperDots = generateDots(data, d => d.BPupper, yScaleBP, '#4CAF50');
+      const bpLowerDots = generateDots(data, d => d.BPlower, yScaleBP, '#9C27B0');
+      const pulseDots = generateDots(data, d => d.P, yScalePulse, '#2196F3');
+
+      // 正常範囲帯
+      const tempNormalBand = generateNormalBand(normalRanges.temp.min, normalRanges.temp.max, tempMin, tempMax, tempTop, 'rgba(255, 87, 34, 0.15)');
+      const bpUpperNormalBand = generateNormalBand(normalRanges.bpUpper.min, normalRanges.bpUpper.max, bpMin, bpMax, bpTop, 'rgba(76, 175, 80, 0.15)');
+      const bpLowerNormalBand = generateNormalBand(normalRanges.bpLower.min, normalRanges.bpLower.max, bpMin, bpMax, bpTop, 'rgba(156, 39, 176, 0.15)');
+      const pulseNormalBand = generateNormalBand(normalRanges.pulse.min, normalRanges.pulse.max, pulseMin, pulseMax, pulseTop, 'rgba(33, 150, 243, 0.15)');
+
+      return `
+        <svg width="${width}" height="${totalHeight}" style="display:block;margin:0 auto;">
+          <!-- 体温グラフ -->
+          <rect x="${margin.left}" y="${tempTop}" width="${chartWidth}" height="${chartHeight}" fill="#fafafa" />
+          ${tempNormalBand}
+          ${generateYTicks(tempMin, tempMax, 1, tempTop, '#666')}
+          ${generateDayLinesAndLabels(tempTop, chartHeight)}
+          <path d="${tempPath}" fill="none" stroke="#FF5722" stroke-width="2" />
+          ${tempDots}
+          <rect x="${margin.left}" y="${tempTop}" width="${chartWidth}" height="${chartHeight}" fill="none" stroke="#ccc" />
+
+          <!-- 血圧グラフ -->
+          <rect x="${margin.left}" y="${bpTop}" width="${chartWidth}" height="${chartHeight}" fill="#fafafa" />
+          ${bpUpperNormalBand}
+          ${bpLowerNormalBand}
+          ${generateYTicks(bpMin, bpMax, 20, bpTop, '#666')}
+          ${generateDayLinesAndLabels(bpTop, chartHeight)}
+          <path d="${bpUpperPath}" fill="none" stroke="#4CAF50" stroke-width="2" />
+          <path d="${bpLowerPath}" fill="none" stroke="#9C27B0" stroke-width="1.5" />
+          ${bpUpperDots}
+          ${bpLowerDots}
+          <rect x="${margin.left}" y="${bpTop}" width="${chartWidth}" height="${chartHeight}" fill="none" stroke="#ccc" />
+
+          <!-- 脈拍グラフ -->
+          <rect x="${margin.left}" y="${pulseTop}" width="${chartWidth}" height="${chartHeight}" fill="#fafafa" />
+          ${pulseNormalBand}
+          ${generateYTicks(pulseMin, pulseMax, 20, pulseTop, '#666')}
+          ${generateDayLinesAndLabels(pulseTop, chartHeight)}
+          <path d="${pulsePath}" fill="none" stroke="#2196F3" stroke-width="2" />
+          ${pulseDots}
+          <rect x="${margin.left}" y="${pulseTop}" width="${chartWidth}" height="${chartHeight}" fill="none" stroke="#ccc" />
+
+          <!-- タイトル -->
+          ${titles}
+        </svg>
+      `;
+    }
+
+    // 固定情報エリアを描画（プロフィールのみ）
     function renderFixedInfo() {
       // プロフィール
       if (patientProfile && patientProfile.text) {
@@ -2012,23 +3109,33 @@
       } else {
         profileContent.innerHTML = '<span class="empty">プロフィールなし</span>';
       }
+    }
 
-      // 現在の処方（今日が有効期間内のもの）
-      const today = new Date();
-      today.setHours(0, 0, 0, 0);
+    // 処方・注射カラムを描画
+    function renderPrescriptionOrderColumn(targetDateKey) {
+      // selectedDateKeyはYYYY-MM-DD形式
+      const targetDate = targetDateKey ? new Date(targetDateKey + 'T00:00:00') : new Date();
+      targetDate.setHours(0, 0, 0, 0);
 
-      // 今日が有効期間内の処方をフィルタリング
-      const todayPrescriptions = activePrescriptions.filter(rx => {
-        if (!rx.startDate) return false;
-        const startDate = new Date(rx.startDate.year, rx.startDate.month - 1, rx.startDate.day);
-        // 各rpの期間を確認（最長の期間を使用）
-        const maxDuration = Math.max(...(rx.rps || []).map(rp => rp.boundsDurationDays?.value || 1));
-        const endDate = new Date(startDate);
-        endDate.setDate(endDate.getDate() + maxDuration - 1);
-        return today >= startDate && today <= endDate;
-      });
+      // 表示用の日付文字列
+      const dateLabel = `${targetDate.getMonth() + 1}/${targetDate.getDate()}`;
 
-      if (todayPrescriptions.length > 0) {
+      let html = '';
+
+      // === 選択日の処方 ===
+      if (selectedCategories.has('prescription')) {
+        const targetPrescriptions = activePrescriptions.filter(rx => {
+          if (!rx.startDate) return false;
+          const startDate = new Date(rx.startDate.year, rx.startDate.month - 1, rx.startDate.day);
+          const maxDuration = Math.max(...(rx.rps || []).map(rp => rp.boundsDurationDays?.value || 1));
+          const endDate = new Date(startDate);
+          endDate.setDate(endDate.getDate() + maxDuration - 1);
+          return targetDate >= startDate && targetDate <= endDate;
+        });
+
+        html += `<div class="prescription-section"><div class="section-title">◆ ${dateLabel} の処方</div>`;
+
+        if (targetPrescriptions.length > 0) {
         // 固定カテゴリの定義
         const FIXED_CATEGORIES = {
           wakeup: { label: '起床時', order: 1 },
@@ -2038,21 +3145,18 @@
           bedtime: { label: '就寝前', order: 5 }
         };
 
-        // タイミングテキストからカテゴリを判定する関数
         function getTimingInfo(timingText, displayOrder) {
           if (timingText.includes('起床')) return { key: 'wakeup', ...FIXED_CATEGORIES.wakeup };
           if (timingText.includes('朝食')) return { key: 'morning', ...FIXED_CATEGORIES.morning };
           if (timingText.includes('昼食')) return { key: 'noon', ...FIXED_CATEGORIES.noon };
           if (timingText.includes('夕食')) return { key: 'evening', ...FIXED_CATEGORIES.evening };
           if (timingText.includes('就寝')) return { key: 'bedtime', ...FIXED_CATEGORIES.bedtime };
-          // 固定カテゴリ以外は元のテキストをそのまま使用
           return { key: timingText, label: timingText, order: 100 + displayOrder };
         }
 
-        // タイミング別にグループ化
-        const timingGroups = new Map(); // Map<カテゴリキー, { label, order, medicines[] }>
+        const timingGroups = new Map();
 
-        todayPrescriptions.forEach(rx => {
+        targetPrescriptions.forEach(rx => {
           (rx.rps || []).forEach(rp => {
             const canonicalUsage = rp.medicationTiming?.medicationTiming?.canonicalPrescriptionUsage;
             const timings = canonicalUsage?.timings || [];
@@ -2065,14 +3169,12 @@
 
             if (medicines.length > 0) {
               if (timings.length === 0) {
-                // timingsが空の場合は用法テキストをラベルとして使用
                 const key = usageText;
                 if (!timingGroups.has(key)) {
                   timingGroups.set(key, { label: usageText, order: 1000, medicines: [] });
                 }
                 timingGroups.get(key).medicines.push(...medicines);
               } else {
-                // 各タイミングに薬剤を追加
                 timings.forEach(timing => {
                   const info = getTimingInfo(timing.text, timing.displayOrder || 0);
                   if (!timingGroups.has(info.key)) {
@@ -2085,49 +3187,46 @@
           });
         });
 
-        // 重複を除去
         timingGroups.forEach((value) => {
           value.medicines = [...new Set(value.medicines)];
         });
 
-        // order順にソートしてHTML生成
         const sortedGroups = Array.from(timingGroups.values())
           .filter(g => g.medicines.length > 0)
           .sort((a, b) => a.order - b.order);
 
-        const prescriptionHtml = sortedGroups.map(group => `
+        html += sortedGroups.map(group => `
           <div class="usage-group">
             <div class="usage-label">[${escapeHtml(group.label)}]</div>
             <div class="usage-medicines">
-              ${group.medicines.map(m => `<div class="med-name">${escapeHtml(m)}</div>`).join('')}
+              ${group.medicines.map(m => `<a href="https://www.google.com/search?q=${encodeURIComponent(m)}" target="_blank" class="med-name med-link">${escapeHtml(m)}</a>`).join('<br>')}
             </div>
           </div>
         `).join('');
+        } else {
+          html += '<div class="empty-message">有効な処方なし</div>';
+        }
 
-        prescriptionContent.innerHTML = prescriptionHtml || '<span class="empty">有効な処方なし</span>';
-      } else {
-        prescriptionContent.innerHTML = '<span class="empty">有効な処方なし</span>';
+        html += '</div>';
       }
 
-      // 本日の注射（今日が実施期間内のもの）
-      // today変数は処方セクションで既に定義済み
+      // === 選択日の注射 ===
+      if (selectedCategories.has('injection')) {
+        const targetInjections = activeInjections.filter(inj => {
+          if (!inj.startDate) return false;
+          const startDate = new Date(inj.startDate.year, inj.startDate.month - 1, inj.startDate.day);
+          const maxDuration = Math.max(...(inj.rps || []).map(rp => rp.boundsDurationDays?.value || 1));
+          const endDate = new Date(startDate);
+          endDate.setDate(endDate.getDate() + maxDuration - 1);
+          return targetDate >= startDate && targetDate <= endDate;
+        });
 
-      // 今日が実施期間内の注射をフィルタリング
-      const todayInjections = activeInjections.filter(inj => {
-        if (!inj.startDate) return false;
-        const startDate = new Date(inj.startDate.year, inj.startDate.month - 1, inj.startDate.day);
-        // 各rpの期間を確認（最長の期間を使用）
-        const maxDuration = Math.max(...(inj.rps || []).map(rp => rp.boundsDurationDays?.value || 1));
-        const endDate = new Date(startDate);
-        endDate.setDate(endDate.getDate() + maxDuration - 1);
-        return today >= startDate && today <= endDate;
-      });
+        html += `<div class="injection-section"><div class="section-title">◆ ${dateLabel} の注射</div>`;
 
-      if (todayInjections.length > 0) {
-        const injectionHtml = todayInjections.flatMap(inj => {
+        if (targetInjections.length > 0) {
+        html += targetInjections.flatMap(inj => {
           const startDate = new Date(inj.startDate.year, inj.startDate.month - 1, inj.startDate.day);
 
-          // 注射は処方と同じ構造: rps[].instructions[].instruction.medicationDosageInstruction
           return (inj.rps || []).map(rp => {
             const medicines = (rp.instructions || []).map(inst => {
               const med = inst.instruction?.medicationDosageInstruction;
@@ -2145,17 +3244,20 @@
 
             return `
               <div class="med-item">
-                <div class="med-name">${medicines.map(m => escapeHtml(m)).join('<br>')}</div>
-                <div class="med-usage">${technique ? escapeHtml(technique) + ' / ' : ''}${endDateStr}</div>
+                <div class="med-usage">${technique ? escapeHtml(technique) + ' ' : ''}${endDateStr}</div>
+                <div class="med-name">${medicines.map(m => `<a href="https://www.google.com/search?q=${encodeURIComponent(m)}" target="_blank" class="med-link">${escapeHtml(m)}</a>`).join('<br>')}</div>
               </div>
             `;
           });
         }).filter(Boolean).join('');
+        } else {
+          html += '<div class="empty-message">注射なし</div>';
+        }
 
-        injectionContent.innerHTML = injectionHtml || '<span class="empty">本日の注射なし</span>';
-      } else {
-        injectionContent.innerHTML = '<span class="empty">本日の注射なし</span>';
+        html += '</div>';
       }
+
+      prescriptionOrderContent.innerHTML = html;
     }
 
     // 患者データをプリフェッチ（バックグラウンド）
@@ -2226,7 +3328,8 @@
             hospInfo.textContent = '入院中ではありません';
             dateListEl.innerHTML = '';
             recordContent.innerHTML = '<div class="no-records">この患者は現在入院していません</div>';
-            orderContent.innerHTML = '';
+            vitalContent.innerHTML = '';
+            prescriptionOrderContent.innerHTML = '';
             return;
           }
 
@@ -2253,7 +3356,8 @@
           hospInfo.textContent = '入院中ではありません';
           dateListEl.innerHTML = '';
           recordContent.innerHTML = '<div class="no-records">この患者は現在入院していません</div>';
-          orderContent.innerHTML = '';
+          vitalContent.innerHTML = '';
+          prescriptionOrderContent.innerHTML = '';
           return;
         }
 
@@ -2293,6 +3397,9 @@
         // 固定情報エリアを描画
         renderFixedInfo();
 
+        // カテゴリフィルター描画
+        renderCategoryFilters();
+
         applyFilters();
         renderTimeline();
 
@@ -2302,13 +3409,17 @@
         console.error(`[${SCRIPT_NAME}] データ読み込みエラー:`, e);
         dateListEl.innerHTML = '';
         recordContent.innerHTML = `<div class="no-records">データの読み込みに失敗しました: ${escapeHtml(e.message)}</div>`;
-        orderContent.innerHTML = '';
+        vitalContent.innerHTML = '';
+        prescriptionOrderContent.innerHTML = '';
       }
     }
 
     // 患者一覧読み込み
     async function loadPatientList() {
       try {
+        // 現在のユーザーUUIDを取得（編集権限判定用）
+        myUuid = await window.HenryCore.getMyUuid();
+
         allPatients = await fetchAllHospitalizedPatients();
         isLoading = false;
         console.log(`[${SCRIPT_NAME}] 入院患者一覧取得: ${allPatients.length}名`);

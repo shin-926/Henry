@@ -379,9 +379,7 @@ GitHubから各スクリプトを動的に読み込む仕組み。詳細は `NOT
 | | reserve_calendar_ui.user.js | 予約カレンダーUIカスタム |
 | **病名・オーダー** | henry_disease_register.user.js | 高速病名検索・登録（病名一覧表示統合） |
 | | henry_order_history.user.js | 患者オーダー履歴表示 |
-| **カルテ** | henry_outpatient_karte_history.user.js | 外来カルテ履歴表示 |
-| | henry_note_reader.user.js | カルテ内容リーダー |
-| | henry_hospitalization_data.user.js | 入院データ表示（実験） |
+| **カルテ** | henry_hospitalization_data.user.js | 入院データ表示（実験） |
 | | henry_hospitalization_search.user.js | カルテ記録検索（入院・外来） |
 | **業務効率化** | henry_auto_approver.user.js | 承認待ちオーダー一括承認 |
 | | henry_login_helper.user.js | ログイン入力補助 |
