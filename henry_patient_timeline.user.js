@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry Patient Timeline
 // @namespace    https://github.com/shin-926/Henry
-// @version      2.44.5
+// @version      2.45.0
 // @description  入院患者の各種記録・オーダーをガントチャート風タイムラインで表示
 // @author       sk powered by Claude
 // @match        https://henry-app.jp/*
@@ -909,41 +909,22 @@
       }
     }
 
-    // 2. 入院期間内で栄養オーダーが有効な日付をbyDateに追加（食種のみ表示対応）
-    if (hospStartDate && hospEndDate && nutritionOrders.length > 0) {
-      for (const order of nutritionOrders) {
-        if (order.isDraft === true) continue;
+    // 2. 入院期間のすべての日をbyDateに追加（絶食表示対応）
+    if (hospStartDate && hospEndDate) {
+      const current = new Date(hospStartDate);
+      while (current <= hospEndDate) {
+        const year = current.getFullYear();
+        const month = current.getMonth() + 1;
+        const day = current.getDate();
+        const key = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
 
-        const orderStart = order.startDate;
-        const orderEnd = order.endDate;
-        if (!orderStart) continue;
-
-        // 栄養オーダーの開始日・終了日をDateに変換
-        const orderStartDate = new Date(orderStart.year, orderStart.month - 1, orderStart.day);
-        const orderEndDate = orderEnd
-          ? new Date(orderEnd.year, orderEnd.month - 1, orderEnd.day)
-          : new Date(9999, 11, 31); // 終了日未設定は無期限
-
-        // 入院期間と栄養オーダー期間の重複部分を計算
-        const rangeStart = orderStartDate > hospStartDate ? orderStartDate : hospStartDate;
-        const rangeEnd = orderEndDate < hospEndDate ? orderEndDate : hospEndDate;
-
-        // 重複部分の各日をbyDateに追加
-        const current = new Date(rangeStart);
-        while (current <= rangeEnd) {
-          const year = current.getFullYear();
-          const month = current.getMonth() + 1;
-          const day = current.getDate();
-          const key = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-
-          if (!byDate.has(key)) {
-            byDate.set(key, {
-              date: new Date(current),
-              entries: []
-            });
-          }
-          current.setDate(current.getDate() + 1);
+        if (!byDate.has(key)) {
+          byDate.set(key, {
+            date: new Date(current),
+            entries: []
+          });
         }
+        current.setDate(current.getDate() + 1);
       }
     }
 
@@ -955,15 +936,13 @@
       const dietType = nutritionInfo?.name;
       const supplies = nutritionInfo?.supplies || [];
 
-      // 食事摂取量がなく、食種もない場合はスキップ
-      if (dayData.entries.length === 0 && !dietType) continue;
-
       const mealText = formatMealIntake(dayData.entries);
       const suppliesText = formatNutritionSupplies(supplies, dietType);
 
       // テキスト生成
       // - 食事摂取量がある場合: 【食種】 朝10/10 昼8/8 夕10/10
       // - 経管食等で摂取量がない場合: 【経管食】毎食: YH Fast 1個, 白湯 200ml
+      // - 食事も経管食もない場合: 絶食
       let text;
       if (dietType && mealText) {
         // 通常食で摂取量がある場合
@@ -974,21 +953,22 @@
       } else if (dietType) {
         // 食種のみ
         text = `【${dietType}】`;
-      } else {
-        // 摂取量のみ
+      } else if (mealText) {
+        // 摂取量のみ（食種情報なし）
         text = mealText;
+      } else {
+        // 食事も経管食もない場合
+        text = '絶食';
       }
 
-      if (text) {
-        result.push({
-          id: `meal-${key}`,
-          category: 'meal',
-          date: dayData.date,
-          title: '食事摂取',
-          text: text,
-          author: ''
-        });
-      }
+      result.push({
+        id: `meal-${key}`,
+        category: 'meal',
+        date: dayData.date,
+        title: '食事摂取',
+        text: text,
+        author: ''
+      });
     }
 
     return result;
