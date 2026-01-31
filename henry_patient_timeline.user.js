@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry Patient Timeline
 // @namespace    https://github.com/shin-926/Henry
-// @version      2.43.2
+// @version      2.44.1
 // @description  入院患者の各種記録・オーダーをガントチャート風タイムラインで表示
 // @author       sk powered by Claude
 // @match        https://henry-app.jp/*
@@ -1303,10 +1303,826 @@
     return dates;
   }
 
+  // SVGでバイタル折れ線グラフを描画（showTimelineModalから分離）
+  // 純粋関数：外部状態に依存せず、引数のみで動作
+  function renderVitalSVG(data, minTime, maxTime, dateKeys, days = 7) {
+    const width = 700;
+    const chartHeight = 140;
+    const gap = 50;
+    const margin = { top: 35, right: 50, bottom: 25, left: 50 };
+    const chartWidth = width - margin.left - margin.right;
+    const totalHeight = margin.top + (chartHeight + gap) * 3 - gap + margin.bottom;
+
+    const normalRanges = {
+      temp: { min: 36.0, max: 37.0 },
+      bpUpper: { min: 90, max: 140 },
+      bpLower: { min: 60, max: 90 },
+      pulse: { min: 60, max: 100 }
+    };
+
+    const temps = data.map(d => d.T).filter(v => v !== null);
+    const bpUppers = data.map(d => d.BPupper).filter(v => v !== null);
+    const bpLowers = data.map(d => d.BPlower).filter(v => v !== null);
+    const pulses = data.map(d => d.P).filter(v => v !== null);
+
+    const tempMin = 35, tempMax = 40;
+
+    const bpValues = [...bpUppers, ...bpLowers];
+    const bpMin = bpValues.length > 0 ? Math.floor(Math.min(...bpValues) / 10) * 10 - 10 : 40;
+    const bpMax = bpValues.length > 0 ? Math.ceil(Math.max(...bpValues) / 10) * 10 + 10 : 180;
+
+    const pulseMin = pulses.length > 0 ? Math.floor(Math.min(...pulses) / 10) * 10 - 10 : 40;
+    const pulseMax = pulses.length > 0 ? Math.ceil(Math.max(...pulses) / 10) * 10 + 10 : 120;
+
+    const timeRange = maxTime - minTime;
+    const xScale = (timestamp) => margin.left + ((timestamp - minTime) / timeRange) * chartWidth;
+
+    const createYScale = (min, max, top) => {
+      return (v) => top + chartHeight - ((v - min) / (max - min)) * chartHeight;
+    };
+
+    const tempTop = margin.top;
+    const bpTop = margin.top + chartHeight + gap;
+    const pulseTop = margin.top + (chartHeight + gap) * 2;
+
+    const yScaleTemp = createYScale(tempMin, tempMax, tempTop);
+    const yScaleBP = createYScale(bpMin, bpMax, bpTop);
+    const yScalePulse = createYScale(pulseMin, pulseMax, pulseTop);
+
+    const generatePath = (points, getValue, yScale) => {
+      const validPoints = points.filter(p => getValue(p) !== null);
+      if (validPoints.length === 0) return '';
+      return validPoints.map((p, idx) => {
+        const x = xScale(p.timestamp);
+        const y = yScale(getValue(p));
+        return `${idx === 0 ? 'M' : 'L'}${x},${y}`;
+      }).join(' ');
+    };
+
+    const generateDots = (points, getValue, yScale, color) => {
+      return points.map(p => {
+        const v = getValue(p);
+        if (v === null) return '';
+        const x = xScale(p.timestamp);
+        const y = yScale(v);
+        return `<circle cx="${x}" cy="${y}" r="3" fill="${color}" />`;
+      }).join('');
+    };
+
+    const dayBoundaries = dateKeys.map(key => {
+      const [year, month, day] = key.split('-').map(Number);
+      const dayStart = new Date(year, month - 1, day, 0, 0, 0).getTime();
+      return { key, timestamp: dayStart, month, day };
+    });
+
+    const generateDayLinesAndLabels = (top, height) => {
+      return dayBoundaries.map((d, i) => {
+        const x = xScale(d.timestamp);
+        if (x < margin.left || x > margin.left + chartWidth) return '';
+        const nextX = (i < dayBoundaries.length - 1)
+          ? xScale(dayBoundaries[i + 1].timestamp)
+          : margin.left + chartWidth;
+        const labelX = (x + nextX) / 2;
+        return `
+          <line x1="${x}" y1="${top}" x2="${x}" y2="${top + height}" stroke="#ddd" stroke-width="1" />
+          <text x="${labelX}" y="${top + height + 12}" text-anchor="middle" font-size="10" fill="#666">${d.month}/${d.day}</text>
+        `;
+      }).join('');
+    };
+
+    const generateYTicks = (min, max, step, top, color) => {
+      const ticks = [];
+      for (let v = min; v <= max; v += step) {
+        ticks.push(v);
+      }
+      const yScale = createYScale(min, max, top);
+      return ticks.map(v => {
+        return `
+          <text x="${margin.left - 5}" y="${yScale(v) + 3}" text-anchor="end" font-size="9" fill="${color}">${v}</text>
+          <text x="${margin.left + chartWidth + 5}" y="${yScale(v) + 3}" text-anchor="start" font-size="9" fill="${color}">${v}</text>
+          <line x1="${margin.left}" y1="${yScale(v)}" x2="${margin.left + chartWidth}" y2="${yScale(v)}" stroke="#eee" stroke-dasharray="2,2" />
+        `;
+      }).join('');
+    };
+
+    const generateNormalBand = (rangeMin, rangeMax, scaleMin, scaleMax, top, color) => {
+      const clampedMin = Math.max(rangeMin, scaleMin);
+      const clampedMax = Math.min(rangeMax, scaleMax);
+      if (clampedMin >= clampedMax) return '';
+      const yScale = createYScale(scaleMin, scaleMax, top);
+      const y1 = yScale(clampedMax);
+      const y2 = yScale(clampedMin);
+      const height = y2 - y1;
+      return `<rect x="${margin.left}" y="${y1}" width="${chartWidth}" height="${height}" fill="${color}" />`;
+    };
+
+    const titles = `
+      <text x="${margin.left}" y="${tempTop - 5}" font-size="11" font-weight="bold" fill="#333">体温 (°C)</text>
+      <text x="${margin.left}" y="${bpTop - 5}" font-size="11" font-weight="bold" fill="#333">血圧 (mmHg)</text>
+      <text x="${margin.left}" y="${pulseTop - 5}" font-size="11" font-weight="bold" fill="#333">脈拍 (/min)</text>
+    `;
+
+    const tempPath = generatePath(data, d => d.T, yScaleTemp);
+    const bpUpperPath = generatePath(data, d => d.BPupper, yScaleBP);
+    const bpLowerPath = generatePath(data, d => d.BPlower, yScaleBP);
+    const pulsePath = generatePath(data, d => d.P, yScalePulse);
+
+    const showDots = days !== 30;
+    const tempDots = showDots ? generateDots(data, d => d.T, yScaleTemp, '#FF5722') : '';
+    const bpUpperDots = showDots ? generateDots(data, d => d.BPupper, yScaleBP, '#4CAF50') : '';
+    const bpLowerDots = showDots ? generateDots(data, d => d.BPlower, yScaleBP, '#9C27B0') : '';
+    const pulseDots = showDots ? generateDots(data, d => d.P, yScalePulse, '#2196F3') : '';
+
+    const tempNormalBand = generateNormalBand(normalRanges.temp.min, normalRanges.temp.max, tempMin, tempMax, tempTop, 'rgba(255, 87, 34, 0.15)');
+    const bpUpperNormalBand = generateNormalBand(normalRanges.bpUpper.min, normalRanges.bpUpper.max, bpMin, bpMax, bpTop, 'rgba(76, 175, 80, 0.15)');
+    const bpLowerNormalBand = generateNormalBand(normalRanges.bpLower.min, normalRanges.bpLower.max, bpMin, bpMax, bpTop, 'rgba(156, 39, 176, 0.15)');
+    const pulseNormalBand = generateNormalBand(normalRanges.pulse.min, normalRanges.pulse.max, pulseMin, pulseMax, pulseTop, 'rgba(33, 150, 243, 0.15)');
+
+    return `
+      <svg width="${width}" height="${totalHeight}" style="display:block;margin:0 auto;">
+        <!-- 体温グラフ -->
+        <rect x="${margin.left}" y="${tempTop}" width="${chartWidth}" height="${chartHeight}" fill="#fafafa" />
+        ${tempNormalBand}
+        ${generateYTicks(tempMin, tempMax, 1, tempTop, '#666')}
+        ${generateDayLinesAndLabels(tempTop, chartHeight)}
+        <path d="${tempPath}" fill="none" stroke="#FF5722" stroke-width="2" />
+        ${tempDots}
+        <rect x="${margin.left}" y="${tempTop}" width="${chartWidth}" height="${chartHeight}" fill="none" stroke="#ccc" />
+
+        <!-- 血圧グラフ -->
+        <rect x="${margin.left}" y="${bpTop}" width="${chartWidth}" height="${chartHeight}" fill="#fafafa" />
+        ${bpUpperNormalBand}
+        ${bpLowerNormalBand}
+        ${generateYTicks(bpMin, bpMax, 20, bpTop, '#666')}
+        ${generateDayLinesAndLabels(bpTop, chartHeight)}
+        <path d="${bpUpperPath}" fill="none" stroke="#4CAF50" stroke-width="2" />
+        <path d="${bpLowerPath}" fill="none" stroke="#9C27B0" stroke-width="1.5" />
+        ${bpUpperDots}
+        ${bpLowerDots}
+        <rect x="${margin.left}" y="${bpTop}" width="${chartWidth}" height="${chartHeight}" fill="none" stroke="#ccc" />
+
+        <!-- 脈拍グラフ -->
+        <rect x="${margin.left}" y="${pulseTop}" width="${chartWidth}" height="${chartHeight}" fill="#fafafa" />
+        ${pulseNormalBand}
+        ${generateYTicks(pulseMin, pulseMax, 20, pulseTop, '#666')}
+        ${generateDayLinesAndLabels(pulseTop, chartHeight)}
+        <path d="${pulsePath}" fill="none" stroke="#2196F3" stroke-width="2" />
+        ${pulseDots}
+        <rect x="${margin.left}" y="${pulseTop}" width="${chartWidth}" height="${chartHeight}" fill="none" stroke="#ccc" />
+
+        <!-- タイトル -->
+        ${titles}
+      </svg>
+    `;
+  }
+
+  // モーダル用CSS（showTimelineModalから分離）
+  const MODAL_CSS = `
+    #patient-timeline-modal {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: rgba(0,0,0,0.5);
+      z-index: 1500;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    #patient-timeline-modal .modal-content {
+      background: white;
+      border-radius: 8px;
+      width: 98vw;
+      height: 98vh;
+      display: flex;
+      flex-direction: column;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    }
+    #patient-timeline-modal .modal-header {
+      padding: 16px 20px;
+      border-bottom: 1px solid #e0e0e0;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-shrink: 0;
+    }
+    #patient-timeline-modal .modal-header h2 {
+      margin: 0;
+      font-size: 18px;
+      font-weight: 600;
+    }
+    #patient-timeline-modal .header-info {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      flex: 1;
+    }
+    #patient-timeline-modal #header-search-container {
+      margin-left: auto;
+      margin-right: 24px;
+    }
+    #patient-timeline-modal #header-search-container .search-input {
+      width: 400px;
+    }
+    #patient-timeline-modal .header-left {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+    }
+    #patient-timeline-modal .back-btn {
+      background: none;
+      border: none;
+      font-size: 20px;
+      cursor: pointer;
+      color: #666;
+      padding: 4px 8px;
+      border-radius: 4px;
+    }
+    #patient-timeline-modal .back-btn:hover {
+      background: #f0f0f0;
+      color: #333;
+    }
+    #patient-timeline-modal .nav-btn {
+      background: none;
+      border: none;
+      font-size: 14px;
+      cursor: pointer;
+      padding: 4px 8px;
+      border-radius: 4px;
+      color: #666;
+      display: none;
+    }
+    #patient-timeline-modal .nav-btn:hover:not(:disabled) {
+      background: #f0f0f0;
+      color: #333;
+    }
+    #patient-timeline-modal .nav-btn:disabled {
+      color: #ccc;
+      cursor: not-allowed;
+    }
+    #patient-timeline-modal .hosp-info {
+      font-size: 13px;
+      color: #666;
+    }
+    #patient-timeline-modal .close-btn {
+      background: none;
+      border: none;
+      font-size: 24px;
+      cursor: pointer;
+      color: #666;
+      padding: 0;
+      line-height: 1;
+    }
+    #patient-timeline-modal .close-btn:hover {
+      color: #333;
+    }
+    #patient-timeline-modal .controls {
+      padding: 12px 20px;
+      border-bottom: 1px solid #e0e0e0;
+      display: flex;
+      gap: 16px;
+      align-items: center;
+      flex-wrap: wrap;
+      flex-shrink: 0;
+    }
+    #patient-timeline-modal .search-input {
+      flex: 1;
+      min-width: 400px;
+      padding: 8px 12px;
+      border: 1px solid #ccc;
+      border-radius: 4px;
+      font-size: 14px;
+    }
+    #patient-timeline-modal .search-input:focus {
+      outline: none;
+      border-color: #2196F3;
+    }
+    #patient-timeline-modal .column-filters {
+      display: flex;
+      gap: 4px;
+      flex: 1;
+      justify-content: flex-end;
+      margin: 0 8px;
+    }
+    #patient-timeline-modal .category-chip {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      padding: 3px 8px;
+      border-radius: 12px;
+      font-size: 11px;
+      cursor: pointer;
+      border: 1px solid;
+      transition: all 0.2s;
+      white-space: nowrap;
+    }
+    #patient-timeline-modal .category-chip.active {
+      opacity: 1;
+    }
+    #patient-timeline-modal .category-chip.inactive {
+      opacity: 0.4;
+      background: #f5f5f5 !important;
+      border-color: #ccc !important;
+      color: #999 !important;
+    }
+    #patient-timeline-modal .main-area {
+      flex: 1;
+      display: flex;
+      overflow: hidden;
+    }
+    #patient-timeline-modal .patient-select-view {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+    #patient-timeline-modal .timeline-layout {
+      display: flex;
+      flex: 1;
+      overflow: hidden;
+    }
+    #patient-timeline-modal .date-list {
+      width: 100px;
+      border-right: 1px solid #e0e0e0;
+      overflow-y: auto;
+      background: #fafafa;
+      flex-shrink: 0;
+    }
+    #patient-timeline-modal .date-item {
+      padding: 10px 12px;
+      font-size: 13px;
+      cursor: pointer;
+      border-bottom: 1px solid #eee;
+      transition: background 0.15s;
+    }
+    #patient-timeline-modal .date-item:hover {
+      background: #e3f2fd;
+    }
+    #patient-timeline-modal .date-item.selected {
+      background: #2196F3;
+      color: white;
+      font-weight: 500;
+    }
+    #patient-timeline-modal .date-item.weekend {
+      color: #e53935;
+    }
+    #patient-timeline-modal .date-item.selected.weekend {
+      color: white;
+    }
+    #patient-timeline-modal .content-columns {
+      display: flex;
+      flex: 1;
+      overflow: hidden;
+    }
+    #patient-timeline-modal .record-column,
+    #patient-timeline-modal .vital-column,
+    #patient-timeline-modal .prescription-order-column {
+      flex: 3;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+    #patient-timeline-modal .fixed-info-column {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      background: #f5f5f5;
+      box-shadow: -2px 0 8px rgba(0,0,0,0.08);
+      border-radius: 8px 0 0 8px;
+    }
+    #patient-timeline-modal .fixed-info-column .column-content {
+      padding-top: 12px;
+    }
+    #patient-timeline-modal .record-column,
+    #patient-timeline-modal .vital-column,
+    #patient-timeline-modal .prescription-order-column {
+      border-right: 1px solid #e0e0e0;
+    }
+    #patient-timeline-modal .column-header {
+      padding: 12px 16px;
+      font-weight: 600;
+      font-size: 14px;
+      background: #f5f5f5;
+      border-bottom: 1px solid #e0e0e0;
+      flex-shrink: 0;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    #patient-timeline-modal .add-record-btn {
+      background: #4CAF50;
+      color: white;
+      border: none;
+      padding: 4px 10px;
+      border-radius: 4px;
+      font-size: 12px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+    #patient-timeline-modal .add-record-btn:hover {
+      background: #388E3C;
+    }
+    #patient-timeline-modal .edit-record-btn {
+      background: transparent;
+      border: none;
+      padding: 2px 6px;
+      font-size: 14px;
+      cursor: pointer;
+      opacity: 0.6;
+      transition: opacity 0.2s;
+    }
+    #patient-timeline-modal .edit-record-btn:hover {
+      opacity: 1;
+    }
+    #patient-timeline-modal .column-content {
+      flex: 1;
+      overflow-y: auto;
+      padding: 12px;
+    }
+    #patient-timeline-modal .record-card {
+      padding: 12px;
+      margin-bottom: 10px;
+      border-radius: 6px;
+      border-left: 4px solid;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+    }
+    #patient-timeline-modal .record-card-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 8px;
+      font-size: 12px;
+    }
+    #patient-timeline-modal .record-card-time {
+      font-weight: 500;
+      color: #333;
+    }
+    #patient-timeline-modal .record-card-author {
+      color: #666;
+      margin-left: 8px;
+      flex: 1;
+    }
+    #patient-timeline-modal .record-card-category {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 4px;
+      font-size: 11px;
+      font-weight: 500;
+    }
+    #patient-timeline-modal .record-card-text {
+      font-size: 13px;
+      line-height: 1.6;
+      white-space: pre-wrap;
+      color: #333;
+    }
+    #patient-timeline-modal .record-card[data-record-id^="meal-"] .record-card-text {
+      font-family: monospace;
+    }
+    #patient-timeline-modal .temp-high {
+      background: #ffebee;
+      color: #c62828;
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-weight: 600;
+    }
+    #patient-timeline-modal .temp-low {
+      background: #e3f2fd;
+      color: #1565c0;
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-weight: 600;
+    }
+    #patient-timeline-modal .vital-table {
+      font-family: monospace;
+      font-size: 13px;
+      border-collapse: collapse;
+      table-layout: fixed;
+      width: 100%;
+    }
+    #patient-timeline-modal .vital-table th,
+    #patient-timeline-modal .vital-table td {
+      padding: 4px 8px;
+      text-align: center;
+    }
+    #patient-timeline-modal .vital-table th:first-child,
+    #patient-timeline-modal .vital-table td:first-child {
+      text-align: left;
+      width: 50px;
+    }
+    #patient-timeline-modal .vital-table th:nth-child(2),
+    #patient-timeline-modal .vital-table td:nth-child(2) {
+      width: 55px;
+    }
+    #patient-timeline-modal .vital-table th:nth-child(3),
+    #patient-timeline-modal .vital-table td:nth-child(3) {
+      width: 70px;
+    }
+    #patient-timeline-modal .vital-table th:nth-child(4),
+    #patient-timeline-modal .vital-table td:nth-child(4) {
+      width: 45px;
+    }
+    #patient-timeline-modal .vital-table th:nth-child(5),
+    #patient-timeline-modal .vital-table td:nth-child(5) {
+      width: 50px;
+    }
+    #patient-timeline-modal .vital-table th {
+      font-weight: 600;
+      color: #666;
+      border-bottom: 1px solid #ddd;
+    }
+    #patient-timeline-modal .vital-table td {
+      border-bottom: 1px solid #f0f0f0;
+    }
+    #patient-timeline-modal .vital-table tr:last-child td {
+      border-bottom: none;
+    }
+    #patient-timeline-modal .no-records {
+      text-align: center;
+      padding: 40px 20px;
+      color: #999;
+      font-size: 13px;
+    }
+    #patient-timeline-modal .loading {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      height: 100%;
+      font-size: 14px;
+      color: #666;
+    }
+    #patient-timeline-modal .no-data {
+      text-align: center;
+      padding: 40px;
+      color: #999;
+      font-size: 14px;
+    }
+    #patient-timeline-modal .category-badge {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 4px;
+      font-size: 11px;
+      font-weight: 500;
+    }
+    #patient-timeline-modal .fixed-info-wrapper {
+      display: flex;
+      flex-direction: column;
+      flex-shrink: 0;
+      border-bottom: 1px solid #e0e0e0;
+    }
+    #patient-timeline-modal .fixed-info-wrapper.collapsed .fixed-info-area {
+      display: none;
+    }
+    #patient-timeline-modal .fixed-info-area {
+      display: flex;
+      gap: 12px;
+      padding: 12px 16px;
+      background: #fafafa;
+      overflow: hidden;
+    }
+    #patient-timeline-modal .fixed-info-resizer {
+      height: 6px;
+      background: #e0e0e0;
+      cursor: ns-resize;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: background 0.2s;
+    }
+    #patient-timeline-modal .fixed-info-resizer:hover {
+      background: #bdbdbd;
+    }
+    #patient-timeline-modal .fixed-info-resizer::after {
+      content: '';
+      width: 40px;
+      height: 3px;
+      background: #999;
+      border-radius: 2px;
+    }
+    #patient-timeline-modal .info-card {
+      background: white;
+      border-radius: 6px;
+      border: 1px solid #e0e0e0;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+      min-width: 0;
+    }
+    #patient-timeline-modal .info-card-header {
+      padding: 8px 12px;
+      font-weight: 600;
+      font-size: 13px;
+      background: #f5f5f5;
+      border-bottom: 1px solid #e0e0e0;
+      flex-shrink: 0;
+    }
+    #patient-timeline-modal .info-card-content {
+      padding: 10px 12px;
+      font-size: 13px;
+      overflow-y: auto;
+      flex: 1;
+      line-height: 1.5;
+    }
+    #patient-timeline-modal .info-card-content .empty {
+      color: #999;
+      font-style: italic;
+    }
+    #patient-timeline-modal .info-card-content .med-item {
+      padding: 4px 0;
+      border-bottom: 1px solid #f0f0f0;
+    }
+    #patient-timeline-modal .info-card-content .med-item:last-child {
+      border-bottom: none;
+    }
+    #patient-timeline-modal .info-card-content .med-name {
+      font-weight: 500;
+    }
+    #patient-timeline-modal .info-card-content .med-usage,
+    #patient-timeline-modal .column-content .med-usage {
+      font-size: 12px;
+      color: #e65100;
+      background: #fff3e0;
+      padding: 2px 8px;
+      border-radius: 4px;
+      margin-bottom: 4px;
+      display: inline-block;
+    }
+    #patient-timeline-modal .usage-group {
+      margin-bottom: 12px;
+    }
+    #patient-timeline-modal .usage-group:last-child {
+      margin-bottom: 0;
+    }
+    #patient-timeline-modal .usage-label {
+      display: inline-block;
+      background: #e3f2fd;
+      color: #1565c0;
+      padding: 2px 8px;
+      border-radius: 4px;
+      font-size: 12px;
+      font-weight: 500;
+      margin-bottom: 4px;
+    }
+    #patient-timeline-modal .usage-medicines {
+      padding-left: 4px;
+    }
+    #patient-timeline-modal .usage-medicines .med-name {
+      padding: 2px 0;
+    }
+    #patient-timeline-modal .med-link {
+      color: inherit;
+      text-decoration: none;
+      cursor: pointer;
+    }
+    #patient-timeline-modal .med-link:hover {
+      text-decoration: underline;
+      color: #1976D2;
+    }
+    #patient-timeline-modal .prescription-section,
+    #patient-timeline-modal .injection-section {
+      padding: 12px;
+      margin: 12px;
+      border-radius: 6px;
+      border-left: 4px solid;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+    }
+    #patient-timeline-modal .section-title {
+      font-weight: 600;
+      font-size: 13px;
+      color: #333;
+      margin-bottom: 8px;
+    }
+    #patient-timeline-modal .empty-message {
+      color: #999;
+      font-size: 13px;
+      padding: 8px 0;
+    }
+    #patient-timeline-modal .patient-list-container {
+      flex: 1;
+      overflow-y: auto;
+      padding: 16px;
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+    }
+    #patient-timeline-modal .ward-column-header {
+      font-size: 16px;
+      font-weight: 600;
+      padding: 8px 12px;
+      background: #e8f5e9;
+      border-radius: 4px;
+      margin-bottom: 12px;
+    }
+    #patient-timeline-modal .ward-column-header.ryoyo {
+      background: #fff3e0;
+    }
+    #patient-timeline-modal .ward-section {
+      margin-bottom: 24px;
+    }
+    #patient-timeline-modal .ward-header {
+      font-size: 14px;
+      font-weight: 600;
+      color: #333;
+      padding: 8px 12px;
+      background: #f5f5f5;
+      border-radius: 4px;
+      margin-bottom: 8px;
+    }
+    #patient-timeline-modal .room-row {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 6px;
+      margin-bottom: 8px;
+      padding: 4px 0 4px 8px;
+    }
+    #patient-timeline-modal .room-label {
+      font-size: 13px;
+      font-weight: 500;
+      color: #666;
+      min-width: 40px;
+    }
+    #patient-timeline-modal .patient-chip {
+      padding: 4px 12px;
+      background: #e3f2fd;
+      border: 1px solid #90caf9;
+      border-radius: 16px;
+      font-size: 13px;
+      cursor: pointer;
+      transition: all 0.15s;
+      white-space: nowrap;
+    }
+    #patient-timeline-modal .patient-chip:hover {
+      filter: brightness(0.95);
+    }
+    #patient-timeline-modal .patient-chip.scheduled {
+      border-style: dashed;
+    }
+    #patient-timeline-modal .patient-chip .scheduled-date {
+      font-size: 11px;
+      color: #666;
+      margin-left: 2px;
+    }
+    #patient-timeline-modal .legend-container {
+      padding: 10px 16px;
+      background: #fafafa;
+      border-bottom: 1px solid #e0e0e0;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      align-items: center;
+    }
+    #patient-timeline-modal .legend-title {
+      font-size: 12px;
+      color: #666;
+      font-weight: 500;
+      margin-right: 4px;
+    }
+    #patient-timeline-modal .legend-item {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 13px;
+      color: #333;
+      padding: 4px 10px;
+      background: #fff;
+      border-radius: 4px;
+      border: 1px solid #e0e0e0;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    #patient-timeline-modal .legend-item:hover {
+      background: #f5f5f5;
+    }
+    #patient-timeline-modal .legend-item.active {
+      box-shadow: 0 0 0 2px rgba(33, 150, 243, 0.5);
+    }
+    #patient-timeline-modal .legend-item.inactive {
+      opacity: 0.5;
+    }
+    #patient-timeline-modal .legend-count {
+      font-size: 12px;
+      color: #666;
+      margin-left: 2px;
+    }
+    #patient-timeline-modal .legend-color {
+      width: 14px;
+      height: 14px;
+      border-radius: 4px;
+      border-width: 1px;
+      border-style: solid;
+    }
+  `;
+
   // タイムラインモーダル表示
   function showTimelineModal() {
     // 既存モーダルを削除
     document.getElementById('patient-timeline-modal')?.remove();
+
+    // SPA遷移対応: クリーンアップ用
+    const cleaner = window.HenryCore.utils.createCleaner();
 
     // 状態管理
     let currentView = 'patient-select'; // 'patient-select' or 'timeline'
@@ -1339,656 +2155,7 @@
     const modal = document.createElement('div');
     modal.id = 'patient-timeline-modal';
     modal.innerHTML = `
-      <style>
-        #patient-timeline-modal {
-          position: fixed;
-          top: 0;
-          left: 0;
-          right: 0;
-          bottom: 0;
-          background: rgba(0,0,0,0.5);
-          z-index: 1500;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-        }
-        #patient-timeline-modal .modal-content {
-          background: white;
-          border-radius: 8px;
-          width: 98vw;
-          height: 98vh;
-          display: flex;
-          flex-direction: column;
-          font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-        }
-        #patient-timeline-modal .modal-header {
-          padding: 16px 20px;
-          border-bottom: 1px solid #e0e0e0;
-          display: flex;
-          justify-content: space-between;
-          align-items: center;
-          flex-shrink: 0;
-        }
-        #patient-timeline-modal .modal-header h2 {
-          margin: 0;
-          font-size: 18px;
-          font-weight: 600;
-        }
-        #patient-timeline-modal .header-info {
-          display: flex;
-          align-items: center;
-          gap: 16px;
-          flex: 1;
-        }
-        #patient-timeline-modal #header-search-container {
-          margin-left: auto;
-          margin-right: 24px;
-        }
-        #patient-timeline-modal #header-search-container .search-input {
-          width: 400px;
-        }
-        #patient-timeline-modal .header-left {
-          display: flex;
-          align-items: center;
-          gap: 4px;
-        }
-        #patient-timeline-modal .back-btn {
-          background: none;
-          border: none;
-          font-size: 20px;
-          cursor: pointer;
-          color: #666;
-          padding: 4px 8px;
-          border-radius: 4px;
-        }
-        #patient-timeline-modal .back-btn:hover {
-          background: #f0f0f0;
-          color: #333;
-        }
-        #patient-timeline-modal .nav-btn {
-          background: none;
-          border: none;
-          font-size: 14px;
-          cursor: pointer;
-          padding: 4px 8px;
-          border-radius: 4px;
-          color: #666;
-          display: none;
-        }
-        #patient-timeline-modal .nav-btn:hover:not(:disabled) {
-          background: #f0f0f0;
-          color: #333;
-        }
-        #patient-timeline-modal .nav-btn:disabled {
-          color: #ccc;
-          cursor: not-allowed;
-        }
-        #patient-timeline-modal .hosp-info {
-          font-size: 13px;
-          color: #666;
-        }
-        #patient-timeline-modal .close-btn {
-          background: none;
-          border: none;
-          font-size: 24px;
-          cursor: pointer;
-          color: #666;
-          padding: 0;
-          line-height: 1;
-        }
-        #patient-timeline-modal .close-btn:hover {
-          color: #333;
-        }
-        #patient-timeline-modal .controls {
-          padding: 12px 20px;
-          border-bottom: 1px solid #e0e0e0;
-          display: flex;
-          gap: 16px;
-          align-items: center;
-          flex-wrap: wrap;
-          flex-shrink: 0;
-        }
-        #patient-timeline-modal .search-input {
-          flex: 1;
-          min-width: 400px;
-          padding: 8px 12px;
-          border: 1px solid #ccc;
-          border-radius: 4px;
-          font-size: 14px;
-        }
-        #patient-timeline-modal .search-input:focus {
-          outline: none;
-          border-color: #2196F3;
-        }
-        #patient-timeline-modal .column-filters {
-          display: flex;
-          gap: 4px;
-          flex: 1;
-          justify-content: flex-end;
-          margin: 0 8px;
-        }
-        #patient-timeline-modal .category-chip {
-          display: flex;
-          align-items: center;
-          gap: 4px;
-          padding: 3px 8px;
-          border-radius: 12px;
-          font-size: 11px;
-          cursor: pointer;
-          border: 1px solid;
-          transition: all 0.2s;
-          white-space: nowrap;
-        }
-        #patient-timeline-modal .category-chip.active {
-          opacity: 1;
-        }
-        #patient-timeline-modal .category-chip.inactive {
-          opacity: 0.4;
-          background: #f5f5f5 !important;
-          border-color: #ccc !important;
-          color: #999 !important;
-        }
-        #patient-timeline-modal .main-area {
-          flex: 1;
-          display: flex;
-          overflow: hidden;
-        }
-        #patient-timeline-modal .patient-select-view {
-          flex: 1;
-          display: flex;
-          flex-direction: column;
-          overflow: hidden;
-        }
-        /* 3カラムレイアウト */
-        #patient-timeline-modal .timeline-layout {
-          display: flex;
-          flex: 1;
-          overflow: hidden;
-        }
-        #patient-timeline-modal .date-list {
-          width: 100px;
-          border-right: 1px solid #e0e0e0;
-          overflow-y: auto;
-          background: #fafafa;
-          flex-shrink: 0;
-        }
-        #patient-timeline-modal .date-item {
-          padding: 10px 12px;
-          font-size: 13px;
-          cursor: pointer;
-          border-bottom: 1px solid #eee;
-          transition: background 0.15s;
-        }
-        #patient-timeline-modal .date-item:hover {
-          background: #e3f2fd;
-        }
-        #patient-timeline-modal .date-item.selected {
-          background: #2196F3;
-          color: white;
-          font-weight: 500;
-        }
-        #patient-timeline-modal .date-item.weekend {
-          color: #e53935;
-        }
-        #patient-timeline-modal .date-item.selected.weekend {
-          color: white;
-        }
-        #patient-timeline-modal .content-columns {
-          display: flex;
-          flex: 1;
-          overflow: hidden;
-        }
-        #patient-timeline-modal .record-column,
-        #patient-timeline-modal .vital-column,
-        #patient-timeline-modal .prescription-order-column {
-          flex: 3;
-          display: flex;
-          flex-direction: column;
-          overflow: hidden;
-        }
-        #patient-timeline-modal .fixed-info-column {
-          flex: 1;
-          display: flex;
-          flex-direction: column;
-          overflow: hidden;
-          background: #f5f5f5;
-          box-shadow: -2px 0 8px rgba(0,0,0,0.08);
-          border-radius: 8px 0 0 8px;
-        }
-        #patient-timeline-modal .fixed-info-column .column-content {
-          padding-top: 12px;
-        }
-        #patient-timeline-modal .record-column,
-        #patient-timeline-modal .vital-column,
-        #patient-timeline-modal .prescription-order-column {
-          border-right: 1px solid #e0e0e0;
-        }
-        #patient-timeline-modal .column-header {
-          padding: 12px 16px;
-          font-weight: 600;
-          font-size: 14px;
-          background: #f5f5f5;
-          border-bottom: 1px solid #e0e0e0;
-          flex-shrink: 0;
-          display: flex;
-          justify-content: space-between;
-          align-items: center;
-        }
-        #patient-timeline-modal .add-record-btn {
-          background: #4CAF50;
-          color: white;
-          border: none;
-          padding: 4px 10px;
-          border-radius: 4px;
-          font-size: 12px;
-          font-weight: 500;
-          cursor: pointer;
-          transition: background 0.2s;
-        }
-        #patient-timeline-modal .add-record-btn:hover {
-          background: #388E3C;
-        }
-        #patient-timeline-modal .edit-record-btn {
-          background: transparent;
-          border: none;
-          padding: 2px 6px;
-          font-size: 14px;
-          cursor: pointer;
-          opacity: 0.6;
-          transition: opacity 0.2s;
-        }
-        #patient-timeline-modal .edit-record-btn:hover {
-          opacity: 1;
-        }
-        #patient-timeline-modal .column-content {
-          flex: 1;
-          overflow-y: auto;
-          padding: 12px;
-        }
-        #patient-timeline-modal .record-card {
-          padding: 12px;
-          margin-bottom: 10px;
-          border-radius: 6px;
-          border-left: 4px solid;
-          box-shadow: 0 1px 3px rgba(0,0,0,0.08);
-        }
-        #patient-timeline-modal .record-card-header {
-          display: flex;
-          justify-content: space-between;
-          align-items: center;
-          margin-bottom: 8px;
-          font-size: 12px;
-        }
-        #patient-timeline-modal .record-card-time {
-          font-weight: 500;
-          color: #333;
-        }
-        #patient-timeline-modal .record-card-author {
-          color: #666;
-          margin-left: 8px;
-          flex: 1;
-        }
-        #patient-timeline-modal .record-card-category {
-          display: inline-block;
-          padding: 2px 8px;
-          border-radius: 4px;
-          font-size: 11px;
-          font-weight: 500;
-        }
-        #patient-timeline-modal .record-card-text {
-          font-size: 13px;
-          line-height: 1.6;
-          white-space: pre-wrap;
-          color: #333;
-        }
-        /* 食事摂取カードは等幅フォントで揃える（経管食の複数行表示用） */
-        #patient-timeline-modal .record-card[data-record-id^="meal-"] .record-card-text {
-          font-family: monospace;
-        }
-        #patient-timeline-modal .temp-high {
-          background: #ffebee;
-          color: #c62828;
-          padding: 2px 6px;
-          border-radius: 4px;
-          font-weight: 600;
-        }
-        #patient-timeline-modal .temp-low {
-          background: #e3f2fd;
-          color: #1565c0;
-          padding: 2px 6px;
-          border-radius: 4px;
-          font-weight: 600;
-        }
-        #patient-timeline-modal .vital-table {
-          font-family: monospace;
-          font-size: 13px;
-          border-collapse: collapse;
-          table-layout: fixed;
-          width: 100%;
-        }
-        #patient-timeline-modal .vital-table th,
-        #patient-timeline-modal .vital-table td {
-          padding: 4px 8px;
-          text-align: center;
-        }
-        #patient-timeline-modal .vital-table th:first-child,
-        #patient-timeline-modal .vital-table td:first-child {
-          text-align: left;
-          width: 50px;
-        }
-        #patient-timeline-modal .vital-table th:nth-child(2),
-        #patient-timeline-modal .vital-table td:nth-child(2) {
-          width: 55px;
-        }
-        #patient-timeline-modal .vital-table th:nth-child(3),
-        #patient-timeline-modal .vital-table td:nth-child(3) {
-          width: 70px;
-        }
-        #patient-timeline-modal .vital-table th:nth-child(4),
-        #patient-timeline-modal .vital-table td:nth-child(4) {
-          width: 45px;
-        }
-        #patient-timeline-modal .vital-table th:nth-child(5),
-        #patient-timeline-modal .vital-table td:nth-child(5) {
-          width: 50px;
-        }
-        #patient-timeline-modal .vital-table th {
-          font-weight: 600;
-          color: #666;
-          border-bottom: 1px solid #ddd;
-        }
-        #patient-timeline-modal .vital-table td {
-          border-bottom: 1px solid #f0f0f0;
-        }
-        #patient-timeline-modal .vital-table tr:last-child td {
-          border-bottom: none;
-        }
-        #patient-timeline-modal .no-records {
-          text-align: center;
-          padding: 40px 20px;
-          color: #999;
-          font-size: 13px;
-        }
-        #patient-timeline-modal .loading {
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          height: 100%;
-          font-size: 14px;
-          color: #666;
-        }
-        #patient-timeline-modal .no-data {
-          text-align: center;
-          padding: 40px;
-          color: #999;
-          font-size: 14px;
-        }
-        #patient-timeline-modal .category-badge {
-          display: inline-block;
-          padding: 2px 8px;
-          border-radius: 4px;
-          font-size: 11px;
-          font-weight: 500;
-        }
-        /* 固定情報エリア */
-        #patient-timeline-modal .fixed-info-wrapper {
-          display: flex;
-          flex-direction: column;
-          flex-shrink: 0;
-          border-bottom: 1px solid #e0e0e0;
-        }
-        #patient-timeline-modal .fixed-info-wrapper.collapsed .fixed-info-area {
-          display: none;
-        }
-        #patient-timeline-modal .fixed-info-area {
-          display: flex;
-          gap: 12px;
-          padding: 12px 16px;
-          background: #fafafa;
-          overflow: hidden;
-        }
-        #patient-timeline-modal .fixed-info-resizer {
-          height: 6px;
-          background: #e0e0e0;
-          cursor: ns-resize;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          transition: background 0.2s;
-        }
-        #patient-timeline-modal .fixed-info-resizer:hover {
-          background: #bdbdbd;
-        }
-        #patient-timeline-modal .fixed-info-resizer::after {
-          content: '';
-          width: 40px;
-          height: 3px;
-          background: #999;
-          border-radius: 2px;
-        }
-        #patient-timeline-modal .info-card {
-          background: white;
-          border-radius: 6px;
-          border: 1px solid #e0e0e0;
-          overflow: hidden;
-          display: flex;
-          flex-direction: column;
-          min-width: 0;
-        }
-        #patient-timeline-modal .info-card-header {
-          padding: 8px 12px;
-          font-weight: 600;
-          font-size: 13px;
-          background: #f5f5f5;
-          border-bottom: 1px solid #e0e0e0;
-          flex-shrink: 0;
-        }
-        #patient-timeline-modal .info-card-content {
-          padding: 10px 12px;
-          font-size: 13px;
-          overflow-y: auto;
-          flex: 1;
-          line-height: 1.5;
-        }
-        #patient-timeline-modal .info-card-content .empty {
-          color: #999;
-          font-style: italic;
-        }
-        #patient-timeline-modal .info-card-content .med-item {
-          padding: 4px 0;
-          border-bottom: 1px solid #f0f0f0;
-        }
-        #patient-timeline-modal .info-card-content .med-item:last-child {
-          border-bottom: none;
-        }
-        #patient-timeline-modal .info-card-content .med-name {
-          font-weight: 500;
-        }
-        #patient-timeline-modal .info-card-content .med-usage,
-        #patient-timeline-modal .column-content .med-usage {
-          font-size: 12px;
-          color: #e65100;
-          background: #fff3e0;
-          padding: 2px 8px;
-          border-radius: 4px;
-          margin-bottom: 4px;
-          display: inline-block;
-        }
-        /* 用法グループ */
-        #patient-timeline-modal .usage-group {
-          margin-bottom: 12px;
-        }
-        #patient-timeline-modal .usage-group:last-child {
-          margin-bottom: 0;
-        }
-        #patient-timeline-modal .usage-label {
-          display: inline-block;
-          background: #e3f2fd;
-          color: #1565c0;
-          padding: 2px 8px;
-          border-radius: 4px;
-          font-size: 12px;
-          font-weight: 500;
-          margin-bottom: 4px;
-        }
-        #patient-timeline-modal .usage-medicines {
-          padding-left: 4px;
-        }
-        #patient-timeline-modal .usage-medicines .med-name {
-          padding: 2px 0;
-        }
-        #patient-timeline-modal .med-link {
-          color: inherit;
-          text-decoration: none;
-          cursor: pointer;
-        }
-        #patient-timeline-modal .med-link:hover {
-          text-decoration: underline;
-          color: #1976D2;
-        }
-        /* 処方・注射カラム（カード形式） */
-        #patient-timeline-modal .prescription-section,
-        #patient-timeline-modal .injection-section {
-          padding: 12px;
-          margin: 12px;
-          border-radius: 6px;
-          border-left: 4px solid;
-          box-shadow: 0 1px 3px rgba(0,0,0,0.08);
-        }
-        #patient-timeline-modal .section-title {
-          font-weight: 600;
-          font-size: 13px;
-          color: #333;
-          margin-bottom: 8px;
-        }
-        #patient-timeline-modal .empty-message {
-          color: #999;
-          font-size: 13px;
-          padding: 8px 0;
-        }
-        /* 患者選択画面のスタイル */
-        #patient-timeline-modal .patient-list-container {
-          flex: 1;
-          overflow-y: auto;
-          padding: 16px;
-          display: grid;
-          grid-template-columns: 1fr 1fr;
-          gap: 16px;
-        }
-        #patient-timeline-modal .ward-column {
-          /* 各列用のコンテナ */
-        }
-        #patient-timeline-modal .ward-column-header {
-          font-size: 16px;
-          font-weight: 600;
-          padding: 8px 12px;
-          background: #e8f5e9;
-          border-radius: 4px;
-          margin-bottom: 12px;
-        }
-        #patient-timeline-modal .ward-column-header.ryoyo {
-          background: #fff3e0;
-        }
-        #patient-timeline-modal .ward-section {
-          margin-bottom: 24px;
-        }
-        #patient-timeline-modal .ward-header {
-          font-size: 14px;
-          font-weight: 600;
-          color: #333;
-          padding: 8px 12px;
-          background: #f5f5f5;
-          border-radius: 4px;
-          margin-bottom: 8px;
-        }
-        /* 病室行: 番号 + チップを横並び */
-        #patient-timeline-modal .room-row {
-          display: flex;
-          flex-wrap: wrap;
-          align-items: center;
-          gap: 6px;
-          margin-bottom: 8px;
-          padding: 4px 0 4px 8px;
-        }
-        #patient-timeline-modal .room-label {
-          font-size: 13px;
-          font-weight: 500;
-          color: #666;
-          min-width: 40px;
-        }
-        /* 患者チップ */
-        #patient-timeline-modal .patient-chip {
-          padding: 4px 12px;
-          background: #e3f2fd;
-          border: 1px solid #90caf9;
-          border-radius: 16px;
-          font-size: 13px;
-          cursor: pointer;
-          transition: all 0.15s;
-          white-space: nowrap;
-        }
-        #patient-timeline-modal .patient-chip:hover {
-          filter: brightness(0.95);
-        }
-        #patient-timeline-modal .patient-chip.scheduled {
-          border-style: dashed;
-        }
-        #patient-timeline-modal .patient-chip .scheduled-date {
-          font-size: 11px;
-          color: #666;
-          margin-left: 2px;
-        }
-        /* 凡例（レジェンド） */
-        #patient-timeline-modal .legend-container {
-          padding: 10px 16px;
-          background: #fafafa;
-          border-bottom: 1px solid #e0e0e0;
-          display: flex;
-          flex-wrap: wrap;
-          gap: 12px;
-          align-items: center;
-        }
-        #patient-timeline-modal .legend-title {
-          font-size: 12px;
-          color: #666;
-          font-weight: 500;
-          margin-right: 4px;
-        }
-        #patient-timeline-modal .legend-item {
-          display: flex;
-          align-items: center;
-          gap: 6px;
-          font-size: 13px;
-          color: #333;
-          padding: 4px 10px;
-          background: #fff;
-          border-radius: 4px;
-          border: 1px solid #e0e0e0;
-          cursor: pointer;
-          transition: all 0.2s;
-        }
-        #patient-timeline-modal .legend-item:hover {
-          background: #f5f5f5;
-        }
-        #patient-timeline-modal .legend-item.active {
-          box-shadow: 0 0 0 2px rgba(33, 150, 243, 0.5);
-        }
-        #patient-timeline-modal .legend-item.inactive {
-          opacity: 0.5;
-        }
-        #patient-timeline-modal .legend-count {
-          font-size: 12px;
-          color: #666;
-          margin-left: 2px;
-        }
-        #patient-timeline-modal .legend-color {
-          width: 14px;
-          height: 14px;
-          border-radius: 4px;
-          border-width: 1px;
-          border-style: solid;
-        }
-      </style>
+      <style>${MODAL_CSS}</style>
       <div class="modal-content">
         <div class="modal-header">
           <div class="header-info">
@@ -2358,17 +2525,22 @@
       });
     }
 
+    // モーダルを閉じる（クリーンアップ付き）
+    function closeModal() {
+      cleaner.cleanup();
+      modal.remove();
+    }
+
     // 閉じる
-    closeBtn.onclick = () => modal.remove();
+    closeBtn.onclick = closeModal;
     modal.addEventListener('click', (e) => {
-      if (e.target === modal) modal.remove();
+      if (e.target === modal) closeModal();
     });
 
     // キーボードショートカット
     const handleKeydown = (e) => {
       if (e.key === 'Escape') {
-        modal.remove();
-        document.removeEventListener('keydown', handleKeydown);
+        closeModal();
         return;
       }
 
@@ -2398,6 +2570,10 @@
       }
     };
     document.addEventListener('keydown', handleKeydown);
+    cleaner.add(() => document.removeEventListener('keydown', handleKeydown));
+
+    // SPA遷移時にモーダルを閉じる
+    cleaner.add(window.HenryCore.utils.subscribeNavigation(closeModal));
 
     // 日付ナビゲーション（direction: -1=上/新しい方、1=下/古い方）
     function navigateDate(direction) {
@@ -3235,201 +3411,6 @@
         });
         observer.observe(document.body, { childList: true });
       }
-    }
-
-    // SVGでバイタル折れ線グラフを描画（3つの独立したグラフ）
-    function renderVitalSVG(data, minTime, maxTime, dateKeys, days = 7) {
-      const width = 700;
-      const chartHeight = 140; // 各グラフの高さ
-      const gap = 50; // グラフ間の余白（日付ラベル用）
-      const margin = { top: 35, right: 50, bottom: 25, left: 50 };
-      const chartWidth = width - margin.left - margin.right;
-      const totalHeight = margin.top + (chartHeight + gap) * 3 - gap + margin.bottom;
-
-      // 正常範囲の定義
-      const normalRanges = {
-        temp: { min: 36.0, max: 37.0 },
-        bpUpper: { min: 90, max: 140 },
-        bpLower: { min: 60, max: 90 },
-        pulse: { min: 60, max: 100 }
-      };
-
-      // 各指標の値域を決定
-      const temps = data.map(d => d.T).filter(v => v !== null);
-      const bpUppers = data.map(d => d.BPupper).filter(v => v !== null);
-      const bpLowers = data.map(d => d.BPlower).filter(v => v !== null);
-      const pulses = data.map(d => d.P).filter(v => v !== null);
-
-      // 体温用スケール（35-40°C固定）
-      const tempMin = 35, tempMax = 40;
-
-      // 血圧用スケール（動的）
-      const bpValues = [...bpUppers, ...bpLowers];
-      const bpMin = bpValues.length > 0 ? Math.floor(Math.min(...bpValues) / 10) * 10 - 10 : 40;
-      const bpMax = bpValues.length > 0 ? Math.ceil(Math.max(...bpValues) / 10) * 10 + 10 : 180;
-
-      // 脈拍用スケール（動的）
-      const pulseMin = pulses.length > 0 ? Math.floor(Math.min(...pulses) / 10) * 10 - 10 : 40;
-      const pulseMax = pulses.length > 0 ? Math.ceil(Math.max(...pulses) / 10) * 10 + 10 : 120;
-
-      // X軸スケール（タイムスタンプベース）
-      const timeRange = maxTime - minTime;
-      const xScale = (timestamp) => margin.left + ((timestamp - minTime) / timeRange) * chartWidth;
-
-      // Y軸スケール生成関数
-      const createYScale = (min, max, top) => {
-        return (v) => top + chartHeight - ((v - min) / (max - min)) * chartHeight;
-      };
-
-      // 各グラフのY位置
-      const tempTop = margin.top;
-      const bpTop = margin.top + chartHeight + gap;
-      const pulseTop = margin.top + (chartHeight + gap) * 2;
-
-      const yScaleTemp = createYScale(tempMin, tempMax, tempTop);
-      const yScaleBP = createYScale(bpMin, bpMax, bpTop);
-      const yScalePulse = createYScale(pulseMin, pulseMax, pulseTop);
-
-      // パス生成関数
-      const generatePath = (points, getValue, yScale) => {
-        const validPoints = points.filter(p => getValue(p) !== null);
-        if (validPoints.length === 0) return '';
-        return validPoints.map((p, idx) => {
-          const x = xScale(p.timestamp);
-          const y = yScale(getValue(p));
-          return `${idx === 0 ? 'M' : 'L'}${x},${y}`;
-        }).join(' ');
-      };
-
-      // ドット生成関数
-      const generateDots = (points, getValue, yScale, color) => {
-        return points.map(p => {
-          const v = getValue(p);
-          if (v === null) return '';
-          const x = xScale(p.timestamp);
-          const y = yScale(v);
-          return `<circle cx="${x}" cy="${y}" r="3" fill="${color}" />`;
-        }).join('');
-      };
-
-      // X軸の日付境界線生成（各グラフ用）
-      const dayBoundaries = dateKeys.map(key => {
-        const [year, month, day] = key.split('-').map(Number);
-        const dayStart = new Date(year, month - 1, day, 0, 0, 0).getTime();
-        return { key, timestamp: dayStart, month, day };
-      });
-
-      // 日の境界線とラベルを生成（ラベルは区切り線の中央に配置）
-      const generateDayLinesAndLabels = (top, height) => {
-        return dayBoundaries.map((d, i) => {
-          const x = xScale(d.timestamp);
-          if (x < margin.left || x > margin.left + chartWidth) return '';
-
-          // ラベル位置: 現在の縦線と次の縦線（または右端）の中央
-          const nextX = (i < dayBoundaries.length - 1)
-            ? xScale(dayBoundaries[i + 1].timestamp)
-            : margin.left + chartWidth;
-          const labelX = (x + nextX) / 2;
-
-          return `
-            <line x1="${x}" y1="${top}" x2="${x}" y2="${top + height}" stroke="#ddd" stroke-width="1" />
-            <text x="${labelX}" y="${top + height + 12}" text-anchor="middle" font-size="10" fill="#666">${d.month}/${d.day}</text>
-          `;
-        }).join('');
-      };
-
-      // Y軸目盛り生成関数（左右両方に表示）
-      const generateYTicks = (min, max, step, top, color) => {
-        const ticks = [];
-        for (let v = min; v <= max; v += step) {
-          ticks.push(v);
-        }
-        const yScale = createYScale(min, max, top);
-        return ticks.map(v => {
-          return `
-            <text x="${margin.left - 5}" y="${yScale(v) + 3}" text-anchor="end" font-size="9" fill="${color}">${v}</text>
-            <text x="${margin.left + chartWidth + 5}" y="${yScale(v) + 3}" text-anchor="start" font-size="9" fill="${color}">${v}</text>
-            <line x1="${margin.left}" y1="${yScale(v)}" x2="${margin.left + chartWidth}" y2="${yScale(v)}" stroke="#eee" stroke-dasharray="2,2" />
-          `;
-        }).join('');
-      };
-
-      // 正常範囲帯の描画関数
-      const generateNormalBand = (rangeMin, rangeMax, scaleMin, scaleMax, top, color) => {
-        // 範囲がスケール外の場合はクリップ
-        const clampedMin = Math.max(rangeMin, scaleMin);
-        const clampedMax = Math.min(rangeMax, scaleMax);
-        if (clampedMin >= clampedMax) return '';
-        const yScale = createYScale(scaleMin, scaleMax, top);
-        const y1 = yScale(clampedMax); // 上端（値が大きい方）
-        const y2 = yScale(clampedMin); // 下端（値が小さい方）
-        const height = y2 - y1;
-        return `<rect x="${margin.left}" y="${y1}" width="${chartWidth}" height="${height}" fill="${color}" />`;
-      };
-
-
-      // グラフタイトル
-      const titles = `
-        <text x="${margin.left}" y="${tempTop - 5}" font-size="11" font-weight="bold" fill="#333">体温 (°C)</text>
-        <text x="${margin.left}" y="${bpTop - 5}" font-size="11" font-weight="bold" fill="#333">血圧 (mmHg)</text>
-        <text x="${margin.left}" y="${pulseTop - 5}" font-size="11" font-weight="bold" fill="#333">脈拍 (/min)</text>
-      `;
-
-      // パスとドット
-      const tempPath = generatePath(data, d => d.T, yScaleTemp);
-      const bpUpperPath = generatePath(data, d => d.BPupper, yScaleBP);
-      const bpLowerPath = generatePath(data, d => d.BPlower, yScaleBP);
-      const pulsePath = generatePath(data, d => d.P, yScalePulse);
-
-      // 30日表示の場合はドットを非表示（データが多いため見づらくなる）
-      const showDots = days !== 30;
-      const tempDots = showDots ? generateDots(data, d => d.T, yScaleTemp, '#FF5722') : '';
-      const bpUpperDots = showDots ? generateDots(data, d => d.BPupper, yScaleBP, '#4CAF50') : '';
-      const bpLowerDots = showDots ? generateDots(data, d => d.BPlower, yScaleBP, '#9C27B0') : '';
-      const pulseDots = showDots ? generateDots(data, d => d.P, yScalePulse, '#2196F3') : '';
-
-      // 正常範囲帯
-      const tempNormalBand = generateNormalBand(normalRanges.temp.min, normalRanges.temp.max, tempMin, tempMax, tempTop, 'rgba(255, 87, 34, 0.15)');
-      const bpUpperNormalBand = generateNormalBand(normalRanges.bpUpper.min, normalRanges.bpUpper.max, bpMin, bpMax, bpTop, 'rgba(76, 175, 80, 0.15)');
-      const bpLowerNormalBand = generateNormalBand(normalRanges.bpLower.min, normalRanges.bpLower.max, bpMin, bpMax, bpTop, 'rgba(156, 39, 176, 0.15)');
-      const pulseNormalBand = generateNormalBand(normalRanges.pulse.min, normalRanges.pulse.max, pulseMin, pulseMax, pulseTop, 'rgba(33, 150, 243, 0.15)');
-
-      return `
-        <svg width="${width}" height="${totalHeight}" style="display:block;margin:0 auto;">
-          <!-- 体温グラフ -->
-          <rect x="${margin.left}" y="${tempTop}" width="${chartWidth}" height="${chartHeight}" fill="#fafafa" />
-          ${tempNormalBand}
-          ${generateYTicks(tempMin, tempMax, 1, tempTop, '#666')}
-          ${generateDayLinesAndLabels(tempTop, chartHeight)}
-          <path d="${tempPath}" fill="none" stroke="#FF5722" stroke-width="2" />
-          ${tempDots}
-          <rect x="${margin.left}" y="${tempTop}" width="${chartWidth}" height="${chartHeight}" fill="none" stroke="#ccc" />
-
-          <!-- 血圧グラフ -->
-          <rect x="${margin.left}" y="${bpTop}" width="${chartWidth}" height="${chartHeight}" fill="#fafafa" />
-          ${bpUpperNormalBand}
-          ${bpLowerNormalBand}
-          ${generateYTicks(bpMin, bpMax, 20, bpTop, '#666')}
-          ${generateDayLinesAndLabels(bpTop, chartHeight)}
-          <path d="${bpUpperPath}" fill="none" stroke="#4CAF50" stroke-width="2" />
-          <path d="${bpLowerPath}" fill="none" stroke="#9C27B0" stroke-width="1.5" />
-          ${bpUpperDots}
-          ${bpLowerDots}
-          <rect x="${margin.left}" y="${bpTop}" width="${chartWidth}" height="${chartHeight}" fill="none" stroke="#ccc" />
-
-          <!-- 脈拍グラフ -->
-          <rect x="${margin.left}" y="${pulseTop}" width="${chartWidth}" height="${chartHeight}" fill="#fafafa" />
-          ${pulseNormalBand}
-          ${generateYTicks(pulseMin, pulseMax, 20, pulseTop, '#666')}
-          ${generateDayLinesAndLabels(pulseTop, chartHeight)}
-          <path d="${pulsePath}" fill="none" stroke="#2196F3" stroke-width="2" />
-          ${pulseDots}
-          <rect x="${margin.left}" y="${pulseTop}" width="${chartWidth}" height="${chartHeight}" fill="none" stroke="#ccc" />
-
-          <!-- タイトル -->
-          ${titles}
-        </svg>
-      `;
     }
 
     // 固定情報エリアを描画（プロフィールのみ）

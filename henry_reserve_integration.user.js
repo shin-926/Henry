@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         予約システム連携
 // @namespace    https://github.com/shin-926/Henry
-// @version      4.5.0
+// @version      4.7.7
 // @description  Henryカルテと予約システム間の双方向連携（再診予約・照射オーダー自動予約・自動印刷・患者プレビュー）
 // @author       sk powered by Claude & Gemini
 // @match        https://henry-app.jp/*
@@ -103,6 +103,9 @@
     // DOM操作
     DOM_TRAVERSE_MAX_DEPTH: 5
   };
+
+  // 照射オーダー処理中フラグ（二重インターセプト防止）
+  let isProcessingImagingOrder = false;
 
   // スタイル定数
   const STYLES = {
@@ -290,6 +293,21 @@
             state
             startDate { year month day }
             endDate { year month day }
+          }
+        }
+      }
+    `,
+    ListSessions: `
+      query ListSessions($input: ListSessionsRequestInput!) {
+        listSessions(input: $input) {
+          sessions {
+            uuid
+            scheduleTime { seconds }
+            doctorUuid
+            encounterId { value }
+            patient {
+              uuid
+            }
           }
         }
       }
@@ -1505,6 +1523,26 @@ html, body { margin: 0; padding: 0; }
       return defaultPov;
     }
 
+    // 画像検査用の来院目的を取得
+    async function getImagingPurposeOfVisit(HenryCore, dateObj) {
+      const result = await HenryCore.query(QUERIES.ListPurposeOfVisits, {
+        input: { searchDate: dateObj }
+      });
+      const purposeOfVisits = result.data?.listPurposeOfVisits?.purposeOfVisits || [];
+
+      // 「画像検査」を探す
+      const imagingPov = purposeOfVisits.find(p => p.title === '画像検査');
+      if (imagingPov) {
+        log.info('来院目的「画像検査」を使用: ' + imagingPov.uuid);
+        return imagingPov;
+      }
+
+      // 見つからない場合はデフォルトを使用
+      log.warn('来院目的「画像検査」が見つからないため、デフォルトを使用');
+      const defaultPov = purposeOfVisits.find(p => p.order?.value === 1) || purposeOfVisits[0];
+      return defaultPov;
+    }
+
     // 外来予約を作成
     async function createOutpatientReservation(HenryCore, patientUuid, doctorUuid, purposeOfVisitUuid, dateObj, timeStr) {
       const scheduleTime = dateTimeToTimestamp(dateObj, timeStr);
@@ -1650,6 +1688,51 @@ html, body { margin: 0; padding: 0; }
       }
     }
 
+    // 既存の外来予約を検索（同じ患者・医師・日付）
+    async function findExistingSession(HenryCore, patientUuid, doctorUuid, dateObj) {
+      try {
+        const result = await HenryCore.query(QUERIES.ListSessions, {
+          input: {
+            date: { year: dateObj.year, month: dateObj.month, day: dateObj.day },
+            query: '',
+            filterStates: [],
+            filterDoctorUuids: doctorUuid ? [doctorUuid] : [],
+            filterPurposeOfVisitUuids: [],
+            pageSize: 1000,
+            pageToken: ''
+          }
+        });
+
+        const sessions = result.data?.listSessions?.sessions || [];
+
+        // 同じ患者のセッションを抽出
+        const matchingSessions = sessions.filter(s => s.patient?.uuid === patientUuid && s.encounterId?.value);
+
+        if (matchingSessions.length === 0) {
+          log.info('既存の外来予約なし');
+          return null;
+        }
+
+        // 複数ある場合は最も早い時間の予約を使用
+        matchingSessions.sort((a, b) => {
+          const timeA = a.scheduleTime?.seconds || 0;
+          const timeB = b.scheduleTime?.seconds || 0;
+          return timeA - timeB;
+        });
+
+        const session = matchingSessions[0];
+        log.info('既存の外来予約を発見: encounterId=' + session.encounterId.value);
+        return {
+          uuid: session.uuid,
+          encounterId: session.encounterId.value,
+          scheduleTime: session.scheduleTime?.seconds
+        };
+      } catch (e) {
+        log.error('外来予約検索エラー: ' + e.message);
+        return null;
+      }
+    }
+
     // レスポンスから照射オーダーデータを取得して印刷
     async function printOrderFromResponse(response, logMessage) {
       try {
@@ -1678,9 +1761,20 @@ html, body { margin: 0; padding: 0; }
       return { id: patient.serialNumber, name: patient.fullName };
     }
 
-    // 未来日付の照射オーダー処理（予約連携）
-    async function handleFutureDateOrder(HenryCore, body, options, url, dateObj, originalFetch, fetchContext) {
-      log.info('未来日付の照射オーダーを検出: ' + dateObj.year + '/' + dateObj.month + '/' + dateObj.day);
+    /**
+     * 未来日付の照射オーダー処理（予約連携）- 統合版
+     * CT/MRI/単純撮影デジタル等、全ての照射オーダーで共通の処理
+     *
+     * @param {Object} config - オーダー種別の設定
+     * @param {string} config.orderType - 確認ダイアログに表示するオーダー種別名（例: '照射オーダー', '単純撮影オーダー'）
+     * @param {string|null} config.defaultModality - モダリティ取得できない場合のデフォルト値
+     * @param {string} config.printLogMessage - 印刷時のログメッセージ
+     * @param {string} config.hospitalizedPrintLogMessage - 入院患者の印刷時のログメッセージ
+     */
+    async function handleFutureDateImagingOrder(HenryCore, body, options, url, dateObj, originalFetch, fetchContext, config) {
+      const { orderType, defaultModality, printLogMessage, hospitalizedPrintLogMessage } = config;
+
+      log.info(`未来日付の${orderType}を検出: ${dateObj.year}/${dateObj.month}/${dateObj.day}`);
 
       const patientUuid = HenryCore.getPatientUuid();
       const doctorUuid = await HenryCore.getMyUuid();
@@ -1693,7 +1787,7 @@ html, body { margin: 0; padding: 0; }
       const patientInfo = await getPatientInfo(HenryCore, patientUuid);
 
       // モダリティを取得
-      const modality = getModalityFromDialog();
+      const modality = getModalityFromDialog() || defaultModality;
       if (modality) {
         log.info('モダリティを取得: ' + modality);
       }
@@ -1706,9 +1800,9 @@ html, body { margin: 0; padding: 0; }
 
       const displayDate = `${dateObj.year}/${dateObj.month}/${dateObj.day}`;
 
-      // 入院患者の場合：従来通り予約システム連携のみ（選択肢なし）
+      // 入院患者の場合：予約システム連携のみ（外来予約は作成しない）
       if (isHospitalized) {
-        const confirmMessage = `未来日付（${displayDate}）の照射オーダーです。\n\n予約システムで予約を取りますか？\n（入院患者のため外来予約は作成されません）\n\n患者: ${patientInfo.id} ${patientInfo.name}`;
+        const confirmMessage = `未来日付（${displayDate}）の${orderType}です。\n\n予約システムで予約を取りますか？\n（入院患者のため外来予約は作成されません）\n\n患者: ${patientInfo.id} ${patientInfo.name}`;
         if (!confirm(confirmMessage)) {
           log.info('ユーザーが予約システム連携をキャンセル - オーダー保存せず終了');
           showImagingNotification('キャンセルしました', 'info');
@@ -1741,128 +1835,16 @@ html, body { margin: 0; padding: 0; }
           ? reservationResult.date.replace(/-/g, '/')
           : displayDate;
         showImagingNotification(`${resultDisplayDate} ${reservationResult.time} の予約を取りました（入院患者）`, 'success');
-        await printOrderFromResponse(response, '入院患者の照射オーダー印刷');
+        await printOrderFromResponse(response, hospitalizedPrintLogMessage);
 
         return response;
       }
 
-      // 外来患者の場合：2段階確認
-      const step1Message = `未来日付（${displayDate}）の照射オーダーです。\n\n予約システムで予約を取りますか？\n\n患者: ${patientInfo.id} ${patientInfo.name}`;
-
-      if (confirm(step1Message)) {
-        // OK → 予約システム連携（従来通り）
-        showImagingNotification('予約システムで予約を取ってください', 'info');
-        const reservationResult = await openReserveForImagingOrder(patientInfo, dateObj, modality);
-        log.info('予約日時: ' + JSON.stringify(reservationResult));
-
-        // 予約日付を使用
-        let actualDateObj = dateObj;
-        if (reservationResult.date) {
-          const [year, month, day] = reservationResult.date.split('-').map(Number);
-          actualDateObj = { year, month, day };
-        }
-
-        // 診療科を取得
-        const purposeOfVisit = await getDefaultPurposeOfVisit(HenryCore, actualDateObj);
-
-        // 外来予約を作成
-        const newEncounterId = await createOutpatientReservation(
-          HenryCore, patientUuid, doctorUuid, purposeOfVisit.uuid, actualDateObj, reservationResult.time
-        );
-
-        // リクエストボディのencounterIdを差し替え
-        body.variables.input.encounterId = { value: newEncounterId };
-
-        // 日付も更新
-        if (reservationResult.date) {
-          body.variables.input.date = actualDateObj;
-        }
-
-        const newOptions = { ...options, body: JSON.stringify(body) };
-        log.info('EncounterIDを差し替えてリクエスト送信: ' + newEncounterId);
-
-        // リクエストを送信
-        const response = await originalFetch.call(fetchContext, url, newOptions);
-
-        showImagingNotification(`${actualDateObj.year}/${actualDateObj.month}/${actualDateObj.day} ${reservationResult.time} の外来予約を作成しました`, 'success');
-
-        // 受付一覧を更新
-        refreshSessionList();
-
-        // 印刷実行
-        await printOrderFromResponse(response, '予約完了後の印刷を実行');
-
-        return response;
-      }
-
-      // キャンセル → 9:00で予約するか確認
-      const step2Message = `9:00に外来予約を作成しますか？\n\n患者: ${patientInfo.id} ${patientInfo.name}`;
-      if (!confirm(step2Message)) {
-        log.info('ユーザーが9:00予約もキャンセル - オーダー保存せず終了');
-        showImagingNotification('キャンセルしました', 'info');
-        return new Response(JSON.stringify({ data: null, errors: [{ message: 'キャンセルされました' }] }), {
-          status: 200,
-          headers: { 'Content-Type': 'application/json' }
-        });
-      }
-
-      // 9:00で外来予約を作成（handlePlainRadiographyOrderと同様の処理）
-      log.info('9:00で外来予約を作成します');
-      const timeStr = CONFIG.DEFAULT_TIME; // '09:00'
-
-      // 診療科を取得
-      const purposeOfVisit = await getDefaultPurposeOfVisit(HenryCore, dateObj);
-
-      // 外来予約を作成
-      const newEncounterId = await createOutpatientReservation(
-        HenryCore, patientUuid, doctorUuid, purposeOfVisit.uuid, dateObj, timeStr
-      );
-
-      // リクエストボディのencounterIdを差し替え
-      body.variables.input.encounterId = { value: newEncounterId };
-
-      const newOptions = { ...options, body: JSON.stringify(body) };
-      log.info('EncounterIDを差し替えてリクエスト送信: ' + newEncounterId);
-
-      // リクエストを送信
-      const response = await originalFetch.call(fetchContext, url, newOptions);
-
-      showImagingNotification(`${displayDate} ${timeStr} の外来予約を作成しました`, 'success');
-
-      // 受付一覧を更新
-      refreshSessionList();
-
-      // 印刷実行
-      await printOrderFromResponse(response, '9:00予約後の印刷を実行');
-
-      return response;
-    }
-
-    // 単純撮影デジタルの未来日付処理（予約システムを開かずに自動処理）
-    async function handlePlainRadiographyOrder(HenryCore, body, options, url, dateObj, originalFetch, fetchContext) {
-      log.info('単純撮影デジタルの未来日付オーダーを検出: ' + dateObj.year + '/' + dateObj.month + '/' + dateObj.day);
-
-      const patientUuid = HenryCore.getPatientUuid();
-      const doctorUuid = await HenryCore.getMyUuid();
-
-      if (!patientUuid || !doctorUuid) {
-        throw new Error('患者情報または医師情報を取得できません');
-      }
-
-      // 患者情報を取得
-      const patientInfo = await getPatientInfo(HenryCore, patientUuid);
-
-      // 入院状態をチェック
-      const isHospitalized = await isHospitalizedOnDate(HenryCore, patientUuid, dateObj);
-
-      // 確認ダイアログ（入院患者と外来患者でメッセージを変える）
-      const displayDate = `${dateObj.year}/${dateObj.month}/${dateObj.day}`;
-      const confirmMessage = isHospitalized
-        ? `未来日付（${displayDate}）の単純撮影オーダーです。\n\nオーダーを保存しますか？\n（入院患者のため外来予約は作成されません）\n\n患者: ${patientInfo.id} ${patientInfo.name}`
-        : `未来日付（${displayDate}）の単純撮影オーダーです。\n\n9:00に外来予約を作成しますか？\n\n患者: ${patientInfo.id} ${patientInfo.name}`;
+      // 外来患者の場合：予約システム必須
+      const confirmMessage = `未来日付（${displayDate}）の${orderType}です。\n\n予約システムで予約を取りますか？\n\n患者: ${patientInfo.id} ${patientInfo.name}`;
 
       if (!confirm(confirmMessage)) {
-        log.info('ユーザーが単純撮影オーダーをキャンセル');
+        log.info('ユーザーが予約システム連携をキャンセル - オーダー保存せず終了');
         showImagingNotification('キャンセルしました', 'info');
         return new Response(JSON.stringify({ data: null, errors: [{ message: 'キャンセルされました' }] }), {
           status: 200,
@@ -1870,44 +1852,60 @@ html, body { margin: 0; padding: 0; }
         });
       }
 
-      // 入院患者の場合：オーダーのみ保存
-      if (isHospitalized) {
-        log.info('入院患者のため外来予約をスキップ - オーダーのみ保存');
+      // 予約システムを開いて予約日時を取得
+      showImagingNotification('予約システムで予約を取ってください', 'info');
+      const reservationResult = await openReserveForImagingOrder(patientInfo, dateObj, modality);
+      log.info('予約日時: ' + JSON.stringify(reservationResult));
 
-        const response = await originalFetch.call(fetchContext, url, options);
-
-        showImagingNotification(`${displayDate} のオーダーを保存しました（入院患者）`, 'success');
-        await printOrderFromResponse(response, '入院患者の単純撮影オーダー印刷');
-
-        return response;
+      // 予約日付を使用
+      let actualDateObj = dateObj;
+      if (reservationResult.date) {
+        const [year, month, day] = reservationResult.date.split('-').map(Number);
+        actualDateObj = { year, month, day };
       }
 
-      // 外来患者の場合：9:00で外来予約を作成
-      const timeStr = CONFIG.DEFAULT_TIME; // '09:00'
+      // 既存の外来予約を検索（同じ患者・医師・日付）
+      const existingSession = await findExistingSession(HenryCore, patientUuid, doctorUuid, actualDateObj);
 
-      // 診療科を取得
-      const purposeOfVisit = await getDefaultPurposeOfVisit(HenryCore, dateObj);
+      let targetEncounterId;
+      let notificationMessage;
 
-      // 外来予約を作成
-      const newEncounterId = await createOutpatientReservation(
-        HenryCore, patientUuid, doctorUuid, purposeOfVisit.uuid, dateObj, timeStr
-      );
+      if (existingSession) {
+        // 既存予約を使用
+        targetEncounterId = existingSession.encounterId;
+        log.info('既存の外来予約を使用: ' + targetEncounterId);
+        showImagingNotification('同じ日に既存の外来予約があります。それを使用します。', 'info');
+        await new Promise(resolve => setTimeout(resolve, 1500)); // 通知を見せる時間
+        notificationMessage = `${actualDateObj.year}/${actualDateObj.month}/${actualDateObj.day} ${reservationResult.time} の予約を取りました（既存予約を使用）`;
+      } else {
+        // 新規作成（画像検査用の来院目的を使用）
+        const purposeOfVisit = await getImagingPurposeOfVisit(HenryCore, actualDateObj);
+        targetEncounterId = await createOutpatientReservation(
+          HenryCore, patientUuid, doctorUuid, purposeOfVisit.uuid, actualDateObj, reservationResult.time
+        );
+        log.info('新規外来予約を作成: ' + targetEncounterId);
+        notificationMessage = `${actualDateObj.year}/${actualDateObj.month}/${actualDateObj.day} ${reservationResult.time} の外来予約を作成しました`;
+        refreshSessionList();
+      }
 
       // リクエストボディのencounterIdを差し替え
-      body.variables.input.encounterId = { value: newEncounterId };
+      body.variables.input.encounterId = { value: targetEncounterId };
+
+      // 日付も更新
+      if (reservationResult.date) {
+        body.variables.input.date = actualDateObj;
+      }
+
       const newOptions = { ...options, body: JSON.stringify(body) };
-      log.info('EncounterIDを差し替えてリクエスト送信: ' + newEncounterId);
+      log.info('EncounterIDを差し替えてリクエスト送信: ' + targetEncounterId);
 
       // リクエストを送信
       const response = await originalFetch.call(fetchContext, url, newOptions);
 
-      showImagingNotification(`${displayDate} ${timeStr} の外来予約を作成しました`, 'success');
-
-      // 受付一覧を更新
-      refreshSessionList();
+      showImagingNotification(notificationMessage, 'success');
 
       // 印刷実行
-      await printOrderFromResponse(response, '単純撮影オーダー印刷');
+      await printOrderFromResponse(response, printLogMessage);
 
       return response;
     }
@@ -1982,22 +1980,38 @@ html, body { margin: 0; padding: 0; }
 
               // 未来日付の場合
               if (dateObj && isFutureDate(dateObj)) {
-                const modality = getModalityFromDialog();
-
-                // 単純撮影デジタルの場合は予約システムを開かずに処理
-                if (modality === '単純撮影デジタル') {
-                  try {
-                    return await handlePlainRadiographyOrder(HenryCore, body, options, url, dateObj, originalFetch, this);
-                  } catch (error) {
-                    return handleReservationError(error, args, originalFetch, this);
-                  }
+                // 処理中の場合はスキップ（二重インターセプト防止）
+                if (isProcessingImagingOrder) {
+                  log.info('照射オーダー処理中のため、このリクエストはスキップ');
+                  return originalFetch.apply(this, args);
                 }
 
-                // その他のモダリティは従来通り予約システム連携
+                const modality = getModalityFromDialog();
+
+                // 処理開始
+                isProcessingImagingOrder = true;
+
+                // オーダー種別に応じた設定
+                const config = modality === '単純撮影デジタル'
+                  ? {
+                      orderType: '単純撮影オーダー',
+                      defaultModality: '単純撮影',
+                      printLogMessage: '単純撮影オーダー印刷',
+                      hospitalizedPrintLogMessage: '入院患者の単純撮影オーダー印刷'
+                    }
+                  : {
+                      orderType: '照射オーダー',
+                      defaultModality: null,
+                      printLogMessage: '予約完了後の印刷を実行',
+                      hospitalizedPrintLogMessage: '入院患者の照射オーダー印刷'
+                    };
+
                 try {
-                  return await handleFutureDateOrder(HenryCore, body, options, url, dateObj, originalFetch, this);
+                  return await handleFutureDateImagingOrder(HenryCore, body, options, url, dateObj, originalFetch, this, config);
                 } catch (error) {
                   return handleReservationError(error, args, originalFetch, this);
+                } finally {
+                  isProcessingImagingOrder = false;
                 }
               }
 
@@ -2332,12 +2346,13 @@ html, body { margin: 0; padding: 0; }
         }
       }
 
-      // 「診療を選択」がCT/MRIでない場合は警告
-      if (!purposeValue.includes('CT') && !purposeValue.includes('MRI')) {
+      // 「診療を選択」がCT/MRIでない場合は警告（CT/MRIオーダーのときのみ）
+      const isCtMriOrder = context.modality?.includes('CT') || context.modality?.includes('MRI');
+      if (isCtMriOrder && !purposeValue.includes('CT') && !purposeValue.includes('MRI')) {
         event.preventDefault();
         event.stopImmediatePropagation();
-        alert(`照射オーダーの予約は「CT/MRI」で登録してください。\n\n現在の選択: ${purposeValue || '(未選択)'}\n\n「診療を選択」を「CT/MRI」に変更してから予約登録してください。`);
-        log.error('診療種別がCT/MRIではない - 予約を阻止:', { purposeValue });
+        alert(`CT/MRIの予約は「CT/MRI」枠で登録してください。\n\n現在の選択: ${purposeValue || '(未選択)'}\n\n「診療を選択」を「CT/MRI」に変更してから予約登録してください。`);
+        log.error('診療種別がCT/MRIではない - 予約を阻止:', { purposeValue, modality: context.modality });
         return { valid: false };
       }
 
