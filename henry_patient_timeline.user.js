@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry Patient Timeline
 // @namespace    https://github.com/shin-926/Henry
-// @version      2.44.4
+// @version      2.44.5
 // @description  入院患者の各種記録・オーダーをガントチャート風タイムラインで表示
 // @author       sk powered by Claude
 // @match        https://henry-app.jp/*
@@ -2528,7 +2528,7 @@
 
     // モーダルを閉じる（クリーンアップ付き）
     function closeModal() {
-      cleaner.cleanup();
+      cleaner.exec();
       modal.remove();
     }
 
