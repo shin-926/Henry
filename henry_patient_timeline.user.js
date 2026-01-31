@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry Patient Timeline
 // @namespace    https://github.com/shin-926/Henry
-// @version      2.44.3
+// @version      2.44.4
 // @description  入院患者の各種記録・オーダーをガントチャート風タイムラインで表示
 // @author       sk powered by Claude
 // @match        https://henry-app.jp/*
@@ -1987,6 +1987,7 @@
       border-radius: 6px;
       border-left: 4px solid;
       box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+      font-size: 13px;
     }
     #patient-timeline-modal .section-title {
       font-weight: 600;
