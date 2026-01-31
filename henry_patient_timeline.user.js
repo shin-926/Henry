@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry Patient Timeline
 // @namespace    https://github.com/shin-926/Henry
-// @version      2.36.1
+// @version      2.39.2
 // @description  入院患者の各種記録・オーダーをガントチャート風タイムラインで表示
 // @author       sk powered by Claude
 // @match        https://henry-app.jp/*
@@ -1147,6 +1147,7 @@
     let selectedCategories = new Set(Object.keys(CATEGORIES));
     let searchText = '';
     let selectedDateKey = null;
+    let vitalGraphState = null; // { close, overlayEl, dateKey, days } グラフモーダルの状態
     let isLoading = true;
     let doctorColorMap = new Map(); // 担当医→色のマッピング
     let selectedDoctors = new Set(); // 選択中の担当医（正規化名）。空=全員表示
@@ -1204,6 +1205,14 @@
           display: flex;
           align-items: center;
           gap: 16px;
+          flex: 1;
+        }
+        #patient-timeline-modal #header-search-container {
+          margin-left: auto;
+          margin-right: 24px;
+        }
+        #patient-timeline-modal #header-search-container .search-input {
+          width: 400px;
         }
         #patient-timeline-modal .header-left {
           display: flex;
@@ -1268,7 +1277,7 @@
         }
         #patient-timeline-modal .search-input {
           flex: 1;
-          min-width: 200px;
+          min-width: 400px;
           padding: 8px 12px;
           border: 1px solid #ccc;
           border-radius: 4px;
@@ -1359,13 +1368,26 @@
         #patient-timeline-modal .record-column,
         #patient-timeline-modal .vital-column,
         #patient-timeline-modal .prescription-order-column {
-          flex: 1;
+          flex: 3;
           display: flex;
           flex-direction: column;
           overflow: hidden;
         }
+        #patient-timeline-modal .fixed-info-column {
+          flex: 1;
+          display: flex;
+          flex-direction: column;
+          overflow: hidden;
+          background: #f5f5f5;
+          box-shadow: -2px 0 8px rgba(0,0,0,0.08);
+          border-radius: 8px 0 0 8px;
+        }
+        #patient-timeline-modal .fixed-info-column .column-content {
+          padding-top: 12px;
+        }
         #patient-timeline-modal .record-column,
-        #patient-timeline-modal .vital-column {
+        #patient-timeline-modal .vital-column,
+        #patient-timeline-modal .prescription-order-column {
           border-right: 1px solid #e0e0e0;
         }
         #patient-timeline-modal .column-header {
@@ -1538,37 +1560,7 @@
           flex-shrink: 0;
           border-bottom: 1px solid #e0e0e0;
         }
-        #patient-timeline-modal .fixed-info-header {
-          padding: 8px 16px;
-          background: #f5f5f5;
-          border-bottom: 1px solid #e0e0e0;
-          display: flex;
-          justify-content: space-between;
-          align-items: center;
-          cursor: pointer;
-          user-select: none;
-        }
-        #patient-timeline-modal .fixed-info-header:hover {
-          background: #eeeeee;
-        }
-        #patient-timeline-modal .fixed-info-header-title {
-          font-weight: 600;
-          font-size: 13px;
-          color: #333;
-        }
-        #patient-timeline-modal .fixed-info-header .toggle-icon {
-          font-size: 10px;
-          color: #666;
-          transition: transform 0.2s;
-        }
-        #patient-timeline-modal .fixed-info-wrapper.collapsed .toggle-icon {
-          transform: rotate(-90deg);
-        }
-        #patient-timeline-modal .fixed-info-wrapper.collapsed .fixed-info-header {
-          border-bottom: none;
-        }
-        #patient-timeline-modal .fixed-info-wrapper.collapsed .fixed-info-area,
-        #patient-timeline-modal .fixed-info-wrapper.collapsed .fixed-info-resizer {
+        #patient-timeline-modal .fixed-info-wrapper.collapsed .fixed-info-area {
           display: none;
         }
         #patient-timeline-modal .fixed-info-area {
@@ -1598,7 +1590,6 @@
           border-radius: 2px;
         }
         #patient-timeline-modal .info-card {
-          flex: 1;
           background: white;
           border-radius: 6px;
           border: 1px solid #e0e0e0;
@@ -1678,13 +1669,14 @@
           text-decoration: underline;
           color: #1976D2;
         }
-        /* 処方・注射カラム */
+        /* 処方・注射カラム（カード形式） */
         #patient-timeline-modal .prescription-section,
         #patient-timeline-modal .injection-section {
-          padding: 12px 16px;
-        }
-        #patient-timeline-modal .prescription-section {
-          border-bottom: 1px solid #e0e0e0;
+          padding: 12px;
+          margin: 12px;
+          border-radius: 6px;
+          border-left: 4px solid;
+          box-shadow: 0 1px 3px rgba(0,0,0,0.08);
         }
         #patient-timeline-modal .section-title {
           font-weight: 600;
@@ -1830,6 +1822,7 @@
             </div>
             <h2 id="modal-title">入院タイムライン</h2>
             <span class="hosp-info" id="hosp-info"></span>
+            <div id="header-search-container" style="display: none;"></div>
           </div>
           <button class="close-btn" title="閉じる">&times;</button>
         </div>
@@ -1845,14 +1838,14 @@
           </div>
           <div id="timeline-container" style="display: none; flex-direction: column; flex: 1; overflow: hidden;">
             <div class="fixed-info-wrapper" id="fixed-info-wrapper">
-              <div class="fixed-info-header" id="fixed-info-header">
-                <span class="fixed-info-header-title">固定情報</span>
-                <span class="toggle-icon">▼</span>
-              </div>
               <div class="fixed-info-area" id="fixed-info-area">
-                <div class="info-card" style="flex: 1;">
+                <div class="info-card" style="width: 50%;">
                   <div class="info-card-header">プロフィール</div>
                   <div class="info-card-content" id="profile-content"><span class="empty">-</span></div>
+                </div>
+                <div class="info-card" style="width: 50%;">
+                  <div class="info-card-header">サマリー</div>
+                  <div class="info-card-content" id="summary-content"><span class="empty">-</span></div>
                 </div>
               </div>
               <div class="fixed-info-resizer" id="fixed-info-resizer"></div>
@@ -1882,6 +1875,11 @@
                   </div>
                   <div class="column-content" id="prescription-order-content"></div>
                 </div>
+                <div class="fixed-info-column">
+                  <div class="column-content" id="fixed-info-content">
+                    <!-- 内容は未定のため空 -->
+                  </div>
+                </div>
               </div>
             </div>
           </div>
@@ -1904,11 +1902,11 @@
     const recordContent = modal.querySelector('#record-content');
     const vitalContent = modal.querySelector('#vital-content');
     const prescriptionOrderContent = modal.querySelector('#prescription-order-content');
+    const fixedInfoContent = modal.querySelector('#fixed-info-content');
     const hospInfo = modal.querySelector('#hosp-info');
     const doctorLegend = modal.querySelector('#doctor-legend');
     const profileContent = modal.querySelector('#profile-content');
     const fixedInfoWrapper = modal.querySelector('#fixed-info-wrapper');
-    const fixedInfoHeader = modal.querySelector('#fixed-info-header');
     const fixedInfoArea = modal.querySelector('#fixed-info-area');
     const fixedInfoResizer = modal.querySelector('#fixed-info-resizer');
     const addRecordBtn = modal.querySelector('#add-record-btn');
@@ -2130,15 +2128,7 @@
       });
     });
 
-    // 折りたたみ機能のセットアップ
-    function setupToggle() {
-      fixedInfoHeader.onclick = () => {
-        fixedInfoWrapper.classList.toggle('collapsed');
-        fixedInfoCollapsed = fixedInfoWrapper.classList.contains('collapsed');
-      };
-    }
-
-    // リサイズ機能のセットアップ
+    // リサイズ機能のセットアップ（ダブルクリックで折りたたみ）
     function setupResizer() {
       let isResizing = false;
       let startY = 0;
@@ -2152,6 +2142,14 @@
         document.body.style.userSelect = 'none';
         e.preventDefault();
       });
+
+      // ダブルクリックで折りたたみトグル
+      const toggleCollapse = () => {
+        fixedInfoWrapper.classList.toggle('collapsed');
+        fixedInfoCollapsed = fixedInfoWrapper.classList.contains('collapsed');
+      };
+      fixedInfoResizer.addEventListener('dblclick', toggleCollapse);
+      fixedInfoArea.addEventListener('dblclick', toggleCollapse);
 
       document.addEventListener('mousemove', (e) => {
         if (!isResizing) return;
@@ -2223,6 +2221,11 @@
       if (newIndex >= 0 && newIndex < dateKeys.length) {
         selectedDateKey = dateKeys[newIndex];
         renderTimeline();
+
+        // グラフモーダルが開いていれば更新（選択中の日数を維持）
+        if (vitalGraphState) {
+          showVitalGraph(selectedDateKey, vitalGraphState.days);
+        }
       }
     }
 
@@ -2333,7 +2336,10 @@
       modalTitle.textContent = '入院タイムライン';
       hospInfo.textContent = '';
 
-      // 検索コントロールを患者検索に切り替え
+      // ヘッダーの検索ボックスを非表示にし、controls-areaに患者検索ボックスを復元
+      const headerSearchContainer = modal.querySelector('#header-search-container');
+      headerSearchContainer.style.display = 'none';
+      headerSearchContainer.innerHTML = '';
       controlsArea.innerHTML = `
         <input type="text" class="search-input" placeholder="患者検索（名前・患者番号）..." id="patient-search-input" value="${escapeHtml(patientSearchText)}">
       `;
@@ -2360,8 +2366,11 @@
       modalTitle.textContent = info ? `${patient.fullName}（${info}）` : patient.fullName;
       hospInfo.textContent = '読み込み中...';
 
-      // 検索コントロールをタイムライン用に切り替え
-      controlsArea.innerHTML = `
+      // 患者選択画面の検索ボックスをクリアし、ヘッダーに検索ボックスを表示
+      controlsArea.innerHTML = '';
+      const headerSearchContainer = modal.querySelector('#header-search-container');
+      headerSearchContainer.style.display = 'block';
+      headerSearchContainer.innerHTML = `
         <input type="text" class="search-input" placeholder="キーワード検索..." id="timeline-search-input">
       `;
       setupTimelineSearchEvent();
@@ -2378,8 +2387,7 @@
         fixedInfoWrapper.classList.remove('collapsed');
       }
 
-      // 折りたたみ・リサイズ機能をセットアップ
-      setupToggle();
+      // リサイズ機能をセットアップ（ダブルクリックで折りたたみ）
       setupResizer();
 
       // ローディング表示
@@ -2387,6 +2395,36 @@
       recordContent.innerHTML = '<div class="no-records">読み込み中...</div>';
       vitalContent.innerHTML = '<div class="no-records">読み込み中...</div>';
       prescriptionOrderContent.innerHTML = '<div class="no-records">読み込み中...</div>';
+
+      // バイタルグラフモーダルが開いていればローディング表示に切り替え
+      if (vitalGraphState && vitalGraphState.overlayEl && vitalGraphState.overlayEl.parentNode) {
+        const titleEl = vitalGraphState.overlayEl.querySelector('.henry-modal-title');
+        if (titleEl) {
+          titleEl.style.display = 'flex';
+          titleEl.style.justifyContent = 'space-between';
+          titleEl.style.alignItems = 'center';
+          titleEl.style.width = '100%';
+          titleEl.innerHTML = `
+            <span>バイタル推移</span>
+            <span style="font-size: 14px; color: #666;">${patient.fullName}</span>
+          `;
+          // bodyElはtitleElの次の兄弟要素（showVitalGraphと同じ取得方法）
+          const bodyEl = titleEl.nextElementSibling;
+          if (bodyEl) {
+            bodyEl.innerHTML = `
+              <div style="display: flex; justify-content: center; gap: 8px; margin-bottom: 16px;">
+                ${[7, 14, 30].map(d => `
+                  <button disabled style="padding: 6px 16px; border: none; border-radius: 4px;
+                    background: #e0e0e0; color: #999; font-size: 13px;">${d}日</button>
+                `).join('')}
+              </div>
+              <div style="display: flex; justify-content: center; align-items: center; min-height: 580px; color: #666;">
+                グラフを生成中...
+              </div>
+            `;
+          }
+        }
+      }
 
       loadTimelineData(patient.uuid);
     }
@@ -2828,17 +2866,17 @@
     }
 
     // バイタル経時変化グラフを表示
-    function showVitalGraph(endDateStr) {
+    function showVitalGraph(endDateStr, days = 7) {
       // endDateStrは YYYY-MM-DD 形式
       const endDate = new Date(endDateStr + 'T23:59:59');
       const startDate = new Date(endDate);
-      startDate.setDate(startDate.getDate() - 6);
+      startDate.setDate(startDate.getDate() - (days - 1));
       startDate.setHours(0, 0, 0, 0);
 
-      // 過去7日分の日付キーを生成
+      // 過去N日分の日付キーを生成
       const dateKeys = [];
       const dateKeySet = new Set();
-      for (let i = 6; i >= 0; i--) {
+      for (let i = days - 1; i >= 0; i--) {
         const d = new Date(endDate);
         d.setDate(d.getDate() - i);
         const key = dateKey(d);
@@ -2873,27 +2911,137 @@
       // データがあるか確認
       const hasData = allVitals.some(d => d.T !== null || d.BPupper !== null || d.P !== null);
       if (!hasData) {
+        // モーダルが既に開いている場合はデータなしでも閉じない（トーストのみ）
+        if (vitalGraphState) {
+          window.HenryCore.ui.showToast('この期間のバイタルデータがありません', 'info');
+          return;
+        }
         window.HenryCore.ui.showToast('この期間のバイタルデータがありません', 'info');
         return;
       }
 
       // 期間表示用の日付フォーマット
       const startLabel = `${parseInt(dateKeys[0].split('-')[1])}/${parseInt(dateKeys[0].split('-')[2])}`;
-      const endLabel = `${parseInt(dateKeys[6].split('-')[1])}/${parseInt(dateKeys[6].split('-')[2])}`;
+      const endLabel = `${parseInt(dateKeys[dateKeys.length - 1].split('-')[1])}/${parseInt(dateKeys[dateKeys.length - 1].split('-')[2])}`;
 
-      // グラフを描画
+      // SVG生成
+      const svgHtml = renderVitalSVG(allVitals, startDate.getTime(), endDate.getTime(), dateKeys, days);
+
+      // ボタングループHTML
+      const buttonGroupHtml = `
+        <div style="display: flex; justify-content: center; gap: 8px; margin-bottom: 16px;">
+          ${[7, 14, 30].map(d => `
+            <button
+              class="vital-days-btn"
+              data-days="${d}"
+              style="
+                padding: 6px 16px;
+                border: none;
+                border-radius: 4px;
+                cursor: pointer;
+                font-size: 13px;
+                ${d === days
+                  ? 'background: #1976d2; color: white;'
+                  : 'background: #e0e0e0; color: #333;'}
+              "
+            >${d}日</button>
+          `).join('')}
+        </div>
+      `;
+
+      // モーダルが既に開いている場合はコンテンツのみ更新
+      if (vitalGraphState && vitalGraphState.overlayEl && vitalGraphState.overlayEl.parentNode) {
+        vitalGraphState.dateKey = endDateStr;
+        vitalGraphState.days = days;
+        // タイトル更新（患者名を右寄せで表示）
+        const titleEl = vitalGraphState.overlayEl.querySelector('.henry-modal-title');
+        if (titleEl) {
+          titleEl.style.display = 'flex';
+          titleEl.style.justifyContent = 'space-between';
+          titleEl.style.alignItems = 'center';
+          titleEl.style.width = '100%';
+          titleEl.innerHTML = `
+            <span>バイタル推移（${startLabel} - ${endLabel}）</span>
+            <span style="font-size: 14px; color: #666;">${selectedPatient?.fullName || ''}</span>
+          `;
+        }
+        // コンテンツ更新（ボタングループ + SVG）
+        const bodyEl = titleEl?.nextElementSibling;
+        if (bodyEl) {
+          bodyEl.innerHTML = buttonGroupHtml + svgHtml;
+          // ボタンにイベントを再設定
+          bodyEl.querySelectorAll('.vital-days-btn').forEach(btn => {
+            btn.onclick = () => {
+              const newDays = parseInt(btn.dataset.days, 10);
+              showVitalGraph(endDateStr, newDays);
+            };
+          });
+        }
+        return;
+      }
+
+      // 新規モーダル作成
       const svgContainer = document.createElement('div');
-      svgContainer.innerHTML = renderVitalSVG(allVitals, startDate.getTime(), endDate.getTime(), dateKeys);
+      svgContainer.innerHTML = buttonGroupHtml + svgHtml;
 
-      window.HenryCore.ui.showModal({
+      // ボタンにクリックイベントを設定
+      svgContainer.querySelectorAll('.vital-days-btn').forEach(btn => {
+        btn.onclick = () => {
+          const newDays = parseInt(btn.dataset.days, 10);
+          showVitalGraph(endDateStr, newDays);
+        };
+      });
+
+      const { close } = window.HenryCore.ui.showModal({
         title: `バイタル推移（${startLabel} - ${endLabel}）`,
         content: svgContainer,
         width: '750px'
       });
+
+      // モーダルのoverlay要素を取得（最後に追加されたhenry-modal-overlay）
+      const overlayEl = document.querySelector('.henry-modal-overlay:last-of-type');
+
+      // タイトルに患者名を追加（右寄せ）
+      if (overlayEl && selectedPatient) {
+        const titleEl = overlayEl.querySelector('.henry-modal-title');
+        if (titleEl) {
+          titleEl.style.display = 'flex';
+          titleEl.style.justifyContent = 'space-between';
+          titleEl.style.alignItems = 'center';
+          titleEl.style.width = '100%';
+          titleEl.innerHTML = `
+            <span>バイタル推移（${startLabel} - ${endLabel}）</span>
+            <span style="font-size: 14px; color: #666;">${selectedPatient.fullName}</span>
+          `;
+        }
+      }
+
+      vitalGraphState = {
+        close,
+        overlayEl,
+        dateKey: endDateStr,
+        days
+      };
+
+      // モーダルが閉じられたら状態をリセット（MutationObserverで監視）
+      if (overlayEl) {
+        const observer = new MutationObserver((mutations) => {
+          for (const mutation of mutations) {
+            for (const removed of mutation.removedNodes) {
+              if (removed === overlayEl) {
+                vitalGraphState = null;
+                observer.disconnect();
+                return;
+              }
+            }
+          }
+        });
+        observer.observe(document.body, { childList: true });
+      }
     }
 
     // SVGでバイタル折れ線グラフを描画（3つの独立したグラフ）
-    function renderVitalSVG(data, minTime, maxTime, dateKeys) {
+    function renderVitalSVG(data, minTime, maxTime, dateKeys, days = 7) {
       const width = 700;
       const chartHeight = 140; // 各グラフの高さ
       const gap = 50; // グラフ間の余白（日付ラベル用）
@@ -3036,10 +3184,12 @@
       const bpLowerPath = generatePath(data, d => d.BPlower, yScaleBP);
       const pulsePath = generatePath(data, d => d.P, yScalePulse);
 
-      const tempDots = generateDots(data, d => d.T, yScaleTemp, '#FF5722');
-      const bpUpperDots = generateDots(data, d => d.BPupper, yScaleBP, '#4CAF50');
-      const bpLowerDots = generateDots(data, d => d.BPlower, yScaleBP, '#9C27B0');
-      const pulseDots = generateDots(data, d => d.P, yScalePulse, '#2196F3');
+      // 30日表示の場合はドットを非表示（データが多いため見づらくなる）
+      const showDots = days !== 30;
+      const tempDots = showDots ? generateDots(data, d => d.T, yScaleTemp, '#FF5722') : '';
+      const bpUpperDots = showDots ? generateDots(data, d => d.BPupper, yScaleBP, '#4CAF50') : '';
+      const bpLowerDots = showDots ? generateDots(data, d => d.BPlower, yScaleBP, '#9C27B0') : '';
+      const pulseDots = showDots ? generateDots(data, d => d.P, yScalePulse, '#2196F3') : '';
 
       // 正常範囲帯
       const tempNormalBand = generateNormalBand(normalRanges.temp.min, normalRanges.temp.max, tempMin, tempMax, tempTop, 'rgba(255, 87, 34, 0.15)');
@@ -3133,7 +3283,8 @@
           return targetDate >= startDate && targetDate <= endDate;
         });
 
-        html += `<div class="prescription-section"><div class="section-title">◆ ${dateLabel} の処方</div>`;
+        const prescriptionCat = CATEGORIES.prescription;
+        html += `<div class="prescription-section" style="background: ${prescriptionCat.bgColor}; border-left-color: ${prescriptionCat.color};"><div class="section-title">◆ ${dateLabel} の処方</div>`;
 
         if (targetPrescriptions.length > 0) {
         // 固定カテゴリの定義
@@ -3221,7 +3372,8 @@
           return targetDate >= startDate && targetDate <= endDate;
         });
 
-        html += `<div class="injection-section"><div class="section-title">◆ ${dateLabel} の注射</div>`;
+        const injectionCat = CATEGORIES.injection;
+        html += `<div class="injection-section" style="background: ${injectionCat.bgColor}; border-left-color: ${injectionCat.color};"><div class="section-title">◆ ${dateLabel} の注射</div>`;
 
         if (targetInjections.length > 0) {
         html += targetInjections.flatMap(inj => {
@@ -3402,6 +3554,11 @@
 
         applyFilters();
         renderTimeline();
+
+        // バイタルグラフモーダルが開いていれば更新（患者切り替え時の連動）
+        if (vitalGraphState) {
+          showVitalGraph(selectedDateKey, vitalGraphState.days);
+        }
 
         // 前後の患者をプリフェッチ（非同期・待たない）
         prefetchAdjacentPatients();
