@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry Patient Timeline
 // @namespace    https://github.com/shin-926/Henry
-// @version      2.39.2
+// @version      2.43.2
 // @description  入院患者の各種記録・オーダーをガントチャート風タイムラインで表示
 // @author       sk powered by Claude
 // @match        https://henry-app.jp/*
@@ -56,11 +56,16 @@
   const ORDER_CATEGORIES = ['vital', 'injection', 'prescription']; // 固定順序で表示
 
   // CUSTOMタイプのUUID
+  // ※マオカ病院専用スクリプトのためハードコード（他病院展開予定なし）
   const NURSING_RECORD_CUSTOM_TYPE_UUID = 'e4ac1e1c-40e2-4c19-9df4-aa57adae7d4f';
   const PATIENT_PROFILE_CUSTOM_TYPE_UUID = 'f639619a-6fdb-452a-a803-8d42cd50830d';
 
-  // 組織UUID（マオカ病院）
+  // 組織UUID
+  // ※マオカ病院専用スクリプトのためハードコード（他病院展開予定なし）
   const ORG_UUID = 'ce6b556b-2a8d-4fce-b8dd-89ba638fc825';
+
+  // 入院病名キャッシュ（patientUuid → 主病名文字列）
+  const diseaseCache = new Map();
 
   // 担当医ごとの色パレット
   const DOCTOR_COLORS = [
@@ -384,6 +389,44 @@
       console.error(`[${SCRIPT_NAME}] 入院情報取得エラー:`, e);
       return [];
     }
+  }
+
+  // 入院病名を一括取得してキャッシュに格納
+  async function prefetchHospitalizationDiseases(patientUuids) {
+    if (!patientUuids || patientUuids.length === 0) return;
+
+    const QUERY = `query ListPatientReceiptDiseases($input: ListPatientReceiptDiseasesRequestInput!) {
+      listPatientReceiptDiseases(input: $input) {
+        patientReceiptDiseases { patientUuid isMain masterDisease { name } masterModifiers { name position } }
+      }
+    }`;
+    try {
+      const result = await window.HenryCore.query(QUERY, {
+        input: { patientUuids, patientCareType: 'PATIENT_CARE_TYPE_INPATIENT' }
+      });
+      const diseases = result?.data?.listPatientReceiptDiseases?.patientReceiptDiseases || [];
+
+      // 患者ごとに主病名をキャッシュ
+      for (const disease of diseases) {
+        if (disease.isMain && disease.patientUuid) {
+          const baseName = disease.masterDisease?.name || '';
+          const modifiers = disease.masterModifiers || [];
+          const prefixes = modifiers.filter(m => m.position === 'PREFIX').map(m => m.name).join('');
+          const suffixes = modifiers.filter(m => m.position === 'SUFFIX').map(m => m.name).join('');
+          const fullName = prefixes + baseName + suffixes;
+          if (fullName) {
+            diseaseCache.set(disease.patientUuid, fullName);
+          }
+        }
+      }
+    } catch (e) {
+      console.error(`[${SCRIPT_NAME}] 入院病名プリフェッチエラー:`, e);
+    }
+  }
+
+  // キャッシュから入院病名を取得
+  function getCachedDisease(patientUuid) {
+    return diseaseCache.get(patientUuid) || null;
   }
 
   // 医師記録取得
@@ -765,15 +808,20 @@
       const nutritionOrdersRaw = data?.nutritionOrders || [];
 
       // 食事摂取量データ（カスタム定量データモジュール）+ 食種情報
+      // 入院開始日から今日までの範囲で栄養オーダーを表示（経管食など摂取量がない場合も対応）
       const mealIntakeItems = extractMealIntakeData(
         data?.clinicalQuantitativeDataModuleCollections || [],
-        nutritionOrdersRaw
+        nutritionOrdersRaw,
+        startDate,
+        today
       );
 
       return {
         timelineItems: [...vitalSigns, ...prescriptionItems, ...injectionItems, ...mealIntakeItems],
         activePrescriptions: prescriptionOrdersRaw.filter(rx => rx.orderStatus === 'ORDER_STATUS_ACTIVE'),
-        activeInjections: injectionOrdersRaw.filter(inj => inj.orderStatus === 'ORDER_STATUS_ACTIVE')
+        activeInjections: injectionOrdersRaw.filter(inj =>
+          !['ORDER_STATUS_COMPLETED', 'ORDER_STATUS_CANCELLED'].includes(inj.orderStatus)
+        )
       };
 
     } catch (e) {
@@ -820,13 +868,15 @@
   // clinicalQuantitativeDataModuleCollections から食事データを抽出
   // nutritionOrders から食種情報を取得
   // 日付ごとにグループ化し、タイムラインアイテムに変換
-  function extractMealIntakeData(moduleCollections, nutritionOrders = []) {
+  // hospStartDate, hospEndDate: 入院期間（栄養オーダーのみの日付を追加するため）
+  function extractMealIntakeData(moduleCollections, nutritionOrders = [], hospStartDate = null, hospEndDate = null) {
     // 食事関連の項目名パターン（APIレスポンスでは「朝食(主)」形式）
     const mealPatterns = ['朝食(主)', '朝食(副)', '昼食(主)', '昼食(副)', '夕食(主)', '夕食(副)'];
 
     // 日付ごとにグループ化
     const byDate = new Map();
 
+    // 1. 食事摂取量データから日付を抽出（現状通り）
     for (const collection of moduleCollections) {
       const modules = collection?.clinicalQuantitativeDataModules || [];
       for (const mod of modules) {
@@ -859,18 +909,75 @@
       }
     }
 
+    // 2. 入院期間内で栄養オーダーが有効な日付をbyDateに追加（食種のみ表示対応）
+    if (hospStartDate && hospEndDate && nutritionOrders.length > 0) {
+      for (const order of nutritionOrders) {
+        if (order.isDraft === true) continue;
+
+        const orderStart = order.startDate;
+        const orderEnd = order.endDate;
+        if (!orderStart) continue;
+
+        // 栄養オーダーの開始日・終了日をDateに変換
+        const orderStartDate = new Date(orderStart.year, orderStart.month - 1, orderStart.day);
+        const orderEndDate = orderEnd
+          ? new Date(orderEnd.year, orderEnd.month - 1, orderEnd.day)
+          : new Date(9999, 11, 31); // 終了日未設定は無期限
+
+        // 入院期間と栄養オーダー期間の重複部分を計算
+        const rangeStart = orderStartDate > hospStartDate ? orderStartDate : hospStartDate;
+        const rangeEnd = orderEndDate < hospEndDate ? orderEndDate : hospEndDate;
+
+        // 重複部分の各日をbyDateに追加
+        const current = new Date(rangeStart);
+        while (current <= rangeEnd) {
+          const year = current.getFullYear();
+          const month = current.getMonth() + 1;
+          const day = current.getDate();
+          const key = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+
+          if (!byDate.has(key)) {
+            byDate.set(key, {
+              date: new Date(current),
+              entries: []
+            });
+          }
+          current.setDate(current.getDate() + 1);
+        }
+      }
+    }
+
     // 各日付のデータをタイムラインアイテムに変換
     const result = [];
     for (const [key, dayData] of byDate) {
-      if (dayData.entries.length === 0) continue;
+      // その日の栄養オーダー情報を取得
+      const nutritionInfo = getNutritionInfoForDate(dayData.date, nutritionOrders);
+      const dietType = nutritionInfo?.name;
+      const supplies = nutritionInfo?.supplies || [];
 
-      // その日の食種を取得
-      const dietType = getDietTypeForDate(dayData.date, nutritionOrders);
+      // 食事摂取量がなく、食種もない場合はスキップ
+      if (dayData.entries.length === 0 && !dietType) continue;
+
       const mealText = formatMealIntake(dayData.entries);
-      // 食種を【】で囲んで表示
-      const text = dietType
-        ? `【${dietType}】 ${mealText}`
-        : mealText;
+      const suppliesText = formatNutritionSupplies(supplies, dietType);
+
+      // テキスト生成
+      // - 食事摂取量がある場合: 【食種】 朝10/10 昼8/8 夕10/10
+      // - 経管食等で摂取量がない場合: 【経管食】毎食: YH Fast 1個, 白湯 200ml
+      let text;
+      if (dietType && mealText) {
+        // 通常食で摂取量がある場合
+        text = `【${dietType}】 ${mealText}`;
+      } else if (dietType && suppliesText) {
+        // 経管食等で摂取量がない場合、suppliesを表示
+        text = `【${dietType}】${suppliesText}`;
+      } else if (dietType) {
+        // 食種のみ
+        text = `【${dietType}】`;
+      } else {
+        // 摂取量のみ
+        text = mealText;
+      }
 
       if (text) {
         result.push({
@@ -887,8 +994,9 @@
     return result;
   }
 
-  // 指定日に有効な食種を取得
-  function getDietTypeForDate(date, nutritionOrders) {
+  // 指定日に有効な栄養オーダー情報を取得
+  // 戻り値: { name: 食種名, supplies: 経管食等の詳細配列 } or null
+  function getNutritionInfoForDate(date, nutritionOrders) {
     for (const order of nutritionOrders) {
       // 下書きはスキップ（isDraftフィールドを優先）
       if (order.isDraft === true) continue;
@@ -902,7 +1010,10 @@
 
       // 日付が範囲内かチェック
       if (date >= startDate && date <= endDate) {
-        return order.detail?.dietaryRegimen?.name || null;
+        return {
+          name: order.detail?.dietaryRegimen?.name || null,
+          supplies: order.detail?.supplies || []
+        };
       }
     }
     return null;
@@ -948,6 +1059,68 @@
     }
 
     return parts.join(' ');
+  }
+
+  // 経管食などのsuppliesを整形
+  // 例: 「毎食: YH Fast（S)（300kcal） 1個, 白湯 200ml」
+  // dietType: 食種名（インデント計算用）
+  function formatNutritionSupplies(supplies, dietType = '') {
+    if (!supplies || supplies.length === 0) return '';
+
+    // タイミングごとにグループ化
+    const byTiming = new Map();
+    const timingOrder = ['MEAL_TIMING_EVERY', 'MEAL_TIMING_BREAKFAST', 'MEAL_TIMING_LUNCH', 'MEAL_TIMING_DINNER'];
+    const timingLabels = {
+      'MEAL_TIMING_EVERY': '毎食',
+      'MEAL_TIMING_BREAKFAST': '　朝',  // 全角スペース追加で2文字幅に
+      'MEAL_TIMING_LUNCH': '　昼',
+      'MEAL_TIMING_DINNER': '　夕'
+    };
+    const unitLabels = {
+      'FOOD_QUANTITY_UNIT_NUMBER_OF_ITEM': '個',
+      'FOOD_QUANTITY_UNIT_MILLILITER': 'ml',
+      'FOOD_QUANTITY_UNIT_GRAM': 'g',
+      'FOOD_QUANTITY_UNIT_KILOCALORIE': 'kcal'
+    };
+
+    for (const supply of supplies) {
+      const timing = supply.timing || 'MEAL_TIMING_EVERY';
+      if (!byTiming.has(timing)) {
+        byTiming.set(timing, []);
+      }
+      const foodName = supply.food?.name || '不明';
+      const quantity = supply.quantity?.value ?? '';
+      const unit = unitLabels[supply.food?.quantityUnit] || '';
+      byTiming.get(timing).push(`${foodName} ${quantity}${unit}`);
+    }
+
+    // タイミング順に結合
+    const parts = [];
+    for (const timing of timingOrder) {
+      if (byTiming.has(timing)) {
+        const label = timingLabels[timing] || '';
+        const items = byTiming.get(timing).join(', ');
+        parts.push(`${label}: ${items}`);
+      }
+    }
+
+    // 2行目以降は【食種名】の幅に合わせてインデント
+    // ※表示側でmonospaceフォントを使用、全角・半角を区別して計算
+    if (!dietType) {
+      return parts.join('\n');
+    }
+    // 【】は全角2文字分
+    let fullWidthCount = 2;
+    let halfWidthCount = 0;
+    for (const char of dietType) {
+      if (char.charCodeAt(0) <= 0x7F) {
+        halfWidthCount++;  // ASCII（半角）
+      } else {
+        fullWidthCount++;  // 全角
+      }
+    }
+    const indent = '　'.repeat(fullWidthCount) + ' '.repeat(halfWidthCount);
+    return parts.map((part, i) => i === 0 ? part : indent + part).join('\n');
   }
 
   // バイタルサインをテキストに整形（単体用 - 後方互換性のため残す）
@@ -1468,6 +1641,10 @@
           white-space: pre-wrap;
           color: #333;
         }
+        /* 食事摂取カードは等幅フォントで揃える（経管食の複数行表示用） */
+        #patient-timeline-modal .record-card[data-record-id^="meal-"] .record-card-text {
+          font-family: monospace;
+        }
         #patient-timeline-modal .temp-high {
           background: #ffebee;
           color: #c62828;
@@ -1929,11 +2106,13 @@
       now.setMinutes(minutes);
       const currentTimeStr = `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`;
 
-      // 編集モードの場合は元の時刻を使用、新規作成は現在時刻
+      // 編集モードの場合は元の時刻と日付を使用、新規作成は現在日時
       let timeStr = currentTimeStr;
+      let dateStr = new Date().toISOString().split('T')[0];  // デフォルトは常に本日
       if (isEdit && existingRecord.performTime) {
         const originalDate = new Date(existingRecord.performTime);
         timeStr = `${originalDate.getHours().toString().padStart(2, '0')}:${originalDate.getMinutes().toString().padStart(2, '0')}`;
+        dateStr = originalDate.toISOString().split('T')[0];  // 元の記録日付
       }
 
       // DOM要素を作成（HenryCore.ui.showModalはcontentが文字列だとtextContentとして設定するため）
@@ -1952,6 +2131,15 @@
       const timeInputWrapper = document.createElement('div');
       timeInputWrapper.style.cssText = 'display: flex; align-items: center; gap: 12px;';
 
+      // 日付入力
+      const dateInput = document.createElement('input');
+      dateInput.type = 'date';
+      dateInput.id = 'record-date-input';
+      dateInput.value = dateStr;
+      dateInput.style.cssText = 'padding: 8px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px;';
+      timeInputWrapper.appendChild(dateInput);
+
+      // 時刻入力
       const timeInput = document.createElement('input');
       timeInput.type = 'time';
       timeInput.id = 'record-time-input';
@@ -2025,6 +2213,7 @@
     async function saveRecord(recordModal, existingRecord = null) {
       const contentInput = document.getElementById('record-content-input');
       const timeInput = document.getElementById('record-time-input');
+      const dateInput = document.getElementById('record-date-input');
       const content = contentInput?.value?.trim();
 
       if (!content) {
@@ -2032,10 +2221,11 @@
         return;
       }
 
-      // 実施日時を計算（選択中の日付 + 入力時刻）
+      // 実施日時を計算（入力された日付 + 入力時刻）
       const [hours, minutes] = (timeInput?.value || '12:00').split(':').map(Number);
-      // selectedDateKeyはYYYY-MM-DD形式
-      const [year, month, day] = selectedDateKey.split('-').map(Number);
+      // dateInputはYYYY-MM-DD形式
+      const dateValue = dateInput?.value || selectedDateKey || new Date().toISOString().split('T')[0];
+      const [year, month, day] = dateValue.split('-').map(Number);
       const performDate = new Date(year, month - 1, day, hours, minutes, 0, 0);
       const performTimeSeconds = Math.floor(performDate.getTime() / 1000);
 
@@ -2353,7 +2543,7 @@
     }
 
     // タイムライン画面に切り替え
-    function switchToTimeline(patient) {
+    async function switchToTimeline(patient) {
       currentView = 'timeline';
       selectedPatient = patient;
 
@@ -2363,8 +2553,15 @@
       const age = patient.birthDate ? calculateAge(patient.birthDate) : null;
       const sexLabel = patient.sexType === 'SEX_TYPE_MALE' ? '男性' : patient.sexType === 'SEX_TYPE_FEMALE' ? '女性' : '';
       const info = [age ? `${age}歳` : null, sexLabel].filter(Boolean).join('・');
-      modalTitle.textContent = info ? `${patient.fullName}（${info}）` : patient.fullName;
+      const titleBase = info ? `${patient.fullName}（${info}）` : patient.fullName;
+      modalTitle.textContent = titleBase;
       hospInfo.textContent = '読み込み中...';
+
+      // 入院病名をキャッシュから取得してタイトルに追加
+      const cachedDisease = getCachedDisease(patient.uuid);
+      if (cachedDisease) {
+        modalTitle.textContent = `${titleBase} - ${cachedDisease}`;
+      }
 
       // 患者選択画面の検索ボックスをクリアし、ヘッダーに検索ボックスを表示
       controlsArea.innerHTML = '';
@@ -3587,6 +3784,12 @@
 
         renderPatientList();
         renderDoctorLegend();
+
+        // 入院病名をバックグラウンドでプリフェッチ（UIをブロックしない）
+        const patientUuids = allPatients.map(p => p.patient?.uuid).filter(Boolean);
+        prefetchHospitalizationDiseases(patientUuids).then(() => {
+          console.log(`[${SCRIPT_NAME}] 入院病名プリフェッチ完了: ${diseaseCache.size}件`);
+        });
       } catch (e) {
         console.error(`[${SCRIPT_NAME}] 患者一覧取得エラー:`, e);
         isLoading = false;
