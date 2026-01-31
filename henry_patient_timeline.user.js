@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry Patient Timeline
 // @namespace    https://github.com/shin-926/Henry
-// @version      2.45.0
+// @version      2.47.0
 // @description  入院患者の各種記録・オーダーをガントチャート風タイムラインで表示
 // @author       sk powered by Claude
 // @match        https://henry-app.jp/*
@@ -48,7 +48,8 @@
     prescription: { id: 'prescription', name: '処方', color: '#3F51B5', bgColor: '#e8eaf6' },
     injection: { id: 'injection', name: '注射', color: '#009688', bgColor: '#e0f2f1' },
     vital: { id: 'vital', name: 'バイタル', color: '#E91E63', bgColor: '#fce4ec' },
-    meal: { id: 'meal', name: '食事摂取', color: '#795548', bgColor: '#efebe9' }
+    meal: { id: 'meal', name: '食事摂取', color: '#795548', bgColor: '#efebe9' },
+    urine: { id: 'urine', name: '排泄', color: '#607D8B', bgColor: '#eceff1' }
   };
 
   // カテゴリのグループ分け
@@ -80,19 +81,34 @@
   ];
 
   // カレンダービューリソース（GetClinicalCalendarView用）
+  // ※Henry本体のClinicalCalendarViewと同じリソースを取得
   const CALENDAR_RESOURCES = [
     '//henry-app.jp/clinicalResource/vitalSign',
     '//henry-app.jp/clinicalResource/prescriptionOrder',
     '//henry-app.jp/clinicalResource/injectionOrder',
-    // 食事摂取量（マオカ病院固有のカスタム定量データ）
+    '//henry-app.jp/clinicalResource/nutritionOrder',
+    // カスタム定量データ（観察項目、食事摂取量、排泄など）
+    '//henry-app.jp/clinicalResource/clinicalQuantitativeDataDefCustom/f20a5f9d-e40d-4049-a24b-a5e5809dc7e8',
+    '//henry-app.jp/clinicalResource/clinicalQuantitativeDataDefCustom/749ade09-5c03-4c6d-a8c4-cf4c386f8f1a',
+    '//henry-app.jp/clinicalResource/clinicalQuantitativeDataDefCustom/1588e236-8eee-4f54-9114-e11c57108f8c',
+    '//henry-app.jp/clinicalResource/clinicalQuantitativeDataDefCustom/77be0d2e-181d-42e1-940b-b27863594c6b',
+    '//henry-app.jp/clinicalResource/clinicalQuantitativeDataDefCustom/772cbf1e-a6e6-42aa-bb88-2b1d650a658a',
     '//henry-app.jp/clinicalResource/clinicalQuantitativeDataDefCustom/fb5d9b7b-8857-40b6-a82b-2547a6ae9e56',
-    // 酸素投与量・その他カスタム定量データ
     '//henry-app.jp/clinicalResource/clinicalQuantitativeDataDefCustom/e54f72b3-ee52-45e9-9dfb-fda4615f9722',
-    '//henry-app.jp/clinicalResource/clinicalQuantitativeDataDefCustom/38c01268-1ffb-4a2f-a227-85f0fafe4780',
     '//henry-app.jp/clinicalResource/clinicalQuantitativeDataDefCustom/2b5d1d50-d162-46b5-a3b9-34608ea8e805',
+    '//henry-app.jp/clinicalResource/clinicalQuantitativeDataDefCustom/38c01268-1ffb-4a2f-a227-85f0fafe4780',
     '//henry-app.jp/clinicalResource/clinicalQuantitativeDataDefCustom/d4c6e8b3-81ee-431f-adbe-dc113294a356',
-    // 栄養オーダー（食種）
-    '//henry-app.jp/clinicalResource/nutritionOrder'
+    '//henry-app.jp/clinicalResource/clinicalQuantitativeDataDefCustom/614e72ad-78ed-4aba-98a9-25d87efcf846',
+    '//henry-app.jp/clinicalResource/clinicalQuantitativeDataDefCustom/883dbf3c-8774-447b-b519-3141fa1ab9a4',
+    '//henry-app.jp/clinicalResource/clinicalQuantitativeDataDefCustom/8142e84b-dadf-465e-b1f6-6b691bbd6588',
+    '//henry-app.jp/clinicalResource/clinicalQuantitativeDataDefCustom/7d50a032-4049-429c-8c58-1a7c8c353390',
+    '//henry-app.jp/clinicalResource/clinicalQuantitativeDataDefCustom/3249f5de-f0c3-496a-968e-7b4d014a5cba',
+    '//henry-app.jp/clinicalResource/clinicalQuantitativeDataDefCustom/a849cd3d-7840-462f-9a62-26d1dcf3bec1',
+    '//henry-app.jp/clinicalResource/clinicalQuantitativeDataDefCustom/f2297762-d0ef-4b88-ae76-61f12569e565',
+    '//henry-app.jp/clinicalResource/clinicalQuantitativeDataDefCustom/9c812b76-e0f5-4a98-af02-aef5885a851c',
+    '//henry-app.jp/clinicalResource/clinicalQuantitativeDataDefCustom/e7a84f72-cece-4d39-9d4e-efa029829423',
+    '//henry-app.jp/clinicalResource/clinicalQuantitativeDataDefCustom/ec34fca6-d32b-4519-b167-266e6e6cf006',
+    '//henry-app.jp/clinicalResource/clinicalQuantitativeDataDefCustom/125c88b0-1151-4ce0-b31b-ddbe3abadef8'
   ];
 
   // バイタルデータキャッシュ（グラフ表示用）
@@ -816,8 +832,11 @@
         today
       );
 
+      // 尿量データ
+      const urineItems = extractUrineData(data?.clinicalQuantitativeDataModuleCollections || []);
+
       return {
-        timelineItems: [...vitalSigns, ...prescriptionItems, ...injectionItems, ...mealIntakeItems],
+        timelineItems: [...vitalSigns, ...prescriptionItems, ...injectionItems, ...mealIntakeItems, ...urineItems],
         activePrescriptions: prescriptionOrdersRaw.filter(rx => rx.orderStatus === 'ORDER_STATUS_ACTIVE'),
         activeInjections: injectionOrdersRaw.filter(inj =>
           !['ORDER_STATUS_COMPLETED', 'ORDER_STATUS_CANCELLED'].includes(inj.orderStatus)
@@ -909,25 +928,6 @@
       }
     }
 
-    // 2. 入院期間のすべての日をbyDateに追加（絶食表示対応）
-    if (hospStartDate && hospEndDate) {
-      const current = new Date(hospStartDate);
-      while (current <= hospEndDate) {
-        const year = current.getFullYear();
-        const month = current.getMonth() + 1;
-        const day = current.getDate();
-        const key = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-
-        if (!byDate.has(key)) {
-          byDate.set(key, {
-            date: new Date(current),
-            entries: []
-          });
-        }
-        current.setDate(current.getDate() + 1);
-      }
-    }
-
     // 各日付のデータをタイムラインアイテムに変換
     const result = [];
     for (const [key, dayData] of byDate) {
@@ -940,11 +940,16 @@
       const suppliesText = formatNutritionSupplies(supplies, dietType);
 
       // テキスト生成
+      // - 絶食の場合: 【絶食】（suppliesは表示しない）
       // - 食事摂取量がある場合: 【食種】 朝10/10 昼8/8 夕10/10
       // - 経管食等で摂取量がない場合: 【経管食】毎食: YH Fast 1個, 白湯 200ml
-      // - 食事も経管食もない場合: 絶食
+      // - 摂取量のみ（食種情報なし）の場合: 朝10/10 昼8/8
+      // - 何もない場合: スキップ
       let text;
-      if (dietType && mealText) {
+      if (dietType === '絶食') {
+        // 絶食オーダー
+        text = '【絶食】';
+      } else if (dietType && mealText) {
         // 通常食で摂取量がある場合
         text = `【${dietType}】 ${mealText}`;
       } else if (dietType && suppliesText) {
@@ -957,8 +962,8 @@
         // 摂取量のみ（食種情報なし）
         text = mealText;
       } else {
-        // 食事も経管食もない場合
-        text = '絶食';
+        // 栄養オーダーも摂取量記録もない日はスキップ
+        continue;
       }
 
       result.push({
@@ -974,9 +979,70 @@
     return result;
   }
 
+  // 尿量データを抽出
+  // clinicalQuantitativeDataModuleCollections から「合計尿量」を抽出
+  // 日付ごとにグループ化し、タイムラインアイテムに変換
+  function extractUrineData(moduleCollections) {
+    const result = [];
+    const byDate = new Map();
+
+    for (const collection of moduleCollections) {
+      const modules = collection?.clinicalQuantitativeDataModules || [];
+      for (const mod of modules) {
+        const dateRange = mod.recordDateRange;
+        if (!dateRange?.start) continue;
+
+        const { year, month, day } = dateRange.start;
+        const key = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+
+        const entries = mod.entries || [];
+        for (const entry of entries) {
+          if ((entry.name || '').includes('合計尿量')) {
+            const value = entry.value != null ? parseInt(entry.value, 10) : null;
+            if (value != null && !byDate.has(key)) {
+              byDate.set(key, {
+                date: new Date(year, month - 1, day),
+                totalUrine: value
+              });
+            }
+          }
+        }
+      }
+    }
+
+    for (const [key, data] of byDate) {
+      result.push({
+        id: `urine-${key}`,
+        category: 'urine',
+        date: data.date,
+        title: '排泄',
+        text: `尿量: ${data.totalUrine}ml`,
+        author: ''
+      });
+    }
+    return result;
+  }
+
+  // 栄養オーダーから食種情報を抽出
+  function extractNutritionInfo(order) {
+    // 食種名: dietaryRegimen.name がない場合は supplies[0].food.name を使用
+    // 例: 絶食オーダーでは dietaryRegimen が null だが supplies[0].food.name に「絶食」が入っている
+    const dietName = order.detail?.dietaryRegimen?.name
+      || order.detail?.supplies?.[0]?.food?.name
+      || null;
+    return {
+      name: dietName,
+      supplies: order.detail?.supplies || []
+    };
+  }
+
   // 指定日に有効な栄養オーダー情報を取得
+  // 範囲内のオーダーがなければ、直近の過去オーダーを返す
   // 戻り値: { name: 食種名, supplies: 経管食等の詳細配列 } or null
   function getNutritionInfoForDate(date, nutritionOrders) {
+    let latestPastOrder = null;
+    let latestPastEndDate = null;
+
     for (const order of nutritionOrders) {
       // 下書きはスキップ（isDraftフィールドを優先）
       if (order.isDraft === true) continue;
@@ -990,13 +1056,20 @@
 
       // 日付が範囲内かチェック
       if (date >= startDate && date <= endDate) {
-        return {
-          name: order.detail?.dietaryRegimen?.name || null,
-          supplies: order.detail?.supplies || []
-        };
+        return extractNutritionInfo(order);
+      }
+
+      // 指定日より前に終了したオーダーを記録（最新のものを保持）
+      if (endDate < date) {
+        if (!latestPastEndDate || endDate > latestPastEndDate) {
+          latestPastEndDate = endDate;
+          latestPastOrder = order;
+        }
       }
     }
-    return null;
+
+    // 範囲内のオーダーがなければ、直近の過去オーダーを返す
+    return latestPastOrder ? extractNutritionInfo(latestPastOrder) : null;
   }
 
   // 食事摂取量を簡潔形式にフォーマット
@@ -3031,7 +3104,7 @@
       // カテゴリのグループ分け
       const filterGroups = {
         'record-filters': ['doctor', 'nursing', 'rehab'],
-        'data-filters': ['vital', 'meal'],
+        'data-filters': ['vital', 'meal', 'urine'],
         'order-filters': ['prescription', 'injection']
       };
 
@@ -3152,9 +3225,9 @@
       // 選択された日付のアイテムを取得
       const selectedItems = itemsByDate.get(selectedDateKey) || [];
 
-      // 記録とデータ（バイタル+食事摂取）に分類
+      // 記録とデータ（バイタル+食事摂取+排泄）に分類
       const records = selectedItems.filter(item => RECORD_CATEGORIES.includes(item.category));
-      const dataItems = selectedItems.filter(item => item.category === 'vital' || item.category === 'meal');
+      const dataItems = selectedItems.filter(item => item.category === 'vital' || item.category === 'meal' || item.category === 'urine');
 
       // 記録は時系列（新→古）でソート
       records.sort((a, b) => (b.date || 0) - (a.date || 0));
@@ -3193,7 +3266,8 @@
       const cat = CATEGORIES[item.category];
       // mealカテゴリは時刻を非表示（食事データには時刻情報がないため）
       // vitalカテゴリは時刻を非表示（テーブル内の各行に時刻があるため冗長）
-      const time = (item.category === 'meal' || item.category === 'vital') ? '' :
+      // urineカテゴリは時刻を非表示（尿量データには時刻情報がないため）
+      const time = (item.category === 'meal' || item.category === 'vital' || item.category === 'urine') ? '' :
         (item.date ? `${item.date.getHours()}:${String(item.date.getMinutes()).padStart(2, '0')}` : '-');
 
       // バイタルカードは体温ハイライト用HTMLを含むためエスケープしない
