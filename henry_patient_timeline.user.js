@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry Patient Timeline
 // @namespace    https://github.com/shin-926/Henry
-// @version      2.44.1
+// @version      2.44.2
 // @description  入院患者の各種記録・オーダーをガントチャート風タイムラインで表示
 // @author       sk powered by Claude
 // @match        https://henry-app.jp/*
@@ -2573,7 +2573,8 @@
     cleaner.add(() => document.removeEventListener('keydown', handleKeydown));
 
     // SPA遷移時にモーダルを閉じる
-    cleaner.add(window.HenryCore.utils.subscribeNavigation(closeModal));
+    window.addEventListener('henry:navigation', closeModal);
+    cleaner.add(() => window.removeEventListener('henry:navigation', closeModal));
 
     // 日付ナビゲーション（direction: -1=上/新しい方、1=下/古い方）
     function navigateDate(direction) {
