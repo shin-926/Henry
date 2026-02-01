@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry Patient Timeline
 // @namespace    https://github.com/shin-926/Henry
-// @version      2.47.0
+// @version      2.78.0
 // @description  入院患者の各種記録・オーダーをガントチャート風タイムラインで表示
 // @author       sk powered by Claude
 // @match        https://henry-app.jp/*
@@ -48,8 +48,9 @@
     prescription: { id: 'prescription', name: '処方', color: '#3F51B5', bgColor: '#e8eaf6' },
     injection: { id: 'injection', name: '注射', color: '#009688', bgColor: '#e0f2f1' },
     vital: { id: 'vital', name: 'バイタル', color: '#E91E63', bgColor: '#fce4ec' },
-    meal: { id: 'meal', name: '食事摂取', color: '#795548', bgColor: '#efebe9' },
-    urine: { id: 'urine', name: '排泄', color: '#607D8B', bgColor: '#eceff1' }
+    meal: { id: 'meal', name: '食事', color: '#795548', bgColor: '#efebe9' },
+    urine: { id: 'urine', name: '排泄', color: '#607D8B', bgColor: '#eceff1' },
+    bloodSugar: { id: 'bloodSugar', name: '血糖', color: '#FF9800', bgColor: '#fff3e0' }
   };
 
   // カテゴリのグループ分け
@@ -60,6 +61,7 @@
   // ※マオカ病院専用スクリプトのためハードコード（他病院展開予定なし）
   const NURSING_RECORD_CUSTOM_TYPE_UUID = 'e4ac1e1c-40e2-4c19-9df4-aa57adae7d4f';
   const PATIENT_PROFILE_CUSTOM_TYPE_UUID = 'f639619a-6fdb-452a-a803-8d42cd50830d';
+  const PRESSURE_ULCER_CUSTOM_TYPE_UUID = '2d3b6bbf-3b3e-4a82-8f7f-e29a32352f52';
 
   // 組織UUID
   // ※マオカ病院専用スクリプトのためハードコード（他病院展開予定なし）
@@ -108,11 +110,20 @@
     '//henry-app.jp/clinicalResource/clinicalQuantitativeDataDefCustom/9c812b76-e0f5-4a98-af02-aef5885a851c',
     '//henry-app.jp/clinicalResource/clinicalQuantitativeDataDefCustom/e7a84f72-cece-4d39-9d4e-efa029829423',
     '//henry-app.jp/clinicalResource/clinicalQuantitativeDataDefCustom/ec34fca6-d32b-4519-b167-266e6e6cf006',
-    '//henry-app.jp/clinicalResource/clinicalQuantitativeDataDefCustom/125c88b0-1151-4ce0-b31b-ddbe3abadef8'
+    '//henry-app.jp/clinicalResource/clinicalQuantitativeDataDefCustom/125c88b0-1151-4ce0-b31b-ddbe3abadef8',
+    // 血液検査（外部検査結果 + 検体検査オーダー）
+    '//henry-app.jp/clinicalResource/inspectionReport',
+    '//henry-app.jp/clinicalResource/specimenInspectionOrder'
   ];
 
   // バイタルデータキャッシュ（グラフ表示用）
   let cachedVitalsByDate = new Map();
+
+  // 血糖データキャッシュ（グラフ表示用）
+  let cachedBloodSugarByDate = new Map();
+
+  // 尿量データキャッシュ（グラフ表示用）
+  let cachedUrineByDate = new Map();
 
   // GraphQL Queries
   const QUERIES = {
@@ -201,13 +212,25 @@
   }
 
   // editorDataをテキストに変換
-  function parseEditorData(editorDataStr) {
+  function parseEditorData(editorDataStr, options = {}) {
     try {
       const data = JSON.parse(editorDataStr);
-      return data.blocks
-        .map(b => b.text)
-        .filter(t => t && t.trim())
-        .join('\n');
+      const lines = [];
+
+      for (const block of data.blocks) {
+        const text = block.text;
+        if (!text || !text.trim()) continue;
+
+        // リハビリ記録用: 未チェック項目をフィルタリング
+        // ブロックのdata.checkboxListItem.checkedが'unchecked'の場合はスキップ
+        if (options.filterUnchecked && block.data?.checkboxListItem?.checked === 'unchecked') {
+          continue;
+        }
+
+        lines.push(text);
+      }
+
+      return lines.join('\n');
     } catch (e) {
       return '';
     }
@@ -386,7 +409,7 @@
       if (!profileDoc) return null;
 
       return {
-        text: parseEditorData(profileDoc.editorData),
+        text: parseEditorData(profileDoc.editorData, { filterUnchecked: true }),
         updateTime: profileDoc.updateTime?.seconds ? new Date(profileDoc.updateTime.seconds * 1000) : null,
         author: profileDoc.creator?.name || '不明'
       };
@@ -573,7 +596,8 @@
       const documents = result?.data?.listRehabilitationDocuments?.documents || [];
 
       for (const doc of documents) {
-        const text = parseEditorData(doc.editorData);
+        // リハビリ記録は未チェック項目をフィルタリング
+        const text = parseEditorData(doc.editorData, { filterUnchecked: true });
         if (text) {
           allDocuments.push({
             id: doc.uuid,
@@ -601,6 +625,39 @@
     }
 
     const response = await fetch('https://henry-app.jp/graphql', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`,
+        'x-auth-organization-uuid': ORG_UUID
+      },
+      body: JSON.stringify({
+        operationName,
+        variables,
+        extensions: {
+          persistedQuery: {
+            version: 1,
+            sha256Hash
+          }
+        }
+      })
+    });
+
+    if (!response.ok) {
+      throw new Error(`API Error: ${response.status}`);
+    }
+
+    return response.json();
+  }
+
+  // GraphQL v2 エンドポイント用（ClinicalCalendarView等）
+  async function callPersistedQueryV2(operationName, variables, sha256Hash) {
+    const token = await window.HenryCore?.getToken();
+    if (!token) {
+      throw new Error('認証トークンがありません');
+    }
+
+    const response = await fetch('https://henry-app.jp/graphql-v2', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -706,14 +763,17 @@
 
   // カレンダービューデータを取得（GetClinicalCalendarView API）
   // 入院開始日から今日までのデータを取得
-  async function fetchCalendarData(patientUuid, hospitalizationStartDate) {
+  // maxDays: 取得する最大日数（デフォルト180日）
+  async function fetchCalendarData(patientUuid, hospitalizationStartDate, maxDays = 180) {
     try {
       const today = new Date();
       const startDate = new Date(hospitalizationStartDate);
       // 入院開始日から今日までの日数を計算
       const diffDays = Math.ceil((today - startDate) / (1000 * 60 * 60 * 24));
-      const beforeDateSize = Math.min(diffDays + 1, 60); // 最大60日
+      const beforeDateSize = Math.min(diffDays + 1, maxDays);
 
+      // GetClinicalCalendarView（v1エンドポイント）を使用
+      // clinicalQuantitativeDataModuleCollections を含むフィールドセットを持つpersisted queryを使用
       const result = await callPersistedQuery(
         'GetClinicalCalendarView',
         {
@@ -748,7 +808,7 @@
             date,
             rawData: vs,
             author: vs.createUser?.name || '不明',
-            oxygen: key ? oxygenData.get(key) : null // 同日の酸素データを付与
+            oxygen: key ? (oxygenData.get(key) || []) : [] // 同日の酸素データを付与（配列形式）
           };
         })
         .filter(vs => vs.date);
@@ -835,12 +895,23 @@
       // 尿量データ
       const urineItems = extractUrineData(data?.clinicalQuantitativeDataModuleCollections || []);
 
+      // 血糖・インスリンデータ
+      const bloodSugarItems = extractBloodSugarInsulinData(data?.clinicalQuantitativeDataModuleCollections || []);
+
+      // 血液検査データ
+      // 外部検査（四国中検）: outsideInspectionReportGroups
+      // 院内検査: clinicalQuantitativeDataModuleCollections から抽出
+      const outsideInspectionReportGroups = data?.outsideInspectionReportGroups || [];
+      const inHouseBloodTests = extractInHouseBloodTests(data?.clinicalQuantitativeDataModuleCollections || []);
+
       return {
-        timelineItems: [...vitalSigns, ...prescriptionItems, ...injectionItems, ...mealIntakeItems, ...urineItems],
+        timelineItems: [...vitalSigns, ...prescriptionItems, ...injectionItems, ...mealIntakeItems, ...urineItems, ...bloodSugarItems],
         activePrescriptions: prescriptionOrdersRaw.filter(rx => rx.orderStatus === 'ORDER_STATUS_ACTIVE'),
         activeInjections: injectionOrdersRaw.filter(inj =>
-          !['ORDER_STATUS_COMPLETED', 'ORDER_STATUS_CANCELLED'].includes(inj.orderStatus)
-        )
+          inj.orderStatus !== 'ORDER_STATUS_CANCELLED'
+        ),
+        outsideInspectionReportGroups,
+        inHouseBloodTests
       };
 
     } catch (e) {
@@ -851,7 +922,7 @@
 
   // 酸素投与データを抽出
   // clinicalQuantitativeDataModuleCollections から酸素投与量・投与方法を抽出
-  // 日付ごとにグループ化して返す
+  // 日付ごとにグループ化し、時刻順の配列として返す（日内変化を追跡）
   function extractOxygenData(moduleCollections) {
     const byDate = new Map();
 
@@ -861,26 +932,41 @@
         const dateRange = mod.recordDateRange;
         if (!dateRange?.start) continue;
 
-        const { year, month, day } = dateRange.start;
+        const { year, month, day, hour, minute } = dateRange.start;
         const key = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+        const time = (hour ?? 0) * 60 + (minute ?? 0);  // 分単位のソート用
 
         if (!byDate.has(key)) {
-          byDate.set(key, { flow: null, method: null });
+          byDate.set(key, []);
         }
 
+        let flow = null, method = null;
         const entries = mod.entries || [];
         for (const entry of entries) {
           const name = entry.name || '';
           if (name.includes('酸素投与量')) {
-            byDate.get(key).flow = entry.value;
+            flow = entry.value;
           } else if (name.includes('酸素投与方法')) {
-            byDate.get(key).method = entry.value;
+            method = entry.value;
           }
+        }
+
+        if (flow !== null) {
+          byDate.get(key).push({ time, flow, method });
         }
       }
     }
 
-    return byDate; // Map<dateKey, { flow, method }>
+    // 各日付内で時刻順にソートし、連続する同一値を除去（変化のみ残す）
+    for (const [key, entries] of byDate) {
+      entries.sort((a, b) => a.time - b.time);
+      const deduped = entries.filter((e, i) =>
+        i === 0 || e.flow !== entries[i-1].flow || e.method !== entries[i-1].method
+      );
+      byDate.set(key, deduped);
+    }
+
+    return byDate; // Map<dateKey, Array<{ time, flow, method }>>
   }
 
   // 食事摂取量データを抽出・整形
@@ -951,7 +1037,7 @@
         text = '【絶食】';
       } else if (dietType && mealText) {
         // 通常食で摂取量がある場合
-        text = `【${dietType}】 ${mealText}`;
+        text = `【${dietType}】${mealText}`;
       } else if (dietType && suppliesText) {
         // 経管食等で摂取量がない場合、suppliesを表示
         text = `【${dietType}】${suppliesText}`;
@@ -1010,16 +1096,146 @@
       }
     }
 
+    // グラフ用キャッシュに保存
+    for (const [key, data] of byDate) {
+      cachedUrineByDate.set(key, data);
+    }
+
     for (const [key, data] of byDate) {
       result.push({
         id: `urine-${key}`,
         category: 'urine',
         date: data.date,
         title: '排泄',
-        text: `尿量: ${data.totalUrine}ml`,
+        text: `【尿量】${data.totalUrine}mL`,
         author: ''
       });
     }
+    return result;
+  }
+
+  // 血糖・インスリンデータを抽出
+  // clinicalQuantitativeDataModuleCollections から血糖値、インスリン薬剤名、単位を抽出
+  // 日付ごとにグループ化し、タイムラインアイテムに変換
+  function extractBloodSugarInsulinData(moduleCollections) {
+    // 血糖・インスリン関連の項目名パターン
+    const bloodSugarPatterns = ['血糖値(朝)', '血糖値(昼)', '血糖値(夕)'];
+    const insulinDrugPattern = '薬剤名';
+    const insulinUnitPatterns = ['単位(朝)', '単位(昼)', '単位(夕)'];
+
+    // 日付ごとにデータをグループ化
+    const byDate = new Map();
+
+    for (const collection of moduleCollections) {
+      const modules = collection?.clinicalQuantitativeDataModules || [];
+      for (const mod of modules) {
+        const dateRange = mod.recordDateRange;
+        if (!dateRange?.start) continue;
+
+        const { year, month, day } = dateRange.start;
+        const date = new Date(year, month - 1, day);
+        const key = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+
+        if (!byDate.has(key)) {
+          byDate.set(key, {
+            date: date,
+            bloodSugar: { morning: null, noon: null, evening: null },
+            insulinDrug: null,
+            insulinUnit: { morning: null, noon: null, evening: null }
+          });
+        }
+
+        const dayData = byDate.get(key);
+        const entries = mod.entries || [];
+
+        for (const entry of entries) {
+          const name = entry.name || '';
+          const value = entry.value;
+
+          // 血糖値
+          if (name.includes('血糖値(朝)') && value != null) {
+            dayData.bloodSugar.morning = parseInt(value, 10);
+          } else if (name.includes('血糖値(昼)') && value != null) {
+            dayData.bloodSugar.noon = parseInt(value, 10);
+          } else if (name.includes('血糖値(夕)') && value != null) {
+            dayData.bloodSugar.evening = parseInt(value, 10);
+          }
+
+          // インスリン薬剤名
+          if (name.includes('薬剤名') && value) {
+            dayData.insulinDrug = value;
+          }
+
+          // インスリン単位
+          if (name.includes('単位(朝)') && value != null) {
+            dayData.insulinUnit.morning = parseFloat(value);
+          } else if (name.includes('単位(昼)') && value != null) {
+            dayData.insulinUnit.noon = parseFloat(value);
+          } else if (name.includes('単位(夕)') && value != null) {
+            dayData.insulinUnit.evening = parseFloat(value);
+          }
+        }
+      }
+    }
+
+    // グラフ用キャッシュに保存（血糖値があるデータのみ）
+    for (const [key, data] of byDate) {
+      const hasBloodSugar = data.bloodSugar.morning != null ||
+                           data.bloodSugar.noon != null ||
+                           data.bloodSugar.evening != null;
+      if (hasBloodSugar) {
+        cachedBloodSugarByDate.set(key, data);
+      }
+    }
+
+    // タイムラインアイテムに変換
+    const result = [];
+    for (const [key, data] of byDate) {
+      // 血糖値が1つでもあればカードを表示
+      const hasBloodSugar = data.bloodSugar.morning != null ||
+                           data.bloodSugar.noon != null ||
+                           data.bloodSugar.evening != null;
+      if (!hasBloodSugar) continue;
+
+      // テキスト生成（1行形式: 血糖値の後ろにインスリン情報を括弧で追加）
+      // 例: 【血糖値】朝100　昼200(トレシーバ6U)　夕90
+      const bsParts = [];
+      const drug = data.insulinDrug || '';
+
+      if (data.bloodSugar.morning != null) {
+        let part = `朝${data.bloodSugar.morning}`;
+        if (drug && data.insulinUnit.morning != null) {
+          part += `(${drug}${data.insulinUnit.morning}U)`;
+        }
+        bsParts.push(part);
+      }
+      if (data.bloodSugar.noon != null) {
+        let part = `昼${data.bloodSugar.noon}`;
+        if (drug && data.insulinUnit.noon != null) {
+          part += `(${drug}${data.insulinUnit.noon}U)`;
+        }
+        bsParts.push(part);
+      }
+      if (data.bloodSugar.evening != null) {
+        let part = `夕${data.bloodSugar.evening}`;
+        if (drug && data.insulinUnit.evening != null) {
+          part += `(${drug}${data.insulinUnit.evening}U)`;
+        }
+        bsParts.push(part);
+      }
+
+      const text = `【血糖値】${bsParts.join('　')}`; // 全角スペース区切り
+
+      result.push({
+        id: `bloodSugar-${key}`,
+        category: 'bloodSugar',
+        date: data.date,
+        title: '血糖',
+        text: text,
+        author: ''
+      });
+    }
+
     return result;
   }
 
@@ -1252,13 +1468,13 @@
 
     html += '</tbody>';
 
-    // 酸素投与はtfootに表示（日付単位のデータなので同一日は同じ値）
-    const oxygen = sorted[0]?.oxygen;
-    if (oxygen?.flow) {
-      const o2Text = oxygen.method
-        ? `O2: ${oxygen.flow}L ${oxygen.method}`
-        : `O2: ${oxygen.flow}L`;
-      html += `<tfoot><tr><td colspan="5" style="text-align:right;padding:4px 0;"><span style="background:#e3f2fd;font-weight:bold;padding:2px 8px;border-radius:4px;">${o2Text}</span></td></tr></tfoot>`;
+    // 酸素投与はtfootに表示（日内変化がある場合は「→」で連結）
+    const oxygenEntries = sorted[0]?.oxygen || [];
+    if (oxygenEntries.length > 0) {
+      const o2Text = oxygenEntries.map(o => {
+        return o.method ? `${o.flow}L（${o.method}）` : `${o.flow}L`;
+      }).join('→');
+      html += `<tfoot><tr><td colspan="5" style="text-align:right;padding:4px 0;"><span style="background:#e3f2fd;font-weight:bold;padding:2px 8px;border-radius:4px;">O2: ${o2Text}</span></td></tr></tfoot>`;
     }
 
     html += '</table>';
@@ -1267,9 +1483,30 @@
 
   // 注射オーダーをテキストに整形
   function formatInjectionOrder(inj) {
-    // 注射の詳細構造は複雑なため、基本情報のみ
     const status = formatOrderStatus(inj.orderStatus);
-    return `ステータス: ${status}`;
+    const rps = inj.rps || [];
+
+    const lines = [];
+    for (const rp of rps) {
+      const medicines = (rp.instructions || []).map(inst => {
+        const med = inst.instruction?.medicationDosageInstruction;
+        const rawName = med?.localMedicine?.name || med?.mhlwMedicine?.name || null;
+        return rawName ? cleanMedicineName(rawName) : null;
+      }).filter(Boolean);
+
+      const technique = (rp.localInjectionTechnique?.name || '').replace(/，/g, ',');
+
+      if (medicines.length > 0) {
+        const medText = medicines.join(', ');
+        lines.push(technique ? `${technique}: ${medText}` : medText);
+      }
+    }
+
+    if (lines.length === 0) {
+      return `ステータス: ${status}`;
+    }
+
+    return `${lines.join(' / ')}（${status}）`;
   }
 
   // オーダーステータスを日本語に変換
@@ -1285,14 +1522,462 @@
     return statusMap[status] || status || '-';
   }
 
+  // 院内血液検査データを抽出（clinicalQuantitativeDataModuleCollections から）
+  // 返り値: { modules: [{ dateKey, entries: [{name, value}] }] }[]
+  function extractInHouseBloodTests(moduleCollections) {
+    // 院内末梢血液一般のUUID（マオカ病院専用）
+    const INHOUSE_BLOOD_TEST_UUID = '614e72ad-78ed-4aba-98a9-25d87efcf846';
+
+    const result = [];
+    for (const collection of moduleCollections) {
+      // APIレスポンスでは cqdDefHrn にHRN形式でUUIDが含まれる
+      // 例: //henry-app.jp/clinicalQuantitativeDataDef/custom/614e72ad-78ed-4aba-98a9-25d87efcf846
+      const hrn = collection?.cqdDefHrn || '';
+      if (!hrn.includes(INHOUSE_BLOOD_TEST_UUID)) continue;
+
+      // カテゴリ名は各モジュールの title から取得（APIレスポンスの構造が変わっている）
+      const modules = (collection?.clinicalQuantitativeDataModules || []).map(mod => {
+        const dateRange = mod.recordDateRange?.start;
+        const dateKey = dateRange
+          ? `${dateRange.year}-${String(dateRange.month).padStart(2, '0')}-${String(dateRange.day).padStart(2, '0')}`
+          : null;
+        const entries = (mod.entries || []).map(e => ({
+          name: e.name,
+          value: e.value,
+          unit: e.unit?.value || ''
+        }));
+        return { dateKey, entries, title: mod.title };
+      }).filter(m => m.dateKey);
+
+      result.push({ modules });
+    }
+    return result;
+  }
+
+  // 基準値文字列をパースして下限・上限を抽出
+  // 例: "10-20", "10～20" → { low: 10, high: 20 }
+  // 例: "0.30以下", "≦0.30" → { low: null, high: 0.30 }
+  // 例: "10以上", "≧10" → { low: 10, high: null }
+  function parseReferenceValue(refValue) {
+    if (!refValue) return null;
+
+    // 範囲形式: "10-20", "10～20", "10~20"
+    const rangeMatch = refValue.match(/([0-9.]+)\s*[-～~]\s*([0-9.]+)/);
+    if (rangeMatch) {
+      return { low: parseFloat(rangeMatch[1]), high: parseFloat(rangeMatch[2]) };
+    }
+
+    // 上限のみ: "0.30以下", "≦0.30", "<=0.30"
+    const upperMatch = refValue.match(/([0-9.]+)\s*以下/) || refValue.match(/[≦<=]\s*([0-9.]+)/);
+    if (upperMatch) {
+      return { low: null, high: parseFloat(upperMatch[1]) };
+    }
+
+    // 下限のみ: "10以上", "≧10", ">=10"
+    const lowerMatch = refValue.match(/([0-9.]+)\s*以上/) || refValue.match(/[≧>=]\s*([0-9.]+)/);
+    if (lowerMatch) {
+      return { low: parseFloat(lowerMatch[1]), high: null };
+    }
+
+    return null;
+  }
+
+  // 値と基準値を比較してL/H判定
+  function judgeAbnormality(value, refValue) {
+    const numValue = parseFloat(value);
+    if (isNaN(numValue)) return { isAbnormal: false, type: 'NORMAL' };
+    const range = parseReferenceValue(refValue);
+    if (!range) return { isAbnormal: false, type: 'NORMAL' };
+    // 下限チェック（lowがnullでない場合のみ）
+    if (range.low !== null && numValue < range.low) return { isAbnormal: true, type: 'LOW' };
+    // 上限チェック（highがnullでない場合のみ）
+    if (range.high !== null && numValue > range.high) return { isAbnormal: true, type: 'HIGH' };
+    return { isAbnormal: false, type: 'NORMAL' };
+  }
+
+  // 血液検査データを抽出・整形
+  // outsideInspectionReportGroups（外部検査）+ inHouseBloodTests（院内検査）から結果を抽出
+  // 日付別→カテゴリ別のネスト構造で返す
+  function extractBloodTestResults(outsideInspectionReportGroups, inHouseBloodTests) {
+    // 日付別 → カテゴリ別 → 検査項目リスト
+    const byDate = new Map();
+
+    // 外注検査の項目名→基準値マップ（院内検査のL/H判定に使用）
+    const referenceValueMap = new Map();
+
+    // 院内検査専用項目のデフォルト基準値（外注検査に対応項目がない場合）
+    referenceValueMap.set('リンパ球', '20-50');
+    referenceValueMap.set('単球', '2-10');
+    referenceValueMap.set('顆粒球', '54-60');
+
+    // 外部検査データ（四国中検など）を処理
+    for (const group of outsideInspectionReportGroups) {
+      const categoryName = group.name || '未分類';
+      const rows = group.outsideInspectionReportRows || [];
+
+      for (const row of rows) {
+        const itemName = row.name || '不明';
+        // 「末梢血液一般」は検査項目ではなくカテゴリ名なのでスキップ
+        if (itemName === '末梢血液一般') continue;
+        const referenceValue = row.standardValue?.value || '';
+        const reports = row.outsideInspectionReports || [];
+
+        // 基準値を収集（院内検査のL/H判定で使用）
+        if (referenceValue) {
+          referenceValueMap.set(itemName, referenceValue);
+        }
+
+        for (const report of reports) {
+          if (!report.date) continue;
+
+          const { year, month, day } = report.date;
+          const dateKey = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+
+          if (!byDate.has(dateKey)) {
+            byDate.set(dateKey, new Map());
+          }
+          const categoryMap = byDate.get(dateKey);
+
+          if (!categoryMap.has(categoryName)) {
+            categoryMap.set(categoryName, []);
+          }
+
+          // 値から単位を分離（"88​10*2/MCL​" → "88", "10*2/MCL"）
+          const rawValue = report.value || '-';
+          // ゼロ幅スペースで分割して値と単位を取得
+          const valueParts = rawValue.split(/[\u200B\u200C\u200D\uFEFF]+/).filter(Boolean);
+          const value = valueParts[0] || rawValue;
+
+          categoryMap.get(categoryName).push({
+            name: itemName,
+            value: value,
+            isAbnormal: report.isAbnormal || false,
+            abnormalityType: report.abnormalityType || 'NORMAL',
+            referenceValue: referenceValue
+          });
+        }
+      }
+    }
+
+    // 院内検査項目 → 外注検査への統合マッピング
+    // { 統合先項目名, 統合先カテゴリ }
+    const INHOUSE_TO_OUTSIDE_MAP = {
+      'WBC': { name: '白血球数', category: '血液学的検査' },
+      'RBC': { name: '赤血球数', category: '血液学的検査' },
+      'HGB': { name: 'Hb', category: '血液学的検査' },
+      'HCT': { name: 'Ht', category: '血液学的検査' },
+      'MCV': { name: 'MCV', category: '血液学的検査' },
+      'MCH': { name: 'MCH', category: '血液学的検査' },
+      'MCHC': { name: 'MCHC', category: '血液学的検査' },
+      'PLT': { name: '血小板数', category: '血液学的検査' },
+      'LY': { name: 'リンパ球', category: '血液学的検査' },
+      'MO': { name: '単球', category: '血液学的検査' },
+      'GR': { name: '顆粒球', category: '血液学的検査' },
+      'CRP': { name: 'CRP', category: '免疫学的検査' }
+    };
+
+    // 院内検査データを処理（外注検査のカテゴリ・項目名に統合）
+    for (const inHouse of inHouseBloodTests) {
+      for (const mod of inHouse.modules) {
+        const dateKey = mod.dateKey;
+        if (!dateKey) continue;
+
+        if (!byDate.has(dateKey)) {
+          byDate.set(dateKey, new Map());
+        }
+        const categoryMap = byDate.get(dateKey);
+
+        for (const entry of mod.entries) {
+          // マッピングから統合先を取得
+          const mapping = INHOUSE_TO_OUTSIDE_MAP[entry.name];
+          if (!mapping) continue; // マッピングにない項目はスキップ
+
+          const categoryName = mapping.category;
+          const itemName = mapping.name;
+
+          if (!categoryMap.has(categoryName)) {
+            categoryMap.set(categoryName, []);
+          }
+
+          // 外注検査の基準値を参照してL/H判定
+          const refValue = referenceValueMap.get(itemName) || '';
+          const { isAbnormal, type } = judgeAbnormality(entry.value, refValue);
+
+          categoryMap.get(categoryName).push({
+            name: itemName,
+            value: entry.value,
+            isAbnormal: isAbnormal,
+            abnormalityType: type,
+            referenceValue: refValue
+          });
+        }
+      }
+    }
+
+    // 日付の新しい順にソート
+    const sortedDates = Array.from(byDate.keys()).sort((a, b) => b.localeCompare(a));
+
+    return sortedDates.map(dateKey => ({
+      dateKey,
+      categories: byDate.get(dateKey)
+    }));
+  }
+
+  // 血液検査データをピボット形式（横軸日付）に変換
+  // 入力: extractBloodTestResults()の戻り値
+  // 出力: { dates: string[], categories: { name, items: { name, referenceValue, values: Map<dateKey, {value, isAbnormal, abnormalityType}> }[] }[] }
+  function pivotBloodTestData(bloodTestResults) {
+    // 全日付を抽出（古い順）
+    const allDates = bloodTestResults.map(r => r.dateKey).sort((a, b) => a.localeCompare(b));
+
+    // カテゴリ別・項目別にデータを集約
+    // categoryName → itemName → { referenceValue, values: Map<dateKey, {value, isAbnormal, abnormalityType}> }
+    const categoryMap = new Map();
+
+    for (const { dateKey, categories } of bloodTestResults) {
+      for (const [categoryName, items] of categories) {
+        if (!categoryMap.has(categoryName)) {
+          categoryMap.set(categoryName, new Map());
+        }
+        const itemMap = categoryMap.get(categoryName);
+
+        for (const item of items) {
+          if (!itemMap.has(item.name)) {
+            itemMap.set(item.name, {
+              referenceValue: item.referenceValue || '',
+              values: new Map()
+            });
+          }
+          const itemData = itemMap.get(item.name);
+          // 基準値が空で新しい値がある場合は更新
+          if (!itemData.referenceValue && item.referenceValue) {
+            itemData.referenceValue = item.referenceValue;
+          }
+          itemData.values.set(dateKey, {
+            value: item.value,
+            isAbnormal: item.isAbnormal,
+            abnormalityType: item.abnormalityType
+          });
+        }
+      }
+    }
+
+    // ピボット形式に変換
+    const categories = [];
+    for (const [categoryName, itemMap] of categoryMap) {
+      const items = [];
+      for (const [itemName, itemData] of itemMap) {
+        items.push({
+          name: itemName,
+          referenceValue: itemData.referenceValue,
+          values: itemData.values
+        });
+      }
+      categories.push({ name: categoryName, items });
+    }
+
+    return { dates: allDates, categories };
+  }
+
+  // 褥瘡評価データを取得
+  async function fetchPressureUlcerRecords(patientUuid) {
+    const allDocuments = [];
+    let pageToken = '';
+
+    try {
+      do {
+        const result = await window.HenryCore.query(QUERIES.LIST_CLINICAL_DOCUMENTS, {
+          input: {
+            patientUuid,
+            pageToken,
+            pageSize: 100,
+            clinicalDocumentTypes: [{
+              type: 'CUSTOM',
+              clinicalDocumentCustomTypeUuid: { value: PRESSURE_ULCER_CUSTOM_TYPE_UUID }
+            }]
+          }
+        });
+
+        const data = result?.data?.listClinicalDocuments;
+        const documents = data?.documents || [];
+
+        for (const doc of documents) {
+          const parsed = parsePressureUlcerEditorData(doc.editorData);
+          if (parsed) {
+            allDocuments.push({
+              uuid: doc.uuid,
+              date: doc.performTime?.seconds ? new Date(doc.performTime.seconds * 1000) : null,
+              author: doc.creator?.name || '不明',
+              ...parsed
+            });
+          }
+        }
+
+        pageToken = data?.nextPageToken || '';
+      } while (pageToken);
+
+      return allDocuments;
+    } catch (e) {
+      console.error(`[${SCRIPT_NAME}] 褥瘡評価取得エラー:`, e);
+      return [];
+    }
+  }
+
+  // 褥瘡評価editorDataをパース
+  // Draft.js形式のJSONから部位・合計点・各DESIGN-R項目を抽出
+  function parsePressureUlcerEditorData(editorDataStr) {
+    try {
+      const data = JSON.parse(editorDataStr);
+      const blocks = data.blocks || [];
+
+      let site = '';        // 部位
+      let totalScore = '';  // 合計点
+      const designR = {     // DESIGN-R各項目
+        D: null,  // 深さ
+        E: null,  // 滲出液
+        S: null,  // 大きさ
+        I: null,  // 炎症/感染
+        G: null,  // 肉芽組織
+        N: null,  // 壊死組織
+        P: null   // ポケット
+      };
+
+      // DESIGN-R項目のパターン
+      // チェックボックスがチェックされている項目から値を抽出
+      const designRPatterns = {
+        D: /^([dD]\d+|[dD][DU]TI?|[dD]U)/i,    // d0-d5, dDTI, dU, DU
+        E: /^([eE]\d+)/,       // e0, e1, e3, e6
+        S: /^([sS]\d+)/,       // s0, s3, s6, s8, s9, s12, s15
+        I: /^([iI]\d+[CcGg]?)/, // i0, i1, i3C, i3, i9
+        G: /^([gG]\d+)/,       // g0, g1, g3, g4, g5, g6
+        N: /^([nN]\d+)/,       // n0, n3, n6
+        P: /^([pP]\d+)/        // p0, p6, p9, p12, p24
+      };
+
+      for (const block of blocks) {
+        const text = (block.text || '').trim();
+        const isCheckbox = block.data?.checkboxListItem;
+        const isChecked = isCheckbox?.checked === 'checked';
+
+        // 合計点と部位を抽出（「合計点 : ２８点 部位：仙骨部」形式）
+        const totalMatch = text.match(/合計点\s*[:：]\s*[０-９\d]+点?\s*部位\s*[:：]\s*(.+)/);
+        if (totalMatch) {
+          // 全角数字を半角に変換
+          const scoreMatch = text.match(/合計点\s*[:：]\s*([０-９\d]+)/);
+          if (scoreMatch) {
+            totalScore = scoreMatch[1].replace(/[０-９]/g, s => String.fromCharCode(s.charCodeAt(0) - 0xFEE0));
+          }
+          site = totalMatch[1].trim();
+          continue;
+        }
+
+        // 別形式: 「部位：〇〇」が単独行の場合
+        const siteOnlyMatch = text.match(/^部位\s*[:：]\s*(.+)/);
+        if (siteOnlyMatch && !site) {
+          site = siteOnlyMatch[1].trim();
+          continue;
+        }
+
+        // チェックされたDESIGN-R項目を抽出
+        if (isChecked) {
+          for (const [key, pattern] of Object.entries(designRPatterns)) {
+            const match = text.trim().match(pattern);
+            if (match) {
+              designR[key] = match[1];
+              break;
+            }
+          }
+        }
+      }
+
+      // 合計点が記入されていない場合は計算で求める
+      // D（深さ）は合計点に含めない
+      if (!totalScore) {
+        const scoreItems = ['E', 'S', 'I', 'G', 'N', 'P'];
+        let calculatedScore = 0;
+        let hasAnyScore = false;
+
+        for (const key of scoreItems) {
+          const value = designR[key];
+          if (value) {
+            // コードから数字部分を抽出（例: e3 → 3, s12 → 12, i3C → 3）
+            const numMatch = value.match(/\d+/);
+            if (numMatch) {
+              calculatedScore += parseInt(numMatch[0], 10);
+              hasAnyScore = true;
+            }
+          }
+        }
+
+        if (hasAnyScore) {
+          totalScore = String(calculatedScore);
+        }
+      }
+
+      // 有効なデータがあるかチェック
+      const hasData = site || totalScore || Object.values(designR).some(v => v !== null);
+      if (!hasData) return null;
+
+      return { site, totalScore, designR };
+    } catch (e) {
+      console.error(`[${SCRIPT_NAME}] 褥瘡editorDataパースエラー:`, e);
+      return null;
+    }
+  }
+
+  // 褥瘡評価データをピボット形式（横軸日付）に変換
+  // 部位ごとにグループ化し、日付×項目のテーブルを構築
+  function pivotPressureUlcerData(records) {
+    if (!records || records.length === 0) {
+      return { dates: [], sites: [] };
+    }
+
+    // 日付を古い順にソート
+    const sortedRecords = [...records].sort((a, b) => (a.date || 0) - (b.date || 0));
+
+    // 全日付を抽出
+    const allDates = [...new Set(sortedRecords.map(r => r.date ? dateKey(r.date) : null).filter(Boolean))];
+
+    // 部位ごとにグループ化
+    // site → { dates: Map<dateKey, { totalScore, designR }> }
+    const siteMap = new Map();
+
+    for (const record of sortedRecords) {
+      if (!record.date) continue;
+      const site = record.site || '部位不明';
+      const dKey = dateKey(record.date);
+
+      if (!siteMap.has(site)) {
+        siteMap.set(site, new Map());
+      }
+
+      siteMap.get(site).set(dKey, {
+        totalScore: record.totalScore,
+        designR: record.designR
+      });
+    }
+
+    // ピボット形式に変換
+    const sites = [];
+    for (const [siteName, dateMap] of siteMap) {
+      sites.push({
+        name: siteName,
+        values: dateMap
+      });
+    }
+
+    return { dates: allDates, sites };
+  }
+
   // 全データ取得
   async function fetchAllData(patientUuid, hospitalizationStartDate) {
-    const [doctorRecords, nursingRecords, rehabRecords, calendarData, profile] = await Promise.all([
+    const [doctorRecords, nursingRecords, rehabRecords, calendarData, profile, pressureUlcerRecords] = await Promise.all([
       fetchDoctorRecords(patientUuid),
       fetchNursingRecords(patientUuid),
       fetchRehabRecords(patientUuid, hospitalizationStartDate),
       fetchCalendarData(patientUuid, hospitalizationStartDate),
-      fetchPatientProfile(patientUuid)
+      fetchPatientProfile(patientUuid),
+      fetchPressureUlcerRecords(patientUuid)
     ]);
 
     const allItems = [...doctorRecords, ...nursingRecords, ...rehabRecords, ...calendarData.timelineItems];
@@ -1308,6 +1993,9 @@
       timelineItems: allItems,
       activePrescriptions: calendarData.activePrescriptions,
       activeInjections: calendarData.activeInjections,
+      outsideInspectionReportGroups: calendarData.outsideInspectionReportGroups || [],
+      inHouseBloodTests: calendarData.inHouseBloodTests || [],
+      pressureUlcerRecords: pressureUlcerRecords || [],
       profile
     };
   }
@@ -1525,6 +2213,275 @@
 
         <!-- タイトル -->
         ${titles}
+      </svg>
+    `;
+  }
+
+  // SVGで血糖値折れ線グラフを描画
+  // 純粋関数：外部状態に依存せず、引数のみで動作
+  function renderBloodSugarSVG(data, minTime, maxTime, dateKeys, days = 7) {
+    const width = 700;
+    const chartHeight = 200;
+    const margin = { top: 35, right: 50, bottom: 25, left: 50 };
+    const chartWidth = width - margin.left - margin.right;
+    const totalHeight = margin.top + chartHeight + margin.bottom;
+
+    // Y軸スケール: 50〜250 mg/dL
+    const yMin = 50, yMax = 250;
+
+    // 基準値帯: 70〜130 mg/dL
+    const normalRange = { min: 70, max: 130 };
+
+    const timeRange = maxTime - minTime;
+    const xScale = (timestamp) => margin.left + ((timestamp - minTime) / timeRange) * chartWidth;
+
+    const createYScale = (min, max, top) => {
+      return (v) => top + chartHeight - ((v - min) / (max - min)) * chartHeight;
+    };
+
+    const chartTop = margin.top;
+    const yScale = createYScale(yMin, yMax, chartTop);
+
+    // 折れ線パス生成
+    const generatePath = (points, getValue, yScaleFn) => {
+      const validPoints = points.filter(p => getValue(p) !== null);
+      if (validPoints.length === 0) return '';
+      return validPoints.map((p, idx) => {
+        const x = xScale(p.timestamp);
+        const y = yScaleFn(getValue(p));
+        return `${idx === 0 ? 'M' : 'L'}${x},${y}`;
+      }).join(' ');
+    };
+
+    // ドット生成
+    const generateDots = (points, getValue, yScaleFn, color) => {
+      return points.map(p => {
+        const v = getValue(p);
+        if (v === null) return '';
+        const x = xScale(p.timestamp);
+        const y = yScaleFn(v);
+        return `<circle cx="${x}" cy="${y}" r="3" fill="${color}" />`;
+      }).join('');
+    };
+
+    // 日付境界線と日付ラベル生成
+    const dayBoundaries = dateKeys.map(key => {
+      const [year, month, day] = key.split('-').map(Number);
+      const dayStart = new Date(year, month - 1, day, 0, 0, 0).getTime();
+      return { key, timestamp: dayStart, month, day };
+    });
+
+    const generateDayLinesAndLabels = (top, height) => {
+      return dayBoundaries.map((d, i) => {
+        const x = xScale(d.timestamp);
+        if (x < margin.left || x > margin.left + chartWidth) return '';
+        const nextX = (i < dayBoundaries.length - 1)
+          ? xScale(dayBoundaries[i + 1].timestamp)
+          : margin.left + chartWidth;
+        const labelX = (x + nextX) / 2;
+        return `
+          <line x1="${x}" y1="${top}" x2="${x}" y2="${top + height}" stroke="#ddd" stroke-width="1" />
+          <text x="${labelX}" y="${top + height + 12}" text-anchor="middle" font-size="10" fill="#666">${d.month}/${d.day}</text>
+        `;
+      }).join('');
+    };
+
+    // Y軸目盛り生成
+    const generateYTicks = (min, max, step, top, color) => {
+      const ticks = [];
+      for (let v = min; v <= max; v += step) {
+        ticks.push(v);
+      }
+      const yScaleFn = createYScale(min, max, top);
+      return ticks.map(v => {
+        return `
+          <text x="${margin.left - 5}" y="${yScaleFn(v) + 3}" text-anchor="end" font-size="9" fill="${color}">${v}</text>
+          <text x="${margin.left + chartWidth + 5}" y="${yScaleFn(v) + 3}" text-anchor="start" font-size="9" fill="${color}">${v}</text>
+          <line x1="${margin.left}" y1="${yScaleFn(v)}" x2="${margin.left + chartWidth}" y2="${yScaleFn(v)}" stroke="#eee" stroke-dasharray="2,2" />
+        `;
+      }).join('');
+    };
+
+    // 基準値帯生成
+    const generateNormalBand = (rangeMin, rangeMax, scaleMin, scaleMax, top, color) => {
+      const clampedMin = Math.max(rangeMin, scaleMin);
+      const clampedMax = Math.min(rangeMax, scaleMax);
+      if (clampedMin >= clampedMax) return '';
+      const yScaleFn = createYScale(scaleMin, scaleMax, top);
+      const y1 = yScaleFn(clampedMax);
+      const y2 = yScaleFn(clampedMin);
+      const height = y2 - y1;
+      return `<rect x="${margin.left}" y="${y1}" width="${chartWidth}" height="${height}" fill="${color}" />`;
+    };
+
+    // 各時間帯の折れ線パス
+    const morningPath = generatePath(data, d => d.morning, yScale);
+    const noonPath = generatePath(data, d => d.noon, yScale);
+    const eveningPath = generatePath(data, d => d.evening, yScale);
+
+    // 30日表示時はドット非表示
+    const showDots = days !== 30;
+    const morningDots = showDots ? generateDots(data, d => d.morning, yScale, '#FF9800') : '';
+    const noonDots = showDots ? generateDots(data, d => d.noon, yScale, '#4CAF50') : '';
+    const eveningDots = showDots ? generateDots(data, d => d.evening, yScale, '#2196F3') : '';
+
+    // 基準値帯（70〜130 mg/dL）
+    const normalBand = generateNormalBand(normalRange.min, normalRange.max, yMin, yMax, chartTop, 'rgba(255, 152, 0, 0.15)');
+
+    // 凡例
+    const legend = `
+      <g transform="translate(${margin.left + chartWidth - 150}, ${chartTop - 25})">
+        <line x1="0" y1="0" x2="20" y2="0" stroke="#FF9800" stroke-width="2" />
+        <text x="25" y="4" font-size="10" fill="#666">朝</text>
+        <line x1="50" y1="0" x2="70" y2="0" stroke="#4CAF50" stroke-width="2" />
+        <text x="75" y="4" font-size="10" fill="#666">昼</text>
+        <line x1="100" y1="0" x2="120" y2="0" stroke="#2196F3" stroke-width="2" />
+        <text x="125" y="4" font-size="10" fill="#666">夕</text>
+      </g>
+    `;
+
+    return `
+      <svg width="${width}" height="${totalHeight}" style="display:block;margin:0 auto;">
+        <!-- 血糖グラフ -->
+        <rect x="${margin.left}" y="${chartTop}" width="${chartWidth}" height="${chartHeight}" fill="#fafafa" />
+        ${normalBand}
+        ${generateYTicks(yMin, yMax, 50, chartTop, '#666')}
+        ${generateDayLinesAndLabels(chartTop, chartHeight)}
+        <path d="${morningPath}" fill="none" stroke="#FF9800" stroke-width="2" />
+        <path d="${noonPath}" fill="none" stroke="#4CAF50" stroke-width="2" />
+        <path d="${eveningPath}" fill="none" stroke="#2196F3" stroke-width="2" />
+        ${morningDots}
+        ${noonDots}
+        ${eveningDots}
+        <rect x="${margin.left}" y="${chartTop}" width="${chartWidth}" height="${chartHeight}" fill="none" stroke="#ccc" />
+
+        <!-- タイトル -->
+        <text x="${margin.left}" y="${chartTop - 5}" font-size="11" font-weight="bold" fill="#333">血糖値 (mg/dL)</text>
+        ${legend}
+      </svg>
+    `;
+  }
+
+  // SVGで尿量折れ線グラフを描画
+  // 純粋関数：外部状態に依存せず、引数のみで動作
+  function renderUrineSVG(data, minTime, maxTime, dateKeys, days = 7) {
+    const width = 700;
+    const chartHeight = 200;
+    const margin = { top: 35, right: 50, bottom: 25, left: 50 };
+    const chartWidth = width - margin.left - margin.right;
+    const totalHeight = margin.top + chartHeight + margin.bottom;
+
+    // Y軸スケール: 0〜3000 mL
+    const yMin = 0, yMax = 3000;
+
+    // 正常範囲帯: 1000〜2000 mL
+    const normalRange = { min: 1000, max: 2000 };
+
+    const timeRange = maxTime - minTime;
+    const xScale = (timestamp) => margin.left + ((timestamp - minTime) / timeRange) * chartWidth;
+
+    const createYScale = (min, max, top) => {
+      return (v) => top + chartHeight - ((v - min) / (max - min)) * chartHeight;
+    };
+
+    const chartTop = margin.top;
+    const yScale = createYScale(yMin, yMax, chartTop);
+
+    // 折れ線パス生成
+    const generatePath = (points, getValue, yScaleFn) => {
+      const validPoints = points.filter(p => getValue(p) !== null);
+      if (validPoints.length === 0) return '';
+      return validPoints.map((p, idx) => {
+        const x = xScale(p.timestamp);
+        const y = yScaleFn(getValue(p));
+        return `${idx === 0 ? 'M' : 'L'}${x},${y}`;
+      }).join(' ');
+    };
+
+    // ドット生成
+    const generateDots = (points, getValue, yScaleFn, color) => {
+      return points.map(p => {
+        const v = getValue(p);
+        if (v === null) return '';
+        const x = xScale(p.timestamp);
+        const y = yScaleFn(v);
+        return `<circle cx="${x}" cy="${y}" r="3" fill="${color}" />`;
+      }).join('');
+    };
+
+    // 日付境界線と日付ラベル生成
+    const dayBoundaries = dateKeys.map(key => {
+      const [year, month, day] = key.split('-').map(Number);
+      const dayStart = new Date(year, month - 1, day, 0, 0, 0).getTime();
+      return { key, timestamp: dayStart, month, day };
+    });
+
+    const generateDayLinesAndLabels = (top, height) => {
+      return dayBoundaries.map((d, i) => {
+        const x = xScale(d.timestamp);
+        if (x < margin.left || x > margin.left + chartWidth) return '';
+        const nextX = (i < dayBoundaries.length - 1)
+          ? xScale(dayBoundaries[i + 1].timestamp)
+          : margin.left + chartWidth;
+        const labelX = (x + nextX) / 2;
+        return `
+          <line x1="${x}" y1="${top}" x2="${x}" y2="${top + height}" stroke="#ddd" stroke-width="1" />
+          <text x="${labelX}" y="${top + height + 12}" text-anchor="middle" font-size="10" fill="#666">${d.month}/${d.day}</text>
+        `;
+      }).join('');
+    };
+
+    // Y軸目盛り生成
+    const generateYTicks = (min, max, step, top, color) => {
+      const ticks = [];
+      for (let v = min; v <= max; v += step) {
+        ticks.push(v);
+      }
+      const yScaleFn = createYScale(min, max, top);
+      return ticks.map(v => {
+        return `
+          <text x="${margin.left - 5}" y="${yScaleFn(v) + 3}" text-anchor="end" font-size="9" fill="${color}">${v}</text>
+          <text x="${margin.left + chartWidth + 5}" y="${yScaleFn(v) + 3}" text-anchor="start" font-size="9" fill="${color}">${v}</text>
+          <line x1="${margin.left}" y1="${yScaleFn(v)}" x2="${margin.left + chartWidth}" y2="${yScaleFn(v)}" stroke="#eee" stroke-dasharray="2,2" />
+        `;
+      }).join('');
+    };
+
+    // 正常範囲帯生成
+    const generateNormalBand = (rangeMin, rangeMax, scaleMin, scaleMax, top, color) => {
+      const clampedMin = Math.max(rangeMin, scaleMin);
+      const clampedMax = Math.min(rangeMax, scaleMax);
+      if (clampedMin >= clampedMax) return '';
+      const yScaleFn = createYScale(scaleMin, scaleMax, top);
+      const y1 = yScaleFn(clampedMax);
+      const y2 = yScaleFn(clampedMin);
+      const height = y2 - y1;
+      return `<rect x="${margin.left}" y="${y1}" width="${chartWidth}" height="${height}" fill="${color}" />`;
+    };
+
+    // 尿量パス
+    const urinePath = generatePath(data, d => d.totalUrine, yScale);
+
+    // 30日表示時はドット非表示
+    const showDots = days !== 30;
+    const urineDots = showDots ? generateDots(data, d => d.totalUrine, yScale, '#607D8B') : '';
+
+    // 正常範囲帯（1000〜2000 mL）
+    const normalBand = generateNormalBand(normalRange.min, normalRange.max, yMin, yMax, chartTop, 'rgba(96, 125, 139, 0.15)');
+
+    return `
+      <svg width="${width}" height="${totalHeight}" style="display:block;margin:0 auto;">
+        <!-- 尿量グラフ -->
+        <rect x="${margin.left}" y="${chartTop}" width="${chartWidth}" height="${chartHeight}" fill="#fafafa" />
+        ${normalBand}
+        ${generateYTicks(yMin, yMax, 500, chartTop, '#666')}
+        ${generateDayLinesAndLabels(chartTop, chartHeight)}
+        <path d="${urinePath}" fill="none" stroke="#607D8B" stroke-width="2" />
+        ${urineDots}
+        <rect x="${margin.left}" y="${chartTop}" width="${chartWidth}" height="${chartHeight}" fill="none" stroke="#ccc" />
+
+        <!-- タイトル -->
+        <text x="${margin.left}" y="${chartTop - 5}" font-size="11" font-weight="bold" fill="#333">尿量 (mL)</text>
       </svg>
     `;
   }
@@ -1782,13 +2739,15 @@
       background: transparent;
       border: none;
       padding: 2px 6px;
-      font-size: 14px;
+      font-size: 11px;
+      color: #666;
       cursor: pointer;
-      opacity: 0.6;
-      transition: opacity 0.2s;
+      opacity: 0.7;
+      transition: opacity 0.2s, color 0.2s;
     }
     #patient-timeline-modal .edit-record-btn:hover {
       opacity: 1;
+      color: #1976D2;
     }
     #patient-timeline-modal .column-content {
       flex: 1;
@@ -2191,12 +3150,17 @@
     let searchText = '';
     let selectedDateKey = null;
     let vitalGraphState = null; // { close, overlayEl, dateKey, days } グラフモーダルの状態
+    let bloodSugarGraphState = null; // { close, overlayEl, dateKey, days } 血糖グラフモーダルの状態
+    let urineGraphState = null; // { close, overlayEl, dateKey, days } 尿量グラフモーダルの状態
     let isLoading = true;
     let doctorColorMap = new Map(); // 担当医→色のマッピング
     let selectedDoctors = new Set(); // 選択中の担当医（正規化名）。空=全員表示
     // 固定情報エリア用
     let activePrescriptions = [];
     let activeInjections = [];
+    let outsideInspectionReportGroups = [];
+    let inHouseBloodTests = [];
+    let pressureUlcerRecords = [];
     let patientProfile = null;
     // 固定情報エリアのUI状態
     let fixedInfoCollapsed = false;
@@ -2647,6 +3611,12 @@
         if (vitalGraphState) {
           showVitalGraph(selectedDateKey, vitalGraphState.days);
         }
+        if (bloodSugarGraphState) {
+          showBloodSugarGraph(selectedDateKey, bloodSugarGraphState.days);
+        }
+        if (urineGraphState) {
+          showUrineGraph(selectedDateKey, urineGraphState.days);
+        }
       }
     }
 
@@ -2746,6 +3716,9 @@
       // 固定情報をリセット
       activePrescriptions = [];
       activeInjections = [];
+      outsideInspectionReportGroups = [];
+      inHouseBloodTests = [];
+      pressureUlcerRecords = [];
       patientProfile = null;
       // 注: selectedDoctors はリセットしない（担当医フィルタは維持）
       // キャッシュをクリア
@@ -2777,6 +3750,13 @@
     async function switchToTimeline(patient) {
       currentView = 'timeline';
       selectedPatient = patient;
+
+      // グラフ用キャッシュをクリア（前の患者のデータが残らないようにする）
+      cachedBloodSugarByDate.clear();
+      cachedUrineByDate.clear();
+      cachedVitalsByDate.clear();
+      // 選択日付もリセット（新患者の入院期間外を参照しないように）
+      selectedDateKey = null;
 
       backBtn.style.display = 'block';
       updateNavButtons();
@@ -2854,7 +3834,65 @@
         }
       }
 
-      loadTimelineData(patient.uuid);
+      // 血糖グラフモーダルが開いていればローディング表示に切り替え
+      if (bloodSugarGraphState && bloodSugarGraphState.overlayEl && bloodSugarGraphState.overlayEl.parentNode) {
+        const titleEl = bloodSugarGraphState.overlayEl.querySelector('.henry-modal-title');
+        if (titleEl) {
+          titleEl.style.display = 'flex';
+          titleEl.style.justifyContent = 'space-between';
+          titleEl.style.alignItems = 'center';
+          titleEl.style.width = '100%';
+          titleEl.innerHTML = `
+            <span>血糖推移</span>
+            <span style="font-size: 14px; color: #666;">${patient.fullName}</span>
+          `;
+          const bodyEl = titleEl.nextElementSibling;
+          if (bodyEl) {
+            bodyEl.innerHTML = `
+              <div style="display: flex; justify-content: center; gap: 8px; margin-bottom: 16px;">
+                ${[7, 14, 30].map(d => `
+                  <button disabled style="padding: 6px 16px; border: none; border-radius: 4px;
+                    background: #e0e0e0; color: #999; font-size: 13px;">${d}日</button>
+                `).join('')}
+              </div>
+              <div style="display: flex; justify-content: center; align-items: center; min-height: 400px; color: #666;">
+                グラフを生成中...
+              </div>
+            `;
+          }
+        }
+      }
+
+      // 尿量グラフモーダルが開いていればローディング表示に切り替え
+      if (urineGraphState && urineGraphState.overlayEl && urineGraphState.overlayEl.parentNode) {
+        const titleEl = urineGraphState.overlayEl.querySelector('.henry-modal-title');
+        if (titleEl) {
+          titleEl.style.display = 'flex';
+          titleEl.style.justifyContent = 'space-between';
+          titleEl.style.alignItems = 'center';
+          titleEl.style.width = '100%';
+          titleEl.innerHTML = `
+            <span>尿量推移</span>
+            <span style="font-size: 14px; color: #666;">${patient.fullName}</span>
+          `;
+          const bodyEl = titleEl.nextElementSibling;
+          if (bodyEl) {
+            bodyEl.innerHTML = `
+              <div style="display: flex; justify-content: center; gap: 8px; margin-bottom: 16px;">
+                ${[7, 14, 30].map(d => `
+                  <button disabled style="padding: 6px 16px; border: none; border-radius: 4px;
+                    background: #e0e0e0; color: #999; font-size: 13px;">${d}日</button>
+                `).join('')}
+              </div>
+              <div style="display: flex; justify-content: center; align-items: center; min-height: 400px; color: #666;">
+                グラフを生成中...
+              </div>
+            `;
+          }
+        }
+      }
+
+      await loadTimelineData(patient.uuid);
     }
 
     // 患者検索イベント設定
@@ -3104,7 +4142,7 @@
       // カテゴリのグループ分け
       const filterGroups = {
         'record-filters': ['doctor', 'nursing', 'rehab'],
-        'data-filters': ['vital', 'meal', 'urine'],
+        'data-filters': ['vital', 'meal', 'urine', 'bloodSugar'],
         'order-filters': ['prescription', 'injection']
       };
 
@@ -3227,7 +4265,7 @@
 
       // 記録とデータ（バイタル+食事摂取+排泄）に分類
       const records = selectedItems.filter(item => RECORD_CATEGORIES.includes(item.category));
-      const dataItems = selectedItems.filter(item => item.category === 'vital' || item.category === 'meal' || item.category === 'urine');
+      const dataItems = selectedItems.filter(item => item.category === 'vital' || item.category === 'meal' || item.category === 'urine' || item.category === 'bloodSugar');
 
       // 記録は時系列（新→古）でソート
       records.sort((a, b) => (b.date || 0) - (a.date || 0));
@@ -3257,6 +4295,30 @@
         };
       });
 
+      // 血糖カードにクリックイベント追加（グラフ表示）
+      vitalContent.querySelectorAll('.record-card[data-record-id^="bloodSugar-"]').forEach(card => {
+        card.style.cursor = 'pointer';
+        card.title = 'クリックで血糖推移グラフを表示';
+        card.onclick = () => {
+          // data-record-id="bloodSugar-YYYY-MM-DD" から日付を抽出
+          const recordId = card.dataset.recordId;
+          const dateStr = recordId.replace('bloodSugar-', '');
+          showBloodSugarGraph(dateStr);
+        };
+      });
+
+      // 尿量カードにクリックイベント追加（グラフ表示）
+      vitalContent.querySelectorAll('.record-card[data-record-id^="urine-"]').forEach(card => {
+        card.style.cursor = 'pointer';
+        card.title = 'クリックで尿量推移グラフを表示';
+        card.onclick = () => {
+          // data-record-id="urine-YYYY-MM-DD" から日付を抽出
+          const recordId = card.dataset.recordId;
+          const dateStr = recordId.replace('urine-', '');
+          showUrineGraph(dateStr);
+        };
+      });
+
       // 処方・注射カラム描画
       renderPrescriptionOrderColumn(selectedDateKey);
     }
@@ -3267,7 +4329,8 @@
       // mealカテゴリは時刻を非表示（食事データには時刻情報がないため）
       // vitalカテゴリは時刻を非表示（テーブル内の各行に時刻があるため冗長）
       // urineカテゴリは時刻を非表示（尿量データには時刻情報がないため）
-      const time = (item.category === 'meal' || item.category === 'vital' || item.category === 'urine') ? '' :
+      // bloodSugarカテゴリは時刻を非表示（日付ベースのデータのため）
+      const time = (item.category === 'meal' || item.category === 'vital' || item.category === 'urine' || item.category === 'bloodSugar') ? '' :
         (item.date ? `${item.date.getHours()}:${String(item.date.getMinutes()).padStart(2, '0')}` : '-');
 
       // バイタルカードは体温ハイライト用HTMLを含むためエスケープしない
@@ -3278,8 +4341,11 @@
       // 医師記録かつ自分が作成したものに編集ボタンを表示
       const canEdit = item.category === 'doctor' && item.creatorUuid && myUuid && item.creatorUuid === myUuid;
       const editButton = canEdit
-        ? `<button class="edit-record-btn" data-record-id="${item.id}" title="編集">✏️</button>`
+        ? `<button class="edit-record-btn" data-record-id="${item.id}">編集</button>`
         : '';
+
+      // 全カテゴリでバッジ非表示（カードの背景色・左ボーダーで区別可能）
+      const categoryBadge = '';
 
       return `
         <div class="record-card" style="background: ${cat.bgColor}; border-left-color: ${cat.color};" data-record-id="${item.id || ''}">
@@ -3287,11 +4353,54 @@
             <span class="record-card-time">${time}</span>
             <span class="record-card-author">${escapeHtml(item.author.replace(/\u3000/g, ' '))}</span>
             ${editButton}
-            <span class="record-card-category" style="background: ${cat.color}; color: white;">${cat.name}</span>
+            ${categoryBadge}
           </div>
           <div class="record-card-text">${textHtml}</div>
         </div>
       `;
+    }
+
+    // 入院していない患者の場合、開いているグラフモーダルにメッセージを表示
+    function updateGraphModalsForNotAdmitted() {
+      const message = 'まだ入院していません';
+      const messageHtml = `
+        <div style="text-align: center; padding: 60px 20px; color: #666;">
+          ${message}
+        </div>
+      `;
+
+      // バイタルグラフ
+      if (vitalGraphState?.overlayEl?.parentNode) {
+        const titleEl = vitalGraphState.overlayEl.querySelector('.henry-modal-title');
+        if (titleEl) {
+          const bodyEl = titleEl.nextElementSibling;
+          if (bodyEl) {
+            bodyEl.innerHTML = messageHtml;
+          }
+        }
+      }
+
+      // 血糖グラフ
+      if (bloodSugarGraphState?.overlayEl?.parentNode) {
+        const titleEl = bloodSugarGraphState.overlayEl.querySelector('.henry-modal-title');
+        if (titleEl) {
+          const bodyEl = titleEl.nextElementSibling;
+          if (bodyEl) {
+            bodyEl.innerHTML = messageHtml;
+          }
+        }
+      }
+
+      // 尿量グラフ
+      if (urineGraphState?.overlayEl?.parentNode) {
+        const titleEl = urineGraphState.overlayEl.querySelector('.henry-modal-title');
+        if (titleEl) {
+          const bodyEl = titleEl.nextElementSibling;
+          if (bodyEl) {
+            bodyEl.innerHTML = messageHtml;
+          }
+        }
+      }
     }
 
     // バイタル経時変化グラフを表示
@@ -3340,11 +4449,58 @@
       // データがあるか確認
       const hasData = allVitals.some(d => d.T !== null || d.BPupper !== null || d.P !== null);
       if (!hasData) {
-        // モーダルが既に開いている場合はデータなしでも閉じない（トーストのみ）
-        if (vitalGraphState) {
-          window.HenryCore.ui.showToast('この期間のバイタルデータがありません', 'info');
+        // モーダルが既に開いている場合はモーダル内に「データなし」を表示
+        if (vitalGraphState && vitalGraphState.overlayEl && vitalGraphState.overlayEl.parentNode) {
+          const titleEl = vitalGraphState.overlayEl.querySelector('.henry-modal-title');
+          if (titleEl) {
+            titleEl.style.display = 'flex';
+            titleEl.style.justifyContent = 'space-between';
+            titleEl.style.alignItems = 'center';
+            titleEl.style.width = '100%';
+            titleEl.innerHTML = `
+              <span>バイタル推移</span>
+              <span style="font-size: 14px; color: #666;">${selectedPatient?.fullName || ''}</span>
+            `;
+            const bodyEl = titleEl.nextElementSibling;
+            if (bodyEl) {
+              // ボタングループHTML（選択維持）
+              const noDataButtonGroupHtml = `
+                <div style="display: flex; justify-content: center; gap: 8px; margin-bottom: 16px;">
+                  ${[7, 14, 30].map(d => `
+                    <button
+                      class="vital-days-btn"
+                      data-days="${d}"
+                      style="
+                        padding: 6px 16px;
+                        border: none;
+                        border-radius: 4px;
+                        cursor: pointer;
+                        font-size: 13px;
+                        ${d === days
+                          ? 'background: #1976d2; color: white;'
+                          : 'background: #e0e0e0; color: #333;'}
+                      "
+                    >${d}日</button>
+                  `).join('')}
+                </div>
+              `;
+              bodyEl.innerHTML = noDataButtonGroupHtml + `
+                <div style="text-align: center; padding: 60px 20px; color: #666;">
+                  この期間のバイタルデータがありません
+                </div>
+              `;
+              // ボタンにイベントを再設定
+              bodyEl.querySelectorAll('.vital-days-btn').forEach(btn => {
+                btn.onclick = () => {
+                  const newDays = parseInt(btn.dataset.days, 10);
+                  showVitalGraph(endDateStr, newDays);
+                };
+              });
+            }
+          }
           return;
         }
+        // 新規オープン時はトースト
         window.HenryCore.ui.showToast('この期間のバイタルデータがありません', 'info');
         return;
       }
@@ -3469,6 +4625,456 @@
       }
     }
 
+    // 血糖経時変化グラフを表示
+    function showBloodSugarGraph(endDateStr, days = 7) {
+      // endDateStrは YYYY-MM-DD 形式
+      const endDate = new Date(endDateStr + 'T23:59:59');
+      const startDate = new Date(endDate);
+      startDate.setDate(startDate.getDate() - (days - 1));
+      startDate.setHours(0, 0, 0, 0);
+
+      // 過去N日分の日付キーを生成
+      const dateKeys = [];
+      const dateKeySet = new Set();
+      for (let i = days - 1; i >= 0; i--) {
+        const d = new Date(endDate);
+        d.setDate(d.getDate() - i);
+        const key = dateKey(d);
+        dateKeys.push(key);
+        dateKeySet.add(key);
+      }
+
+      // allItems から血糖データを収集（キャッシュ不要・バイタルと同じパターン）
+      const allBloodSugar = [];
+      for (const item of allItems) {
+        if (item.category !== 'bloodSugar') continue;
+        const itemKey = dateKey(item.date);
+        if (!dateKeySet.has(itemKey)) continue;
+
+        // 日付の正午をタイムスタンプとして使用（グラフのX軸用）
+        const [year, month, day] = itemKey.split('-').map(Number);
+        const timestamp = new Date(year, month - 1, day, 12, 0, 0).getTime();
+
+        // テキストから血糖値を抽出（例: 【血糖値】朝100　昼200(トレシーバ6U)　夕90）
+        const text = item.text;
+        const morningMatch = text.match(/朝(\d+)/);
+        const noonMatch = text.match(/昼(\d+)/);
+        const eveningMatch = text.match(/夕(\d+)/);
+
+        allBloodSugar.push({
+          timestamp,
+          dateKey: itemKey,
+          morning: morningMatch ? parseInt(morningMatch[1], 10) : null,
+          noon: noonMatch ? parseInt(noonMatch[1], 10) : null,
+          evening: eveningMatch ? parseInt(eveningMatch[1], 10) : null
+        });
+      }
+
+      // 時系列でソート
+      allBloodSugar.sort((a, b) => a.timestamp - b.timestamp);
+
+      // データがあるか確認
+      const hasData = allBloodSugar.some(d => d.morning !== null || d.noon !== null || d.evening !== null);
+      if (!hasData) {
+        // モーダルが既に開いている場合はモーダル内に「データなし」を表示
+        if (bloodSugarGraphState && bloodSugarGraphState.overlayEl && bloodSugarGraphState.overlayEl.parentNode) {
+          const titleEl = bloodSugarGraphState.overlayEl.querySelector('.henry-modal-title');
+          if (titleEl) {
+            titleEl.style.display = 'flex';
+            titleEl.style.justifyContent = 'space-between';
+            titleEl.style.alignItems = 'center';
+            titleEl.style.width = '100%';
+            titleEl.innerHTML = `
+              <span>血糖推移</span>
+              <span style="font-size: 14px; color: #666;">${selectedPatient?.fullName || ''}</span>
+            `;
+            const bodyEl = titleEl.nextElementSibling;
+            if (bodyEl) {
+              // ボタングループHTML（選択維持）
+              const noDataButtonGroupHtml = `
+                <div style="display: flex; justify-content: center; gap: 8px; margin-bottom: 16px;">
+                  ${[7, 14, 30].map(d => `
+                    <button
+                      class="blood-sugar-days-btn"
+                      data-days="${d}"
+                      style="
+                        padding: 6px 16px;
+                        border: none;
+                        border-radius: 4px;
+                        cursor: pointer;
+                        font-size: 13px;
+                        ${d === days
+                          ? 'background: #FF9800; color: white;'
+                          : 'background: #e0e0e0; color: #333;'}
+                      "
+                    >${d}日</button>
+                  `).join('')}
+                </div>
+              `;
+              bodyEl.innerHTML = noDataButtonGroupHtml + `
+                <div style="text-align: center; padding: 60px 20px; color: #666;">
+                  この期間の血糖データがありません
+                </div>
+              `;
+              // ボタンにイベントを再設定
+              bodyEl.querySelectorAll('.blood-sugar-days-btn').forEach(btn => {
+                btn.onclick = () => {
+                  const newDays = parseInt(btn.dataset.days, 10);
+                  showBloodSugarGraph(endDateStr, newDays);
+                };
+              });
+            }
+          }
+          return;
+        }
+        // 新規オープン時はトースト
+        window.HenryCore.ui.showToast('この期間の血糖データがありません', 'info');
+        return;
+      }
+
+      // 期間表示用の日付フォーマット
+      const startLabel = `${parseInt(dateKeys[0].split('-')[1])}/${parseInt(dateKeys[0].split('-')[2])}`;
+      const endLabel = `${parseInt(dateKeys[dateKeys.length - 1].split('-')[1])}/${parseInt(dateKeys[dateKeys.length - 1].split('-')[2])}`;
+
+      // SVG生成
+      const svgHtml = renderBloodSugarSVG(allBloodSugar, startDate.getTime(), endDate.getTime(), dateKeys, days);
+
+      // ボタングループHTML
+      const buttonGroupHtml = `
+        <div style="display: flex; justify-content: center; gap: 8px; margin-bottom: 16px;">
+          ${[7, 14, 30].map(d => `
+            <button
+              class="blood-sugar-days-btn"
+              data-days="${d}"
+              style="
+                padding: 6px 16px;
+                border: none;
+                border-radius: 4px;
+                cursor: pointer;
+                font-size: 13px;
+                ${d === days
+                  ? 'background: #FF9800; color: white;'
+                  : 'background: #e0e0e0; color: #333;'}
+              "
+            >${d}日</button>
+          `).join('')}
+        </div>
+      `;
+
+      // モーダルが既に開いている場合はコンテンツのみ更新
+      if (bloodSugarGraphState && bloodSugarGraphState.overlayEl && bloodSugarGraphState.overlayEl.parentNode) {
+        bloodSugarGraphState.dateKey = endDateStr;
+        bloodSugarGraphState.days = days;
+        // タイトル更新（患者名を右寄せで表示）
+        const titleEl = bloodSugarGraphState.overlayEl.querySelector('.henry-modal-title');
+        if (titleEl) {
+          titleEl.style.display = 'flex';
+          titleEl.style.justifyContent = 'space-between';
+          titleEl.style.alignItems = 'center';
+          titleEl.style.width = '100%';
+          titleEl.innerHTML = `
+            <span>血糖推移（${startLabel} - ${endLabel}）</span>
+            <span style="font-size: 14px; color: #666;">${selectedPatient?.fullName || ''}</span>
+          `;
+        }
+        // コンテンツ更新（ボタングループ + SVG）
+        const bodyEl = titleEl?.nextElementSibling;
+        if (bodyEl) {
+          bodyEl.innerHTML = buttonGroupHtml + svgHtml;
+          // ボタンにイベントを再設定
+          bodyEl.querySelectorAll('.blood-sugar-days-btn').forEach(btn => {
+            btn.onclick = () => {
+              const newDays = parseInt(btn.dataset.days, 10);
+              showBloodSugarGraph(endDateStr, newDays);
+            };
+          });
+        }
+        return;
+      }
+
+      // 新規モーダル作成
+      const svgContainer = document.createElement('div');
+      svgContainer.innerHTML = buttonGroupHtml + svgHtml;
+
+      // ボタンにクリックイベントを設定
+      svgContainer.querySelectorAll('.blood-sugar-days-btn').forEach(btn => {
+        btn.onclick = () => {
+          const newDays = parseInt(btn.dataset.days, 10);
+          showBloodSugarGraph(endDateStr, newDays);
+        };
+      });
+
+      const { close } = window.HenryCore.ui.showModal({
+        title: `血糖推移（${startLabel} - ${endLabel}）`,
+        content: svgContainer,
+        width: '750px'
+      });
+
+      // モーダルのoverlay要素を取得（最後に追加されたhenry-modal-overlay）
+      const overlayEl = document.querySelector('.henry-modal-overlay:last-of-type');
+
+      // タイトルに患者名を追加（右寄せ）
+      if (overlayEl && selectedPatient) {
+        const titleEl = overlayEl.querySelector('.henry-modal-title');
+        if (titleEl) {
+          titleEl.style.display = 'flex';
+          titleEl.style.justifyContent = 'space-between';
+          titleEl.style.alignItems = 'center';
+          titleEl.style.width = '100%';
+          titleEl.innerHTML = `
+            <span>血糖推移（${startLabel} - ${endLabel}）</span>
+            <span style="font-size: 14px; color: #666;">${selectedPatient.fullName}</span>
+          `;
+        }
+      }
+
+      bloodSugarGraphState = {
+        close,
+        overlayEl,
+        dateKey: endDateStr,
+        days
+      };
+
+      // モーダルが閉じられたら状態をリセット（MutationObserverで監視）
+      if (overlayEl) {
+        const observer = new MutationObserver((mutations) => {
+          for (const mutation of mutations) {
+            for (const removed of mutation.removedNodes) {
+              if (removed === overlayEl) {
+                bloodSugarGraphState = null;
+                observer.disconnect();
+                return;
+              }
+            }
+          }
+        });
+        observer.observe(document.body, { childList: true });
+      }
+    }
+
+    // 尿量経時変化グラフを表示
+    function showUrineGraph(endDateStr, days = 7) {
+      // endDateStrは YYYY-MM-DD 形式
+      const endDate = new Date(endDateStr + 'T23:59:59');
+      const startDate = new Date(endDate);
+      startDate.setDate(startDate.getDate() - (days - 1));
+      startDate.setHours(0, 0, 0, 0);
+
+      // 過去N日分の日付キーを生成
+      const dateKeys = [];
+      const dateKeySet = new Set();
+      for (let i = days - 1; i >= 0; i--) {
+        const d = new Date(endDate);
+        d.setDate(d.getDate() - i);
+        const key = dateKey(d);
+        dateKeys.push(key);
+        dateKeySet.add(key);
+      }
+
+      // allItems から尿量データを収集（キャッシュ不要・バイタルと同じパターン）
+      const allUrine = [];
+      for (const item of allItems) {
+        if (item.category !== 'urine') continue;
+        const itemKey = dateKey(item.date);
+        if (!dateKeySet.has(itemKey)) continue;
+
+        // 日付の正午をタイムスタンプとして使用（グラフのX軸用）
+        const [year, month, day] = itemKey.split('-').map(Number);
+        const timestamp = new Date(year, month - 1, day, 12, 0, 0).getTime();
+
+        // テキストから尿量を抽出（例: 【尿量】1500mL）
+        const match = item.text.match(/【尿量】(\d+)/);
+        const totalUrine = match ? parseInt(match[1], 10) : 0;
+
+        allUrine.push({
+          timestamp,
+          dateKey: itemKey,
+          totalUrine
+        });
+      }
+
+      // 時系列でソート
+      allUrine.sort((a, b) => a.timestamp - b.timestamp);
+
+      // データがあるか確認
+      const hasData = allUrine.some(d => d.totalUrine !== null);
+      if (!hasData) {
+        // モーダルが既に開いている場合はモーダル内に「データなし」を表示
+        if (urineGraphState && urineGraphState.overlayEl && urineGraphState.overlayEl.parentNode) {
+          const titleEl = urineGraphState.overlayEl.querySelector('.henry-modal-title');
+          if (titleEl) {
+            titleEl.style.display = 'flex';
+            titleEl.style.justifyContent = 'space-between';
+            titleEl.style.alignItems = 'center';
+            titleEl.style.width = '100%';
+            titleEl.innerHTML = `
+              <span>尿量推移</span>
+              <span style="font-size: 14px; color: #666;">${selectedPatient?.fullName || ''}</span>
+            `;
+            const bodyEl = titleEl.nextElementSibling;
+            if (bodyEl) {
+              // ボタングループHTML（選択維持）
+              const noDataButtonGroupHtml = `
+                <div style="display: flex; justify-content: center; gap: 8px; margin-bottom: 16px;">
+                  ${[7, 14, 30].map(d => `
+                    <button
+                      class="urine-days-btn"
+                      data-days="${d}"
+                      style="
+                        padding: 6px 16px;
+                        border: none;
+                        border-radius: 4px;
+                        cursor: pointer;
+                        font-size: 13px;
+                        ${d === days
+                          ? 'background: #607D8B; color: white;'
+                          : 'background: #e0e0e0; color: #333;'}
+                      "
+                    >${d}日</button>
+                  `).join('')}
+                </div>
+              `;
+              bodyEl.innerHTML = noDataButtonGroupHtml + `
+                <div style="text-align: center; padding: 60px 20px; color: #666;">
+                  この期間の尿量データがありません
+                </div>
+              `;
+              // ボタンにイベントを再設定
+              bodyEl.querySelectorAll('.urine-days-btn').forEach(btn => {
+                btn.onclick = () => {
+                  const newDays = parseInt(btn.dataset.days, 10);
+                  showUrineGraph(endDateStr, newDays);
+                };
+              });
+            }
+          }
+          return;
+        }
+        // 新規オープン時はトースト
+        window.HenryCore.ui.showToast('この期間の尿量データがありません', 'info');
+        return;
+      }
+
+      // 期間表示用の日付フォーマット
+      const startLabel = `${parseInt(dateKeys[0].split('-')[1])}/${parseInt(dateKeys[0].split('-')[2])}`;
+      const endLabel = `${parseInt(dateKeys[dateKeys.length - 1].split('-')[1])}/${parseInt(dateKeys[dateKeys.length - 1].split('-')[2])}`;
+
+      // SVG生成
+      const svgHtml = renderUrineSVG(allUrine, startDate.getTime(), endDate.getTime(), dateKeys, days);
+
+      // ボタングループHTML
+      const buttonGroupHtml = `
+        <div style="display: flex; justify-content: center; gap: 8px; margin-bottom: 16px;">
+          ${[7, 14, 30].map(d => `
+            <button
+              class="urine-days-btn"
+              data-days="${d}"
+              style="
+                padding: 6px 16px;
+                border: none;
+                border-radius: 4px;
+                cursor: pointer;
+                font-size: 13px;
+                ${d === days
+                  ? 'background: #607D8B; color: white;'
+                  : 'background: #e0e0e0; color: #333;'}
+              "
+            >${d}日</button>
+          `).join('')}
+        </div>
+      `;
+
+      // モーダルが既に開いている場合はコンテンツのみ更新
+      if (urineGraphState && urineGraphState.overlayEl && urineGraphState.overlayEl.parentNode) {
+        urineGraphState.dateKey = endDateStr;
+        urineGraphState.days = days;
+        // タイトル更新（患者名を右寄せで表示）
+        const titleEl = urineGraphState.overlayEl.querySelector('.henry-modal-title');
+        if (titleEl) {
+          titleEl.style.display = 'flex';
+          titleEl.style.justifyContent = 'space-between';
+          titleEl.style.alignItems = 'center';
+          titleEl.style.width = '100%';
+          titleEl.innerHTML = `
+            <span>尿量推移（${startLabel} - ${endLabel}）</span>
+            <span style="font-size: 14px; color: #666;">${selectedPatient?.fullName || ''}</span>
+          `;
+        }
+        // コンテンツ更新（ボタングループ + SVG）
+        const bodyEl = titleEl?.nextElementSibling;
+        if (bodyEl) {
+          bodyEl.innerHTML = buttonGroupHtml + svgHtml;
+          // ボタンにイベントを再設定
+          bodyEl.querySelectorAll('.urine-days-btn').forEach(btn => {
+            btn.onclick = () => {
+              const newDays = parseInt(btn.dataset.days, 10);
+              showUrineGraph(endDateStr, newDays);
+            };
+          });
+        }
+        return;
+      }
+
+      // 新規モーダル作成
+      const svgContainer = document.createElement('div');
+      svgContainer.innerHTML = buttonGroupHtml + svgHtml;
+
+      // ボタンにクリックイベントを設定
+      svgContainer.querySelectorAll('.urine-days-btn').forEach(btn => {
+        btn.onclick = () => {
+          const newDays = parseInt(btn.dataset.days, 10);
+          showUrineGraph(endDateStr, newDays);
+        };
+      });
+
+      const { close } = window.HenryCore.ui.showModal({
+        title: `尿量推移（${startLabel} - ${endLabel}）`,
+        content: svgContainer,
+        width: '750px'
+      });
+
+      // モーダルのoverlay要素を取得（最後に追加されたhenry-modal-overlay）
+      const overlayEl = document.querySelector('.henry-modal-overlay:last-of-type');
+
+      // タイトルに患者名を追加（右寄せ）
+      if (overlayEl && selectedPatient) {
+        const titleEl = overlayEl.querySelector('.henry-modal-title');
+        if (titleEl) {
+          titleEl.style.display = 'flex';
+          titleEl.style.justifyContent = 'space-between';
+          titleEl.style.alignItems = 'center';
+          titleEl.style.width = '100%';
+          titleEl.innerHTML = `
+            <span>尿量推移（${startLabel} - ${endLabel}）</span>
+            <span style="font-size: 14px; color: #666;">${selectedPatient.fullName}</span>
+          `;
+        }
+      }
+
+      urineGraphState = {
+        close,
+        overlayEl,
+        dateKey: endDateStr,
+        days
+      };
+
+      // モーダルが閉じられたら状態をリセット（MutationObserverで監視）
+      if (overlayEl) {
+        const observer = new MutationObserver((mutations) => {
+          for (const mutation of mutations) {
+            for (const removed of mutation.removedNodes) {
+              if (removed === overlayEl) {
+                urineGraphState = null;
+                observer.disconnect();
+                return;
+              }
+            }
+          }
+        });
+        observer.observe(document.body, { childList: true });
+      }
+    }
+
     // 固定情報エリアを描画（プロフィールのみ）
     function renderFixedInfo() {
       // プロフィール
@@ -3493,6 +5099,881 @@
       } else {
         profileContent.innerHTML = '<span class="empty">プロフィールなし</span>';
       }
+
+      // 固定情報カラム（右端サイドパネル）を描画
+      renderFixedInfoColumn();
+    }
+
+    // 固定情報カラム（右端サイドパネル）を描画
+    function renderFixedInfoColumn() {
+      let html = '';
+
+      // 血液検査ボタン
+      html += `
+        <button id="blood-test-btn" style="
+          width: 100%;
+          padding: 12px 16px;
+          background: linear-gradient(135deg, #e3f2fd 0%, #bbdefb 100%);
+          border: 1px solid #90caf9;
+          border-radius: 8px;
+          font-size: 14px;
+          font-weight: 500;
+          color: #1565c0;
+          cursor: pointer;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          gap: 8px;
+          transition: all 0.2s;
+          margin-bottom: 12px;
+        ">
+          血液検査結果
+        </button>
+      `;
+
+      // 褥瘡評価ボタン
+      html += `
+        <button id="pressure-ulcer-btn" style="
+          width: 100%;
+          padding: 12px 16px;
+          background: linear-gradient(135deg, #fce4ec 0%, #f8bbd9 100%);
+          border: 1px solid #f48fb1;
+          border-radius: 8px;
+          font-size: 14px;
+          font-weight: 500;
+          color: #c2185b;
+          cursor: pointer;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          gap: 8px;
+          transition: all 0.2s;
+          margin-bottom: 12px;
+        ">
+          褥瘡評価
+        </button>
+      `;
+
+      // AIサマリー用データボタン
+      html += `
+        <button id="ai-data-btn" style="
+          width: 100%;
+          padding: 12px 16px;
+          background: linear-gradient(135deg, #e8f5e9 0%, #c8e6c9 100%);
+          border: 1px solid #81c784;
+          border-radius: 8px;
+          font-size: 14px;
+          font-weight: 500;
+          color: #2e7d32;
+          cursor: pointer;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          gap: 8px;
+          transition: all 0.2s;
+          margin-bottom: 12px;
+        ">
+          サマリー用データ
+        </button>
+      `;
+
+      fixedInfoContent.innerHTML = html;
+
+      // 血液検査ボタンのイベント
+      const bloodTestBtn = fixedInfoContent.querySelector('#blood-test-btn');
+      if (bloodTestBtn) {
+        bloodTestBtn.addEventListener('mouseover', () => {
+          bloodTestBtn.style.background = 'linear-gradient(135deg, #bbdefb 0%, #90caf9 100%)';
+        });
+        bloodTestBtn.addEventListener('mouseout', () => {
+          bloodTestBtn.style.background = 'linear-gradient(135deg, #e3f2fd 0%, #bbdefb 100%)';
+        });
+        bloodTestBtn.addEventListener('click', showBloodTestModal);
+      }
+
+      // 褥瘡評価ボタンのイベント
+      const pressureUlcerBtn = fixedInfoContent.querySelector('#pressure-ulcer-btn');
+      if (pressureUlcerBtn) {
+        pressureUlcerBtn.addEventListener('mouseover', () => {
+          pressureUlcerBtn.style.background = 'linear-gradient(135deg, #f8bbd9 0%, #f48fb1 100%)';
+        });
+        pressureUlcerBtn.addEventListener('mouseout', () => {
+          pressureUlcerBtn.style.background = 'linear-gradient(135deg, #fce4ec 0%, #f8bbd9 100%)';
+        });
+        pressureUlcerBtn.addEventListener('click', showPressureUlcerModal);
+      }
+
+      // AIサマリー用データボタンのイベント
+      const aiDataBtn = fixedInfoContent.querySelector('#ai-data-btn');
+      if (aiDataBtn) {
+        aiDataBtn.addEventListener('mouseover', () => {
+          aiDataBtn.style.background = 'linear-gradient(135deg, #c8e6c9 0%, #81c784 100%)';
+        });
+        aiDataBtn.addEventListener('mouseout', () => {
+          aiDataBtn.style.background = 'linear-gradient(135deg, #e8f5e9 0%, #c8e6c9 100%)';
+        });
+        aiDataBtn.addEventListener('click', downloadAIData);
+      }
+    }
+
+    // AIサマリー用データをマークダウン形式に整形
+    function formatDataForAI() {
+      if (!selectedPatient || !currentHospitalization) {
+        return null;
+      }
+
+      // ISO日付フォーマット関数
+      const toIsoDate = (date) => {
+        if (!date) return '';
+        const d = date instanceof Date ? date : new Date(date);
+        const year = d.getFullYear();
+        const month = String(d.getMonth() + 1).padStart(2, '0');
+        const day = String(d.getDate()).padStart(2, '0');
+        return `${year}-${month}-${day}`;
+      };
+
+      const lines = [];
+      const today = new Date();
+      const todayIso = toIsoDate(today);
+
+      const hospStart = currentHospitalization.startDate;
+      const startDateIso = `${hospStart.year}-${String(hospStart.month).padStart(2, '0')}-${String(hospStart.day).padStart(2, '0')}`;
+      const dayCount = currentHospitalization.hospitalizationDayCount?.value || '-';
+
+      const age = calculateAge(selectedPatient.birthDate);
+      const gender = selectedPatient.sex === 'MALE' ? '男性' : selectedPatient.sex === 'FEMALE' ? '女性' : '不明';
+      const disease = getCachedDisease(selectedPatient.uuid) || '未登録';
+
+      // === フロントマター（YAML形式） ===
+      lines.push('---');
+      lines.push(`patient_name: "${selectedPatient.fullName}"`);
+      lines.push(`patient_id: "${selectedPatient.uuid}"`);
+      lines.push(`export_date: "${todayIso}"`);
+      lines.push(`admission_date: "${startDateIso}"`);
+      lines.push(`hospital_day: ${dayCount}`);
+      lines.push(`source_system: "Henry_EMR"`);
+      lines.push(`doc_type: "patient_timeline_summary"`);
+      lines.push('---\n');
+
+      // === 患者基本情報 ===
+      lines.push('# 入院患者データ（AIサマリー作成用）\n');
+
+      lines.push('## 患者基本情報\n');
+      lines.push(`- 氏名: ${selectedPatient.fullName}`);
+      lines.push(`- 年齢・性別: ${age}歳 ${gender}`);
+      lines.push(`- 主病名: ${disease}`);
+      lines.push(`- 入院日: ${startDateIso}（${dayCount}日目）`);
+      if (currentHospitalization.lastHospitalizationLocation) {
+        const loc = currentHospitalization.lastHospitalizationLocation;
+        lines.push(`- 病棟・病室: ${loc.ward?.name || ''} ${loc.room?.name || ''}`);
+      }
+      lines.push('');
+
+      // === 患者プロフィール ===
+      if (patientProfile && patientProfile.text) {
+        lines.push('## 患者プロフィール（既往歴・ADL等）\n');
+        let profileText = patientProfile.text;
+        // 「患者プロフィール」行を削除
+        profileText = profileText.split('\n')
+          .filter(line => !line.includes('患者プロフィール'))
+          .join('\n');
+        lines.push(profileText);
+        lines.push('');
+      }
+
+      // === 処方履歴 ===
+      if (activePrescriptions.length > 0) {
+        lines.push('## 現在の処方\n');
+        for (const rx of activePrescriptions) {
+          const createDate = rx.createTime?.seconds
+            ? new Date(rx.createTime.seconds * 1000)
+            : null;
+          const dateStr = createDate
+            ? toIsoDate(createDate)
+            : '不明';
+
+          for (const rp of (rx.rps || [])) {
+            const medicines = (rp.instructions || []).map(inst => {
+              const med = inst.instruction?.medicationDosageInstruction;
+              const name = cleanMedicineName(med?.localMedicine?.name || med?.medicine?.name || '');
+              const dosage = med?.text || '';
+              return name ? `${name} ${dosage}`.trim() : null;
+            }).filter(Boolean);
+
+            if (medicines.length > 0) {
+              lines.push(`- ${medicines.join(', ')}（${dateStr}〜）`);
+            }
+          }
+        }
+        lines.push('');
+      }
+
+      // === 注射履歴（期間スナップショット方式） ===
+      if (activeInjections.length > 0) {
+        // 全注射を「開始日、終了日、投与経路、薬剤名」の形式に変換
+        const injectionPeriods = [];
+        for (const inj of activeInjections) {
+          // 保留・下書きは除外
+          if (['ORDER_STATUS_ON_HOLD', 'ORDER_STATUS_DRAFT'].includes(inj.orderStatus)) continue;
+
+          for (const rp of (inj.rps || [])) {
+            const technique = (rp.localInjectionTechnique?.name || '').replace(/，/g, ',') || 'その他';
+            const medicines = (rp.instructions || []).map(inst => {
+              const med = inst.instruction?.medicationDosageInstruction;
+              const rawName = med?.localMedicine?.name || med?.mhlwMedicine?.name || null;
+              return rawName ? cleanMedicineName(rawName) : null;
+            }).filter(Boolean);
+
+            if (medicines.length > 0 && inj.startDate) {
+              const startDate = new Date(inj.startDate.year, inj.startDate.month - 1, inj.startDate.day);
+              const duration = rp.boundsDurationDays?.value || 1;
+              const endDate = new Date(startDate);
+              endDate.setDate(endDate.getDate() + duration - 1);
+
+              // 有効な注射は終了日を「継続中」として扱う
+              const isActive = inj.orderStatus === 'ORDER_STATUS_ACTIVE';
+
+              injectionPeriods.push({
+                startDate,
+                endDate: isActive ? null : endDate, // nullは継続中
+                technique,
+                medicines: medicines.join(', '),
+                isActive
+              });
+            }
+          }
+        }
+
+        if (injectionPeriods.length > 0) {
+          // 全ての日付境界点を収集
+          const boundaries = new Set();
+          const today = new Date();
+          today.setHours(0, 0, 0, 0);
+
+          for (const period of injectionPeriods) {
+            boundaries.add(period.startDate.getTime());
+            if (period.endDate) {
+              // 終了日の翌日を境界として追加
+              const nextDay = new Date(period.endDate);
+              nextDay.setDate(nextDay.getDate() + 1);
+              boundaries.add(nextDay.getTime());
+            }
+          }
+          // 今日も境界として追加
+          boundaries.add(today.getTime());
+
+          // 境界点をソート（古い順＝時系列順）
+          const sortedBoundaries = [...boundaries].sort((a, b) => a - b);
+
+          // 各期間でどの注射が有効だったかを計算
+          lines.push('## 注射履歴\n');
+
+          for (let i = 0; i < sortedBoundaries.length - 1; i++) {
+            const periodStart = new Date(sortedBoundaries[i]);
+            const periodEnd = new Date(sortedBoundaries[i + 1]);
+
+            // この期間で有効だった注射を収集
+            const activeInPeriod = injectionPeriods.filter(period => {
+              const effectiveEnd = period.endDate || today;
+              return period.startDate <= periodStart && effectiveEnd >= periodStart;
+            });
+
+            if (activeInPeriod.length === 0) continue;
+
+            // 期間ラベルを作成（ISO形式）
+            const startStr = toIsoDate(periodStart);
+            const endDateForDisplay = new Date(periodEnd);
+            endDateForDisplay.setDate(endDateForDisplay.getDate() - 1);
+            const endStr = toIsoDate(endDateForDisplay);
+            const isCurrentPeriod = periodEnd.getTime() > today.getTime();
+            const periodLabel = isCurrentPeriod
+              ? `### 現在投与中（${startStr}〜）`
+              : `### ${startStr}〜${endStr}`;
+
+            lines.push(periodLabel);
+
+            // 投与経路ごとにグループ化
+            const byTechnique = new Map();
+            for (const item of activeInPeriod) {
+              if (!byTechnique.has(item.technique)) {
+                byTechnique.set(item.technique, []);
+              }
+              byTechnique.get(item.technique).push(item.medicines);
+            }
+
+            for (const [technique, meds] of byTechnique) {
+              // 重複を除去
+              const uniqueMeds = [...new Set(meds)];
+              lines.push(`- ${technique}: ${uniqueMeds.join(', ')}`);
+            }
+            lines.push('');
+          }
+        }
+      }
+
+      // === 経過記録（時系列・全データ統合） ===
+      lines.push('## 経過記録\n');
+
+      // 全日付を収集（allItems + 血液検査 + 褥瘡評価）
+      const allDates = new Set();
+
+      // allItemsから日付を収集（バイタル、血糖、食事、尿量、医師、看護、リハビリ）
+      const sortedItems = [...allItems]
+        .filter(item => item.date && ['doctor', 'nursing', 'rehab', 'vital', 'meal', 'urine', 'bloodSugar'].includes(item.category))
+        .sort((a, b) => a.date - b.date);
+
+      for (const item of sortedItems) {
+        allDates.add(dateKey(item.date));
+      }
+
+      // 血液検査の日付を収集
+      const bloodTestResults = extractBloodTestResults(outsideInspectionReportGroups, inHouseBloodTests);
+      const bloodTestByDate = new Map();
+      for (const result of bloodTestResults) {
+        allDates.add(result.dateKey);
+        bloodTestByDate.set(result.dateKey, result);
+      }
+
+      // 褥瘡評価の日付を収集
+      const pressureUlcerByDate = new Map();
+      if (pressureUlcerRecords && pressureUlcerRecords.length > 0) {
+        for (const record of pressureUlcerRecords) {
+          if (!record.recordDate) continue;
+          const dk = `${record.recordDate.year}-${String(record.recordDate.month).padStart(2, '0')}-${String(record.recordDate.day).padStart(2, '0')}`;
+          allDates.add(dk);
+          if (!pressureUlcerByDate.has(dk)) {
+            pressureUlcerByDate.set(dk, []);
+          }
+          pressureUlcerByDate.get(dk).push(record);
+        }
+      }
+
+      // allItemsを日付ごとにグループ化
+      const groupedByDate = new Map();
+      for (const item of sortedItems) {
+        const key = dateKey(item.date);
+        if (!groupedByDate.has(key)) {
+          groupedByDate.set(key, []);
+        }
+        groupedByDate.get(key).push(item);
+      }
+
+      // カテゴリ名のマッピング
+      const categoryLabels = {
+        vital: 'バイタル',
+        bloodSugar: '血糖値',
+        meal: '食事',
+        urine: '尿量',
+        doctor: '医師記録',
+        nursing: '看護記録',
+        rehab: 'リハビリ記録'
+      };
+
+      // カテゴリの表示順序
+      const categoryOrder = ['vital', 'bloodSugar', 'meal', 'urine', 'doctor', 'nursing', 'rehab'];
+
+      // 日付順に出力
+      const sortedDates = Array.from(allDates).sort();
+      for (const dk of sortedDates) {
+        // ISO形式（YYYY-MM-DD）で出力
+        lines.push(`### ${dk}\n`);
+
+        // カテゴリごとのアイテム
+        const items = groupedByDate.get(dk) || [];
+        const byCategory = new Map();
+        for (const item of items) {
+          if (!byCategory.has(item.category)) {
+            byCategory.set(item.category, []);
+          }
+          byCategory.get(item.category).push(item);
+        }
+
+        // カテゴリ順に出力
+        for (const cat of categoryOrder) {
+          const catItems = byCategory.get(cat);
+          if (!catItems || catItems.length === 0) continue;
+
+          const label = categoryLabels[cat] || cat;
+          lines.push(`**${label}**`);
+
+          for (const item of catItems) {
+            const text = item.text.trim();
+            lines.push(text);
+          }
+          lines.push('');
+        }
+
+        // 血液検査（この日付にある場合）
+        const bloodTest = bloodTestByDate.get(dk);
+        if (bloodTest) {
+          lines.push('**血液検査**');
+          for (const [category, testItems] of bloodTest.categories) {
+            const itemStrs = testItems.map(item => {
+              const flag = item.flag ? ` (${item.flag})` : '';
+              const ref = item.referenceValue ? ` [基準:${item.referenceValue}]` : '';
+              return `${item.name}: ${item.value}${flag}${ref}`;
+            });
+            lines.push(`${category}: ${itemStrs.join(', ')}`);
+          }
+          lines.push('');
+        }
+
+        // 褥瘡評価（この日付にある場合）
+        const pressureUlcers = pressureUlcerByDate.get(dk);
+        if (pressureUlcers && pressureUlcers.length > 0) {
+          lines.push('**褥瘡評価**');
+          for (const record of pressureUlcers) {
+            const parsed = parsePressureUlcerEditorData(record.editorData);
+            if (!parsed) continue;
+
+            const site = parsed.site || '部位不明';
+            const score = parsed.totalScore ? `${parsed.totalScore}点` : '-';
+            const designRItems = Object.entries(parsed.designR)
+              .filter(([, v]) => v !== null)
+              .map(([k, v]) => `${k}:${v}`)
+              .join(' ');
+            lines.push(`${site} 合計${score} ${designRItems}`);
+          }
+          lines.push('');
+        }
+      }
+
+      // === 日次データ推移テーブル（バイタル・血糖・食事・尿量） ===
+      // 全日付を収集
+      const dailyDataDates = new Set();
+      const vitalByDate = new Map();
+      const bloodSugarByDate = new Map();
+      const mealByDate = new Map();
+      const urineByDate = new Map();
+
+      for (const item of allItems) {
+        if (!item.date) continue;
+        const dk = dateKey(item.date);
+        dailyDataDates.add(dk);
+
+        if (item.category === 'vital' && item.vitals) {
+          vitalByDate.set(dk, item.vitals);
+        } else if (item.category === 'bloodSugar') {
+          bloodSugarByDate.set(dk, item.text);
+        } else if (item.category === 'meal') {
+          mealByDate.set(dk, item.text);
+        } else if (item.category === 'urine') {
+          urineByDate.set(dk, item.text);
+        }
+      }
+
+      if (dailyDataDates.size > 0) {
+        lines.push('## 日次データ推移（テーブル）\n');
+
+        const sortedDailyDates = Array.from(dailyDataDates).sort();
+
+        // ヘッダー
+        lines.push('| 日付 | T (℃) | BP (mmHg) | P (bpm) | SpO2 (%) | 血糖 (朝/昼/夕) | 尿量 (mL) | 食事 |');
+        lines.push('|------|--------|-----------|---------|----------|-----------------|-----------|------|');
+
+        for (const dk of sortedDailyDates) {
+          // バイタル
+          let temp = '-', bp = '-', pulse = '-', spo2 = '-';
+          const vitals = vitalByDate.get(dk) || [];
+          for (const vs of vitals) {
+            const raw = vs.rawData || vs;
+            if (temp === '-' && raw.temperature?.value) {
+              temp = String(raw.temperature.value / 10);
+            }
+            if (bp === '-' && raw.bloodPressureUpperBound?.value && raw.bloodPressureLowerBound?.value) {
+              bp = `${raw.bloodPressureUpperBound.value / 10}/${raw.bloodPressureLowerBound.value / 10}`;
+            }
+            if (pulse === '-' && raw.pulseRate?.value) {
+              pulse = String(raw.pulseRate.value / 10);
+            }
+            if (spo2 === '-' && raw.spo2?.value) {
+              spo2 = String(raw.spo2.value / 10);
+            }
+          }
+
+          // 血糖（テキストから抽出）
+          let bloodSugar = '-';
+          const bsText = bloodSugarByDate.get(dk) || '';
+          const bsMatch = bsText.match(/朝(\d+)?.*昼(\d+)?.*夕(\d+)?/);
+          if (bsMatch) {
+            bloodSugar = `${bsMatch[1] || '-'}/${bsMatch[2] || '-'}/${bsMatch[3] || '-'}`;
+          } else if (bsText) {
+            // 別形式の場合はテキストをそのまま使用（短縮）
+            bloodSugar = bsText.replace(/【血糖・インスリン】/g, '').replace(/\n/g, ' ').slice(0, 20);
+          }
+
+          // 尿量（テキストから抽出）
+          let urine = '-';
+          const urineText = urineByDate.get(dk) || '';
+          const urineMatch = urineText.match(/(\d+)mL/);
+          if (urineMatch) {
+            urine = urineMatch[1];
+          }
+
+          // 食事（テキストを短縮）
+          let meal = '-';
+          const mealText = mealByDate.get(dk) || '';
+          if (mealText) {
+            // 改行を除去して短縮
+            meal = mealText.replace(/\n/g, ' ').slice(0, 30);
+            if (mealText.length > 30) meal += '...';
+          }
+
+          lines.push(`| ${dk} | ${temp} | ${bp} | ${pulse} | ${spo2} | ${bloodSugar} | ${urine} | ${meal} |`);
+        }
+        lines.push('');
+      }
+
+      // === 血液検査のピボットテーブル ===
+      if (bloodTestResults.length > 0) {
+        lines.push('## 血液検査推移（テーブル）\n');
+
+        // 日付リスト（ソート済み）
+        const testDates = [...bloodTestResults].sort((a, b) => a.dateKey.localeCompare(b.dateKey)).map(r => r.dateKey);
+
+        // 全検査項目を収集（基準値も含む）
+        const allTestItems = new Map(); // itemName -> { referenceValue, dates: Map(dateKey -> {value, flag}) }
+        for (const result of bloodTestResults) {
+          for (const [, items] of result.categories) {
+            for (const item of items) {
+              if (!allTestItems.has(item.name)) {
+                allTestItems.set(item.name, {
+                  referenceValue: item.referenceValue || '-',
+                  dates: new Map()
+                });
+              }
+              // 基準値は最初に見つかったものを使用（同じ項目なら同じはず）
+              if (item.referenceValue && allTestItems.get(item.name).referenceValue === '-') {
+                allTestItems.get(item.name).referenceValue = item.referenceValue;
+              }
+              allTestItems.get(item.name).dates.set(result.dateKey, {
+                value: item.value,
+                flag: item.flag
+              });
+            }
+          }
+        }
+
+        // ヘッダー行（基準値列を追加）
+        lines.push(`| 検査項目 | 基準値 | ${testDates.join(' | ')} |`);
+        lines.push(`|----------|--------|${testDates.map(() => '------').join('|')}|`);
+
+        // 各検査項目の行
+        for (const [itemName, itemData] of allTestItems) {
+          const values = testDates.map(dk => {
+            const data = itemData.dates.get(dk);
+            if (!data) return '-';
+            return data.flag ? `${data.value} (${data.flag})` : data.value;
+          });
+          lines.push(`| ${itemName} | ${itemData.referenceValue} | ${values.join(' | ')} |`);
+        }
+        lines.push('');
+      }
+
+      return lines.join('\n');
+    }
+
+    // AIサマリー用データをダウンロード
+    function downloadAIData() {
+      const content = formatDataForAI();
+      if (!content) {
+        window.HenryCore.ui.showToast('データがありません', 'error');
+        return;
+      }
+
+      // ファイル名生成
+      const today = new Date();
+      const dateStr = `${today.getFullYear()}${String(today.getMonth() + 1).padStart(2, '0')}${String(today.getDate()).padStart(2, '0')}`;
+      const patientName = selectedPatient?.fullName?.replace(/\s+/g, '') || '患者';
+      const fileName = `${patientName}_入院データ_${dateStr}.md`;
+
+      // BlobとダウンロードリンクでDL
+      const blob = new Blob([content], { type: 'text/markdown; charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = fileName;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+
+      window.HenryCore.ui.showToast('ダウンロードしました', 'success');
+    }
+
+    // 血液検査結果モーダルを表示（横軸日付形式）
+    function showBloodTestModal() {
+      const results = extractBloodTestResults(outsideInspectionReportGroups, inHouseBloodTests);
+
+      if (results.length === 0) {
+        window.HenryCore.ui.showToast('血液検査データがありません', 'info');
+        return;
+      }
+
+      // ピボット形式に変換
+      const pivoted = pivotBloodTestData(results);
+
+      // カテゴリの表示順序（優先度順）
+      const categoryOrder = [
+        '血液学的検査',
+        '生化学的検査',
+        '内分泌学的検査',
+        '免疫学的検査',
+        '負荷試験・機能検査'
+      ];
+
+      // カテゴリをソート
+      const sortedCategories = [...pivoted.categories].sort((a, b) => {
+        const aIdx = categoryOrder.indexOf(a.name);
+        const bIdx = categoryOrder.indexOf(b.name);
+        if (aIdx === -1 && bIdx === -1) return a.name.localeCompare(b.name);
+        if (aIdx === -1) return 1;
+        if (bIdx === -1) return -1;
+        return aIdx - bIdx;
+      });
+
+      // 日付ラベル（月/日形式）
+      const dateLabels = pivoted.dates.map(d => {
+        const [, month, day] = d.split('-').map(Number);
+        return `${month}/${day}`;
+      });
+
+      // モーダルコンテンツを構築
+      const contentDiv = document.createElement('div');
+      contentDiv.style.cssText = 'max-height: 70vh; overflow-x: auto; padding: 8px;';
+
+      // テーブル作成
+      const table = document.createElement('table');
+      table.style.cssText = 'border-collapse: collapse; font-size: 13px; min-width: 100%;';
+
+      // ヘッダー行（項目 | 基準値 | 日付1 | 日付2 | ...）
+      const thead = document.createElement('thead');
+      const headerRow = document.createElement('tr');
+      headerRow.style.cssText = 'background: #f5f5f5; position: sticky; top: 0; z-index: 1;';
+
+      // 項目列ヘッダー
+      const thItem = document.createElement('th');
+      thItem.style.cssText = 'text-align: left; padding: 8px; border-bottom: 2px solid #e0e0e0; min-width: 150px; position: sticky; left: 0; background: #f5f5f5;';
+      thItem.textContent = '項目';
+      headerRow.appendChild(thItem);
+
+      // 基準値列ヘッダー
+      const thRef = document.createElement('th');
+      thRef.style.cssText = 'text-align: center; padding: 8px; border-bottom: 2px solid #e0e0e0; min-width: 80px; position: sticky; left: 150px; background: #f5f5f5; border-right: 1px solid #e0e0e0;';
+      thRef.textContent = '基準値';
+      headerRow.appendChild(thRef);
+
+      // 日付列ヘッダー
+      for (const label of dateLabels) {
+        const th = document.createElement('th');
+        th.style.cssText = 'text-align: center; padding: 8px; border-bottom: 2px solid #e0e0e0; min-width: 70px;';
+        th.textContent = label;
+        headerRow.appendChild(th);
+      }
+      thead.appendChild(headerRow);
+      table.appendChild(thead);
+
+      // ボディ
+      const tbody = document.createElement('tbody');
+
+      for (const category of sortedCategories) {
+        // カテゴリヘッダー行
+        const categoryRow = document.createElement('tr');
+        const categoryCell = document.createElement('td');
+        categoryCell.colSpan = 2 + pivoted.dates.length;
+        categoryCell.style.cssText = 'font-size: 13px; font-weight: 600; color: #1565c0; padding: 8px; background: #e3f2fd; border-top: 1px solid #e0e0e0;';
+        categoryCell.textContent = category.name;
+        categoryRow.appendChild(categoryCell);
+        tbody.appendChild(categoryRow);
+
+        // 項目行
+        for (const item of category.items) {
+          const row = document.createElement('tr');
+
+          // 項目名セル
+          const nameCell = document.createElement('td');
+          nameCell.style.cssText = 'text-align: left; padding: 6px 8px; border-bottom: 1px solid #f0f0f0; position: sticky; left: 0; background: #fff;';
+          nameCell.textContent = item.name;
+          row.appendChild(nameCell);
+
+          // 基準値セル
+          const refCell = document.createElement('td');
+          refCell.style.cssText = 'text-align: center; padding: 6px 8px; border-bottom: 1px solid #f0f0f0; color: #666; font-size: 12px; position: sticky; left: 150px; background: #fff; border-right: 1px solid #f0f0f0;';
+          refCell.textContent = item.referenceValue || '-';
+          row.appendChild(refCell);
+
+          // 各日付の値セル
+          for (const dateKey of pivoted.dates) {
+            const valueCell = document.createElement('td');
+            let cellStyle = 'text-align: center; padding: 6px 8px; border-bottom: 1px solid #f0f0f0;';
+
+            const valueData = item.values.get(dateKey);
+            if (valueData) {
+              if (valueData.isAbnormal) {
+                if (valueData.abnormalityType === 'HIGH') {
+                  cellStyle += ' color: #c62828; font-weight: 600;';
+                } else if (valueData.abnormalityType === 'LOW') {
+                  cellStyle += ' color: #1565c0; font-weight: 600;';
+                }
+              }
+              valueCell.textContent = valueData.value;
+            } else {
+              cellStyle += ' color: #ccc;';
+              valueCell.textContent = '-';
+            }
+            valueCell.style.cssText = cellStyle;
+            row.appendChild(valueCell);
+          }
+
+          tbody.appendChild(row);
+        }
+      }
+
+      table.appendChild(tbody);
+      contentDiv.appendChild(table);
+
+      // モーダル幅を日付数に応じて調整（画面幅の80%まで）
+      // 項目列150px + 基準値列80px + 日付列70px×日付数 + padding
+      const requiredWidth = 280 + pivoted.dates.length * 70;
+      const maxWidth = window.innerWidth * 0.8;
+      const modalWidth = Math.min(maxWidth, requiredWidth);
+
+      window.HenryCore.ui.showModal({
+        title: `血液検査結果 - ${selectedPatient?.fullName || ''}`,
+        content: contentDiv,
+        width: `${modalWidth}px`
+      });
+    }
+
+    // 褥瘡評価モーダルを表示（横軸日付形式）
+    function showPressureUlcerModal() {
+      if (!pressureUlcerRecords || pressureUlcerRecords.length === 0) {
+        window.HenryCore.ui.showToast('褥瘡評価データがありません', 'info');
+        return;
+      }
+
+      // ピボット形式に変換
+      const pivoted = pivotPressureUlcerData(pressureUlcerRecords);
+
+      if (pivoted.sites.length === 0) {
+        window.HenryCore.ui.showToast('褥瘡評価データがありません', 'info');
+        return;
+      }
+
+      // 日付ラベル（月/日形式）
+      const dateLabels = pivoted.dates.map(d => {
+        const [, month, day] = d.split('-').map(Number);
+        return `${month}/${day}`;
+      });
+
+      // DESIGN-R項目の表示順序と日本語ラベル
+      const DESIGN_R_ITEMS = [
+        { key: 'totalScore', label: '合計点', highlight: true },
+        { key: 'D', label: '深さ(D)' },
+        { key: 'E', label: '滲出液(E)' },
+        { key: 'S', label: '大きさ(S)' },
+        { key: 'I', label: '炎症/感染(I)' },
+        { key: 'G', label: '肉芽組織(G)' },
+        { key: 'N', label: '壊死組織(N)' },
+        { key: 'P', label: 'ポケット(P)' }
+      ];
+
+      // モーダルコンテンツを構築
+      const contentDiv = document.createElement('div');
+      contentDiv.style.cssText = 'max-height: 70vh; overflow-x: auto; padding: 8px;';
+
+      // テーブル作成
+      const table = document.createElement('table');
+      table.style.cssText = 'border-collapse: collapse; font-size: 13px; min-width: 100%;';
+
+      // ヘッダー行（項目 | 日付1 | 日付2 | ...）
+      const thead = document.createElement('thead');
+      const headerRow = document.createElement('tr');
+      headerRow.style.cssText = 'background: #f5f5f5; position: sticky; top: 0; z-index: 1;';
+
+      // 項目列ヘッダー
+      const thItem = document.createElement('th');
+      thItem.style.cssText = 'text-align: left; padding: 8px; border-bottom: 2px solid #e0e0e0; min-width: 120px; position: sticky; left: 0; background: #f5f5f5;';
+      thItem.textContent = '項目';
+      headerRow.appendChild(thItem);
+
+      // 日付列ヘッダー
+      for (const label of dateLabels) {
+        const th = document.createElement('th');
+        th.style.cssText = 'text-align: center; padding: 8px; border-bottom: 2px solid #e0e0e0; min-width: 60px;';
+        th.textContent = label;
+        headerRow.appendChild(th);
+      }
+      thead.appendChild(headerRow);
+      table.appendChild(thead);
+
+      // ボディ
+      const tbody = document.createElement('tbody');
+
+      for (const site of pivoted.sites) {
+        // 部位ヘッダー行
+        const siteRow = document.createElement('tr');
+        const siteCell = document.createElement('td');
+        siteCell.colSpan = 1 + pivoted.dates.length;
+        siteCell.style.cssText = 'font-size: 13px; font-weight: 600; color: #c2185b; padding: 8px; background: #fce4ec; border-top: 1px solid #e0e0e0;';
+        siteCell.textContent = site.name;
+        siteRow.appendChild(siteCell);
+        tbody.appendChild(siteRow);
+
+        // 各DESIGN-R項目の行
+        for (const item of DESIGN_R_ITEMS) {
+          const row = document.createElement('tr');
+
+          // 項目名セル
+          const nameCell = document.createElement('td');
+          nameCell.style.cssText = `text-align: left; padding: 6px 8px; border-bottom: 1px solid #f0f0f0; position: sticky; left: 0; background: #fff; padding-left: 16px;${item.highlight ? ' font-weight: 600;' : ''}`;
+          nameCell.textContent = item.label;
+          row.appendChild(nameCell);
+
+          // 各日付の値セル
+          for (const dKey of pivoted.dates) {
+            const valueCell = document.createElement('td');
+            let cellStyle = 'text-align: center; padding: 6px 8px; border-bottom: 1px solid #f0f0f0;';
+
+            const siteData = site.values.get(dKey);
+            let value = '-';
+            if (siteData) {
+              if (item.key === 'totalScore') {
+                value = siteData.totalScore || '-';
+                if (value !== '-') {
+                  cellStyle += ' font-weight: 600; color: #c2185b;';
+                }
+              } else {
+                value = siteData.designR?.[item.key] || '-';
+              }
+            }
+
+            if (value === '-') {
+              cellStyle += ' color: #ccc;';
+            }
+            valueCell.style.cssText = cellStyle;
+            valueCell.textContent = value;
+            row.appendChild(valueCell);
+          }
+
+          tbody.appendChild(row);
+        }
+      }
+
+      table.appendChild(tbody);
+      contentDiv.appendChild(table);
+
+      // モーダル幅を日付数に応じて調整（画面幅の80%まで）
+      // 項目列120px + 日付列60px×日付数 + padding
+      const requiredWidth = 200 + pivoted.dates.length * 60;
+      const maxWidth = window.innerWidth * 0.8;
+      const modalWidth = Math.min(maxWidth, requiredWidth);
+
+      window.HenryCore.ui.showModal({
+        title: `褥瘡評価（DESIGN-R） - ${selectedPatient?.fullName || ''}`,
+        content: contentDiv,
+        width: `${modalWidth}px`
+      });
     }
 
     // 処方・注射カラムを描画
@@ -3716,6 +6197,7 @@
             recordContent.innerHTML = '<div class="no-records">この患者は現在入院していません</div>';
             vitalContent.innerHTML = '';
             prescriptionOrderContent.innerHTML = '';
+            updateGraphModalsForNotAdmitted();
             return;
           }
 
@@ -3744,6 +6226,7 @@
           recordContent.innerHTML = '<div class="no-records">この患者は現在入院していません</div>';
           vitalContent.innerHTML = '';
           prescriptionOrderContent.innerHTML = '';
+          updateGraphModalsForNotAdmitted();
           return;
         }
 
@@ -3766,6 +6249,9 @@
         // 固定情報を保存
         activePrescriptions = allData.activePrescriptions;
         activeInjections = allData.activeInjections;
+        outsideInspectionReportGroups = allData.outsideInspectionReportGroups;
+        inHouseBloodTests = allData.inHouseBloodTests;
+        pressureUlcerRecords = allData.pressureUlcerRecords;
         patientProfile = allData.profile;
 
         // 入院期間でフィルタリング
@@ -3778,7 +6264,7 @@
           : null;
         allItems = filterByHospitalizationPeriod(allItems, startDate, endDate);
 
-        console.log(`[${SCRIPT_NAME}] データ読み込み完了: ${allItems.length}件, 有効処方: ${activePrescriptions.length}件, 有効注射: ${activeInjections.length}件`);
+        console.log(`[${SCRIPT_NAME}] データ読み込み完了: ${allItems.length}件, 有効処方: ${activePrescriptions.length}件, 有効注射: ${activeInjections.length}件, 血液検査: ${outsideInspectionReportGroups.length}件, 褥瘡評価: ${pressureUlcerRecords.length}件`);
 
         // 固定情報エリアを描画
         renderFixedInfo();
@@ -3789,9 +6275,15 @@
         applyFilters();
         renderTimeline();
 
-        // バイタルグラフモーダルが開いていれば更新（患者切り替え時の連動）
+        // グラフモーダルが開いていれば更新（患者切り替え時の連動）
         if (vitalGraphState) {
           showVitalGraph(selectedDateKey, vitalGraphState.days);
+        }
+        if (bloodSugarGraphState) {
+          showBloodSugarGraph(selectedDateKey, bloodSugarGraphState.days);
+        }
+        if (urineGraphState) {
+          showUrineGraph(selectedDateKey, urineGraphState.days);
         }
 
         // 前後の患者をプリフェッチ（非同期・待たない）
