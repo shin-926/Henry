@@ -298,6 +298,15 @@
       "beta": true
     },
     {
+      "name": "henry_summary_export",
+      "label": "サマリー用データ出力（ベータ版）",
+      "file": "henry_summary_export.user.js",
+      "match": ["henry-app.jp"],
+      "category": "karte",
+      "order": 12,
+      "beta": true
+    },
+    {
       "name": "henry_test_helper",
       "label": "テストヘルパー（ベータ版）",
       "file": "henry_test_helper.user.js",

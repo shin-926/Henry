@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry Patient Timeline
 // @namespace    https://github.com/shin-926/Henry
-// @version      2.83.0
+// @version      2.91.0
 // @description  入院患者の各種記録・オーダーをガントチャート風タイムラインで表示
 // @author       sk powered by Claude
 // @match        https://henry-app.jp/*
@@ -62,6 +62,8 @@
   const NURSING_RECORD_CUSTOM_TYPE_UUID = 'e4ac1e1c-40e2-4c19-9df4-aa57adae7d4f';
   const PATIENT_PROFILE_CUSTOM_TYPE_UUID = 'f639619a-6fdb-452a-a803-8d42cd50830d';
   const PRESSURE_ULCER_CUSTOM_TYPE_UUID = '2d3b6bbf-3b3e-4a82-8f7f-e29a32352f52';
+  const PHARMACY_RECORD_CUSTOM_TYPE_UUID = '2de23e84-0e84-4861-8763-77c8d45f94bb';
+  const INSPECTION_FINDINGS_CUSTOM_TYPE_UUID = 'f83d4392-7a68-4c6c-9eef-8947097fb29d';
 
   // 組織UUID
   // ※マオカ病院専用スクリプトのためハードコード（他病院展開予定なし）
@@ -236,6 +238,30 @@
     }
   }
 
+  // editorDataから画像URLを抽出
+  function extractImagesFromEditorData(editorDataStr) {
+    try {
+      const data = JSON.parse(editorDataStr);
+      const images = [];
+      for (const block of data.blocks) {
+        if (block.type === 'atomic' && block.data?.fileBlock) {
+          const fb = block.data.fileBlock;
+          if (fb.fileType === 'FILE_TYPE_IMAGE' && fb.redirectUrl) {
+            images.push({
+              url: fb.redirectUrl,
+              mimeType: fb.mimeType,
+              width: fb.imageWidth || 0,
+              height: fb.imageHeight || 0
+            });
+          }
+        }
+      }
+      return images;
+    } catch (e) {
+      return [];
+    }
+  }
+
   // 日付フォーマット（短縮形）
   function formatShortDate(date) {
     if (!date) return '-';
@@ -266,6 +292,52 @@
     const div = document.createElement('div');
     div.textContent = text;
     return div.innerHTML;
+  }
+
+  // 薬剤部記録テキストから薬剤名を抽出してリンク化
+  function formatPharmacyText(text) {
+    const lines = text.split('\n');
+    const result = [];
+    const linkStyle = 'color: #1976d2; text-decoration: none;';
+
+    // 薬剤名部分をリンク化（「薬剤名　数量」から薬剤名を抽出）
+    function linkifyDrug(drugText) {
+      // 全角スペースで区切って最初の部分を薬剤名とみなす
+      const parts = drugText.split(/[\u3000]+/);
+      if (parts.length === 0) return escapeHtml(drugText);
+
+      const drugName = parts[0].trim();
+      if (!drugName) return escapeHtml(drugText);
+
+      const rest = parts.slice(1).join('　');
+      const link = `<a href="https://www.google.com/search?q=${encodeURIComponent(drugName)}" target="_blank" style="${linkStyle}">${escapeHtml(drugName)}</a>`;
+      return rest ? link + '　' + escapeHtml(rest) : link;
+    }
+
+    for (const line of lines) {
+      // パターン1: 「・薬剤名：」または「①・薬剤名：」で始まる行
+      const drugLineMatch = line.match(/^([①-⑳]?・薬剤名[：:])\s*(.+)/);
+      if (drugLineMatch) {
+        const prefix = drugLineMatch[1];
+        const drugsText = drugLineMatch[2];
+        result.push(escapeHtml(prefix) + linkifyDrug(drugsText));
+        continue;
+      }
+
+      // パターン2: インデント行（全角スペース×4以上で始まる）= 継続薬剤名
+      const indentMatch = line.match(/^([\u3000]{4,})(.+)/);
+      if (indentMatch) {
+        const indent = indentMatch[1];
+        const drugsText = indentMatch[2];
+        result.push(indent + linkifyDrug(drugsText));
+        continue;
+      }
+
+      // その他の行はそのまま
+      result.push(escapeHtml(line));
+    }
+
+    return result.join('<br>');
   }
 
   // 正規表現エスケープ
@@ -1969,6 +2041,93 @@
     return { dates: allDates, sites };
   }
 
+  // 薬剤部記録を取得
+  async function fetchPharmacyRecords(patientUuid) {
+    const allRecords = [];
+    let pageToken = '';
+
+    try {
+      do {
+        const result = await window.HenryCore.query(QUERIES.LIST_CLINICAL_DOCUMENTS, {
+          input: {
+            patientUuid,
+            pageToken,
+            pageSize: 100,
+            clinicalDocumentTypes: [{
+              type: 'CUSTOM',
+              clinicalDocumentCustomTypeUuid: { value: PHARMACY_RECORD_CUSTOM_TYPE_UUID }
+            }]
+          }
+        });
+
+        const data = result?.data?.listClinicalDocuments;
+        const documents = data?.documents || [];
+
+        for (const doc of documents) {
+          allRecords.push({
+            id: doc.uuid,
+            date: doc.performTime?.seconds ? new Date(doc.performTime.seconds * 1000) : null,
+            text: parseEditorData(doc.editorData),
+            author: doc.creator?.name || '不明'
+          });
+        }
+
+        pageToken = data?.nextPageToken || '';
+      } while (pageToken);
+
+      // 日付順（古→新）でソート
+      allRecords.sort((a, b) => (a.date || 0) - (b.date || 0));
+      return allRecords;
+    } catch (e) {
+      console.error(`[${SCRIPT_NAME}] 薬剤部記録取得エラー:`, e);
+      return [];
+    }
+  }
+
+  // 検査所見（読影結果等）を取得
+  async function fetchInspectionFindings(patientUuid) {
+    const allRecords = [];
+    let pageToken = '';
+
+    try {
+      do {
+        const result = await window.HenryCore.query(QUERIES.LIST_CLINICAL_DOCUMENTS, {
+          input: {
+            patientUuid,
+            pageToken,
+            pageSize: 100,
+            clinicalDocumentTypes: [{
+              type: 'CUSTOM',
+              clinicalDocumentCustomTypeUuid: { value: INSPECTION_FINDINGS_CUSTOM_TYPE_UUID }
+            }]
+          }
+        });
+
+        const data = result?.data?.listClinicalDocuments;
+        const documents = data?.documents || [];
+
+        for (const doc of documents) {
+          allRecords.push({
+            id: doc.uuid,
+            date: doc.performTime?.seconds ? new Date(doc.performTime.seconds * 1000) : null,
+            editorData: doc.editorData, // 生データを保持（画像抽出用）
+            text: parseEditorData(doc.editorData),
+            author: doc.creator?.name || '不明'
+          });
+        }
+
+        pageToken = data?.nextPageToken || '';
+      } while (pageToken);
+
+      // 日付順（古→新）でソート
+      allRecords.sort((a, b) => (a.date || 0) - (b.date || 0));
+      return allRecords;
+    } catch (e) {
+      console.error(`[${SCRIPT_NAME}] 検査所見取得エラー:`, e);
+      return [];
+    }
+  }
+
   // ========================================
   // サマリー管理（Google Spreadsheet）
   // ========================================
@@ -2019,13 +2178,13 @@
     const auth = window.HenryCore?.modules?.GoogleAuth;
     if (!auth) return null;
 
-    const tokens = await auth.getTokens();
-    if (!tokens?.access_token) return null;
+    const accessToken = await auth.getValidAccessToken();
+    if (!accessToken) return null;
 
     // Drive APIでファイル検索
     const query = encodeURIComponent(`name='${SUMMARY_SPREADSHEET_NAME}' and mimeType='application/vnd.google-apps.spreadsheet' and 'root' in parents and trashed=false`);
     const response = await fetch(`https://www.googleapis.com/drive/v3/files?q=${query}&fields=files(id,name)`, {
-      headers: { 'Authorization': `Bearer ${tokens.access_token}` }
+      headers: { 'Authorization': `Bearer ${accessToken}` }
     });
 
     if (!response.ok) return null;
@@ -2271,13 +2430,15 @@
 
   // 全データ取得
   async function fetchAllData(patientUuid, hospitalizationStartDate) {
-    const [doctorRecords, nursingRecords, rehabRecords, calendarData, profile, pressureUlcerRecords] = await Promise.all([
+    const [doctorRecords, nursingRecords, rehabRecords, calendarData, profile, pressureUlcerRecords, pharmacyRecords, inspectionFindingsRecords] = await Promise.all([
       fetchDoctorRecords(patientUuid),
       fetchNursingRecords(patientUuid),
       fetchRehabRecords(patientUuid, hospitalizationStartDate),
       fetchCalendarData(patientUuid, hospitalizationStartDate),
       fetchPatientProfile(patientUuid),
-      fetchPressureUlcerRecords(patientUuid)
+      fetchPressureUlcerRecords(patientUuid),
+      fetchPharmacyRecords(patientUuid),
+      fetchInspectionFindings(patientUuid)
     ]);
 
     const allItems = [...doctorRecords, ...nursingRecords, ...rehabRecords, ...calendarData.timelineItems];
@@ -2296,6 +2457,8 @@
       outsideInspectionReportGroups: calendarData.outsideInspectionReportGroups || [],
       inHouseBloodTests: calendarData.inHouseBloodTests || [],
       pressureUlcerRecords: pressureUlcerRecords || [],
+      pharmacyRecords: pharmacyRecords || [],
+      inspectionFindingsRecords: inspectionFindingsRecords || [],
       profile
     };
   }
@@ -3460,6 +3623,10 @@
     let vitalGraphState = null; // { close, overlayEl, dateKey, days } グラフモーダルの状態
     let bloodSugarGraphState = null; // { close, overlayEl, dateKey, days } 血糖グラフモーダルの状態
     let urineGraphState = null; // { close, overlayEl, dateKey, days } 尿量グラフモーダルの状態
+    let bloodTestModalState = null; // { close, overlayEl } 血液検査モーダルの状態
+    let pressureUlcerModalState = null; // { close, overlayEl } 褥瘡評価モーダルの状態
+    let pharmacyModalState = null; // { close, overlayEl } 薬剤部記録モーダルの状態
+    let inspectionFindingsModalState = null; // { close, overlayEl } 検査所見モーダルの状態
     let isLoading = true;
     let doctorColorMap = new Map(); // 担当医→色のマッピング
     let selectedDoctors = new Set(); // 選択中の担当医（正規化名）。空=全員表示
@@ -3469,6 +3636,8 @@
     let outsideInspectionReportGroups = [];
     let inHouseBloodTests = [];
     let pressureUlcerRecords = [];
+    let pharmacyRecords = [];
+    let inspectionFindingsRecords = [];
     let patientProfile = null;
     // 固定情報エリアのUI状態
     let fixedInfoCollapsed = false;
@@ -4508,6 +4677,11 @@
 
     // タイムライン描画
     function renderTimeline() {
+      // スクロール位置をリセット（患者/日付変更時に前の状態が残らないように）
+      if (recordContent) recordContent.scrollTop = 0;
+      if (vitalContent) vitalContent.scrollTop = 0;
+      if (prescriptionOrderContent) prescriptionOrderContent.scrollTop = 0;
+
       if (!currentHospitalization) {
         dateListEl.innerHTML = '<div class="no-records">入院情報なし</div>';
         recordContent.innerHTML = '';
@@ -5508,9 +5682,32 @@
         </button>
       `;
 
-      // AIサマリー用データボタン
+      // 薬剤部ボタン
       html += `
-        <button id="ai-data-btn" style="
+        <button id="pharmacy-btn" style="
+          width: 100%;
+          padding: 12px 16px;
+          background: linear-gradient(135deg, #e0f7fa 0%, #b2ebf2 100%);
+          border: 1px solid #4dd0e1;
+          border-radius: 8px;
+          font-size: 14px;
+          font-weight: 500;
+          color: #00838f;
+          cursor: pointer;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          gap: 8px;
+          transition: all 0.2s;
+          margin-bottom: 12px;
+        ">
+          薬剤部
+        </button>
+      `;
+
+      // 検査所見ボタン
+      html += `
+        <button id="inspection-findings-btn" style="
           width: 100%;
           padding: 12px 16px;
           background: linear-gradient(135deg, #e8f5e9 0%, #c8e6c9 100%);
@@ -5527,7 +5724,7 @@
           transition: all 0.2s;
           margin-bottom: 12px;
         ">
-          サマリー用データ
+          検査所見
         </button>
       `;
 
@@ -5557,516 +5754,46 @@
         pressureUlcerBtn.addEventListener('click', showPressureUlcerModal);
       }
 
-      // AIサマリー用データボタンのイベント
-      const aiDataBtn = fixedInfoContent.querySelector('#ai-data-btn');
-      if (aiDataBtn) {
-        aiDataBtn.addEventListener('mouseover', () => {
-          aiDataBtn.style.background = 'linear-gradient(135deg, #c8e6c9 0%, #81c784 100%)';
+      // 薬剤部ボタンのイベント
+      const pharmacyBtn = fixedInfoContent.querySelector('#pharmacy-btn');
+      if (pharmacyBtn) {
+        pharmacyBtn.addEventListener('mouseover', () => {
+          pharmacyBtn.style.background = 'linear-gradient(135deg, #b2ebf2 0%, #4dd0e1 100%)';
         });
-        aiDataBtn.addEventListener('mouseout', () => {
-          aiDataBtn.style.background = 'linear-gradient(135deg, #e8f5e9 0%, #c8e6c9 100%)';
+        pharmacyBtn.addEventListener('mouseout', () => {
+          pharmacyBtn.style.background = 'linear-gradient(135deg, #e0f7fa 0%, #b2ebf2 100%)';
         });
-        aiDataBtn.addEventListener('click', downloadAIData);
-      }
-    }
-
-    // AIサマリー用データをマークダウン形式に整形
-    function formatDataForAI() {
-      if (!selectedPatient || !currentHospitalization) {
-        return null;
+        pharmacyBtn.addEventListener('click', showPharmacyModal);
       }
 
-      // ISO日付フォーマット関数
-      const toIsoDate = (date) => {
-        if (!date) return '';
-        const d = date instanceof Date ? date : new Date(date);
-        const year = d.getFullYear();
-        const month = String(d.getMonth() + 1).padStart(2, '0');
-        const day = String(d.getDate()).padStart(2, '0');
-        return `${year}-${month}-${day}`;
-      };
-
-      const lines = [];
-      const today = new Date();
-      const todayIso = toIsoDate(today);
-
-      const hospStart = currentHospitalization.startDate;
-      const startDateIso = `${hospStart.year}-${String(hospStart.month).padStart(2, '0')}-${String(hospStart.day).padStart(2, '0')}`;
-      const dayCount = currentHospitalization.hospitalizationDayCount?.value || '-';
-
-      const age = calculateAge(selectedPatient.birthDate);
-      const gender = selectedPatient.sex === 'MALE' ? '男性' : selectedPatient.sex === 'FEMALE' ? '女性' : '不明';
-      const disease = getCachedDisease(selectedPatient.uuid) || '未登録';
-
-      // === フロントマター（YAML形式） ===
-      lines.push('---');
-      lines.push(`patient_name: "${selectedPatient.fullName}"`);
-      lines.push(`patient_id: "${selectedPatient.uuid}"`);
-      lines.push(`export_date: "${todayIso}"`);
-      lines.push(`admission_date: "${startDateIso}"`);
-      lines.push(`hospital_day: ${dayCount}`);
-      lines.push(`source_system: "Henry_EMR"`);
-      lines.push(`doc_type: "patient_timeline_summary"`);
-      lines.push('---\n');
-
-      // === 患者基本情報 ===
-      lines.push('# 入院患者データ（AIサマリー作成用）\n');
-
-      lines.push('## 患者基本情報\n');
-      lines.push(`- 氏名: ${selectedPatient.fullName}`);
-      lines.push(`- 年齢・性別: ${age}歳 ${gender}`);
-      lines.push(`- 主病名: ${disease}`);
-      lines.push(`- 入院日: ${startDateIso}（${dayCount}日目）`);
-      if (currentHospitalization.lastHospitalizationLocation) {
-        const loc = currentHospitalization.lastHospitalizationLocation;
-        lines.push(`- 病棟・病室: ${loc.ward?.name || ''} ${loc.room?.name || ''}`);
-      }
-      lines.push('');
-
-      // === 患者プロフィール ===
-      // スプレッドシートのプロフィールを優先、なければGraphQL APIから
-      const cachedData = summaryCache?.[selectedPatient.uuid];
-      let profileText = '';
-      if (cachedData && cachedData.profile) {
-        profileText = cachedData.profile;
-      } else if (patientProfile && patientProfile.text) {
-        profileText = patientProfile.text;
-        // 「患者プロフィール」行を削除
-        profileText = profileText.split('\n')
-          .filter(line => !line.includes('患者プロフィール'))
-          .join('\n');
-      }
-      if (profileText) {
-        lines.push('## 患者プロフィール（既往歴・ADL等）\n');
-        lines.push(profileText);
-        lines.push('');
+      // 検査所見ボタンのイベント
+      const inspectionFindingsBtn = fixedInfoContent.querySelector('#inspection-findings-btn');
+      if (inspectionFindingsBtn) {
+        inspectionFindingsBtn.addEventListener('mouseover', () => {
+          inspectionFindingsBtn.style.background = 'linear-gradient(135deg, #c8e6c9 0%, #a5d6a7 100%)';
+        });
+        inspectionFindingsBtn.addEventListener('mouseout', () => {
+          inspectionFindingsBtn.style.background = 'linear-gradient(135deg, #e8f5e9 0%, #c8e6c9 100%)';
+        });
+        inspectionFindingsBtn.addEventListener('click', showInspectionFindingsModal);
       }
 
-      // === 処方履歴 ===
-      if (activePrescriptions.length > 0) {
-        lines.push('## 現在の処方\n');
-        for (const rx of activePrescriptions) {
-          const createDate = rx.createTime?.seconds
-            ? new Date(rx.createTime.seconds * 1000)
-            : null;
-          const dateStr = createDate
-            ? toIsoDate(createDate)
-            : '不明';
-
-          for (const rp of (rx.rps || [])) {
-            const medicines = (rp.instructions || []).map(inst => {
-              const med = inst.instruction?.medicationDosageInstruction;
-              const name = cleanMedicineName(med?.localMedicine?.name || med?.medicine?.name || '');
-              const dosage = med?.text || '';
-              return name ? `${name} ${dosage}`.trim() : null;
-            }).filter(Boolean);
-
-            if (medicines.length > 0) {
-              lines.push(`- ${medicines.join(', ')}（${dateStr}〜）`);
-            }
-          }
-        }
-        lines.push('');
-      }
-
-      // === 注射履歴（期間スナップショット方式） ===
-      if (activeInjections.length > 0) {
-        // 全注射を「開始日、終了日、投与経路、薬剤名」の形式に変換
-        const injectionPeriods = [];
-        for (const inj of activeInjections) {
-          // 保留・下書きは除外
-          if (['ORDER_STATUS_ON_HOLD', 'ORDER_STATUS_DRAFT'].includes(inj.orderStatus)) continue;
-
-          for (const rp of (inj.rps || [])) {
-            const technique = (rp.localInjectionTechnique?.name || '').replace(/，/g, ',') || 'その他';
-            const medicines = (rp.instructions || []).map(inst => {
-              const med = inst.instruction?.medicationDosageInstruction;
-              const rawName = med?.localMedicine?.name || med?.mhlwMedicine?.name || null;
-              return rawName ? cleanMedicineName(rawName) : null;
-            }).filter(Boolean);
-
-            if (medicines.length > 0 && inj.startDate) {
-              const startDate = new Date(inj.startDate.year, inj.startDate.month - 1, inj.startDate.day);
-              const duration = rp.boundsDurationDays?.value || 1;
-              const endDate = new Date(startDate);
-              endDate.setDate(endDate.getDate() + duration - 1);
-
-              // 有効な注射は終了日を「継続中」として扱う
-              const isActive = inj.orderStatus === 'ORDER_STATUS_ACTIVE';
-
-              injectionPeriods.push({
-                startDate,
-                endDate: isActive ? null : endDate, // nullは継続中
-                technique,
-                medicines: medicines.join(', '),
-                isActive
-              });
-            }
-          }
-        }
-
-        if (injectionPeriods.length > 0) {
-          // 全ての日付境界点を収集
-          const boundaries = new Set();
-          const today = new Date();
-          today.setHours(0, 0, 0, 0);
-
-          for (const period of injectionPeriods) {
-            boundaries.add(period.startDate.getTime());
-            if (period.endDate) {
-              // 終了日の翌日を境界として追加
-              const nextDay = new Date(period.endDate);
-              nextDay.setDate(nextDay.getDate() + 1);
-              boundaries.add(nextDay.getTime());
-            }
-          }
-          // 今日も境界として追加
-          boundaries.add(today.getTime());
-
-          // 境界点をソート（古い順＝時系列順）
-          const sortedBoundaries = [...boundaries].sort((a, b) => a - b);
-
-          // 各期間でどの注射が有効だったかを計算
-          lines.push('## 注射履歴\n');
-
-          for (let i = 0; i < sortedBoundaries.length - 1; i++) {
-            const periodStart = new Date(sortedBoundaries[i]);
-            const periodEnd = new Date(sortedBoundaries[i + 1]);
-
-            // この期間で有効だった注射を収集
-            const activeInPeriod = injectionPeriods.filter(period => {
-              const effectiveEnd = period.endDate || today;
-              return period.startDate <= periodStart && effectiveEnd >= periodStart;
-            });
-
-            if (activeInPeriod.length === 0) continue;
-
-            // 期間ラベルを作成（ISO形式）
-            const startStr = toIsoDate(periodStart);
-            const endDateForDisplay = new Date(periodEnd);
-            endDateForDisplay.setDate(endDateForDisplay.getDate() - 1);
-            const endStr = toIsoDate(endDateForDisplay);
-            const isCurrentPeriod = periodEnd.getTime() > today.getTime();
-            const periodLabel = isCurrentPeriod
-              ? `### 現在投与中（${startStr}〜）`
-              : `### ${startStr}〜${endStr}`;
-
-            lines.push(periodLabel);
-
-            // 投与経路ごとにグループ化
-            const byTechnique = new Map();
-            for (const item of activeInPeriod) {
-              if (!byTechnique.has(item.technique)) {
-                byTechnique.set(item.technique, []);
-              }
-              byTechnique.get(item.technique).push(item.medicines);
-            }
-
-            for (const [technique, meds] of byTechnique) {
-              // 重複を除去
-              const uniqueMeds = [...new Set(meds)];
-              lines.push(`- ${technique}: ${uniqueMeds.join(', ')}`);
-            }
-            lines.push('');
-          }
-        }
-      }
-
-      // === 経過記録（時系列・全データ統合） ===
-      lines.push('## 経過記録\n');
-
-      // 全日付を収集（allItems + 血液検査 + 褥瘡評価）
-      const allDates = new Set();
-
-      // allItemsから日付を収集（バイタル、血糖、食事、尿量、医師、看護、リハビリ）
-      const sortedItems = [...allItems]
-        .filter(item => item.date && ['doctor', 'nursing', 'rehab', 'vital', 'meal', 'urine', 'bloodSugar'].includes(item.category))
-        .sort((a, b) => a.date - b.date);
-
-      for (const item of sortedItems) {
-        allDates.add(dateKey(item.date));
-      }
-
-      // 血液検査の日付を収集
-      const bloodTestResults = extractBloodTestResults(outsideInspectionReportGroups, inHouseBloodTests);
-      const bloodTestByDate = new Map();
-      for (const result of bloodTestResults) {
-        allDates.add(result.dateKey);
-        bloodTestByDate.set(result.dateKey, result);
-      }
-
-      // 褥瘡評価の日付を収集
-      const pressureUlcerByDate = new Map();
-      if (pressureUlcerRecords && pressureUlcerRecords.length > 0) {
-        for (const record of pressureUlcerRecords) {
-          if (!record.recordDate) continue;
-          const dk = `${record.recordDate.year}-${String(record.recordDate.month).padStart(2, '0')}-${String(record.recordDate.day).padStart(2, '0')}`;
-          allDates.add(dk);
-          if (!pressureUlcerByDate.has(dk)) {
-            pressureUlcerByDate.set(dk, []);
-          }
-          pressureUlcerByDate.get(dk).push(record);
-        }
-      }
-
-      // allItemsを日付ごとにグループ化
-      const groupedByDate = new Map();
-      for (const item of sortedItems) {
-        const key = dateKey(item.date);
-        if (!groupedByDate.has(key)) {
-          groupedByDate.set(key, []);
-        }
-        groupedByDate.get(key).push(item);
-      }
-
-      // カテゴリ名のマッピング
-      const categoryLabels = {
-        vital: 'バイタル',
-        bloodSugar: '血糖値',
-        meal: '食事',
-        urine: '尿量',
-        doctor: '医師記録',
-        nursing: '看護記録',
-        rehab: 'リハビリ記録'
-      };
-
-      // カテゴリの表示順序
-      const categoryOrder = ['vital', 'bloodSugar', 'meal', 'urine', 'doctor', 'nursing', 'rehab'];
-
-      // 日付順に出力
-      const sortedDates = Array.from(allDates).sort();
-      for (const dk of sortedDates) {
-        // ISO形式（YYYY-MM-DD）で出力
-        lines.push(`### ${dk}\n`);
-
-        // カテゴリごとのアイテム
-        const items = groupedByDate.get(dk) || [];
-        const byCategory = new Map();
-        for (const item of items) {
-          if (!byCategory.has(item.category)) {
-            byCategory.set(item.category, []);
-          }
-          byCategory.get(item.category).push(item);
-        }
-
-        // カテゴリ順に出力
-        for (const cat of categoryOrder) {
-          const catItems = byCategory.get(cat);
-          if (!catItems || catItems.length === 0) continue;
-
-          const label = categoryLabels[cat] || cat;
-          lines.push(`**${label}**`);
-
-          for (const item of catItems) {
-            const text = item.text.trim();
-            lines.push(text);
-          }
-          lines.push('');
-        }
-
-        // 血液検査（この日付にある場合）
-        const bloodTest = bloodTestByDate.get(dk);
-        if (bloodTest) {
-          lines.push('**血液検査**');
-          for (const [category, testItems] of bloodTest.categories) {
-            const itemStrs = testItems.map(item => {
-              const flag = item.flag ? ` (${item.flag})` : '';
-              const ref = item.referenceValue ? ` [基準:${item.referenceValue}]` : '';
-              return `${item.name}: ${item.value}${flag}${ref}`;
-            });
-            lines.push(`${category}: ${itemStrs.join(', ')}`);
-          }
-          lines.push('');
-        }
-
-        // 褥瘡評価（この日付にある場合）
-        const pressureUlcers = pressureUlcerByDate.get(dk);
-        if (pressureUlcers && pressureUlcers.length > 0) {
-          lines.push('**褥瘡評価**');
-          for (const record of pressureUlcers) {
-            const parsed = parsePressureUlcerEditorData(record.editorData);
-            if (!parsed) continue;
-
-            const site = parsed.site || '部位不明';
-            const score = parsed.totalScore ? `${parsed.totalScore}点` : '-';
-            const designRItems = Object.entries(parsed.designR)
-              .filter(([, v]) => v !== null)
-              .map(([k, v]) => `${k}:${v}`)
-              .join(' ');
-            lines.push(`${site} 合計${score} ${designRItems}`);
-          }
-          lines.push('');
-        }
-      }
-
-      // === 日次データ推移テーブル（バイタル・血糖・食事・尿量） ===
-      // 全日付を収集
-      const dailyDataDates = new Set();
-      const vitalByDate = new Map();
-      const bloodSugarByDate = new Map();
-      const mealByDate = new Map();
-      const urineByDate = new Map();
-
-      for (const item of allItems) {
-        if (!item.date) continue;
-        const dk = dateKey(item.date);
-        dailyDataDates.add(dk);
-
-        if (item.category === 'vital' && item.vitals) {
-          vitalByDate.set(dk, item.vitals);
-        } else if (item.category === 'bloodSugar') {
-          bloodSugarByDate.set(dk, item.text);
-        } else if (item.category === 'meal') {
-          mealByDate.set(dk, item.text);
-        } else if (item.category === 'urine') {
-          urineByDate.set(dk, item.text);
-        }
-      }
-
-      if (dailyDataDates.size > 0) {
-        lines.push('## 日次データ推移（テーブル）\n');
-
-        const sortedDailyDates = Array.from(dailyDataDates).sort();
-
-        // ヘッダー
-        lines.push('| 日付 | T (℃) | BP (mmHg) | P (bpm) | SpO2 (%) | 血糖 (朝/昼/夕) | 尿量 (mL) | 食事 |');
-        lines.push('|------|--------|-----------|---------|----------|-----------------|-----------|------|');
-
-        for (const dk of sortedDailyDates) {
-          // バイタル
-          let temp = '-', bp = '-', pulse = '-', spo2 = '-';
-          const vitals = vitalByDate.get(dk) || [];
-          for (const vs of vitals) {
-            const raw = vs.rawData || vs;
-            if (temp === '-' && raw.temperature?.value) {
-              temp = String(raw.temperature.value / 10);
-            }
-            if (bp === '-' && raw.bloodPressureUpperBound?.value && raw.bloodPressureLowerBound?.value) {
-              bp = `${raw.bloodPressureUpperBound.value / 10}/${raw.bloodPressureLowerBound.value / 10}`;
-            }
-            if (pulse === '-' && raw.pulseRate?.value) {
-              pulse = String(raw.pulseRate.value / 10);
-            }
-            if (spo2 === '-' && raw.spo2?.value) {
-              spo2 = String(raw.spo2.value / 10);
-            }
-          }
-
-          // 血糖（テキストから抽出）
-          let bloodSugar = '-';
-          const bsText = bloodSugarByDate.get(dk) || '';
-          const bsMatch = bsText.match(/朝(\d+)?.*昼(\d+)?.*夕(\d+)?/);
-          if (bsMatch) {
-            bloodSugar = `${bsMatch[1] || '-'}/${bsMatch[2] || '-'}/${bsMatch[3] || '-'}`;
-          } else if (bsText) {
-            // 別形式の場合はテキストをそのまま使用（短縮）
-            bloodSugar = bsText.replace(/【血糖・インスリン】/g, '').replace(/\n/g, ' ').slice(0, 20);
-          }
-
-          // 尿量（テキストから抽出）
-          let urine = '-';
-          const urineText = urineByDate.get(dk) || '';
-          const urineMatch = urineText.match(/(\d+)mL/);
-          if (urineMatch) {
-            urine = urineMatch[1];
-          }
-
-          // 食事（テキストを短縮）
-          let meal = '-';
-          const mealText = mealByDate.get(dk) || '';
-          if (mealText) {
-            // 改行を除去して短縮
-            meal = mealText.replace(/\n/g, ' ').slice(0, 30);
-            if (mealText.length > 30) meal += '...';
-          }
-
-          lines.push(`| ${dk} | ${temp} | ${bp} | ${pulse} | ${spo2} | ${bloodSugar} | ${urine} | ${meal} |`);
-        }
-        lines.push('');
-      }
-
-      // === 血液検査のピボットテーブル ===
-      if (bloodTestResults.length > 0) {
-        lines.push('## 血液検査推移（テーブル）\n');
-
-        // 日付リスト（ソート済み）
-        const testDates = [...bloodTestResults].sort((a, b) => a.dateKey.localeCompare(b.dateKey)).map(r => r.dateKey);
-
-        // 全検査項目を収集（基準値も含む）
-        const allTestItems = new Map(); // itemName -> { referenceValue, dates: Map(dateKey -> {value, flag}) }
-        for (const result of bloodTestResults) {
-          for (const [, items] of result.categories) {
-            for (const item of items) {
-              if (!allTestItems.has(item.name)) {
-                allTestItems.set(item.name, {
-                  referenceValue: item.referenceValue || '-',
-                  dates: new Map()
-                });
-              }
-              // 基準値は最初に見つかったものを使用（同じ項目なら同じはず）
-              if (item.referenceValue && allTestItems.get(item.name).referenceValue === '-') {
-                allTestItems.get(item.name).referenceValue = item.referenceValue;
-              }
-              allTestItems.get(item.name).dates.set(result.dateKey, {
-                value: item.value,
-                flag: item.flag
-              });
-            }
-          }
-        }
-
-        // ヘッダー行（基準値列を追加）
-        lines.push(`| 検査項目 | 基準値 | ${testDates.join(' | ')} |`);
-        lines.push(`|----------|--------|${testDates.map(() => '------').join('|')}|`);
-
-        // 各検査項目の行
-        for (const [itemName, itemData] of allTestItems) {
-          const values = testDates.map(dk => {
-            const data = itemData.dates.get(dk);
-            if (!data) return '-';
-            return data.flag ? `${data.value} (${data.flag})` : data.value;
-          });
-          lines.push(`| ${itemName} | ${itemData.referenceValue} | ${values.join(' | ')} |`);
-        }
-        lines.push('');
-      }
-
-      return lines.join('\n');
-    }
-
-    // AIサマリー用データをダウンロード
-    function downloadAIData() {
-      const content = formatDataForAI();
-      if (!content) {
-        window.HenryCore.ui.showToast('データがありません', 'error');
-        return;
-      }
-
-      // ファイル名生成
-      const today = new Date();
-      const dateStr = `${today.getFullYear()}${String(today.getMonth() + 1).padStart(2, '0')}${String(today.getDate()).padStart(2, '0')}`;
-      const patientName = selectedPatient?.fullName?.replace(/\s+/g, '') || '患者';
-      const fileName = `${patientName}_入院データ_${dateStr}.md`;
-
-      // BlobとダウンロードリンクでDL
-      const blob = new Blob([content], { type: 'text/markdown; charset=utf-8' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = fileName;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
-
-      window.HenryCore.ui.showToast('ダウンロードしました', 'success');
     }
 
     // 血液検査結果モーダルを表示（横軸日付形式）
     function showBloodTestModal() {
       const results = extractBloodTestResults(outsideInspectionReportGroups, inHouseBloodTests);
+      const modalTitle = `血液検査結果 - ${selectedPatient?.fullName || ''}`;
 
       if (results.length === 0) {
+        // モーダルが開いていれば「データなし」表示
+        if (bloodTestModalState?.overlayEl?.parentNode) {
+          const titleEl = bloodTestModalState.overlayEl.querySelector('.henry-modal-title');
+          if (titleEl) titleEl.textContent = modalTitle;
+          const contentEl = bloodTestModalState.overlayEl.querySelector('.henry-modal-content');
+          if (contentEl) contentEl.innerHTML = '<div style="padding: 20px; text-align: center; color: #666;">血液検査データがありません</div>';
+          return;
+        }
         window.HenryCore.ui.showToast('血液検査データがありません', 'info');
         return;
       }
@@ -6199,16 +5926,58 @@
       const maxWidth = window.innerWidth * 0.8;
       const modalWidth = Math.min(maxWidth, requiredWidth);
 
-      window.HenryCore.ui.showModal({
-        title: `血液検査結果 - ${selectedPatient?.fullName || ''}`,
+      // モーダルが既に開いている場合はコンテンツのみ更新
+      if (bloodTestModalState?.overlayEl?.parentNode) {
+        const titleEl = bloodTestModalState.overlayEl.querySelector('.henry-modal-title');
+        if (titleEl) titleEl.textContent = modalTitle;
+        const contentEl = bloodTestModalState.overlayEl.querySelector('.henry-modal-content');
+        if (contentEl) {
+          contentEl.innerHTML = '';
+          contentEl.appendChild(contentDiv);
+        }
+        return;
+      }
+
+      // 新規モーダル作成
+      const { close } = window.HenryCore.ui.showModal({
+        title: modalTitle,
         content: contentDiv,
         width: `${modalWidth}px`
       });
+      const overlayEl = document.querySelector('.henry-modal-overlay:last-of-type');
+
+      bloodTestModalState = { close, overlayEl };
+
+      // MutationObserverでモーダル削除時にリセット
+      if (overlayEl) {
+        const observer = new MutationObserver((mutations) => {
+          for (const mutation of mutations) {
+            for (const removed of mutation.removedNodes) {
+              if (removed === overlayEl) {
+                bloodTestModalState = null;
+                observer.disconnect();
+                return;
+              }
+            }
+          }
+        });
+        observer.observe(document.body, { childList: true });
+      }
     }
 
     // 褥瘡評価モーダルを表示（横軸日付形式）
     function showPressureUlcerModal() {
+      const modalTitle = `褥瘡評価（DESIGN-R） - ${selectedPatient?.fullName || ''}`;
+
       if (!pressureUlcerRecords || pressureUlcerRecords.length === 0) {
+        // モーダルが開いていれば「データなし」表示
+        if (pressureUlcerModalState?.overlayEl?.parentNode) {
+          const titleEl = pressureUlcerModalState.overlayEl.querySelector('.henry-modal-title');
+          if (titleEl) titleEl.textContent = modalTitle;
+          const contentEl = pressureUlcerModalState.overlayEl.querySelector('.henry-modal-content');
+          if (contentEl) contentEl.innerHTML = '<div style="padding: 20px; text-align: center; color: #666;">褥瘡評価データがありません</div>';
+          return;
+        }
         window.HenryCore.ui.showToast('褥瘡評価データがありません', 'info');
         return;
       }
@@ -6217,6 +5986,14 @@
       const pivoted = pivotPressureUlcerData(pressureUlcerRecords);
 
       if (pivoted.sites.length === 0) {
+        // モーダルが開いていれば「データなし」表示
+        if (pressureUlcerModalState?.overlayEl?.parentNode) {
+          const titleEl = pressureUlcerModalState.overlayEl.querySelector('.henry-modal-title');
+          if (titleEl) titleEl.textContent = modalTitle;
+          const contentEl = pressureUlcerModalState.overlayEl.querySelector('.henry-modal-content');
+          if (contentEl) contentEl.innerHTML = '<div style="padding: 20px; text-align: center; color: #666;">褥瘡評価データがありません</div>';
+          return;
+        }
         window.HenryCore.ui.showToast('褥瘡評価データがありません', 'info');
         return;
       }
@@ -6330,11 +6107,302 @@
       const maxWidth = window.innerWidth * 0.8;
       const modalWidth = Math.min(maxWidth, requiredWidth);
 
-      window.HenryCore.ui.showModal({
-        title: `褥瘡評価（DESIGN-R） - ${selectedPatient?.fullName || ''}`,
+      // モーダルが既に開いている場合はコンテンツのみ更新
+      if (pressureUlcerModalState?.overlayEl?.parentNode) {
+        const titleEl = pressureUlcerModalState.overlayEl.querySelector('.henry-modal-title');
+        if (titleEl) titleEl.textContent = modalTitle;
+        const contentEl = pressureUlcerModalState.overlayEl.querySelector('.henry-modal-content');
+        if (contentEl) {
+          contentEl.innerHTML = '';
+          contentEl.appendChild(contentDiv);
+        }
+        return;
+      }
+
+      // 新規モーダル作成
+      const { close } = window.HenryCore.ui.showModal({
+        title: modalTitle,
         content: contentDiv,
         width: `${modalWidth}px`
       });
+      const overlayEl = document.querySelector('.henry-modal-overlay:last-of-type');
+
+      pressureUlcerModalState = { close, overlayEl };
+
+      // MutationObserverでモーダル削除時にリセット
+      if (overlayEl) {
+        const observer = new MutationObserver((mutations) => {
+          for (const mutation of mutations) {
+            for (const removed of mutation.removedNodes) {
+              if (removed === overlayEl) {
+                pressureUlcerModalState = null;
+                observer.disconnect();
+                return;
+              }
+            }
+          }
+        });
+        observer.observe(document.body, { childList: true });
+      }
+    }
+
+    // 薬剤部記録モーダルを表示
+    function showPharmacyModal() {
+      if (!selectedPatient) {
+        window.HenryCore.ui.showToast('患者が選択されていません', 'error');
+        return;
+      }
+
+      const modalTitle = `💊 薬剤部記録 - ${selectedPatient.fullName}`;
+
+      // モーダルが開いている場合はタイトル更新
+      if (pharmacyModalState?.overlayEl?.parentNode) {
+        const titleEl = pharmacyModalState.overlayEl.querySelector('.henry-modal-title');
+        if (titleEl) titleEl.textContent = modalTitle;
+      }
+
+      // プリフェッチ済みデータを使用
+      if (pharmacyRecords.length === 0) {
+        // モーダルが開いていれば「データなし」表示
+        if (pharmacyModalState?.overlayEl?.parentNode) {
+          const contentEl = pharmacyModalState.overlayEl.querySelector('.henry-modal-content');
+          if (contentEl) contentEl.innerHTML = '<div style="padding: 20px; text-align: center; color: #666;">薬剤部記録がありません</div>';
+          return;
+        }
+        window.HenryCore.ui.showToast('薬剤部記録がありません', 'info');
+        return;
+      }
+
+      // モーダルコンテンツを構築
+      const contentDiv = document.createElement('div');
+      contentDiv.style.cssText = 'max-height: 70vh; overflow-y: auto; padding: 8px;';
+
+      // 各記録をカードとして表示
+      for (let i = 0; i < pharmacyRecords.length; i++) {
+        const record = pharmacyRecords[i];
+        const recordDiv = document.createElement('div');
+        recordDiv.style.cssText = `
+          padding: 12px;
+          background: #e0f7fa;
+          border-radius: 6px;
+          margin-bottom: 12px;
+        `;
+
+        // ヘッダー（日付・作成者）
+        const headerDiv = document.createElement('div');
+        headerDiv.style.cssText = `
+          display: flex;
+          justify-content: space-between;
+          margin-bottom: 8px;
+          font-size: 12px;
+          color: #666;
+        `;
+        const dateStr = record.date
+          ? `${record.date.getFullYear()}/${record.date.getMonth() + 1}/${record.date.getDate()} ${record.date.getHours()}:${String(record.date.getMinutes()).padStart(2, '0')}`
+          : '日付不明';
+        headerDiv.innerHTML = `
+          <span style="font-weight: 500; color: #00838f;">${escapeHtml(dateStr)}</span>
+          <span>${escapeHtml(record.author)}</span>
+        `;
+        recordDiv.appendChild(headerDiv);
+
+        // 本文
+        const textDiv = document.createElement('div');
+        textDiv.style.cssText = `
+          font-size: 14px;
+          line-height: 1.6;
+          white-space: pre-wrap;
+        `;
+        textDiv.innerHTML = formatPharmacyText(record.text);
+        recordDiv.appendChild(textDiv);
+
+        contentDiv.appendChild(recordDiv);
+
+        // 区切り線（最後以外）
+        if (i < pharmacyRecords.length - 1) {
+          const hr = document.createElement('hr');
+          hr.style.cssText = 'margin: 16px 0; border: none; border-top: 1px solid #e0e0e0;';
+          contentDiv.appendChild(hr);
+        }
+      }
+
+      // モーダルが既に開いている場合はコンテンツのみ更新
+      if (pharmacyModalState?.overlayEl?.parentNode) {
+        const contentEl = pharmacyModalState.overlayEl.querySelector('.henry-modal-content');
+        if (contentEl) {
+          contentEl.innerHTML = '';
+          contentEl.appendChild(contentDiv);
+        }
+        return;
+      }
+
+      // 新規モーダル作成
+      const { close } = window.HenryCore.ui.showModal({
+        title: modalTitle,
+        content: contentDiv,
+        width: '600px'
+      });
+      const overlayEl = document.querySelector('.henry-modal-overlay:last-of-type');
+
+      pharmacyModalState = { close, overlayEl };
+
+      // MutationObserverでモーダル削除時にリセット
+      if (overlayEl) {
+        const observer = new MutationObserver((mutations) => {
+          for (const mutation of mutations) {
+            for (const removed of mutation.removedNodes) {
+              if (removed === overlayEl) {
+                pharmacyModalState = null;
+                observer.disconnect();
+                return;
+              }
+            }
+          }
+        });
+        observer.observe(document.body, { childList: true });
+      }
+    }
+
+    // 検査所見モーダルを表示
+    function showInspectionFindingsModal() {
+      if (!selectedPatient) {
+        window.HenryCore.ui.showToast('患者が選択されていません', 'error');
+        return;
+      }
+
+      const modalTitle = `🔬 検査所見（読影結果等） - ${selectedPatient.fullName}`;
+
+      // モーダルが開いている場合はタイトル更新
+      if (inspectionFindingsModalState?.overlayEl?.parentNode) {
+        const titleEl = inspectionFindingsModalState.overlayEl.querySelector('.henry-modal-title');
+        if (titleEl) titleEl.textContent = modalTitle;
+      }
+
+      // プリフェッチ済みデータを使用
+      if (inspectionFindingsRecords.length === 0) {
+        // モーダルが開いていれば「データなし」表示
+        if (inspectionFindingsModalState?.overlayEl?.parentNode) {
+          const contentEl = inspectionFindingsModalState.overlayEl.querySelector('.henry-modal-content');
+          if (contentEl) contentEl.innerHTML = '<div style="padding: 20px; text-align: center; color: #666;">検査所見がありません</div>';
+          return;
+        }
+        window.HenryCore.ui.showToast('検査所見がありません', 'info');
+        return;
+      }
+
+      // モーダルコンテンツを構築
+      const contentDiv = document.createElement('div');
+      contentDiv.style.cssText = 'max-height: 70vh; overflow-y: auto; padding: 8px;';
+
+      // 各記録をカードとして表示
+      for (let i = 0; i < inspectionFindingsRecords.length; i++) {
+        const record = inspectionFindingsRecords[i];
+        const recordDiv = document.createElement('div');
+        recordDiv.style.cssText = `
+          padding: 12px;
+          background: #e8f5e9;
+          border-radius: 6px;
+          margin-bottom: 12px;
+        `;
+
+        // ヘッダー（日付・作成者）
+        const headerDiv = document.createElement('div');
+        headerDiv.style.cssText = `
+          display: flex;
+          justify-content: space-between;
+          margin-bottom: 8px;
+          font-size: 12px;
+          color: #666;
+        `;
+        const dateStr = record.date
+          ? `${record.date.getFullYear()}/${record.date.getMonth() + 1}/${record.date.getDate()} ${record.date.getHours()}:${String(record.date.getMinutes()).padStart(2, '0')}`
+          : '日付不明';
+        headerDiv.innerHTML = `
+          <span style="font-weight: 500; color: #2e7d32;">${escapeHtml(dateStr)}</span>
+          <span>${escapeHtml(record.author)}</span>
+        `;
+        recordDiv.appendChild(headerDiv);
+
+        // 本文
+        const textDiv = document.createElement('div');
+        textDiv.style.cssText = `
+          font-size: 14px;
+          line-height: 1.6;
+          white-space: pre-wrap;
+        `;
+        textDiv.textContent = record.text;
+        recordDiv.appendChild(textDiv);
+
+        // 画像があれば表示
+        if (record.editorData) {
+          const images = extractImagesFromEditorData(record.editorData);
+          if (images.length > 0) {
+            const imageContainer = document.createElement('div');
+            imageContainer.style.cssText = 'margin-top: 12px;';
+            for (const img of images) {
+              const imgEl = document.createElement('img');
+              imgEl.src = img.url;
+              imgEl.style.cssText = `
+                max-width: 100%;
+                border-radius: 4px;
+                margin-bottom: 8px;
+                cursor: pointer;
+              `;
+              imgEl.alt = '検査画像';
+              imgEl.title = 'クリックで拡大表示';
+              // クリックで拡大表示
+              imgEl.addEventListener('click', () => window.open(img.url, '_blank'));
+              imageContainer.appendChild(imgEl);
+            }
+            recordDiv.appendChild(imageContainer);
+          }
+        }
+
+        contentDiv.appendChild(recordDiv);
+
+        // 区切り線（最後以外）
+        if (i < inspectionFindingsRecords.length - 1) {
+          const hr = document.createElement('hr');
+          hr.style.cssText = 'margin: 16px 0; border: none; border-top: 1px solid #e0e0e0;';
+          contentDiv.appendChild(hr);
+        }
+      }
+
+      // モーダルが既に開いている場合はコンテンツのみ更新
+      if (inspectionFindingsModalState?.overlayEl?.parentNode) {
+        const contentEl = inspectionFindingsModalState.overlayEl.querySelector('.henry-modal-content');
+        if (contentEl) {
+          contentEl.innerHTML = '';
+          contentEl.appendChild(contentDiv);
+        }
+        return;
+      }
+
+      // 新規モーダル作成
+      const { close } = window.HenryCore.ui.showModal({
+        title: modalTitle,
+        content: contentDiv,
+        width: '600px'
+      });
+      const overlayEl = document.querySelector('.henry-modal-overlay:last-of-type');
+
+      inspectionFindingsModalState = { close, overlayEl };
+
+      // MutationObserverでモーダル削除時にリセット
+      if (overlayEl) {
+        const observer = new MutationObserver((mutations) => {
+          for (const mutation of mutations) {
+            for (const removed of mutation.removedNodes) {
+              if (removed === overlayEl) {
+                inspectionFindingsModalState = null;
+                observer.disconnect();
+                return;
+              }
+            }
+          }
+        });
+        observer.observe(document.body, { childList: true });
+      }
     }
 
     // サマリー入力モーダル
@@ -6518,6 +6586,54 @@
 
       let html = '';
 
+      // === 選択日の注射 ===
+      if (selectedCategories.has('injection')) {
+        const targetInjections = activeInjections.filter(inj => {
+          if (!inj.startDate) return false;
+          const startDate = new Date(inj.startDate.year, inj.startDate.month - 1, inj.startDate.day);
+          const maxDuration = Math.max(...(inj.rps || []).map(rp => rp.boundsDurationDays?.value || 1));
+          const endDate = new Date(startDate);
+          endDate.setDate(endDate.getDate() + maxDuration - 1);
+          return targetDate >= startDate && targetDate <= endDate;
+        });
+
+        const injectionCat = CATEGORIES.injection;
+        html += `<div class="injection-section" style="background: ${injectionCat.bgColor}; border-left-color: ${injectionCat.color};"><div class="section-title">◆ ${dateLabel} の注射</div>`;
+
+        if (targetInjections.length > 0) {
+        html += targetInjections.flatMap(inj => {
+          const startDate = new Date(inj.startDate.year, inj.startDate.month - 1, inj.startDate.day);
+
+          return (inj.rps || []).map(rp => {
+            const medicines = (rp.instructions || []).map(inst => {
+              const med = inst.instruction?.medicationDosageInstruction;
+              const rawName = med?.localMedicine?.name || med?.mhlwMedicine?.name || null;
+              return rawName ? cleanMedicineName(rawName) : null;
+            }).filter(Boolean);
+
+            const technique = (rp.localInjectionTechnique?.name || '').replace(/，/g, ',');
+            const duration = rp.boundsDurationDays?.value || 1;
+            const endDate = new Date(startDate);
+            endDate.setDate(endDate.getDate() + duration - 1);
+            const endDateStr = `${endDate.getMonth() + 1}/${endDate.getDate()}まで`;
+
+            if (medicines.length === 0) return '';
+
+            return `
+              <div class="med-item">
+                <div class="med-usage">${technique ? escapeHtml(technique) + ' ' : ''}${endDateStr}</div>
+                <div class="med-name">${medicines.map(m => `<a href="https://www.google.com/search?q=${encodeURIComponent(m)}" target="_blank" class="med-link">${escapeHtml(m)}</a>`).join('<br>')}</div>
+              </div>
+            `;
+          });
+        }).filter(Boolean).join('');
+        } else {
+          html += '<div class="empty-message">注射なし</div>';
+        }
+
+        html += '</div>';
+      }
+
       // === 選択日の処方 ===
       if (selectedCategories.has('prescription')) {
         const targetPrescriptions = activePrescriptions.filter(rx => {
@@ -6602,54 +6718,6 @@
         `).join('');
         } else {
           html += '<div class="empty-message">有効な処方なし</div>';
-        }
-
-        html += '</div>';
-      }
-
-      // === 選択日の注射 ===
-      if (selectedCategories.has('injection')) {
-        const targetInjections = activeInjections.filter(inj => {
-          if (!inj.startDate) return false;
-          const startDate = new Date(inj.startDate.year, inj.startDate.month - 1, inj.startDate.day);
-          const maxDuration = Math.max(...(inj.rps || []).map(rp => rp.boundsDurationDays?.value || 1));
-          const endDate = new Date(startDate);
-          endDate.setDate(endDate.getDate() + maxDuration - 1);
-          return targetDate >= startDate && targetDate <= endDate;
-        });
-
-        const injectionCat = CATEGORIES.injection;
-        html += `<div class="injection-section" style="background: ${injectionCat.bgColor}; border-left-color: ${injectionCat.color};"><div class="section-title">◆ ${dateLabel} の注射</div>`;
-
-        if (targetInjections.length > 0) {
-        html += targetInjections.flatMap(inj => {
-          const startDate = new Date(inj.startDate.year, inj.startDate.month - 1, inj.startDate.day);
-
-          return (inj.rps || []).map(rp => {
-            const medicines = (rp.instructions || []).map(inst => {
-              const med = inst.instruction?.medicationDosageInstruction;
-              const rawName = med?.localMedicine?.name || med?.mhlwMedicine?.name || null;
-              return rawName ? cleanMedicineName(rawName) : null;
-            }).filter(Boolean);
-
-            const technique = (rp.localInjectionTechnique?.name || '').replace(/，/g, ',');
-            const duration = rp.boundsDurationDays?.value || 1;
-            const endDate = new Date(startDate);
-            endDate.setDate(endDate.getDate() + duration - 1);
-            const endDateStr = `${endDate.getMonth() + 1}/${endDate.getDate()}まで`;
-
-            if (medicines.length === 0) return '';
-
-            return `
-              <div class="med-item">
-                <div class="med-usage">${technique ? escapeHtml(technique) + ' ' : ''}${endDateStr}</div>
-                <div class="med-name">${medicines.map(m => `<a href="https://www.google.com/search?q=${encodeURIComponent(m)}" target="_blank" class="med-link">${escapeHtml(m)}</a>`).join('<br>')}</div>
-              </div>
-            `;
-          });
-        }).filter(Boolean).join('');
-        } else {
-          html += '<div class="empty-message">注射なし</div>';
         }
 
         html += '</div>';
@@ -6783,6 +6851,8 @@
         outsideInspectionReportGroups = allData.outsideInspectionReportGroups;
         inHouseBloodTests = allData.inHouseBloodTests;
         pressureUlcerRecords = allData.pressureUlcerRecords;
+        pharmacyRecords = allData.pharmacyRecords;
+        inspectionFindingsRecords = allData.inspectionFindingsRecords;
         patientProfile = allData.profile;
 
         // 入院期間でフィルタリング
@@ -6795,7 +6865,7 @@
           : null;
         allItems = filterByHospitalizationPeriod(allItems, startDate, endDate);
 
-        console.log(`[${SCRIPT_NAME}] データ読み込み完了: ${allItems.length}件, 有効処方: ${activePrescriptions.length}件, 有効注射: ${activeInjections.length}件, 血液検査: ${outsideInspectionReportGroups.length}件, 褥瘡評価: ${pressureUlcerRecords.length}件`);
+        console.log(`[${SCRIPT_NAME}] データ読み込み完了: ${allItems.length}件, 有効処方: ${activePrescriptions.length}件, 有効注射: ${activeInjections.length}件, 血液検査: ${outsideInspectionReportGroups.length}件, 褥瘡評価: ${pressureUlcerRecords.length}件, 薬剤部: ${pharmacyRecords.length}件, 検査所見: ${inspectionFindingsRecords.length}件`);
 
         // 固定情報エリアを描画
         renderFixedInfo();
@@ -6815,6 +6885,19 @@
         }
         if (urineGraphState) {
           showUrineGraph(selectedDateKey, urineGraphState.days);
+        }
+        // サイドパネルモーダルが開いていれば更新（患者切り替え時の連動）
+        if (bloodTestModalState) {
+          showBloodTestModal();
+        }
+        if (pressureUlcerModalState) {
+          showPressureUlcerModal();
+        }
+        if (pharmacyModalState) {
+          showPharmacyModal();
+        }
+        if (inspectionFindingsModalState) {
+          showInspectionFindingsModal();
         }
 
         // 前後の患者をプリフェッチ（非同期・待たない）
