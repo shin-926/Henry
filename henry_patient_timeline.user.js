@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry Patient Timeline
 // @namespace    https://github.com/shin-926/Henry
-// @version      2.78.0
+// @version      2.83.0
 // @description  入院患者の各種記録・オーダーをガントチャート風タイムラインで表示
 // @author       sk powered by Claude
 // @match        https://henry-app.jp/*
@@ -1969,6 +1969,306 @@
     return { dates: allDates, sites };
   }
 
+  // ========================================
+  // サマリー管理（Google Spreadsheet）
+  // ========================================
+
+  const SUMMARY_SPREADSHEET_NAME = 'Henry_患者サマリー';
+  let summarySpreadsheetId = null; // スプレッドシートIDキャッシュ
+  let summaryCache = null; // 全サマリーキャッシュ { patientUuid: { patientName, summary, summaryUpdatedAt, profile, profileUpdatedAt, rowIndex } }
+  let summaryCacheLoading = null; // 読み込み中のPromise（重複防止）
+
+  // Google Sheets API ヘルパー
+  async function sheetsApiRequest(endpoint, method = 'GET', body = null) {
+    const auth = window.HenryCore?.modules?.GoogleAuth;
+    if (!auth) {
+      throw new Error('GoogleAuth モジュールが利用できません');
+    }
+
+    const accessToken = await auth.getValidAccessToken();
+    if (!accessToken) {
+      throw new Error('Google認証が必要です');
+    }
+
+    const options = {
+      method,
+      headers: {
+        'Authorization': `Bearer ${accessToken}`,
+        'Content-Type': 'application/json'
+      }
+    };
+
+    if (body) {
+      options.body = JSON.stringify(body);
+    }
+
+    const response = await fetch(endpoint, options);
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`Sheets API エラー: ${response.status} ${errorText}`);
+    }
+
+    return response.json();
+  }
+
+  // スプレッドシートを検索（My Drive直下）
+  async function findSummarySpreadsheet() {
+    if (summarySpreadsheetId) return summarySpreadsheetId;
+
+    const auth = window.HenryCore?.modules?.GoogleAuth;
+    if (!auth) return null;
+
+    const tokens = await auth.getTokens();
+    if (!tokens?.access_token) return null;
+
+    // Drive APIでファイル検索
+    const query = encodeURIComponent(`name='${SUMMARY_SPREADSHEET_NAME}' and mimeType='application/vnd.google-apps.spreadsheet' and 'root' in parents and trashed=false`);
+    const response = await fetch(`https://www.googleapis.com/drive/v3/files?q=${query}&fields=files(id,name)`, {
+      headers: { 'Authorization': `Bearer ${tokens.access_token}` }
+    });
+
+    if (!response.ok) return null;
+
+    const data = await response.json();
+    if (data.files && data.files.length > 0) {
+      summarySpreadsheetId = data.files[0].id;
+      return summarySpreadsheetId;
+    }
+
+    return null;
+  }
+
+  // スプレッドシートを新規作成
+  async function createSummarySpreadsheet() {
+    const response = await sheetsApiRequest(
+      'https://sheets.googleapis.com/v4/spreadsheets',
+      'POST',
+      {
+        properties: { title: SUMMARY_SPREADSHEET_NAME },
+        sheets: [{
+          properties: { title: 'サマリー' },
+          data: [{
+            startRow: 0,
+            startColumn: 0,
+            rowData: [{
+              values: [
+                { userEnteredValue: { stringValue: '患者UUID' } },
+                { userEnteredValue: { stringValue: '患者名' } },
+                { userEnteredValue: { stringValue: 'サマリー' } },
+                { userEnteredValue: { stringValue: 'サマリー更新日時' } },
+                { userEnteredValue: { stringValue: 'プロフィール' } },
+                { userEnteredValue: { stringValue: 'プロフィール更新日時' } }
+              ]
+            }]
+          }]
+        }]
+      }
+    );
+
+    summarySpreadsheetId = response.spreadsheetId;
+
+    // My Drive直下に移動（作成時はMy Driveに入るが念のため）
+    console.log(`[${SCRIPT_NAME}] サマリースプレッドシートを作成: ${summarySpreadsheetId}`);
+
+    return summarySpreadsheetId;
+  }
+
+  // スプレッドシートIDを取得（なければ作成）
+  async function getOrCreateSummarySpreadsheet() {
+    let id = await findSummarySpreadsheet();
+    if (!id) {
+      id = await createSummarySpreadsheet();
+    }
+    return id;
+  }
+
+  // 全サマリーを取得してキャッシュに格納
+  async function loadAllSummaries() {
+    // 既にロード中なら待つ（重複リクエスト防止）
+    if (summaryCacheLoading) {
+      return summaryCacheLoading;
+    }
+
+    // 既にキャッシュがあれば返す
+    if (summaryCache !== null) {
+      return summaryCache;
+    }
+
+    summaryCacheLoading = (async () => {
+      try {
+        const spreadsheetId = await findSummarySpreadsheet();
+        if (!spreadsheetId) {
+          summaryCache = {};
+          return summaryCache;
+        }
+
+        const response = await sheetsApiRequest(
+          `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/サマリー!A:F`
+        );
+
+        const rows = response.values || [];
+        summaryCache = {};
+
+        // ヘッダーをスキップして全データをキャッシュに格納
+        for (let i = 1; i < rows.length; i++) {
+          const row = rows[i];
+          if (row[0]) {
+            summaryCache[row[0]] = {
+              rowIndex: i + 1, // 1-based（Sheets APIでの行番号）
+              patientName: row[1] || '',
+              summary: row[2] || '',
+              summaryUpdatedAt: row[3] || '',
+              profile: row[4] || '',
+              profileUpdatedAt: row[5] || ''
+            };
+          }
+        }
+
+        console.log(`[${SCRIPT_NAME}] サマリーキャッシュ完了: ${Object.keys(summaryCache).length}件`);
+        return summaryCache;
+      } catch (e) {
+        console.error(`[${SCRIPT_NAME}] サマリー一括読み込みエラー:`, e);
+        summaryCache = {};
+        return summaryCache;
+      } finally {
+        summaryCacheLoading = null;
+      }
+    })();
+
+    return summaryCacheLoading;
+  }
+
+  // 患者のサマリーを取得（キャッシュから）
+  async function loadPatientSummary(patientUuid) {
+    try {
+      const cache = await loadAllSummaries();
+      return cache[patientUuid] || null;
+    } catch (e) {
+      console.error(`[${SCRIPT_NAME}] サマリー読み込みエラー:`, e);
+      return null;
+    }
+  }
+
+  // 患者のサマリーを保存
+  async function savePatientSummary(patientUuid, patientName, summary) {
+    try {
+      const spreadsheetId = await getOrCreateSummarySpreadsheet();
+      const now = new Date().toISOString();
+
+      // キャッシュを確保
+      await loadAllSummaries();
+
+      // 既存データを確認（キャッシュから）
+      const existing = summaryCache[patientUuid];
+
+      // 既存のプロフィールデータを維持
+      const existingProfile = existing?.profile || '';
+      const existingProfileUpdatedAt = existing?.profileUpdatedAt || '';
+
+      let newRowIndex;
+      if (existing) {
+        // 更新（既存行を上書き）- プロフィールは維持
+        await sheetsApiRequest(
+          `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/サマリー!A${existing.rowIndex}:F${existing.rowIndex}?valueInputOption=RAW`,
+          'PUT',
+          {
+            values: [[patientUuid, patientName, summary, now, existingProfile, existingProfileUpdatedAt]]
+          }
+        );
+        newRowIndex = existing.rowIndex;
+      } else {
+        // 新規追加（末尾に追加）
+        const appendResponse = await sheetsApiRequest(
+          `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/サマリー!A:F:append?valueInputOption=RAW&insertDataOption=INSERT_ROWS`,
+          'POST',
+          {
+            values: [[patientUuid, patientName, summary, now, '', '']]
+          }
+        );
+        // レスポンスから追加された行番号を取得
+        // updatedRange: "サマリー!A5:F5" のような形式
+        const range = appendResponse?.updates?.updatedRange || '';
+        const match = range.match(/!A(\d+):/);
+        newRowIndex = match ? parseInt(match[1], 10) : Object.keys(summaryCache).length + 2;
+      }
+
+      // キャッシュを更新
+      summaryCache[patientUuid] = {
+        rowIndex: newRowIndex,
+        patientName,
+        summary,
+        summaryUpdatedAt: now,
+        profile: existingProfile,
+        profileUpdatedAt: existingProfileUpdatedAt
+      };
+
+      return true;
+    } catch (e) {
+      console.error(`[${SCRIPT_NAME}] サマリー保存エラー:`, e);
+      throw e;
+    }
+  }
+
+  // 患者のプロフィールを保存
+  async function savePatientProfile(patientUuid, patientName, profile) {
+    try {
+      const spreadsheetId = await getOrCreateSummarySpreadsheet();
+      const now = new Date().toISOString();
+
+      // キャッシュを確保
+      await loadAllSummaries();
+
+      // 既存データを確認（キャッシュから）
+      const existing = summaryCache[patientUuid];
+
+      // 既存のサマリーデータを維持
+      const existingSummary = existing?.summary || '';
+      const existingSummaryUpdatedAt = existing?.summaryUpdatedAt || '';
+
+      let newRowIndex;
+      if (existing) {
+        // 更新（既存行を上書き）- サマリーは維持
+        await sheetsApiRequest(
+          `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/サマリー!A${existing.rowIndex}:F${existing.rowIndex}?valueInputOption=RAW`,
+          'PUT',
+          {
+            values: [[patientUuid, patientName, existingSummary, existingSummaryUpdatedAt, profile, now]]
+          }
+        );
+        newRowIndex = existing.rowIndex;
+      } else {
+        // 新規追加（末尾に追加）
+        const appendResponse = await sheetsApiRequest(
+          `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/サマリー!A:F:append?valueInputOption=RAW&insertDataOption=INSERT_ROWS`,
+          'POST',
+          {
+            values: [[patientUuid, patientName, '', '', profile, now]]
+          }
+        );
+        // レスポンスから追加された行番号を取得
+        const range = appendResponse?.updates?.updatedRange || '';
+        const match = range.match(/!A(\d+):/);
+        newRowIndex = match ? parseInt(match[1], 10) : Object.keys(summaryCache).length + 2;
+      }
+
+      // キャッシュを更新
+      summaryCache[patientUuid] = {
+        rowIndex: newRowIndex,
+        patientName,
+        summary: existingSummary,
+        summaryUpdatedAt: existingSummaryUpdatedAt,
+        profile,
+        profileUpdatedAt: now
+      };
+
+      return true;
+    } catch (e) {
+      console.error(`[${SCRIPT_NAME}] プロフィール保存エラー:`, e);
+      throw e;
+    }
+  }
+
   // 全データ取得
   async function fetchAllData(patientUuid, hospitalizationStartDate) {
     const [doctorRecords, nursingRecords, rehabRecords, calendarData, profile, pressureUlcerRecords] = await Promise.all([
@@ -2507,7 +2807,7 @@
       height: 98vh;
       display: flex;
       flex-direction: column;
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      font-family: "Noto Sans JP", sans-serif;
     }
     #patient-timeline-modal .modal-header {
       padding: 16px 20px;
@@ -2922,6 +3222,14 @@
       flex-direction: column;
       min-width: 0;
     }
+    #patient-timeline-modal .info-card.clickable {
+      cursor: pointer;
+      transition: background 0.2s, border-color 0.2s;
+    }
+    #patient-timeline-modal .info-card.clickable:hover {
+      background: #fafafa;
+      border-color: #bdbdbd;
+    }
     #patient-timeline-modal .info-card-header {
       padding: 8px 12px;
       font-weight: 600;
@@ -3201,13 +3509,13 @@
           <div id="timeline-container" style="display: none; flex-direction: column; flex: 1; overflow: hidden;">
             <div class="fixed-info-wrapper" id="fixed-info-wrapper">
               <div class="fixed-info-area" id="fixed-info-area">
-                <div class="info-card" style="width: 50%;">
-                  <div class="info-card-header">プロフィール</div>
-                  <div class="info-card-content" id="profile-content"><span class="empty">-</span></div>
+                <div class="info-card clickable" style="width: 50%;" id="profile-card">
+                  <div class="info-card-header">📋 プロフィール</div>
+                  <div class="info-card-content" id="profile-content"><span class="empty">クリックして入力</span></div>
                 </div>
-                <div class="info-card" style="width: 50%;">
-                  <div class="info-card-header">サマリー</div>
-                  <div class="info-card-content" id="summary-content"><span class="empty">-</span></div>
+                <div class="info-card clickable" style="width: 50%;" id="summary-card">
+                  <div class="info-card-header">📝 サマリー</div>
+                  <div class="info-card-content" id="summary-content"><span class="empty">クリックして入力</span></div>
                 </div>
               </div>
               <div class="fixed-info-resizer" id="fixed-info-resizer"></div>
@@ -5075,33 +5383,79 @@
       }
     }
 
-    // 固定情報エリアを描画（プロフィールのみ）
+    // 固定情報エリアを描画（プロフィールとサマリー）
     function renderFixedInfo() {
-      // プロフィール
-      if (patientProfile && patientProfile.text) {
-        let displayText = patientProfile.text;
+      // プロフィールカードのイベント設定
+      const profileCard = document.getElementById('profile-card');
+      if (profileCard) {
+        profileCard.onclick = () => showProfileModal();
+      }
 
-        // 「患者プロフィール」行を削除
-        displayText = displayText.split('\n')
-          .filter(line => !line.includes('患者プロフィール'))
-          .join('\n');
+      // サマリーカードのイベント設定
+      const summaryCard = document.getElementById('summary-card');
+      const summaryContent = document.getElementById('summary-content');
+      if (summaryCard) {
+        summaryCard.onclick = () => showSummaryModal();
+      }
 
-        // 【延命治療】以降を削除
-        const cutoffIndex = displayText.indexOf('【延命治療】');
-        if (cutoffIndex !== -1) {
-          displayText = displayText.substring(0, cutoffIndex).trim();
-        }
+      // プロフィールとサマリーを1回のAPI呼び出しで取得
+      if (selectedPatient) {
+        loadPatientSummary(selectedPatient.uuid).then(data => {
+          // プロフィール表示：スプレッドシートを優先、なければGraphQL APIから
+          if (data && data.profile) {
+            profileContent.innerHTML = escapeHtml(data.profile).replace(/\n/g, '<br>');
+          } else if (patientProfile && patientProfile.text) {
+            profileContent.innerHTML = escapeHtml(formatGraphQLProfile(patientProfile.text)).replace(/\n/g, '<br>');
+          } else {
+            profileContent.innerHTML = '<span class="empty">クリックして入力</span>';
+          }
 
-        // 【既往歴】の前に空行を挿入
-        displayText = displayText.replace(/【既往歴】/g, '\n【既往歴】');
-
-        profileContent.innerHTML = escapeHtml(displayText).replace(/\n/g, '<br>');
+          // サマリー表示
+          if (summaryContent) {
+            if (data && data.summary) {
+              summaryContent.innerHTML = escapeHtml(data.summary).replace(/\n/g, '<br>');
+            } else {
+              summaryContent.innerHTML = '<span class="empty">クリックして入力</span>';
+            }
+          }
+        }).catch(e => {
+          console.error(`[${SCRIPT_NAME}] プロフィール/サマリー読み込みエラー:`, e);
+          // フォールバック：GraphQL APIからのプロフィール
+          if (patientProfile && patientProfile.text) {
+            profileContent.innerHTML = escapeHtml(formatGraphQLProfile(patientProfile.text)).replace(/\n/g, '<br>');
+          } else {
+            profileContent.innerHTML = '<span class="empty">クリックして入力</span>';
+          }
+          if (summaryContent) {
+            summaryContent.innerHTML = '<span class="empty">クリックして入力</span>';
+          }
+        });
       } else {
-        profileContent.innerHTML = '<span class="empty">プロフィールなし</span>';
+        profileContent.innerHTML = '<span class="empty">クリックして入力</span>';
+        if (summaryContent) {
+          summaryContent.innerHTML = '<span class="empty">クリックして入力</span>';
+        }
       }
 
       // 固定情報カラム（右端サイドパネル）を描画
       renderFixedInfoColumn();
+    }
+
+    // GraphQL APIからのプロフィールを整形
+    function formatGraphQLProfile(text) {
+      let displayText = text;
+      // 「患者プロフィール」行を削除
+      displayText = displayText.split('\n')
+        .filter(line => !line.includes('患者プロフィール'))
+        .join('\n');
+      // 【延命治療】以降を削除
+      const cutoffIndex = displayText.indexOf('【延命治療】');
+      if (cutoffIndex !== -1) {
+        displayText = displayText.substring(0, cutoffIndex).trim();
+      }
+      // 【既往歴】の前に空行を挿入
+      displayText = displayText.replace(/【既往歴】/g, '\n【既往歴】');
+      return displayText;
     }
 
     // 固定情報カラム（右端サイドパネル）を描画
@@ -5270,13 +5624,20 @@
       lines.push('');
 
       // === 患者プロフィール ===
-      if (patientProfile && patientProfile.text) {
-        lines.push('## 患者プロフィール（既往歴・ADL等）\n');
-        let profileText = patientProfile.text;
+      // スプレッドシートのプロフィールを優先、なければGraphQL APIから
+      const cachedData = summaryCache?.[selectedPatient.uuid];
+      let profileText = '';
+      if (cachedData && cachedData.profile) {
+        profileText = cachedData.profile;
+      } else if (patientProfile && patientProfile.text) {
+        profileText = patientProfile.text;
         // 「患者プロフィール」行を削除
         profileText = profileText.split('\n')
           .filter(line => !line.includes('患者プロフィール'))
           .join('\n');
+      }
+      if (profileText) {
+        lines.push('## 患者プロフィール（既往歴・ADL等）\n');
         lines.push(profileText);
         lines.push('');
       }
@@ -5976,6 +6337,176 @@
       });
     }
 
+    // サマリー入力モーダル
+    async function showSummaryModal() {
+      if (!selectedPatient) {
+        window.HenryCore.ui.showToast('患者が選択されていません', 'error');
+        return;
+      }
+
+      // 現在のサマリーを読み込む
+      let currentSummary = '';
+      try {
+        const data = await loadPatientSummary(selectedPatient.uuid);
+        if (data && data.summary) {
+          currentSummary = data.summary;
+        }
+      } catch (e) {
+        console.error(`[${SCRIPT_NAME}] サマリー読み込みエラー:`, e);
+      }
+
+      // モーダルコンテンツを構築
+      const contentDiv = document.createElement('div');
+      contentDiv.style.cssText = 'padding: 16px;';
+
+      const textarea = document.createElement('textarea');
+      textarea.id = 'summary-modal-input';
+      textarea.value = currentSummary;
+      textarea.placeholder = '患者サマリーを入力...';
+      textarea.style.cssText = `
+        width: 100%;
+        min-height: 300px;
+        padding: 12px;
+        border: 1px solid #e0e0e0;
+        border-radius: 6px;
+        font-family: "Noto Sans JP", sans-serif;
+        font-size: 14px;
+        line-height: 1.6;
+        resize: vertical;
+        box-sizing: border-box;
+      `;
+      contentDiv.appendChild(textarea);
+
+      let summaryModal;
+      summaryModal = window.HenryCore.ui.showModal({
+        title: `📝 サマリー - ${selectedPatient.fullName}`,
+        content: contentDiv,
+        width: '750px',
+        actions: [
+          { label: 'キャンセル', variant: 'secondary', onClick: () => summaryModal.close() },
+          {
+            label: '保存',
+            variant: 'primary',
+            onClick: async () => {
+              const summary = textarea.value.trim();
+              if (!summary) {
+                window.HenryCore.ui.showToast('サマリーを入力してください', 'error');
+                return;
+              }
+
+              try {
+                await savePatientSummary(
+                  selectedPatient.uuid,
+                  selectedPatient.fullName,
+                  summary
+                );
+                window.HenryCore.ui.showToast('サマリーを保存しました', 'success');
+                summaryModal.close();
+
+                // 上部カードを更新
+                const summaryContent = document.getElementById('summary-content');
+                if (summaryContent) {
+                  summaryContent.innerHTML = escapeHtml(summary).replace(/\n/g, '<br>');
+                }
+              } catch (e) {
+                console.error(`[${SCRIPT_NAME}] サマリー保存エラー:`, e);
+                window.HenryCore.ui.showToast(`保存エラー: ${e.message}`, 'error');
+              }
+            }
+          }
+        ]
+      });
+
+      // フォーカスを設定
+      setTimeout(() => textarea.focus(), 100);
+    }
+
+    // プロフィール編集モーダル
+    async function showProfileModal() {
+      if (!selectedPatient) {
+        window.HenryCore.ui.showToast('患者が選択されていません', 'error');
+        return;
+      }
+
+      // 現在のプロフィールを読み込む（スプレッドシート優先）
+      let currentProfile = '';
+      try {
+        const data = await loadPatientSummary(selectedPatient.uuid);
+        if (data && data.profile) {
+          currentProfile = data.profile;
+        } else if (patientProfile && patientProfile.text) {
+          // GraphQL APIからのプロフィールをデフォルト値として使用
+          currentProfile = formatGraphQLProfile(patientProfile.text);
+        }
+      } catch (e) {
+        console.error(`[${SCRIPT_NAME}] プロフィール読み込みエラー:`, e);
+      }
+
+      // モーダルコンテンツを構築
+      const contentDiv = document.createElement('div');
+      contentDiv.style.cssText = 'padding: 16px;';
+
+      const textarea = document.createElement('textarea');
+      textarea.id = 'profile-modal-input';
+      textarea.value = currentProfile;
+      textarea.placeholder = '患者プロフィールを入力...';
+      textarea.style.cssText = `
+        width: 100%;
+        min-height: 300px;
+        padding: 12px;
+        border: 1px solid #e0e0e0;
+        border-radius: 6px;
+        font-family: "Noto Sans JP", sans-serif;
+        font-size: 14px;
+        line-height: 1.6;
+        resize: vertical;
+        box-sizing: border-box;
+      `;
+      contentDiv.appendChild(textarea);
+
+      let profileModal;
+      profileModal = window.HenryCore.ui.showModal({
+        title: `📋 プロフィール - ${selectedPatient.fullName}`,
+        content: contentDiv,
+        width: '750px',
+        actions: [
+          { label: 'キャンセル', variant: 'secondary', onClick: () => profileModal.close() },
+          {
+            label: '保存',
+            variant: 'primary',
+            onClick: async () => {
+              const profile = textarea.value.trim();
+              if (!profile) {
+                window.HenryCore.ui.showToast('プロフィールを入力してください', 'error');
+                return;
+              }
+
+              try {
+                await savePatientProfile(
+                  selectedPatient.uuid,
+                  selectedPatient.fullName,
+                  profile
+                );
+                window.HenryCore.ui.showToast('プロフィールを保存しました', 'success');
+                profileModal.close();
+
+                // 上部カードを更新
+                if (profileContent) {
+                  profileContent.innerHTML = escapeHtml(profile).replace(/\n/g, '<br>');
+                }
+              } catch (e) {
+                console.error(`[${SCRIPT_NAME}] プロフィール保存エラー:`, e);
+                window.HenryCore.ui.showToast(`保存エラー: ${e.message}`, 'error');
+              }
+            }
+          }
+        ]
+      });
+
+      // フォーカスを設定
+      setTimeout(() => textarea.focus(), 100);
+    }
+
     // 処方・注射カラムを描画
     function renderPrescriptionOrderColumn(targetDateKey) {
       // selectedDateKeyはYYYY-MM-DD形式
@@ -6303,7 +6834,15 @@
         // 現在のユーザーUUIDを取得（編集権限判定用）
         myUuid = await window.HenryCore.getMyUuid();
 
-        allPatients = await fetchAllHospitalizedPatients();
+        // サマリーキャッシュをクリア（モーダル再オープン時に最新データを取得）
+        summaryCache = null;
+
+        // 患者一覧とサマリーキャッシュを並列で取得
+        const [patients] = await Promise.all([
+          fetchAllHospitalizedPatients(),
+          loadAllSummaries() // サマリーキャッシュをプリロード
+        ]);
+        allPatients = patients;
         isLoading = false;
         console.log(`[${SCRIPT_NAME}] 入院患者一覧取得: ${allPatients.length}名`);
 

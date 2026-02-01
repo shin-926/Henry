@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry Core
 // @namespace    https://henry-app.jp/
-// @version      2.19.0
+// @version      2.20.0
 // @description  Henry スクリプト実行基盤 (GoogleAuth統合 / Google Docs対応)
 // @author       sk powered by Claude & Gemini
 // @match        https://henry-app.jp/*
@@ -114,7 +114,7 @@
     GOOGLE_CLIENT_SECRET: storedCredentials?.clientSecret || '',
 
     // GoogleAuth固定設定
-    GOOGLE_SCOPES: 'https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/drive.readonly https://www.googleapis.com/auth/documents',
+    GOOGLE_SCOPES: 'https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/drive.readonly https://www.googleapis.com/auth/documents https://www.googleapis.com/auth/spreadsheets',
     GOOGLE_REDIRECT_URI: 'https://henry-app.jp/',
     GOOGLE_AUTH_ENDPOINT: 'https://accounts.google.com/o/oauth2/v2/auth',
     GOOGLE_TOKEN_ENDPOINT: 'https://oauth2.googleapis.com/token',
