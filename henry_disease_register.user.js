@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry Disease Register
 // @namespace    https://henry-app.jp/
-// @version      3.25.1
+// @version      3.27.0
 // @description  高速病名検索・登録
 // @author       sk powered by Claude & Gemini
 // @match        https://henry-app.jp/*
@@ -697,7 +697,7 @@
       return a.modifierCount - b.modifierCount;
     });
 
-    // 重複を除去して上位5件を返す
+    // 重複を除去して上位10件を返す
     // 同じ表示名（修飾語+病名）の場合は、病名が長い方（具体的な病名）を採用
     const displayNameMap = new Map();
     for (const r of allResults) {
@@ -715,7 +715,7 @@
         });
       }
     }
-    // スコア順で上位5件を取得
+    // スコア順で上位10件を取得
     const candidates = [...displayNameMap.values()]
       .sort((a, b) => b.score - a.score)
       .slice(0, 10);
@@ -783,6 +783,10 @@
 
     // マッチしない場合は0
     if (commonPrefix === 0) return 0;
+
+    // クエリが2文字以上なのに1文字しか一致しない場合は除外
+    // 例：「上気道炎」で「上顎挫傷」がヒットするのを防ぐ
+    if (query.length >= 2 && commonPrefix === 1) return 0;
 
     // 共通部分の割合（病名長に対するカバー率）
     const coverage = commonPrefix / diseaseName.length;
@@ -885,12 +889,12 @@
       }
     }
 
-    // フェーズ3: 包含検索（先頭一致・ファジーで十分な結果がない場合）
-    // 病名の途中にクエリが含まれるものを検索
-    if (candidates.length < 5 && q.length >= 2) {
+    // フェーズ3: 包含検索（常に実行）
+    // 病名の途中にクエリが含まれるものを検索（例：「上気道炎」→「急性上気道炎」）
+    if (q.length >= 2) {
       const existingCodes = new Set(candidates.map(c => c.code));
 
-      for (let i = 0; i < diseaseNameIndex.length && candidates.length < 20; i++) {
+      for (let i = 0; i < diseaseNameIndex.length && candidates.length < 30; i++) {
         if (existingCodes.has(DISEASES[i][0])) continue;
 
         const name = normalizeText(diseaseNameIndex[i]).toLowerCase();
@@ -909,7 +913,7 @@
             icd10: icd10,
             name: DISEASES[i][2],
             normalizedName: name,
-            score: 0.4 * coverage + icd10Bonus,  // 包含検索は低スコア
+            score: 0.5 + 0.4 * coverage + icd10Bonus,  // ベース0.5 + カバー率ボーナス
             matchType: 'contains'
           });
         }
@@ -934,11 +938,11 @@
     // スコアでソート（高い順）
     candidates.sort((a, b) => b.score - a.score);
 
-    // 重複除去して上位5件（スコアも返す）
+    // 重複除去して上位10件（スコアも返す）
     const seen = new Set();
     const results = [];
     for (const c of candidates) {
-      if (!seen.has(c.code) && results.length < 5) {
+      if (!seen.has(c.code) && results.length < 10) {
         seen.add(c.code);
         results.push({ code: c.code, icd10: c.icd10, name: c.name, score: c.score });
       }
