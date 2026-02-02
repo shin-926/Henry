@@ -280,15 +280,6 @@
       "beta": true
     },
     {
-      "name": "henry_hospitalization_data",
-      "label": "入院データ取得（ベータ版）",
-      "file": "henry_hospitalization_data.user.js",
-      "match": ["henry-app.jp"],
-      "category": "karte",
-      "order": 10,
-      "beta": true
-    },
-    {
       "name": "henry_hospitalization_search",
       "label": "カルテ記録検索",
       "file": "henry_hospitalization_search.user.js",

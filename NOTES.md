@@ -108,7 +108,6 @@ npx playwright test tests/imaging-order.spec.js
 - henry_reception_filter.user.js
 - henry_memo.user.js
 - henry_hospitalization_search.user.js
-- henry_hospitalization_data.user.js
 - henry_order_history.user.js
 - henry_google_drive_bridge.user.js
 - henry_ikensho_form.user.js
