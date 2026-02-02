@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry Patient Timeline
 // @namespace    https://github.com/shin-926/Henry
-// @version      2.95.0
+// @version      2.96.0
 // @description  入院患者の各種記録・オーダーをガントチャート風タイムラインで表示
 // @author       sk powered by Claude
 // @match        https://henry-app.jp/*
@@ -859,26 +859,20 @@
       const diffDays = Math.ceil((today - startDate) / (1000 * 60 * 60 * 24));
       const beforeDateSize = Math.min(diffDays + 1, maxDays);
 
-      // 変数を別オブジェクトで渡す方式（Henry本体と同じ）
-      const variables = {
-        input: {
-          patientUuid: patientUuid,
-          baseDate: {
-            year: today.getFullYear(),
-            month: today.getMonth() + 1,
-            day: today.getDate()
-          },
-          beforeDateSize: beforeDateSize,
-          afterDateSize: 0,
-          clinicalResourceHrns: CALENDAR_RESOURCES,
-          createUserUuids: [],
-          accountingOrderShinryoShikibetsus: []
-        }
-      };
+      // インライン方式（変数型がスキーマに存在しないためフルクエリではインライン必須）
+      const resourcesStr = CALENDAR_RESOURCES.map(r => `"${r}"`).join(', ');
 
       const query = `
-        query GetClinicalCalendarView($input: GetClinicalCalendarViewInput!) {
-          getClinicalCalendarView(input: $input) {
+        query GetClinicalCalendarView {
+          getClinicalCalendarView(input: {
+            patientUuid: "${patientUuid}",
+            baseDate: { year: ${today.getFullYear()}, month: ${today.getMonth() + 1}, day: ${today.getDate()} },
+            beforeDateSize: ${beforeDateSize},
+            afterDateSize: 0,
+            clinicalResourceHrns: [${resourcesStr}],
+            createUserUuids: [],
+            accountingOrderShinryoShikibetsus: []
+          }) {
             vitalSigns {
               recordTime { seconds }
               createUser { name }
@@ -949,11 +943,7 @@
       `;
 
       // NOTE: このクエリは /graphql でのみ利用可能
-      // operationNameも指定（Henry本体と同じ形式）
-      const result = await window.HenryCore.query(query, variables, {
-        endpoint: '/graphql',
-        operationName: 'GetClinicalCalendarView'
-      });
+      const result = await window.HenryCore.query(query, {}, { endpoint: '/graphql' });
       const data = result?.data?.getClinicalCalendarView;
 
       // 酸素投与データを抽出（日付ごとにグループ化）
