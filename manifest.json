@@ -298,6 +298,15 @@
       "enabled": true
     },
     {
+      "name": "henry_karte_input_helper",
+      "label": "カルテ入力支援（ベータ版）",
+      "file": "henry_karte_input_helper.user.js",
+      "match": ["henry-app.jp"],
+      "category": "karte",
+      "order": 10,
+      "beta": true
+    },
+    {
       "name": "henry_rehab_order",
       "label": "リハビリオーダー（ベータ版）",
       "file": "henry_rehab_order.user.js",

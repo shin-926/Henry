@@ -356,6 +356,37 @@ API調査で手間取ったり、ハマったポイントを記録する。全AP
 |----------------|---------------|--------|
 | （調査時に追記） | | |
 
+#### GetClinicalCalendarView (タイムライン用)
+
+**エンドポイント**: `/graphql` (フルクエリ方式)
+
+**調査日**: 2026-02-02
+
+**フィールド名の変更履歴**（v2.93.0で対応）:
+
+| 旧フィールド名 | 新フィールド名 |
+|---------------|---------------|
+| bodyTemperature | temperature |
+| bloodPressureSystolic | bloodPressureUpperBound |
+| bloodPressureDiastolic | bloodPressureLowerBound |
+| spO2 | spo2 |
+| respiratoryRate | respiration |
+| medicine | mhlwMedicine |
+
+**型情報（調査で判明）**:
+
+| 型名 | 利用可能フィールド | 備考 |
+|-----|-------------------|------|
+| MedicationDosageInstruction_quantity | doseQuantity (Frac100000型) | 投与量を保持 |
+| Frac100000 | value | 数値を100000倍した整数で保持 |
+| OutsideInspectionReportRow | name のみ | 検査値フィールドなし（API制限） |
+| NutritionOrder | uuid, createTime, orderStatus, startDate, endDate | 食事内容フィールドなし（API制限） |
+
+**注意点**:
+- `quantity.doseQuantity.value`でInternal Errorが発生する場合がある（サーバー側の問題）
+- OutsideInspectionReportRowから検査値を取得する別APIの調査が必要
+- NutritionOrderの食事内容は別APIで取得する必要あり
+
 ### GraphQL インライン方式
 
 GraphQL mutationで変数型（`$input: SomeInput!`）がエラーになる場合は、インライン方式を使う。
@@ -503,6 +534,79 @@ const result = await HenryCore.query(LIST_CLINICAL_DOCUMENTS_QUERY, {
 #### 適用実績
 
 - `henry_hospitalization_search.user.js` v1.6.0 - カルテ記録検索
+
+#### ListDailyWardHospitalizations (graphql)
+
+入院患者一覧を取得するAPI。病棟画面で使用されている。
+
+```javascript
+const query = `
+  query ListDailyWardHospitalizations {
+    listDailyWardHospitalizations(input: {
+      wardIds: [],
+      searchDate: { year: ${year}, month: ${month}, day: ${day} },
+      roomIds: [],
+      searchText: ""
+    }) {
+      dailyWardHospitalizations {
+        wardId
+        roomHospitalizationDistributions {
+          roomId
+          hospitalizations {
+            uuid
+            state
+            patient { uuid fullName }
+            hospitalizationDoctor { doctor { uuid name } }
+          }
+        }
+      }
+    }
+  }
+`;
+
+// HenryCore.query で呼び出す（endpoint指定必須）
+const result = await HenryCore.query(query, {}, { endpoint: '/graphql' });
+```
+
+**注意点:**
+- **`/graphql` エンドポイント専用**（`/graphql-v2` では未定義エラー）
+- **インライン方式必須** - 変数形式（`$input: ListDailyWardHospitalizationsInput!`）は型がスキーマに存在しないためエラー
+- 以下のフィールドは**スキーマ変更で使用不可**（2026-02時点）:
+  - `routeType` - オブジェクト型に変更済み
+  - `referralType` - オブジェクト型に変更済み
+  - `roomNonHealthcareSystemChargePriceOverride` - オブジェクト型に変更済み
+- Henry本体はAPQ（Persisted Query）を使用しているため、フルクエリとはスキーマが異なる場合がある
+
+#### 適用実績
+
+- `henry_patient_timeline.user.js` - 入院患者タイムライン
+
+#### GetClinicalCalendarView (graphql)
+
+患者のカレンダービュー（バイタル、処方、注射、栄養、検査等）を取得するAPI。
+
+**注意点:**
+- **`/graphql` エンドポイント専用**（`/graphql-v2` では未定義エラー）
+- **インライン方式必須** - 変数形式は型がスキーマに存在しないためエラー
+- 以下のフィールドは**スキーマ変更で使用不可**（2026-02時点）:
+
+| 旧フィールド | 新フィールド | 備考 |
+|-------------|-------------|------|
+| `bodyTemperature` | `temperature` | VitalSign型 |
+| `bloodPressureSystolic` | `bloodPressureUpperBound` | VitalSign型 |
+| `bloodPressureDiastolic` | `bloodPressureLowerBound` | VitalSign型 |
+| `spO2` | `spo2` | VitalSign型（小文字に変更） |
+| `respiratoryRate` | `respiration` | VitalSign型 |
+| `Date.hour/minute` | なし | Date型にはhour/minuteがない |
+| `medicine` | `mhlwMedicine` | MedicationDosageInstruction型 |
+| `doseQuantity` | `quantity` | フィールド構造も変更 |
+| `administrationMethod` | なし | InjectionOrderRp型から削除 |
+| `nutritionOrderContents` | なし | NutritionOrder型から削除 |
+| `outsideInspectionReports` | `outsideInspectionReportRows` | 構造も変更 |
+
+#### 適用実績
+
+- `henry_patient_timeline.user.js` - 入院患者タイムライン（fetchCalendarData関数）
 
 ---
 

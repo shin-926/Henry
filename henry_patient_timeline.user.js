@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry Patient Timeline
 // @namespace    https://github.com/shin-926/Henry
-// @version      2.91.0
+// @version      2.95.0
 // @description  入院患者の各種記録・オーダーをガントチャート風タイムラインで表示
 // @author       sk powered by Claude
 // @match        https://henry-app.jp/*
@@ -689,71 +689,9 @@
     }
   }
 
-  // Persisted Query を使用してAPIを呼び出す
-  async function callPersistedQuery(operationName, variables, sha256Hash) {
-    const token = await window.HenryCore?.getToken();
-    if (!token) {
-      throw new Error('認証トークンがありません');
-    }
-
-    const response = await fetch('https://henry-app.jp/graphql', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${token}`,
-        'x-auth-organization-uuid': ORG_UUID
-      },
-      body: JSON.stringify({
-        operationName,
-        variables,
-        extensions: {
-          persistedQuery: {
-            version: 1,
-            sha256Hash
-          }
-        }
-      })
-    });
-
-    if (!response.ok) {
-      throw new Error(`API Error: ${response.status}`);
-    }
-
-    return response.json();
-  }
-
-  // GraphQL v2 エンドポイント用（ClinicalCalendarView等）
-  async function callPersistedQueryV2(operationName, variables, sha256Hash) {
-    const token = await window.HenryCore?.getToken();
-    if (!token) {
-      throw new Error('認証トークンがありません');
-    }
-
-    const response = await fetch('https://henry-app.jp/graphql-v2', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${token}`,
-        'x-auth-organization-uuid': ORG_UUID
-      },
-      body: JSON.stringify({
-        operationName,
-        variables,
-        extensions: {
-          persistedQuery: {
-            version: 1,
-            sha256Hash
-          }
-        }
-      })
-    });
-
-    if (!response.ok) {
-      throw new Error(`API Error: ${response.status}`);
-    }
-
-    return response.json();
-  }
+  // NOTE: Persisted Query (APQ) は廃止。
+  // サーバーキャッシュが切れると PersistedQueryNotFound エラーが発生するため、
+  // インライン方式のフルクエリを使用する。
 
   // 入院中・入院予定の全患者を取得
   // 7日後の日付で検索することで、入院予定患者（WILL_ADMIT）も含めて取得
@@ -764,22 +702,99 @@
       const searchDate = new Date(today);
       searchDate.setDate(searchDate.getDate() + 7);
 
-      const result = await callPersistedQuery(
-        'ListDailyWardHospitalizations',
-        {
-          input: {
+      // フルクエリ + インライン形式（変数形式は型定義がスキーマに存在しないためエラー）
+      // NOTE: このクエリは /graphql でのみ利用可能（/graphql-v2 では未定義）
+      const query = `
+        query ListDailyWardHospitalizations {
+          listDailyWardHospitalizations(input: {
             wardIds: [],
-            searchDate: {
-              year: searchDate.getFullYear(),
-              month: searchDate.getMonth() + 1,
-              day: searchDate.getDate()
-            },
+            searchDate: { year: ${searchDate.getFullYear()}, month: ${searchDate.getMonth() + 1}, day: ${searchDate.getDate()} },
             roomIds: [],
-            searchText: ''
+            searchText: ""
+          }) {
+            dailyWardHospitalizations {
+              wardId
+              roomHospitalizationDistributions {
+                roomId
+                hospitalizations {
+                  uuid
+                  state
+                  departmentTransferType
+                  startDate { year month day }
+                  endDate { year month day }
+                  patient {
+                    uuid
+                    serialNumber
+                    serialNumberPrefix
+                    fullName
+                    fullNamePhonetic
+                    isDraft
+                    isTestPatient
+                    detail {
+                      patientUuid
+                      addressLine_1
+                      addressLine_2
+                      postalCode
+                      email
+                      phoneNumber
+                      sexType
+                      birthDate { year month day }
+                      memo
+                    }
+                    tags
+                    attentionSummary {
+                      hasAnyInfection
+                      hasAnyAllergy
+                    }
+                  }
+                  hospitalizationDoctor {
+                    doctor {
+                      uuid
+                      name
+                      namePhonetic { value }
+                    }
+                  }
+                  hospitalizationDayCount { value }
+                  lastHospitalizationLocationUuid
+                  statusHospitalizationLocation {
+                    uuid
+                    hospitalizationUuid
+                    wardUuid { value }
+                    roomUuid { value }
+                    transferDate { year month day }
+                    transferTime { hours minutes seconds }
+                    ward {
+                      uuid
+                      name
+                      nameKana
+                      receiptWardType
+                      wardCode { value }
+                      isCommunityBasedCare
+                      isKanwaCare
+                      isKaigoIryouin
+                      bedType
+                      ff1WardType
+                    }
+                    room {
+                      uuid
+                      wardUuid
+                      name
+                      isCommunityBasedCare
+                    }
+                    eventType
+                    hasCompleted
+                    isCommunityBasedCareCalculationEnabled
+                    isKanwaCareCalculationEnabled
+                  }
+                }
+              }
+            }
           }
-        },
-        'e1692624de62dd647f1e30bbeb9d468a67b777510710c474fb99f9a5b52ee02f'
-      );
+        }
+      `;
+
+      // NOTE: このクエリは /graphql でのみ利用可能（/graphql-v2 では未定義）
+      const result = await window.HenryCore.query(query, {}, { endpoint: '/graphql' });
 
       // GraphQL errors をチェック
       if (result?.errors) {
@@ -844,28 +859,101 @@
       const diffDays = Math.ceil((today - startDate) / (1000 * 60 * 60 * 24));
       const beforeDateSize = Math.min(diffDays + 1, maxDays);
 
-      // GetClinicalCalendarView（v1エンドポイント）を使用
-      // clinicalQuantitativeDataModuleCollections を含むフィールドセットを持つpersisted queryを使用
-      const result = await callPersistedQuery(
-        'GetClinicalCalendarView',
-        {
-          input: {
-            patientUuid: patientUuid,
-            baseDate: {
-              year: today.getFullYear(),
-              month: today.getMonth() + 1,
-              day: today.getDate()
-            },
-            beforeDateSize: beforeDateSize,
-            afterDateSize: 0,
-            clinicalResourceHrns: CALENDAR_RESOURCES,
-            createUserUuids: [],
-            accountingOrderShinryoShikibetsus: []
-          }
-        },
-        '74f284465206f367c4c544c20b020204478fa075a1fd3cb1bf3fd266ced026e1'
-      );
+      // 変数を別オブジェクトで渡す方式（Henry本体と同じ）
+      const variables = {
+        input: {
+          patientUuid: patientUuid,
+          baseDate: {
+            year: today.getFullYear(),
+            month: today.getMonth() + 1,
+            day: today.getDate()
+          },
+          beforeDateSize: beforeDateSize,
+          afterDateSize: 0,
+          clinicalResourceHrns: CALENDAR_RESOURCES,
+          createUserUuids: [],
+          accountingOrderShinryoShikibetsus: []
+        }
+      };
 
+      const query = `
+        query GetClinicalCalendarView($input: GetClinicalCalendarViewInput!) {
+          getClinicalCalendarView(input: $input) {
+            vitalSigns {
+              recordTime { seconds }
+              createUser { name }
+              temperature { value }
+              pulseRate { value }
+              bloodPressureUpperBound { value }
+              bloodPressureLowerBound { value }
+              spo2 { value }
+              respiration { value }
+            }
+            clinicalQuantitativeDataModuleCollections {
+              clinicalQuantitativeDataModules {
+                recordDateRange {
+                  start { year month day }
+                }
+                entries {
+                  name
+                  value
+                }
+              }
+            }
+            prescriptionOrders {
+              uuid
+              createTime { seconds }
+              orderStatus
+              doctor { name }
+              rps {
+                instructions {
+                  instruction {
+                    medicationDosageInstruction {
+                      localMedicine { name }
+                      mhlwMedicine { name }
+                    }
+                  }
+                }
+              }
+            }
+            injectionOrders {
+              uuid
+              createTime { seconds }
+              orderStatus
+              doctor { name }
+              rps {
+                instructions {
+                  instruction {
+                    medicationDosageInstruction {
+                      localMedicine { name }
+                      mhlwMedicine { name }
+                    }
+                  }
+                }
+              }
+            }
+            nutritionOrders {
+              uuid
+              createTime { seconds }
+              orderStatus
+              startDate { year month day }
+              endDate { year month day }
+            }
+            outsideInspectionReportGroups {
+              outsideInspectionReportRows {
+                name
+              }
+            }
+          }
+        }
+      `;
+
+      // NOTE: このクエリは /graphql でのみ利用可能
+      // operationNameも指定（Henry本体と同じ形式）
+      const result = await window.HenryCore.query(query, variables, {
+        endpoint: '/graphql',
+        operationName: 'GetClinicalCalendarView'
+      });
       const data = result?.data?.getClinicalCalendarView;
 
       // 酸素投与データを抽出（日付ごとにグループ化）
@@ -919,7 +1007,7 @@
         return (rx.rps || []).map((rp, idx) => {
           const medicines = (rp.instructions || []).map(inst => {
             const med = inst.instruction?.medicationDosageInstruction;
-            return med?.localMedicine?.name || med?.medicine?.name || '不明';
+            return med?.localMedicine?.name || med?.mhlwMedicine?.name || '不明';
           }).filter(Boolean);
 
           return {
@@ -6676,7 +6764,7 @@
             const usageText = (canonicalUsage?.text || '用法不明').replace(/，/g, ',');
             const medicines = (rp.instructions || []).map(inst => {
               const med = inst.instruction?.medicationDosageInstruction;
-              const rawName = med?.localMedicine?.name || med?.medicine?.name || null;
+              const rawName = med?.localMedicine?.name || med?.mhlwMedicine?.name || null;
               return rawName ? cleanMedicineName(rawName) : null;
             }).filter(Boolean);
 

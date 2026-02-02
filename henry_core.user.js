@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry Core
 // @namespace    https://henry-app.jp/
-// @version      2.20.0
+// @version      2.21.0
 // @description  Henry スクリプト実行基盤 (GoogleAuth統合 / Google Docs対応)
 // @author       sk powered by Claude & Gemini
 // @match        https://henry-app.jp/*
@@ -404,6 +404,7 @@
           'x-auth-organization-uuid': CONFIG.ORG_UUID
         },
         body: JSON.stringify({
+          operationName,
           query: queryString,
           variables
         })

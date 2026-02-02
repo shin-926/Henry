@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         予約システム連携
 // @namespace    https://github.com/shin-926/Henry
-// @version      4.7.7
+// @version      4.7.8
 // @description  Henryカルテと予約システム間の双方向連携（再診予約・照射オーダー自動予約・自動印刷・患者プレビュー）
 // @author       sk powered by Claude & Gemini
 // @match        https://henry-app.jp/*
@@ -1677,14 +1677,16 @@ html, body { margin: 0; padding: 0; }
       return '';
     }
 
-    // 受付一覧を更新
+    // 受付一覧・カルテ画面を更新
     function refreshSessionList() {
       if (!unsafeWindow.__APOLLO_CLIENT__) return;
       try {
-        unsafeWindow.__APOLLO_CLIENT__.refetchQueries({ include: ['ListSessions'] });
-        log.info('受付一覧を更新しました');
+        unsafeWindow.__APOLLO_CLIENT__.refetchQueries({
+          include: ['ListSessions', 'EncounterEditorQuery']
+        });
+        log.info('受付一覧・カルテ画面を更新しました');
       } catch (e) {
-        log.warn('受付一覧の更新に失敗: ' + e.message);
+        log.warn('画面更新に失敗: ' + e.message);
       }
     }
 
