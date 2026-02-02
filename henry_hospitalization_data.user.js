@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry Hospitalization Data Viewer
 // @namespace    https://github.com/shin-926/Henry
-// @version      0.17.0
+// @version      0.18.0
 // @description  入院患者の日々データを取得・表示（バイタル・処方・注射・検査・栄養・ADL・看護日誌対応）
 // @author       sk powered by Claude & Gemini
 // @match        https://henry-app.jp/*
@@ -35,7 +35,7 @@
  * - 患者プロフィール: GraphQL API (ListClinicalDocuments - CUSTOM type) - フルクエリ方式
  * - リハビリ日々記録: GraphQL API (ListRehabilitationDocuments) - インライン方式
  * - リハビリオーダー: GraphQL API (ListOrders - ORDER_TYPE_REHABILITATION) - インライン方式
- * - バイタルサイン: Persisted Query API (GetClinicalCalendarView - vitalSign resource)
+ * - バイタルサイン: GraphQL API (GetClinicalCalendarView) - インライン方式
  */
 
 (function() {
@@ -46,9 +46,6 @@
 
   // 組織UUID（マオカ病院）
   const ORG_UUID = 'ce6b556b-2a8d-4fce-b8dd-89ba638fc825';
-
-  // Note: 以前はPersisted Query Hashを使用していたが、フルクエリ方式/インライン方式に移行済み
-  // callPersistedQuery関数はfetchCalendarData（GetClinicalCalendarView on /graphql）でのみ使用
 
   // GraphQL Queries（フルクエリ方式）
   const QUERIES = {
@@ -68,40 +65,6 @@
       }
     `
   };
-
-  // Persisted Query を使用してAPIを呼び出す
-  async function callPersistedQuery(operationName, variables, sha256Hash, endpoint = 'graphql') {
-    // HenryCoreからトークンを取得
-    const token = await window.HenryCore?.getToken();
-    if (!token) {
-      throw new Error('認証トークンがありません');
-    }
-
-    const response = await fetch(`https://henry-app.jp/${endpoint}`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${token}`,
-        'x-auth-organization-uuid': ORG_UUID
-      },
-      body: JSON.stringify({
-        operationName,
-        variables,
-        extensions: {
-          persistedQuery: {
-            version: 1,
-            sha256Hash
-          }
-        }
-      })
-    });
-
-    if (!response.ok) {
-      throw new Error(`API Error: ${response.status}`);
-    }
-
-    return response.json();
-  }
 
   // 医師記録を取得（フルクエリ方式）
   // Note: HOSPITALIZATION_CONSULTATION のみ有効（HOSPITALIZATION_PROGRESSは無効なenum）
@@ -346,26 +309,99 @@
     try {
       const today = new Date();
 
-      const result = await callPersistedQuery(
-        'GetClinicalCalendarView',
-        {
-          input: {
-            patientUuid: patientUuid,
-            baseDate: {
-              year: today.getFullYear(),
-              month: today.getMonth() + 1,
-              day: today.getDate()
-            },
+      // インライン方式（変数型がスキーマに存在しないためフルクエリではインライン必須）
+      const resourcesStr = CALENDAR_RESOURCES.map(r => `"${r}"`).join(', ');
+
+      const query = `
+        query GetClinicalCalendarView {
+          getClinicalCalendarView(input: {
+            patientUuid: "${patientUuid}",
+            baseDate: { year: ${today.getFullYear()}, month: ${today.getMonth() + 1}, day: ${today.getDate()} },
             beforeDateSize: 16,
             afterDateSize: 0,
-            clinicalResourceHrns: CALENDAR_RESOURCES,
+            clinicalResourceHrns: [${resourcesStr}],
             createUserUuids: [],
             accountingOrderShinryoShikibetsus: []
+          }) {
+            vitalSigns {
+              uuid
+              recordTime { seconds }
+              createUser { name }
+              temperature { value }
+              pulseRate { value }
+              bloodPressureUpperBound { value }
+              bloodPressureLowerBound { value }
+              spo2 { value }
+              respiration { value }
+              bloodSugar { value }
+            }
+            prescriptionOrders {
+              uuid
+              createTime { seconds }
+              orderStatus
+              doctor { name }
+              rps {
+                instructions {
+                  instruction {
+                    medicationDosageInstruction {
+                      localMedicine { name }
+                      mhlwMedicine { name }
+                    }
+                  }
+                }
+              }
+            }
+            injectionOrders {
+              uuid
+              createTime { seconds }
+              orderStatus
+              doctor { name }
+              rps {
+                instructions {
+                  instruction {
+                    medicationDosageInstruction {
+                      localMedicine { name }
+                      mhlwMedicine { name }
+                    }
+                  }
+                }
+              }
+            }
+            nutritionOrders {
+              uuid
+              createTime { seconds }
+              orderStatus
+              startDate { year month day }
+              endDate { year month day }
+              detail {
+                dietaryRegimen { name }
+              }
+            }
+            inspectionReports {
+              uuid
+              reportTime { seconds }
+              title
+              editorData
+              createUser { name }
+            }
+            adlAssessments {
+              uuid
+              assessmentTime { seconds }
+              totalScore { value }
+              createUser { name }
+            }
+            nursingJournals {
+              uuid
+              recordTime { seconds }
+              editorData
+              createUser { name }
+            }
           }
-        },
-        '74f284465206f367c4c544c20b020204478fa075a1fd3cb1bf3fd266ced026e1', // GetClinicalCalendarView Hash
-        'graphql' // graphql-v2 ではなく graphql
-      );
+        }
+      `;
+
+      // NOTE: このクエリは /graphql でのみ利用可能
+      const result = await window.HenryCore.query(query, {}, { endpoint: '/graphql' });
 
       const data = result?.data?.getClinicalCalendarView;
       console.log(`[${SCRIPT_NAME}] GetClinicalCalendarView 生データ:`, data);

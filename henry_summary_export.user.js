@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry Summary Export
 // @namespace    https://github.com/shin-926/Henry
-// @version      1.5.0
+// @version      1.6.0
 // @description  入院患者のサマリー用データをマークダウン形式でダウンロード
 // @author       sk powered by Claude
 // @match        https://henry-app.jp/*
@@ -191,61 +191,61 @@
   }
 
   // ====================
-  // API呼び出し関数
-  // ====================
-
-  async function callPersistedQuery(operationName, variables, sha256Hash) {
-    const token = await window.HenryCore?.getToken();
-    if (!token) {
-      throw new Error('認証トークンがありません');
-    }
-    const response = await fetch('https://henry-app.jp/graphql', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${token}`,
-        'x-auth-organization-uuid': ORG_UUID
-      },
-      body: JSON.stringify({
-        operationName,
-        variables,
-        extensions: {
-          persistedQuery: {
-            version: 1,
-            sha256Hash
-          }
-        }
-      })
-    });
-    if (!response.ok) {
-      throw new Error(`API Error: ${response.status}`);
-    }
-    return response.json();
-  }
-
-  // ====================
-  // 入院患者一覧取得
+  // 入院患者一覧取得（インライン方式）
   // ====================
 
   async function fetchAllHospitalizedPatients() {
     try {
       const today = new Date();
-      const result = await callPersistedQuery(
-        'ListDailyWardHospitalizations',
-        {
-          input: {
+
+      // インライン方式（変数型がスキーマに存在しないためフルクエリではインライン必須）
+      const query = `
+        query ListDailyWardHospitalizations {
+          listDailyWardHospitalizations(input: {
             wardIds: [],
-            searchDate: {
-              year: today.getFullYear(),
-              month: today.getMonth() + 1,
-              day: today.getDate()
-            },
+            searchDate: { year: ${today.getFullYear()}, month: ${today.getMonth() + 1}, day: ${today.getDate()} },
             roomIds: [],
-            searchText: ''
+            searchText: ""
+          }) {
+            dailyWardHospitalizations {
+              wardId
+              wardName
+              roomHospitalizationDistributions {
+                roomId
+                roomName
+                hospitalizations {
+                  uuid
+                  state
+                  startDate { year month day }
+                  endDate { year month day }
+                  patient {
+                    uuid
+                    serialNumber
+                    fullName
+                    fullNamePhonetic
+                    detail {
+                      sexType
+                      birthDate { year month day }
+                    }
+                  }
+                  hospitalizationDoctor {
+                    doctor { name }
+                  }
+                  hospitalizationDayCount { value }
+                  lastHospitalizationLocationUuid
+                  statusHospitalizationLocation {
+                    ward { name }
+                    room { name }
+                  }
+                }
+              }
+            }
           }
-        },
-        'e1692624de62dd647f1e30bbeb9d468a67b777510710c474fb99f9a5b52ee02f'
-      );
+        }
+      `;
+
+      // NOTE: このクエリは /graphql でのみ利用可能
+      const result = await window.HenryCore.query(query, {}, { endpoint: '/graphql' });
 
       if (result?.errors) {
         console.error(`[${SCRIPT_NAME}] GraphQL errors:`, result.errors);
@@ -621,25 +621,105 @@
       const diffDays = Math.ceil((today - startDate) / (1000 * 60 * 60 * 24));
       const beforeDateSize = Math.min(diffDays + 1, maxDays);
 
-      const result = await callPersistedQuery(
-        'GetClinicalCalendarView',
-        {
-          input: {
-            patientUuid: patientUuid,
-            baseDate: {
-              year: today.getFullYear(),
-              month: today.getMonth() + 1,
-              day: today.getDate()
-            },
-            beforeDateSize: beforeDateSize,
+      // インライン方式（変数型がスキーマに存在しないためフルクエリではインライン必須）
+      const resourcesStr = CALENDAR_RESOURCES.map(r => `"${r}"`).join(', ');
+
+      const query = `
+        query GetClinicalCalendarView {
+          getClinicalCalendarView(input: {
+            patientUuid: "${patientUuid}",
+            baseDate: { year: ${today.getFullYear()}, month: ${today.getMonth() + 1}, day: ${today.getDate()} },
+            beforeDateSize: ${beforeDateSize},
             afterDateSize: 0,
-            clinicalResourceHrns: CALENDAR_RESOURCES,
+            clinicalResourceHrns: [${resourcesStr}],
             createUserUuids: [],
             accountingOrderShinryoShikibetsus: []
+          }) {
+            vitalSigns {
+              recordTime { seconds }
+              createUser { name }
+              temperature { value }
+              pulseRate { value }
+              bloodPressureUpperBound { value }
+              bloodPressureLowerBound { value }
+              spo2 { value }
+              respiration { value }
+            }
+            prescriptionOrders {
+              uuid
+              createTime { seconds }
+              orderStatus
+              doctor { name }
+              rps {
+                boundsDurationDays { value }
+                instructions {
+                  instruction {
+                    medicationDosageInstruction {
+                      localMedicine { name }
+                      mhlwMedicine { name }
+                    }
+                  }
+                }
+              }
+            }
+            injectionOrders {
+              uuid
+              createTime { seconds }
+              orderStatus
+              doctor { name }
+              rps {
+                boundsDurationDays { value }
+                localInjectionTechnique { name }
+                instructions {
+                  instruction {
+                    medicationDosageInstruction {
+                      localMedicine { name }
+                      mhlwMedicine { name }
+                    }
+                  }
+                }
+              }
+            }
+            nutritionOrders {
+              uuid
+              createTime { seconds }
+              orderStatus
+              startDate { year month day }
+              endDate { year month day }
+              detail {
+                dietaryRegimen { name }
+              }
+            }
+            clinicalQuantitativeDataModuleCollections {
+              clinicalQuantitativeDataModules {
+                recordDateRange {
+                  start { year month day }
+                }
+                entries {
+                  name
+                  value
+                }
+              }
+            }
+            outsideInspectionReportGroups {
+              name
+              outsideInspectionReportRows {
+                name
+                standardValue { value }
+                outsideInspectionReports {
+                  date { year month day }
+                  value
+                  isAbnormal
+                  abnormalityType
+                }
+              }
+            }
           }
-        },
-        '74f284465206f367c4c544c20b020204478fa075a1fd3cb1bf3fd266ced026e1'
-      );
+        }
+      `;
+
+      // NOTE: このクエリは /graphql でのみ利用可能
+      const result = await window.HenryCore.query(query, {}, { endpoint: '/graphql' });
 
       const data = result?.data?.getClinicalCalendarView;
       return {
