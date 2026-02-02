@@ -63,6 +63,15 @@
       "enabled": true
     },
     {
+      "name": "henry_imaging_order",
+      "label": "外来照射オーダー（ベータ版）",
+      "file": "henry_imaging_order.user.js",
+      "match": ["henry-app.jp"],
+      "category": "karte",
+      "order": 10,
+      "beta": true
+    },
+    {
       "name": "henry_imaging_order_helper",
       "label": "照射オーダー補助",
       "file": "henry_imaging_order_helper.user.js",
@@ -287,6 +296,15 @@
       "category": "karte",
       "order": 10,
       "enabled": true
+    },
+    {
+      "name": "henry_rehab_order",
+      "label": "リハビリオーダー（ベータ版）",
+      "file": "henry_rehab_order.user.js",
+      "match": ["henry-app.jp"],
+      "category": "karte",
+      "order": 10,
+      "beta": true
     },
     {
       "name": "henry_patient_timeline",

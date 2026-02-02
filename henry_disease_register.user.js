@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry Disease Register
 // @namespace    https://henry-app.jp/
-// @version      3.27.0
+// @version      3.28.0
 // @description  高速病名検索・登録
 // @author       sk powered by Claude & Gemini
 // @match        https://henry-app.jp/*
@@ -612,11 +612,21 @@
 
       // この位置でマッチする接頭語候補を全て取得
       for (const mod of PREFIX_MODIFIERS) {
-        if (str.startsWith(mod[2])) {
-          const newPrefixes = [...prefixes, { code: mod[0], name: mod[1], len: mod[2].length }];
-          const newRemaining = str.slice(mod[2].length);
+        const searchName = mod[2];
+
+        // 完全一致（従来通り）
+        if (str.startsWith(searchName)) {
+          const newPrefixes = [...prefixes, { code: mod[0], name: mod[1], len: searchName.length, partial: false }];
+          const newRemaining = str.slice(searchName.length);
           // さらに接頭語を探す
           results.push(...extractPrefixes(newRemaining, newPrefixes, depth + 1));
+        }
+        // 包含検索: 接頭語が入力を含む場合（例: str="急性" → searchName="超急性" にマッチ）
+        // 深さ0（最初の呼び出し）でのみ適用、かつ入力が2文字以上
+        else if (depth === 0 && str.length >= 2 && searchName.includes(str) && searchName !== str) {
+          const newPrefixes = [...prefixes, { code: mod[0], name: mod[1], len: str.length, partial: true }];
+          // 残りは空文字（入力全体が接頭語にマッチ）
+          results.push({ remaining: '', prefixes: newPrefixes });
         }
       }
 
@@ -634,12 +644,22 @@
 
       // この位置でマッチする接尾語候補を全て取得
       for (const mod of SUFFIX_MODIFIERS) {
-        if (str.endsWith(mod[2])) {
+        const searchName = mod[2];
+
+        // 完全一致（従来通り）
+        if (str.endsWith(searchName)) {
           // 接尾語は先に見つかった方が外側（後ろ）なので先頭に追加
-          const newSuffixes = [{ code: mod[0], name: mod[1] }, ...suffixes];
-          const newRemaining = str.slice(0, -mod[2].length);
+          const newSuffixes = [{ code: mod[0], name: mod[1], partial: false }, ...suffixes];
+          const newRemaining = str.slice(0, -searchName.length);
           // さらに接尾語を探す
           results.push(...extractSuffixes(newRemaining, newSuffixes, depth + 1));
+        }
+        // 包含検索: 接尾語が入力を含む場合（例: str="術後" → searchName="の術後" にマッチ）
+        // 深さ0（最初の呼び出し）でのみ適用、かつ入力が2文字以上
+        else if (depth === 0 && str.length >= 2 && searchName.includes(str) && searchName !== str) {
+          const newSuffixes = [{ code: mod[0], name: mod[1], partial: true }, ...suffixes];
+          // 残りは空文字（入力全体が接尾語にマッチ）
+          results.push({ remaining: '', suffixes: newSuffixes });
         }
       }
 
@@ -657,12 +677,14 @@
 
     for (const prefixPattern of prefixPatterns) {
       const foundPrefixes = prefixPattern.prefixes.map(p => ({ code: p.code, name: p.name }));
+      const hasPrefixPartial = prefixPattern.prefixes.some(p => p.partial);
 
       // 接尾語パターンを取得
       const suffixPatterns = extractSuffixes(prefixPattern.remaining, [], 0);
 
       for (const suffixPattern of suffixPatterns) {
         const foundSuffixes = suffixPattern.suffixes.map(s => ({ code: s.code, name: s.name }));
+        const hasSuffixPartial = suffixPattern.suffixes.some(s => s.partial);
         const remaining = suffixPattern.remaining;
 
         // 残りの部分で病名を検索
@@ -674,11 +696,13 @@
             // 病名長ボーナス: 長い病名（具体的な病名）を優先
             // 2文字→0.2, 5文字→0.5, 10文字以上→1.0
             const lengthBonus = Math.min(disease.name.length / 10, 1.0);
+            // 部分一致の修飾語がある場合はペナルティ（完全一致より低いスコアにする）
+            const partialPenalty = (hasPrefixPartial || hasSuffixPartial) ? 0.3 : 0;
             allResults.push({
               disease: disease,
               prefixes: foundPrefixes,
               suffixes: foundSuffixes,
-              score: (disease.score || 0) + lengthBonus,
+              score: (disease.score || 0) + lengthBonus - partialPenalty,
               modifierCount: foundPrefixes.length + foundSuffixes.length,
               diseaseNameLen: disease.name.length
             });
