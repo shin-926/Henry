@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry Patient Timeline
 // @namespace    https://github.com/shin-926/Henry
-// @version      2.100.0
+// @version      2.101.0
 // @description  入院患者の各種記録・オーダーをガントチャート風タイムラインで表示
 // @author       sk powered by Claude
 // @match        https://henry-app.jp/*
@@ -3772,7 +3772,7 @@
     let patientProfile = null;
     // 固定情報エリアのUI状態
     let fixedInfoCollapsed = false;
-    let fixedInfoHeight = '150px';
+    let fixedInfoHeight = '300px';
     // 現在のユーザーUUID（編集権限判定用）
     let myUuid = null;
     // プリフェッチ用キャッシュ
@@ -4137,7 +4137,10 @@
       document.addEventListener('mousemove', (e) => {
         if (!isResizing) return;
         const deltaY = e.clientY - startY;
-        const newHeight = Math.max(60, Math.min(400, startHeight + deltaY));
+        // 最大値をモーダル高さの80%に（画面の大部分まで拡大可能）
+        const modalHeight = modal.querySelector('.timeline-container')?.offsetHeight || window.innerHeight * 0.9;
+        const maxHeight = modalHeight * 0.8;
+        const newHeight = Math.max(60, Math.min(maxHeight, startHeight + deltaY));
         fixedInfoArea.style.height = `${newHeight}px`;
       });
 
