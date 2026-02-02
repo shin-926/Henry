@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry Patient Timeline
 // @namespace    https://github.com/shin-926/Henry
-// @version      2.96.0
+// @version      2.100.0
 // @description  入院患者の各種記録・オーダーをガントチャート風タイムラインで表示
 // @author       sk powered by Claude
 // @match        https://henry-app.jp/*
@@ -900,11 +900,24 @@
               orderStatus
               doctor { name }
               rps {
+                boundsDurationDays { value }
+                medicationTiming {
+                  medicationTiming {
+                    canonicalPrescriptionUsage {
+                      text
+                      timings { text }
+                    }
+                  }
+                }
                 instructions {
                   instruction {
                     medicationDosageInstruction {
                       localMedicine { name }
                       mhlwMedicine { name }
+                      quantity {
+                        doseQuantity { value }
+                        doseQuantityPerDay { value }
+                      }
                     }
                   }
                 }
@@ -916,11 +929,17 @@
               orderStatus
               doctor { name }
               rps {
+                boundsDurationDays { value }
+                localInjectionTechnique { name }
                 instructions {
                   instruction {
                     medicationDosageInstruction {
                       localMedicine { name }
                       mhlwMedicine { name }
+                      quantity {
+                        doseQuantity { value }
+                        doseQuantityPerDay { value }
+                      }
                     }
                   }
                 }
@@ -930,12 +949,27 @@
               uuid
               createTime { seconds }
               orderStatus
+              isDraft
               startDate { year month day }
               endDate { year month day }
+              detail {
+                dietaryRegimen { name }
+                supplies {
+                  food { name }
+                }
+              }
             }
             outsideInspectionReportGroups {
+              name
               outsideInspectionReportRows {
                 name
+                standardValue { value }
+                outsideInspectionReports {
+                  date { year month day }
+                  value
+                  isAbnormal
+                  abnormalityType
+                }
               }
             }
           }
@@ -997,7 +1031,16 @@
         return (rx.rps || []).map((rp, idx) => {
           const medicines = (rp.instructions || []).map(inst => {
             const med = inst.instruction?.medicationDosageInstruction;
-            return med?.localMedicine?.name || med?.mhlwMedicine?.name || '不明';
+            const name = med?.localMedicine?.name || med?.mhlwMedicine?.name || '不明';
+            // 投与量を取得（Frac100000形式: 100000 = 1）
+            const dosePerDay = med?.quantity?.doseQuantityPerDay?.value;
+            const dose = med?.quantity?.doseQuantity?.value;
+            const doseValue = dose || dosePerDay;
+            if (doseValue) {
+              const doseNum = parseInt(doseValue, 10) / 100000;
+              return `${name} ${doseNum}`;
+            }
+            return name;
           }).filter(Boolean);
 
           return {
@@ -1641,7 +1684,17 @@
       const medicines = (rp.instructions || []).map(inst => {
         const med = inst.instruction?.medicationDosageInstruction;
         const rawName = med?.localMedicine?.name || med?.mhlwMedicine?.name || null;
-        return rawName ? cleanMedicineName(rawName) : null;
+        if (!rawName) return null;
+        const name = cleanMedicineName(rawName);
+        // 投与量を取得（Frac100000形式: 100000 = 1）
+        const dosePerDay = med?.quantity?.doseQuantityPerDay?.value;
+        const dose = med?.quantity?.doseQuantity?.value;
+        const doseValue = dose || dosePerDay;
+        if (doseValue) {
+          const doseNum = parseInt(doseValue, 10) / 100000;
+          return `${name} ${doseNum}`;
+        }
+        return name;
       }).filter(Boolean);
 
       const technique = (rp.localInjectionTechnique?.name || '').replace(/，/g, ',');
@@ -4768,6 +4821,15 @@
         return;
       }
 
+      // startDateの存在チェック
+      if (!currentHospitalization.startDate) {
+        dateListEl.innerHTML = '<div class="no-records">入院開始日なし</div>';
+        recordContent.innerHTML = '';
+        vitalContent.innerHTML = '';
+        prescriptionOrderContent.innerHTML = '';
+        return;
+      }
+
       // 入院開始日から今日までの日付リスト
       const startDate = new Date(
         currentHospitalization.startDate.year,
@@ -6667,8 +6729,10 @@
       // === 選択日の注射 ===
       if (selectedCategories.has('injection')) {
         const targetInjections = activeInjections.filter(inj => {
-          if (!inj.startDate) return false;
-          const startDate = new Date(inj.startDate.year, inj.startDate.month - 1, inj.startDate.day);
+          // 注射はcreateTimeを開始日として使用（startDateフィールドがない）
+          if (!inj.createTime?.seconds) return false;
+          const startDate = new Date(inj.createTime.seconds * 1000);
+          startDate.setHours(0, 0, 0, 0);
           const maxDuration = Math.max(...(inj.rps || []).map(rp => rp.boundsDurationDays?.value || 1));
           const endDate = new Date(startDate);
           endDate.setDate(endDate.getDate() + maxDuration - 1);
@@ -6680,7 +6744,9 @@
 
         if (targetInjections.length > 0) {
         html += targetInjections.flatMap(inj => {
-          const startDate = new Date(inj.startDate.year, inj.startDate.month - 1, inj.startDate.day);
+          // createTimeから開始日を計算
+          const startDate = new Date(inj.createTime.seconds * 1000);
+          startDate.setHours(0, 0, 0, 0);
 
           return (inj.rps || []).map(rp => {
             const medicines = (rp.instructions || []).map(inst => {
@@ -6715,8 +6781,10 @@
       // === 選択日の処方 ===
       if (selectedCategories.has('prescription')) {
         const targetPrescriptions = activePrescriptions.filter(rx => {
-          if (!rx.startDate) return false;
-          const startDate = new Date(rx.startDate.year, rx.startDate.month - 1, rx.startDate.day);
+          // 処方はcreateTimeを開始日として使用（startDateフィールドがない）
+          if (!rx.createTime?.seconds) return false;
+          const startDate = new Date(rx.createTime.seconds * 1000);
+          startDate.setHours(0, 0, 0, 0);
           const maxDuration = Math.max(...(rx.rps || []).map(rp => rp.boundsDurationDays?.value || 1));
           const endDate = new Date(startDate);
           endDate.setDate(endDate.getDate() + maxDuration - 1);
@@ -6811,7 +6879,7 @@
       try {
         const hospitalizations = await fetchHospitalizations(patientUuid);
         const currentHosp = hospitalizations.find(h => h.state === 'ADMITTED');
-        if (!currentHosp) return;
+        if (!currentHosp || !currentHosp.startDate) return;
 
         const startDate = new Date(
           currentHosp.startDate.year,
@@ -6878,6 +6946,17 @@
             return;
           }
 
+          // startDateの存在チェック
+          if (!currentHospitalization.startDate) {
+            console.error(`[${SCRIPT_NAME}] 入院開始日が設定されていません: ${patientUuid}`);
+            hospInfo.textContent = '入院情報エラー';
+            dateListEl.innerHTML = '';
+            recordContent.innerHTML = '<div class="no-records">入院開始日が設定されていません</div>';
+            vitalContent.innerHTML = '';
+            prescriptionOrderContent.innerHTML = '';
+            return;
+          }
+
           // 入院開始日
           const startDate = new Date(
             currentHospitalization.startDate.year,
@@ -6904,6 +6983,17 @@
           vitalContent.innerHTML = '';
           prescriptionOrderContent.innerHTML = '';
           updateGraphModalsForNotAdmitted();
+          return;
+        }
+
+        // startDateの存在チェック（キャッシュからの場合も）
+        if (!currentHospitalization.startDate) {
+          console.error(`[${SCRIPT_NAME}] 入院開始日が設定されていません`);
+          hospInfo.textContent = '入院情報エラー';
+          dateListEl.innerHTML = '';
+          recordContent.innerHTML = '<div class="no-records">入院開始日が設定されていません</div>';
+          vitalContent.innerHTML = '';
+          prescriptionOrderContent.innerHTML = '';
           return;
         }
 
