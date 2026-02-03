@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry Patient Timeline
 // @namespace    https://github.com/shin-926/Henry
-// @version      2.131.0
+// @version      2.132.0
 // @description  入院患者の各種記録・オーダーをガントチャート風タイムラインで表示
 // @author       sk powered by Claude
 // @match        https://henry-app.jp/*
@@ -502,6 +502,31 @@
         <div class="record-card-text">${textHtml}</div>
       </div>
     `;
+  }
+
+  // フィルタ適用後の患者リストを取得
+  function getFilteredPatientList(state) {
+    if (state.filter.doctors.size === 0) return state.patient.all;
+    return state.patient.all.filter(p => {
+      const doctorName = p.hospitalizationDoctor?.doctor?.name;
+      const normalizedName = normalizeDoctorName(doctorName);
+      return state.filter.doctors.has(normalizedName);
+    });
+  }
+
+  // 現在の患者インデックスを取得（フィルタ適用後のリストでの位置）
+  function getCurrentPatientIndex(state) {
+    if (!state.patient.selected) return -1;
+    // 担当医フィルタを適用したリストを使用
+    let filteredList = state.patient.all;
+    if (state.filter.doctors.size > 0) {
+      filteredList = state.patient.all.filter(p => {
+        const doctorName = p.hospitalizationDoctor?.doctor?.name;
+        const normalizedName = normalizeDoctorName(doctorName);
+        return state.filter.doctors.has(normalizedName);
+      });
+    }
+    return filteredList.findIndex(p => p.patient.uuid === state.patient.selected.uuid);
   }
 
   // 入院情報取得クエリ
@@ -4393,35 +4418,10 @@
     // 患者ナビゲーション
     // =========================================================================
 
-    // 現在の患者インデックスを取得（フィルタ適用後のリストでの位置）
-    function getCurrentPatientIndex() {
-      if (!state.patient.selected) return -1;
-      // 担当医フィルタを適用したリストを使用
-      let filteredList = state.patient.all;
-      if (state.filter.doctors.size > 0) {
-        filteredList = state.patient.all.filter(p => {
-          const doctorName = p.hospitalizationDoctor?.doctor?.name;
-          const normalizedName = normalizeDoctorName(doctorName);
-          return state.filter.doctors.has(normalizedName);
-        });
-      }
-      return filteredList.findIndex(p => p.patient.uuid === state.patient.selected.uuid);
-    }
-
-    // フィルタ適用後の患者リストを取得
-    function getFilteredPatientList() {
-      if (state.filter.doctors.size === 0) return state.patient.all;
-      return state.patient.all.filter(p => {
-        const doctorName = p.hospitalizationDoctor?.doctor?.name;
-        const normalizedName = normalizeDoctorName(doctorName);
-        return state.filter.doctors.has(normalizedName);
-      });
-    }
-
     // 前の患者に移動
     function navigateToPreviousPatient() {
-      const filteredList = getFilteredPatientList();
-      const idx = getCurrentPatientIndex();
+      const filteredList = getFilteredPatientList(state);
+      const idx = getCurrentPatientIndex(state);
       if (idx > 0) {
         const patient = filteredList[idx - 1];
         switchToTimeline({
@@ -4438,8 +4438,8 @@
 
     // 次の患者に移動
     function navigateToNextPatient() {
-      const filteredList = getFilteredPatientList();
-      const idx = getCurrentPatientIndex();
+      const filteredList = getFilteredPatientList(state);
+      const idx = getCurrentPatientIndex(state);
       if (idx >= 0 && idx < filteredList.length - 1) {
         const patient = filteredList[idx + 1];
         switchToTimeline({
@@ -4456,8 +4456,8 @@
 
     // ナビゲーションボタンの状態を更新
     function updateNavButtons() {
-      const filteredList = getFilteredPatientList();
-      const idx = getCurrentPatientIndex();
+      const filteredList = getFilteredPatientList(state);
+      const idx = getCurrentPatientIndex(state);
       const isVisible = state.ui.currentView === 'timeline' && filteredList.length > 1;
 
       prevBtn.style.display = isVisible ? 'block' : 'none';
@@ -7171,8 +7171,8 @@
 
     // 前後の患者データをプリフェッチ
     function prefetchAdjacentPatients() {
-      const filteredList = getFilteredPatientList();
-      const idx = getCurrentPatientIndex();
+      const filteredList = getFilteredPatientList(state);
+      const idx = getCurrentPatientIndex(state);
 
       // 前の患者をプリフェッチ
       if (idx > 0) {
