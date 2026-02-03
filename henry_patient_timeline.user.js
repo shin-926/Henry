@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry Patient Timeline
 // @namespace    https://github.com/shin-926/Henry
-// @version      2.127.0
+// @version      2.128.0
 // @description  入院患者の各種記録・オーダーをガントチャート風タイムラインで表示
 // @author       sk powered by Claude
 // @match        https://henry-app.jp/*
@@ -3859,13 +3859,15 @@
     let doctorColorMap = new Map(); // 担当医→色のマッピング
     let selectedDoctors = new Set(); // 選択中の担当医（正規化名）。空=全員表示
     // 固定情報エリア用
-    let activePrescriptions = [];
-    let activeInjections = [];
-    let outsideInspectionReportGroups = [];
-    let inHouseBloodTests = [];
-    let pressureUlcerRecords = [];
-    let pharmacyRecords = [];
-    let inspectionFindingsRecords = [];
+    const fixedData = {
+      activePrescriptions: [],
+      activeInjections: [],
+      outsideReports: [],      // outsideInspectionReportGroups
+      inHouseBloodTests: [],
+      pressureUlcer: [],       // pressureUlcerRecords
+      pharmacy: [],            // pharmacyRecords
+      inspectionFindings: [],  // inspectionFindingsRecords
+    };
     let patientProfile = null;
     // 現在のユーザーUUID（編集権限判定用）
     let myUuid = null;
@@ -4365,11 +4367,11 @@
       currentHospitalization = null;
       selectedDateKey = null;
       // 固定情報をリセット
-      activePrescriptions = [];
-      activeInjections = [];
-      outsideInspectionReportGroups = [];
-      inHouseBloodTests = [];
-      pressureUlcerRecords = [];
+      fixedData.activePrescriptions = [];
+      fixedData.activeInjections = [];
+      fixedData.outsideReports = [];
+      fixedData.inHouseBloodTests = [];
+      fixedData.pressureUlcer = [];
       patientProfile = null;
       // 注: selectedDoctors はリセットしない（担当医フィルタは維持）
       // キャッシュをクリア
@@ -4875,7 +4877,7 @@
 
       // 処方検索
       if (selectedCategories.has('prescription')) {
-        activePrescriptions.forEach(rx => {
+        fixedData.activePrescriptions.forEach(rx => {
           const medicines = extractMedicineNamesFromOrder(rx);
           if (medicines.some(m => m.toLowerCase().includes(lowerSearch))) {
             addOrderDateRangeToMatches(rx);
@@ -4885,7 +4887,7 @@
 
       // 注射検索
       if (selectedCategories.has('injection')) {
-        activeInjections.forEach(inj => {
+        fixedData.activeInjections.forEach(inj => {
           const medicines = extractMedicineNamesFromOrder(inj);
           if (medicines.some(m => m.toLowerCase().includes(lowerSearch))) {
             addOrderDateRangeToMatches(inj);
@@ -6101,7 +6103,7 @@
 
     // 血液検査結果モーダルを表示（横軸日付形式）
     function showBloodTestModal() {
-      const results = extractBloodTestResults(outsideInspectionReportGroups, inHouseBloodTests);
+      const results = extractBloodTestResults(fixedData.outsideReports, fixedData.inHouseBloodTests);
       const modalTitle = `血液検査結果 - ${selectedPatient?.fullName || ''}`;
 
       if (results.length === 0) {
@@ -6289,7 +6291,7 @@
     function showPressureUlcerModal() {
       const modalTitle = `褥瘡評価（DESIGN-R） - ${selectedPatient?.fullName || ''}`;
 
-      if (!pressureUlcerRecords || pressureUlcerRecords.length === 0) {
+      if (!fixedData.pressureUlcer || fixedData.pressureUlcer.length === 0) {
         // モーダルが開いていれば「データなし」表示
         if (modals.pressureUlcer?.overlayEl?.parentNode) {
           const titleEl = modals.pressureUlcer.overlayEl.querySelector('.henry-modal-title');
@@ -6303,7 +6305,7 @@
       }
 
       // ピボット形式に変換
-      const pivoted = pivotPressureUlcerData(pressureUlcerRecords);
+      const pivoted = pivotPressureUlcerData(fixedData.pressureUlcer);
 
       if (pivoted.sites.length === 0) {
         // モーダルが開いていれば「データなし」表示
@@ -6483,7 +6485,7 @@
       }
 
       // プリフェッチ済みデータを使用
-      if (pharmacyRecords.length === 0) {
+      if (fixedData.pharmacy.length === 0) {
         // モーダルが開いていれば「データなし」表示
         if (modals.pharmacy?.overlayEl?.parentNode) {
           const titleEl = modals.pharmacy.overlayEl.querySelector('.henry-modal-title');
@@ -6500,8 +6502,8 @@
       contentDiv.style.cssText = 'max-height: 70vh; overflow-y: auto; padding: 8px;';
 
       // 各記録をカードとして表示
-      for (let i = 0; i < pharmacyRecords.length; i++) {
-        const record = pharmacyRecords[i];
+      for (let i = 0; i < fixedData.pharmacy.length; i++) {
+        const record = fixedData.pharmacy[i];
         const recordDiv = document.createElement('div');
         recordDiv.style.cssText = `
           padding: 12px;
@@ -6539,7 +6541,7 @@
         contentDiv.appendChild(recordDiv);
 
         // 区切り線（最後以外）
-        if (i < pharmacyRecords.length - 1) {
+        if (i < fixedData.pharmacy.length - 1) {
           const hr = document.createElement('hr');
           hr.style.cssText = 'margin: 16px 0; border: none; border-top: 1px solid #e0e0e0;';
           contentDiv.appendChild(hr);
@@ -6601,7 +6603,7 @@
       }
 
       // プリフェッチ済みデータを使用
-      if (inspectionFindingsRecords.length === 0) {
+      if (fixedData.inspectionFindings.length === 0) {
         // モーダルが開いていれば「データなし」表示
         if (modals.inspectionFindings?.overlayEl?.parentNode) {
           const titleEl = modals.inspectionFindings.overlayEl.querySelector('.henry-modal-title');
@@ -6618,8 +6620,8 @@
       contentDiv.style.cssText = 'max-height: 70vh; overflow-y: auto; padding: 8px;';
 
       // 各記録をカードとして表示
-      for (let i = 0; i < inspectionFindingsRecords.length; i++) {
-        const record = inspectionFindingsRecords[i];
+      for (let i = 0; i < fixedData.inspectionFindings.length; i++) {
+        const record = fixedData.inspectionFindings[i];
         const recordDiv = document.createElement('div');
         recordDiv.style.cssText = `
           padding: 12px;
@@ -6682,7 +6684,7 @@
         contentDiv.appendChild(recordDiv);
 
         // 区切り線（最後以外）
-        if (i < inspectionFindingsRecords.length - 1) {
+        if (i < fixedData.inspectionFindings.length - 1) {
           const hr = document.createElement('hr');
           hr.style.cssText = 'margin: 16px 0; border: none; border-top: 1px solid #e0e0e0;';
           contentDiv.appendChild(hr);
@@ -6862,7 +6864,7 @@
 
       // === 選択日の注射 ===
       if (selectedCategories.has('injection')) {
-        let targetInjections = activeInjections.filter(inj => {
+        let targetInjections = fixedData.activeInjections.filter(inj => {
           // startDateがあれば使用、なければcreateTimeにフォールバック
           const startDate = inj.startDate
             ? new Date(inj.startDate.year, inj.startDate.month - 1, inj.startDate.day)
@@ -6936,7 +6938,7 @@
 
       // === 選択日の処方 ===
       if (selectedCategories.has('prescription')) {
-        let targetPrescriptions = activePrescriptions.filter(rx => {
+        let targetPrescriptions = fixedData.activePrescriptions.filter(rx => {
           // startDateがあれば使用、なければcreateTimeにフォールバック
           const startDate = rx.startDate
             ? new Date(rx.startDate.year, rx.startDate.month - 1, rx.startDate.day)
@@ -7199,13 +7201,13 @@
         allItems = allData.timelineItems;
 
         // 固定情報を保存
-        activePrescriptions = allData.activePrescriptions;
-        activeInjections = allData.activeInjections;
-        outsideInspectionReportGroups = allData.outsideInspectionReportGroups;
-        inHouseBloodTests = allData.inHouseBloodTests;
-        pressureUlcerRecords = allData.pressureUlcerRecords;
-        pharmacyRecords = allData.pharmacyRecords;
-        inspectionFindingsRecords = allData.inspectionFindingsRecords;
+        fixedData.activePrescriptions = allData.activePrescriptions;
+        fixedData.activeInjections = allData.activeInjections;
+        fixedData.outsideReports = allData.outsideInspectionReportGroups;
+        fixedData.inHouseBloodTests = allData.inHouseBloodTests;
+        fixedData.pressureUlcer = allData.pressureUlcerRecords;
+        fixedData.pharmacy = allData.pharmacyRecords;
+        fixedData.inspectionFindings = allData.inspectionFindingsRecords;
         patientProfile = allData.profile;
 
         // 入院期間でフィルタリング
@@ -7218,7 +7220,7 @@
           : null;
         allItems = filterByHospitalizationPeriod(allItems, startDate, endDate);
 
-        DEBUG && console.log(`[${SCRIPT_NAME}] データ読み込み完了: ${allItems.length}件, 有効処方: ${activePrescriptions.length}件, 有効注射: ${activeInjections.length}件, 血液検査: ${outsideInspectionReportGroups.length}件, 褥瘡評価: ${pressureUlcerRecords.length}件, 薬剤部: ${pharmacyRecords.length}件, 検査所見: ${inspectionFindingsRecords.length}件`);
+        DEBUG && console.log(`[${SCRIPT_NAME}] データ読み込み完了: ${allItems.length}件, 有効処方: ${fixedData.activePrescriptions.length}件, 有効注射: ${fixedData.activeInjections.length}件, 血液検査: ${fixedData.outsideReports.length}件, 褥瘡評価: ${fixedData.pressureUlcer.length}件, 薬剤部: ${fixedData.pharmacy.length}件, 検査所見: ${fixedData.inspectionFindings.length}件`);
 
         // 固定情報エリアを描画
         renderFixedInfo();
