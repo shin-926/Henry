@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry Patient Timeline
 // @namespace    https://github.com/shin-926/Henry
-// @version      2.101.0
+// @version      2.105.0
 // @description  入院患者の各種記録・オーダーをガントチャート風タイムラインで表示
 // @author       sk powered by Claude
 // @match        https://henry-app.jp/*
@@ -884,13 +884,16 @@
               respiration { value }
             }
             clinicalQuantitativeDataModuleCollections {
+              cqdDefHrn
               clinicalQuantitativeDataModules {
+                title
                 recordDateRange {
                   start { year month day }
                 }
                 entries {
                   name
                   value
+                  unit { value }
                 }
               }
             }
@@ -1808,10 +1811,18 @@
     // 外注検査の項目名→基準値マップ（院内検査のL/H判定に使用）
     const referenceValueMap = new Map();
 
-    // 院内検査専用項目のデフォルト基準値（外注検査に対応項目がない場合）
+    // 院内検査専用項目のデフォルト基準値（外注検査に対応項目がない場合のみ使用）
+    referenceValueMap.set('白血球数', '33-86');
+    referenceValueMap.set('赤血球数', '380-570');
+    referenceValueMap.set('Hb', '11.5-17.5');
+    referenceValueMap.set('Ht', '34.8-52.4');
+    referenceValueMap.set('MCV', '83-101');
+    referenceValueMap.set('MCH', '28-34');
+    referenceValueMap.set('MCHC', '31.6-36.6');
+    referenceValueMap.set('血小板数', '15.0-35.0');
     referenceValueMap.set('リンパ球', '20-50');
     referenceValueMap.set('単球', '2-10');
-    referenceValueMap.set('顆粒球', '54-60');
+    referenceValueMap.set('顆粒球', '40-74');
 
     // 外部検査データ（四国中検など）を処理
     for (const group of outsideInspectionReportGroups) {
@@ -3247,7 +3258,7 @@
       overflow: hidden;
     }
     #patient-timeline-modal .date-list {
-      width: 100px;
+      width: 90px;
       border-right: 1px solid #e0e0e0;
       overflow-y: auto;
       background: #fafafa;
@@ -3282,7 +3293,7 @@
     #patient-timeline-modal .record-column,
     #patient-timeline-modal .vital-column,
     #patient-timeline-modal .prescription-order-column {
-      flex: 3;
+      flex: 1;
       display: flex;
       flex-direction: column;
       overflow: hidden;
@@ -3298,6 +3309,31 @@
     }
     #patient-timeline-modal .fixed-info-column .column-content {
       padding-top: 12px;
+      display: flex;
+      flex-direction: column;
+      height: 100%;
+    }
+    /* サマリーカード：初期80%、リサイズ可能 */
+    #patient-timeline-modal #sidebar-summary-card {
+      flex: 0 0 auto;
+      height: 80%;
+      min-height: 100px;
+      margin-bottom: 0;
+      display: flex;
+      flex-direction: column;
+    }
+    #patient-timeline-modal #sidebar-summary-content {
+      flex: 1;
+      max-height: none;
+      overflow-y: auto;
+    }
+    /* ボタングリッド：残り40%を使用 */
+    #patient-timeline-modal .button-grid {
+      flex: 1;
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+      align-content: start;
     }
     #patient-timeline-modal .record-column,
     #patient-timeline-modal .vital-column,
@@ -3487,25 +3523,6 @@
       padding: 12px 16px;
       background: #fafafa;
       overflow: hidden;
-    }
-    #patient-timeline-modal .fixed-info-resizer {
-      height: 6px;
-      background: #e0e0e0;
-      cursor: ns-resize;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      transition: background 0.2s;
-    }
-    #patient-timeline-modal .fixed-info-resizer:hover {
-      background: #bdbdbd;
-    }
-    #patient-timeline-modal .fixed-info-resizer::after {
-      content: '';
-      width: 40px;
-      height: 3px;
-      background: #999;
-      border-radius: 2px;
     }
     #patient-timeline-modal .info-card {
       background: white;
@@ -3770,9 +3787,6 @@
     let pharmacyRecords = [];
     let inspectionFindingsRecords = [];
     let patientProfile = null;
-    // 固定情報エリアのUI状態
-    let fixedInfoCollapsed = false;
-    let fixedInfoHeight = '300px';
     // 現在のユーザーUUID（編集権限判定用）
     let myUuid = null;
     // プリフェッチ用キャッシュ
@@ -3807,19 +3821,6 @@
             </div>
           </div>
           <div id="timeline-container" style="display: none; flex-direction: column; flex: 1; overflow: hidden;">
-            <div class="fixed-info-wrapper" id="fixed-info-wrapper">
-              <div class="fixed-info-area" id="fixed-info-area">
-                <div class="info-card clickable" style="width: 50%;" id="profile-card">
-                  <div class="info-card-header">📋 プロフィール</div>
-                  <div class="info-card-content" id="profile-content"><span class="empty">クリックして入力</span></div>
-                </div>
-                <div class="info-card clickable" style="width: 50%;" id="summary-card">
-                  <div class="info-card-header">📝 サマリー</div>
-                  <div class="info-card-content" id="summary-content"><span class="empty">クリックして入力</span></div>
-                </div>
-              </div>
-              <div class="fixed-info-resizer" id="fixed-info-resizer"></div>
-            </div>
             <div class="timeline-layout" style="flex: 1; overflow: hidden;">
               <div class="date-list" id="date-list"></div>
               <div class="content-columns">
@@ -3875,10 +3876,6 @@
     const fixedInfoContent = modal.querySelector('#fixed-info-content');
     const hospInfo = modal.querySelector('#hosp-info');
     const doctorLegend = modal.querySelector('#doctor-legend');
-    const profileContent = modal.querySelector('#profile-content');
-    const fixedInfoWrapper = modal.querySelector('#fixed-info-wrapper');
-    const fixedInfoArea = modal.querySelector('#fixed-info-area');
-    const fixedInfoResizer = modal.querySelector('#fixed-info-resizer');
     const addRecordBtn = modal.querySelector('#add-record-btn');
 
     // 記録追加モーダル表示
@@ -4111,49 +4108,6 @@
       });
     });
 
-    // リサイズ機能のセットアップ（ダブルクリックで折りたたみ）
-    function setupResizer() {
-      let isResizing = false;
-      let startY = 0;
-      let startHeight = 0;
-
-      fixedInfoResizer.addEventListener('mousedown', (e) => {
-        isResizing = true;
-        startY = e.clientY;
-        startHeight = fixedInfoArea.offsetHeight;
-        document.body.style.cursor = 'ns-resize';
-        document.body.style.userSelect = 'none';
-        e.preventDefault();
-      });
-
-      // ダブルクリックで折りたたみトグル
-      const toggleCollapse = () => {
-        fixedInfoWrapper.classList.toggle('collapsed');
-        fixedInfoCollapsed = fixedInfoWrapper.classList.contains('collapsed');
-      };
-      fixedInfoResizer.addEventListener('dblclick', toggleCollapse);
-      fixedInfoArea.addEventListener('dblclick', toggleCollapse);
-
-      document.addEventListener('mousemove', (e) => {
-        if (!isResizing) return;
-        const deltaY = e.clientY - startY;
-        // 最大値をモーダル高さの80%に（画面の大部分まで拡大可能）
-        const modalHeight = modal.querySelector('.timeline-container')?.offsetHeight || window.innerHeight * 0.9;
-        const maxHeight = modalHeight * 0.8;
-        const newHeight = Math.max(60, Math.min(maxHeight, startHeight + deltaY));
-        fixedInfoArea.style.height = `${newHeight}px`;
-      });
-
-      document.addEventListener('mouseup', () => {
-        if (isResizing) {
-          isResizing = false;
-          document.body.style.cursor = '';
-          document.body.style.userSelect = '';
-          fixedInfoHeight = fixedInfoArea.style.height;
-        }
-      });
-    }
-
     // モーダルを閉じる（クリーンアップ付き）
     function closeModal() {
       cleaner.exec();
@@ -4345,6 +4299,7 @@
       const headerSearchContainer = modal.querySelector('#header-search-container');
       headerSearchContainer.style.display = 'none';
       headerSearchContainer.innerHTML = '';
+      controlsArea.style.display = 'flex';
       controlsArea.innerHTML = `
         <input type="text" class="search-input" placeholder="患者検索（名前・患者番号）..." id="patient-search-input" value="${escapeHtml(patientSearchText)}">
       `;
@@ -4387,6 +4342,7 @@
 
       // 患者選択画面の検索ボックスをクリアし、ヘッダーに検索ボックスを表示
       controlsArea.innerHTML = '';
+      controlsArea.style.display = 'none';
       const headerSearchContainer = modal.querySelector('#header-search-container');
       headerSearchContainer.style.display = 'block';
       headerSearchContainer.innerHTML = `
@@ -4397,17 +4353,6 @@
       patientSelectView.style.display = 'none';
       timelineContainer.style.display = 'flex';
       timelineContainer.style.flexDirection = 'column';
-
-      // 固定情報エリアの状態を復元
-      fixedInfoArea.style.height = fixedInfoHeight;
-      if (fixedInfoCollapsed) {
-        fixedInfoWrapper.classList.add('collapsed');
-      } else {
-        fixedInfoWrapper.classList.remove('collapsed');
-      }
-
-      // リサイズ機能をセットアップ（ダブルクリックで折りたたみ）
-      setupResizer();
 
       // ローディング表示
       dateListEl.innerHTML = '<div class="no-records">読み込み中...</div>';
@@ -4868,7 +4813,7 @@
       // 日付リスト描画
       dateListEl.innerHTML = dates.map(date => {
         const key = dateKey(date);
-        const isWeekend = date.getDay() === 0 || date.getDay() === 6;
+        const isWeekend = date.getDay() === 0;
         const isSelected = key === selectedDateKey;
         return `
           <div class="date-item ${isSelected ? 'selected' : ''} ${isWeekend ? 'weekend' : ''}" data-date-key="${key}">
@@ -5702,30 +5647,13 @@
 
     // 固定情報エリアを描画（プロフィールとサマリー）
     function renderFixedInfo() {
-      // プロフィールカードのイベント設定
-      const profileCard = document.getElementById('profile-card');
-      if (profileCard) {
-        profileCard.onclick = () => showProfileModal();
-      }
+      // 固定情報カラム（右端サイドパネル）を描画
+      renderFixedInfoColumn();
 
-      // サマリーカードのイベント設定
-      const summaryCard = document.getElementById('summary-card');
-      const summaryContent = document.getElementById('summary-content');
-      if (summaryCard) {
-        summaryCard.onclick = () => showSummaryModal();
-      }
-
-      // プロフィールとサマリーを1回のAPI呼び出しで取得
+      // プロフィールとサマリーを1回のAPI呼び出しで取得し、右サイドパネルを更新
       if (selectedPatient) {
         loadPatientSummary(selectedPatient.uuid).then(data => {
-          // プロフィール表示：スプレッドシートを優先、なければGraphQL APIから
-          if (data && data.profile) {
-            profileContent.innerHTML = escapeHtml(data.profile).replace(/\n/g, '<br>');
-          } else if (patientProfile && patientProfile.text) {
-            profileContent.innerHTML = escapeHtml(formatGraphQLProfile(patientProfile.text)).replace(/\n/g, '<br>');
-          } else {
-            profileContent.innerHTML = '<span class="empty">クリックして入力</span>';
-          }
+          const summaryContent = document.getElementById('sidebar-summary-content');
 
           // サマリー表示
           if (summaryContent) {
@@ -5737,25 +5665,12 @@
           }
         }).catch(e => {
           console.error(`[${SCRIPT_NAME}] プロフィール/サマリー読み込みエラー:`, e);
-          // フォールバック：GraphQL APIからのプロフィール
-          if (patientProfile && patientProfile.text) {
-            profileContent.innerHTML = escapeHtml(formatGraphQLProfile(patientProfile.text)).replace(/\n/g, '<br>');
-          } else {
-            profileContent.innerHTML = '<span class="empty">クリックして入力</span>';
-          }
+          const summaryContent = document.getElementById('sidebar-summary-content');
           if (summaryContent) {
             summaryContent.innerHTML = '<span class="empty">クリックして入力</span>';
           }
         });
-      } else {
-        profileContent.innerHTML = '<span class="empty">クリックして入力</span>';
-        if (summaryContent) {
-          summaryContent.innerHTML = '<span class="empty">クリックして入力</span>';
-        }
       }
-
-      // 固定情報カラム（右端サイドパネル）を描画
-      renderFixedInfoColumn();
     }
 
     // GraphQL APIからのプロフィールを整形
@@ -5779,10 +5694,43 @@
     function renderFixedInfoColumn() {
       let html = '';
 
+      // サマリーカード（クリックで編集モーダル）
+      html += `
+        <div id="sidebar-summary-card" class="info-card clickable" style="cursor: pointer;">
+          <div class="info-card-header">📝 サマリー</div>
+          <div class="info-card-content" id="sidebar-summary-content">
+            <span class="empty">クリックして入力</span>
+          </div>
+        </div>
+      `;
+
+      // ボタングリッド開始
+      html += `<div class="button-grid">`;
+
+      // プロフィールボタン（クリックで編集モーダル）
+      html += `
+        <button id="profile-btn" style="
+          padding: 12px 16px;
+          background: linear-gradient(135deg, #fff3e0 0%, #ffe0b2 100%);
+          border: 1px solid #ffcc80;
+          border-radius: 8px;
+          font-size: 14px;
+          font-weight: 500;
+          color: #e65100;
+          cursor: pointer;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          gap: 8px;
+          transition: all 0.2s;
+        ">
+          📋 プロフィール
+        </button>
+      `;
+
       // 血液検査ボタン
       html += `
         <button id="blood-test-btn" style="
-          width: 100%;
           padding: 12px 16px;
           background: linear-gradient(135deg, #e3f2fd 0%, #bbdefb 100%);
           border: 1px solid #90caf9;
@@ -5796,7 +5744,6 @@
           justify-content: center;
           gap: 8px;
           transition: all 0.2s;
-          margin-bottom: 12px;
         ">
           血液検査結果
         </button>
@@ -5805,7 +5752,6 @@
       // 褥瘡評価ボタン
       html += `
         <button id="pressure-ulcer-btn" style="
-          width: 100%;
           padding: 12px 16px;
           background: linear-gradient(135deg, #fce4ec 0%, #f8bbd9 100%);
           border: 1px solid #f48fb1;
@@ -5819,7 +5765,6 @@
           justify-content: center;
           gap: 8px;
           transition: all 0.2s;
-          margin-bottom: 12px;
         ">
           褥瘡評価
         </button>
@@ -5828,7 +5773,6 @@
       // 薬剤部ボタン
       html += `
         <button id="pharmacy-btn" style="
-          width: 100%;
           padding: 12px 16px;
           background: linear-gradient(135deg, #e0f7fa 0%, #b2ebf2 100%);
           border: 1px solid #4dd0e1;
@@ -5842,7 +5786,6 @@
           justify-content: center;
           gap: 8px;
           transition: all 0.2s;
-          margin-bottom: 12px;
         ">
           薬剤部
         </button>
@@ -5851,7 +5794,6 @@
       // 検査所見ボタン
       html += `
         <button id="inspection-findings-btn" style="
-          width: 100%;
           padding: 12px 16px;
           background: linear-gradient(135deg, #e8f5e9 0%, #c8e6c9 100%);
           border: 1px solid #81c784;
@@ -5865,13 +5807,33 @@
           justify-content: center;
           gap: 8px;
           transition: all 0.2s;
-          margin-bottom: 12px;
         ">
           検査所見
         </button>
       `;
 
+      // ボタングリッド終了
+      html += `</div>`;
+
       fixedInfoContent.innerHTML = html;
+
+      // サマリーカードのイベント
+      const sidebarSummaryCard = fixedInfoContent.querySelector('#sidebar-summary-card');
+      if (sidebarSummaryCard) {
+        sidebarSummaryCard.addEventListener('click', showSummaryModal);
+      }
+
+      // プロフィールボタンのイベント
+      const profileBtn = fixedInfoContent.querySelector('#profile-btn');
+      if (profileBtn) {
+        profileBtn.addEventListener('mouseover', () => {
+          profileBtn.style.background = 'linear-gradient(135deg, #ffe0b2 0%, #ffcc80 100%)';
+        });
+        profileBtn.addEventListener('mouseout', () => {
+          profileBtn.style.background = 'linear-gradient(135deg, #fff3e0 0%, #ffe0b2 100%)';
+        });
+        profileBtn.addEventListener('click', showProfileModal);
+      }
 
       // 血液検査ボタンのイベント
       const bloodTestBtn = fixedInfoContent.querySelector('#blood-test-btn');
@@ -6614,10 +6576,10 @@
                 window.HenryCore.ui.showToast('サマリーを保存しました', 'success');
                 summaryModal.close();
 
-                // 上部カードを更新
-                const summaryContent = document.getElementById('summary-content');
-                if (summaryContent) {
-                  summaryContent.innerHTML = escapeHtml(summary).replace(/\n/g, '<br>');
+                // 右サイドパネルのサマリーカードを更新
+                const sidebarSummaryContent = document.getElementById('sidebar-summary-content');
+                if (sidebarSummaryContent) {
+                  sidebarSummaryContent.innerHTML = escapeHtml(summary).replace(/\n/g, '<br>');
                 }
               } catch (e) {
                 console.error(`[${SCRIPT_NAME}] サマリー保存エラー:`, e);
@@ -6700,11 +6662,6 @@
                 );
                 window.HenryCore.ui.showToast('プロフィールを保存しました', 'success');
                 profileModal.close();
-
-                // 上部カードを更新
-                if (profileContent) {
-                  profileContent.innerHTML = escapeHtml(profile).replace(/\n/g, '<br>');
-                }
               } catch (e) {
                 console.error(`[${SCRIPT_NAME}] プロフィール保存エラー:`, e);
                 window.HenryCore.ui.showToast(`保存エラー: ${e.message}`, 'error');
