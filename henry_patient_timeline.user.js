@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry Patient Timeline
 // @namespace    https://github.com/shin-926/Henry
-// @version      2.132.0
+// @version      2.133.0
 // @description  入院患者の各種記録・オーダーをガントチャート風タイムラインで表示
 // @author       sk powered by Claude
 // @match        https://henry-app.jp/*
@@ -527,6 +527,101 @@
       });
     }
     return filteredList.findIndex(p => p.patient.uuid === state.patient.selected.uuid);
+  }
+
+  // オーダーの有効期間をマッチ日付に追加
+  function addOrderDateRangeToMatches(state, order) {
+    if (!order.createTime?.seconds) return;
+
+    const startDate = new Date(order.createTime.seconds * 1000);
+    startDate.setHours(0, 0, 0, 0);
+
+    const maxDuration = Math.max(...(order.rps || []).map(rp => rp.boundsDurationDays?.value || 1));
+    const endDate = new Date(startDate);
+    endDate.setDate(endDate.getDate() + maxDuration - 1);
+
+    // 入院期間との交差を考慮
+    if (!state.hospitalization.current?.startDate) return;
+
+    const hospStart = new Date(
+      state.hospitalization.current.startDate.year,
+      state.hospitalization.current.startDate.month - 1,
+      state.hospitalization.current.startDate.day
+    );
+    const hospEnd = state.hospitalization.current.endDate
+      ? new Date(
+          state.hospitalization.current.endDate.year,
+          state.hospitalization.current.endDate.month - 1,
+          state.hospitalization.current.endDate.day
+        )
+      : new Date();
+
+    const rangeStart = new Date(Math.max(startDate.getTime(), hospStart.getTime()));
+    const rangeEnd = new Date(Math.min(endDate.getTime(), hospEnd.getTime()));
+
+    for (let d = new Date(rangeStart); d <= rangeEnd; d.setDate(d.getDate() + 1)) {
+      state.timeline.matchingDates.add(dateKey(new Date(d)));
+    }
+  }
+
+  // マッチがある日付を計算（グローバル検索用）
+  function updateMatchingDates(state) {
+    state.timeline.matchingDates.clear();
+    if (!state.filter.searchText.trim()) return;
+
+    const lowerSearch = state.filter.searchText.toLowerCase();
+
+    // タイムラインアイテム検索
+    state.timeline.items.forEach(item => {
+      // カテゴリフィルタ適用
+      if (!state.filter.categories.has(item.category)) return;
+      if (!item.date) return;
+
+      // 検索マッチ判定
+      const matchText = item.text.toLowerCase().includes(lowerSearch);
+      const matchAuthor = item.author.toLowerCase().includes(lowerSearch);
+      if (matchText || matchAuthor) {
+        state.timeline.matchingDates.add(dateKey(item.date));
+      }
+    });
+
+    // 処方検索
+    if (state.filter.categories.has('prescription')) {
+      state.orders.prescriptions.forEach(rx => {
+        const medicines = extractMedicineNamesFromOrder(rx);
+        if (medicines.some(m => m.toLowerCase().includes(lowerSearch))) {
+          addOrderDateRangeToMatches(state, rx);
+        }
+      });
+    }
+
+    // 注射検索
+    if (state.filter.categories.has('injection')) {
+      state.orders.injections.forEach(inj => {
+        const medicines = extractMedicineNamesFromOrder(inj);
+        if (medicines.some(m => m.toLowerCase().includes(lowerSearch))) {
+          addOrderDateRangeToMatches(state, inj);
+        }
+      });
+    }
+  }
+
+  // フィルタ適用
+  function applyFilters(state) {
+    state.timeline.filtered = state.timeline.items.filter(item => {
+      // カテゴリフィルタ
+      if (!state.filter.categories.has(item.category)) return false;
+
+      // キーワード検索
+      if (state.filter.searchText.trim()) {
+        const lowerSearch = state.filter.searchText.toLowerCase();
+        const matchText = item.text.toLowerCase().includes(lowerSearch);
+        const matchAuthor = item.author.toLowerCase().includes(lowerSearch);
+        if (!matchText && !matchAuthor) return false;
+      }
+
+      return true;
+    });
   }
 
   // 入院情報取得クエリ
@@ -4693,8 +4788,8 @@
         clearTimeout(timeout);
         timeout = setTimeout(() => {
           state.filter.searchText = input.value;
-          updateMatchingDates(); // 全日付のマッチを計算
-          applyFilters();
+          updateMatchingDates(state); // 全日付のマッチを計算
+          applyFilters(state);
           renderTimeline();
         }, 300);
       };
@@ -4959,111 +5054,12 @@
               state.filter.categories.add(catId);
             }
             renderCategoryFilters();
-            updateMatchingDates(); // カテゴリ変更時もマッチを再計算
-            applyFilters();
+            updateMatchingDates(state); // カテゴリ変更時もマッチを再計算
+            applyFilters(state);
             renderTimeline();
           };
         });
       });
-    }
-
-    // =========================================================================
-    // フィルター・検索
-    // =========================================================================
-
-    // フィルタ適用
-    function applyFilters() {
-      state.timeline.filtered = state.timeline.items.filter(item => {
-        // カテゴリフィルタ
-        if (!state.filter.categories.has(item.category)) return false;
-
-        // キーワード検索
-        if (state.filter.searchText.trim()) {
-          const lowerSearch = state.filter.searchText.toLowerCase();
-          const matchText = item.text.toLowerCase().includes(lowerSearch);
-          const matchAuthor = item.author.toLowerCase().includes(lowerSearch);
-          if (!matchText && !matchAuthor) return false;
-        }
-
-        return true;
-      });
-    }
-
-    // マッチがある日付を計算（グローバル検索用）
-    function updateMatchingDates() {
-      state.timeline.matchingDates.clear();
-      if (!state.filter.searchText.trim()) return;
-
-      const lowerSearch = state.filter.searchText.toLowerCase();
-
-      // タイムラインアイテム検索
-      state.timeline.items.forEach(item => {
-        // カテゴリフィルタ適用
-        if (!state.filter.categories.has(item.category)) return;
-        if (!item.date) return;
-
-        // 検索マッチ判定
-        const matchText = item.text.toLowerCase().includes(lowerSearch);
-        const matchAuthor = item.author.toLowerCase().includes(lowerSearch);
-        if (matchText || matchAuthor) {
-          state.timeline.matchingDates.add(dateKey(item.date));
-        }
-      });
-
-      // 処方検索
-      if (state.filter.categories.has('prescription')) {
-        state.orders.prescriptions.forEach(rx => {
-          const medicines = extractMedicineNamesFromOrder(rx);
-          if (medicines.some(m => m.toLowerCase().includes(lowerSearch))) {
-            addOrderDateRangeToMatches(rx);
-          }
-        });
-      }
-
-      // 注射検索
-      if (state.filter.categories.has('injection')) {
-        state.orders.injections.forEach(inj => {
-          const medicines = extractMedicineNamesFromOrder(inj);
-          if (medicines.some(m => m.toLowerCase().includes(lowerSearch))) {
-            addOrderDateRangeToMatches(inj);
-          }
-        });
-      }
-    }
-
-    // オーダーの有効期間をマッチ日付に追加
-    function addOrderDateRangeToMatches(order) {
-      if (!order.createTime?.seconds) return;
-
-      const startDate = new Date(order.createTime.seconds * 1000);
-      startDate.setHours(0, 0, 0, 0);
-
-      const maxDuration = Math.max(...(order.rps || []).map(rp => rp.boundsDurationDays?.value || 1));
-      const endDate = new Date(startDate);
-      endDate.setDate(endDate.getDate() + maxDuration - 1);
-
-      // 入院期間との交差を考慮
-      if (!state.hospitalization.current?.startDate) return;
-
-      const hospStart = new Date(
-        state.hospitalization.current.startDate.year,
-        state.hospitalization.current.startDate.month - 1,
-        state.hospitalization.current.startDate.day
-      );
-      const hospEnd = state.hospitalization.current.endDate
-        ? new Date(
-            state.hospitalization.current.endDate.year,
-            state.hospitalization.current.endDate.month - 1,
-            state.hospitalization.current.endDate.day
-          )
-        : new Date();
-
-      const rangeStart = new Date(Math.max(startDate.getTime(), hospStart.getTime()));
-      const rangeEnd = new Date(Math.min(endDate.getTime(), hospEnd.getTime()));
-
-      for (let d = new Date(rangeStart); d <= rangeEnd; d.setDate(d.getDate() + 1)) {
-        state.timeline.matchingDates.add(dateKey(new Date(d)));
-      }
     }
 
     // タイムライン描画
@@ -7311,7 +7307,7 @@
         // カテゴリフィルター描画
         renderCategoryFilters();
 
-        applyFilters();
+        applyFilters(state);
         renderTimeline();
 
         // グラフモーダルが開いていれば更新（患者切り替え時の連動）
