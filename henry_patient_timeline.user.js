@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry Patient Timeline
 // @namespace    https://github.com/shin-926/Henry
-// @version      2.124.0
+// @version      2.125.0
 // @description  入院患者の各種記録・オーダーをガントチャート風タイムラインで表示
 // @author       sk powered by Claude
 // @match        https://henry-app.jp/*
@@ -39,6 +39,7 @@
 
   const SCRIPT_NAME = 'PatientTimeline';
   const VERSION = GM_info.script.version;
+  const DEBUG = false; // 本番時はfalse
 
   // カテゴリ定義
   const CATEGORIES = {
@@ -2412,7 +2413,7 @@
     summarySpreadsheetId = response.spreadsheetId;
 
     // My Drive直下に移動（作成時はMy Driveに入るが念のため）
-    console.log(`[${SCRIPT_NAME}] サマリースプレッドシートを作成: ${summarySpreadsheetId}`);
+    DEBUG && console.log(`[${SCRIPT_NAME}] サマリースプレッドシートを作成: ${summarySpreadsheetId}`);
 
     return summarySpreadsheetId;
   }
@@ -2468,7 +2469,7 @@
           }
         }
 
-        console.log(`[${SCRIPT_NAME}] サマリーキャッシュ完了: ${Object.keys(summaryCache).length}件`);
+        DEBUG && console.log(`[${SCRIPT_NAME}] サマリーキャッシュ完了: ${Object.keys(summaryCache).length}件`);
         return summaryCache;
       } catch (e) {
         console.error(`[${SCRIPT_NAME}] サマリー一括読み込みエラー:`, e);
@@ -5380,6 +5381,7 @@
           }
         });
         observer.observe(document.body, { childList: true });
+        cleaner.add(() => observer.disconnect());
       }
     }
 
@@ -5607,6 +5609,7 @@
           }
         });
         observer.observe(document.body, { childList: true });
+        cleaner.add(() => observer.disconnect());
       }
     }
 
@@ -5830,6 +5833,7 @@
           }
         });
         observer.observe(document.body, { childList: true });
+        cleaner.add(() => observer.disconnect());
       }
     }
 
@@ -5859,7 +5863,7 @@
               summary
             );
             // 保存成功のフィードバック（控えめに）
-            console.log(`[${SCRIPT_NAME}] サマリー自動保存完了`);
+            DEBUG && console.log(`[${SCRIPT_NAME}] サマリー自動保存完了`);
           } catch (e) {
             console.error(`[${SCRIPT_NAME}] サマリー保存エラー:`, e);
             window.HenryCore.ui.showToast(`保存エラー: ${e.message}`, 'error');
@@ -6272,6 +6276,7 @@
           }
         });
         observer.observe(document.body, { childList: true });
+        cleaner.add(() => observer.disconnect());
       }
     }
 
@@ -6453,6 +6458,7 @@
           }
         });
         observer.observe(document.body, { childList: true });
+        cleaner.add(() => observer.disconnect());
       }
     }
 
@@ -6572,6 +6578,7 @@
           }
         });
         observer.observe(document.body, { childList: true });
+        cleaner.add(() => observer.disconnect());
       }
     }
 
@@ -6716,6 +6723,7 @@
           }
         });
         observer.observe(document.body, { childList: true });
+        cleaner.add(() => observer.disconnect());
       }
     }
 
@@ -6836,6 +6844,7 @@
           }
         });
         observer.observe(document.body, { childList: true });
+        cleaner.add(() => observer.disconnect());
       }
     }
 
@@ -7068,9 +7077,9 @@
           allData
         });
 
-        console.log(`[${SCRIPT_NAME}] プリフェッチ完了: ${patientUuid}`);
+        DEBUG && console.log(`[${SCRIPT_NAME}] プリフェッチ完了: ${patientUuid}`);
       } catch (e) {
-        console.error(`[${SCRIPT_NAME}] プリフェッチ失敗:`, e.message);
+        DEBUG && console.error(`[${SCRIPT_NAME}] プリフェッチ失敗:`, e.message);
       }
     }
 
@@ -7100,7 +7109,7 @@
         // キャッシュを確認
         const cached = patientDataCache.get(patientUuid);
         if (cached) {
-          console.log(`[${SCRIPT_NAME}] キャッシュ使用: ${patientUuid}`);
+          DEBUG && console.log(`[${SCRIPT_NAME}] キャッシュ使用: ${patientUuid}`);
           hospitalizations = cached.hospitalizations;
           currentHospitalization = cached.currentHospitalization;
           allData = cached.allData;
@@ -7208,7 +7217,7 @@
           : null;
         allItems = filterByHospitalizationPeriod(allItems, startDate, endDate);
 
-        console.log(`[${SCRIPT_NAME}] データ読み込み完了: ${allItems.length}件, 有効処方: ${activePrescriptions.length}件, 有効注射: ${activeInjections.length}件, 血液検査: ${outsideInspectionReportGroups.length}件, 褥瘡評価: ${pressureUlcerRecords.length}件, 薬剤部: ${pharmacyRecords.length}件, 検査所見: ${inspectionFindingsRecords.length}件`);
+        DEBUG && console.log(`[${SCRIPT_NAME}] データ読み込み完了: ${allItems.length}件, 有効処方: ${activePrescriptions.length}件, 有効注射: ${activeInjections.length}件, 血液検査: ${outsideInspectionReportGroups.length}件, 褥瘡評価: ${pressureUlcerRecords.length}件, 薬剤部: ${pharmacyRecords.length}件, 検査所見: ${inspectionFindingsRecords.length}件`);
 
         // 固定情報エリアを描画
         renderFixedInfo();
@@ -7273,11 +7282,11 @@
         ]);
         allPatients = patients;
         isLoading = false;
-        console.log(`[${SCRIPT_NAME}] 入院患者一覧取得: ${allPatients.length}名`);
+        DEBUG && console.log(`[${SCRIPT_NAME}] 入院患者一覧取得: ${allPatients.length}名`);
 
         // 担当医カラーマップを構築
         doctorColorMap = buildDoctorColorMap(allPatients);
-        console.log(`[${SCRIPT_NAME}] 担当医: ${doctorColorMap.size}名`);
+        DEBUG && console.log(`[${SCRIPT_NAME}] 担当医: ${doctorColorMap.size}名`);
 
         renderPatientList();
         renderDoctorLegend();
@@ -7285,7 +7294,7 @@
         // 入院病名をバックグラウンドでプリフェッチ（UIをブロックしない）
         const patientUuids = allPatients.map(p => p.patient?.uuid).filter(Boolean);
         prefetchHospitalizationDiseases(patientUuids).then(() => {
-          console.log(`[${SCRIPT_NAME}] 入院病名プリフェッチ完了: ${diseaseCache.size}件`);
+          DEBUG && console.log(`[${SCRIPT_NAME}] 入院病名プリフェッチ完了: ${diseaseCache.size}件`);
         });
       } catch (e) {
         console.error(`[${SCRIPT_NAME}] 患者一覧取得エラー:`, e);
