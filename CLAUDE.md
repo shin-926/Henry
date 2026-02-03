@@ -1,4 +1,4 @@
-# Henry EMR 開発ガイドライン (Core Rules v4.53)
+# Henry EMR 開発ガイドライン (Core Rules v4.58)
 
 <!-- 📝 UPDATED: v4.52 - サブエージェント活用ルール追加 -->
 
@@ -129,32 +129,6 @@
 - 純粋関数として切り出すことでテスト容易性を向上
 - `data-testid`、`role`、`aria-*` 属性の使用を推奨
 
-### コード出力の制約 (Code Generation Protocol)
-
-**原則**: ユーザーからの明示的な指示（例：「コードを書いて」「実装して」）があるまで、コピー＆ペーストしてそのまま使える「完全な実装コード」を出力してはならない。
-
-**YOU MUST**: コードを修正する前に、まず修正内容をユーザーに確認すること。確認なしに直接編集しない。
-
-**禁止事項**: 議論の途中で、ユーザーが求めていないのに「修正した全体のコードはこちらです」と長いコードブロックを提示すること。
-
-**例外（許可されるコード）**: ロジックや処理の流れを説明するための短いコード片（数行程度のスニペット）や疑似コードは、理解を助けるために積極的に提示してよい。
-
-**判断基準**:
-
-- ✅ OK: 「例えば、このように `filter` を使うイメージです」といった説明用の抜粋
-- ❌ NG: 「修正が完了しました。以下のスクリプト全体を貼り付けてください」といった完成品の提示（指示があるまで待機）
-
-### コード出力の順序 (Code Output Order)
-
-**原則**: コードブロックを出力する際は、説明文を**先に**、コードを**最後に**配置する。コードブロックの後に説明文を書かない。
-
-**理由**: コードブロックの後に説明文があると、ユーザーがコピペする際に余計なテキストが混入し、シンタックスエラーの原因となる。
-
-**判断基準**:
-
-- ✅ OK: 説明 → 変更点 → コードブロック（終了）
-- ❌ NG: コードブロック → 変更点 → 説明
-
 ---
 
 ## 2. Henry開発の必須ルール (Core Development Rules)
@@ -230,17 +204,7 @@
 
 #### エラーハンドリング
 
-**YOU MUST**: `query()` は失敗時に例外を投げる。try-catchで処理し、静かに終了すること。
-
-```javascript
-try {
-  const result = await HenryCore.query(QUERY, { input: { uuid } });
-  if (!result.data?.getPatient) return null;
-} catch (e) {
-  console.error('[SCRIPT_NAME]', e.message);
-  return null;
-}
-```
+**YOU MUST**: `query()` は失敗時に例外を投げる。try-catchで処理し、静かに終了すること。コード例は `NOTES.md` の「HenryCore使用パターン」を参照。
 
 #### OAuth認証
 
@@ -248,10 +212,7 @@ try {
 
 #### fetchインターセプト
 
-**IMPORTANT**: fetchインターセプトで問題が起きたらProxy方式を検討すること：
-- 通常のfetchインターセプト（`originalFetch.apply(this, args)`）はFirestore等の厳格なライブラリと競合することがある
-- 問題が起きた場合は `Proxy` + `Reflect.apply` 方式に変更する
-- 詳細は `NOTES.md` の「fetchインターセプトとFirestore競合問題」を参照
+**IMPORTANT**: fetchインターセプトの実装パターンは `NOTES.md` の「fetchインターセプト実装パターン」を参照すること
 
 #### API詳細
 
@@ -259,56 +220,9 @@ try {
 
 ### GraphQL API 開発ルール
 
-**YOU MUST**: GraphQL APIを使用する際は、以下のフローを守ること：
+**YOU MUST**: GraphQL APIを使用する際は、コードを書く前にチェックリストを確認すること。
 
-#### 1. 開発前：仕様確認
-
-- chrome-devtools-mcpでHenry本体のリクエストをキャプチャ
-- エンドポイント（`/graphql` or `/graphql-v2`）を確認
-- ペイロード構造（フィールド、型）を確認
-- **推測でコードを書かない。スピードより確認の正確さを優先する**
-
-#### 2. 開発中：段階的に検証
-
-1. **エラーログを確認** - 何が起きているか把握する
-2. **実際のpayloadを確認** - Henry本体のリクエスト/レスポンス形式を調べる
-3. **コンソールで試す** - コードに入れる前にブラウザコンソールで動作検証
-4. **確認してから反映** - 動くことを確かめてからファイル更新
-
-焦って推測でコードを書くと手戻りが増える。一歩ずつ確実に進める。
-
-#### 3. エラー時：ペイロード比較（推測禁止）
-
-1. **Henry本体で同じ操作を実行** - DevToolsのNetworkタブでリクエストをキャプチャ
-2. **ペイロードを比較** - Henry本体と自分のコードを**フィールド単位で**比較
-3. **差分を特定→修正** - 足りないフィールド、値の形式の違いを修正
-
-**NEVER**: 推測で原因を探ること（「Persisted Queryが必要」「エンドポイントが違う」等）。まず比較を行う。
-
-**よくある差分の例**:
-- 足りないフィールド（`medicines: []`, `filmCount: null` 等）
-- Enum値の形式（クォートの有無）
-- ネストされたオブジェクトの構造
-
-**YOU MUST**: 400エラーが出たら、まず**レスポンスボディ**を確認すること。エラーメッセージに原因が書いてある。
-
-```javascript
-// レスポンスボディの確認方法
-onload: (response) => {
-  console.log('status:', response.status);
-  console.log('body:', response.responseText);  // ← ここに答えがある
-}
-```
-
-**よくあるエラーメッセージと対処**:
-- `Field "xxx" must have a selection of subfields` → フィールドがオブジェクト型に変更された。`xxx { value }` のようにサブフィールドを指定するか、不要なら削除
-- `Unknown type "XxxInput"` → 変数形式が使えない。インライン方式に変更
-- `Field "xxx" is undefined` → エンドポイントが違う or フィールド名が変わった
-
-#### 4. 調査後：記録
-
-- ハマりポイントは `NOTES.md` の「GraphQL API 調査メモ」に記録
-- 全APIを網羅的に記録する必要はない。「次回の自分が助かる情報」だけ残す
+詳細な開発手順、チェックリスト、エラー対処法は `NOTES.md` の「GraphQL API 開発ガイド」を参照。
 
 **IMPORTANT**: GraphQL mutationで変数型（`$input: SomeInput!`）がエラーになる場合は、インライン方式を使うこと。詳細は `NOTES.md` の「GraphQL インライン方式」を参照。
 
@@ -322,68 +236,25 @@ onload: (response) => {
 
 ### Apollo Client による画面更新
 
-**IMPORTANT**: データ変更後にHenryのUIを更新したい場合は、`__APOLLO_CLIENT__.refetchQueries()` を使用する。
-
-```javascript
-// 例: 外来診療画面を更新
-window.__APOLLO_CLIENT__.refetchQueries({ include: ['EncounterEditorQuery'] });
-```
-
-詳細とクエリ名一覧は `NOTES.md` の「Apollo Client による画面更新」を参照。
+**IMPORTANT**: データ変更後にHenryのUIを更新したい場合は、`__APOLLO_CLIENT__.refetchQueries()` を使用する。詳細とクエリ名一覧は `NOTES.md` の「Apollo Client による画面更新」を参照。
 
 ### UI実装
 
-#### 共通UI関数
+**YOU MUST**: 新規スクリプト作成時は `HenryCore.ui.*` の共通UI関数を使用すること。
 
-**YOU MUST**: 新規スクリプト作成時は `HenryCore.ui.*` の共通UI関数を使用すること：
-- トースト通知: `HenryCore.ui.showToast(message, type, duration)`
-- スピナー: `HenryCore.ui.showSpinner(message)` → `{ close }` を返す
-- モーダル: `HenryCore.ui.showModal(options)`
-- 入力フィールド: `HenryCore.ui.createInput(options)`, `HenryCore.ui.createTextarea(options)`
-- ボタン: `HenryCore.ui.createButton(options)`
-- デザイントークン: `HenryCore.ui.tokens` で色・フォント・余白等を参照
-- **例外**: HenryCoreが利用できない環境（ログイン画面、外部ドメイン）では独自実装を許容
+**YOU MUST**: z-indexは階層ルールに従うこと（モーダル=1500、常駐UI=1400）。
 
-#### z-index階層ルール
+**YOU MUST**: HTML/CSS再現時は推測せず、スクリーンショット・HTML構造・computedStyleを取得してから実装すること。
 
-**YOU MUST**: z-indexは以下の階層ルールに従うこと（Henryログインモーダル=1600の下に配置）：
-
-| 階層 | z-index | 用途 |
-|------|---------|------|
-| 最上位 | 1600 | Henry本体のログインモーダル（変更不可） |
-| モーダル | 1500 | Tampermonkey製モーダル、ポップアップ、トースト |
-| 常駐UI | 1400 | Tampermonkey製アイコン、ツールチップ、インジケーター |
-
-- **理由**: セッションタイムアウト時のログインモーダルがスクリプトUIに隠れてしまう問題を防ぐ
-- 予約システム（manage-maokahp.reserve.ne.jp）など Henry 以外のドメインはこのルール対象外
-
-#### HTML/CSS再現
-
-**YOU MUST**: 既存のHTML/CSSを「同じにして」「再現して」と言われた場合は、推測せず以下の手順を踏むこと：
-1. まずスクリーンショットで全体像を把握
-2. 完全なHTML構造を取得（`element.innerHTML`または`outerHTML`）
-3. 主要要素のcomputedStyleを一括取得
-4. 取得したデータに基づいて忠実に実装
-- **理由**: 断片的な情報で推測実装すると何度も修正が必要になる
+詳細（関数一覧、z-index表、再現手順）は `NOTES.md` の「UI実装ガイド」を参照。
 
 ### パフォーマンス
 
-#### MutationObserver最適化
+**IMPORTANT**: MutationObserverの監視範囲はなるべく狭くすること（body全体監視は避ける）。
 
-**IMPORTANT**: MutationObserverの監視範囲はなるべく狭くすること：
-- `document.body` 全体を監視するのではなく、対象のコンテナ（モーダル、特定のセクション等）のみを監視する
-- 2段階監視パターン: Stage 1で対象コンテナの出現を検知 → Stage 2でコンテナ内のみを監視
-- コールバック内のDOM検索も `document.querySelector` ではなく `container.querySelector` を使う
-- 高頻度で発火する場合は `debounce` を適用する
-- **理由**: 監視範囲が広いと、無関係なDOM変更でもコールバックが実行され、パフォーマンスが低下する
+**IMPORTANT**: 処理フローの最適化を常に検討すること（並列化、プリフェッチ、キャッシュ活用）。
 
-#### 処理フロー最適化
-
-**IMPORTANT**: 実装時は処理フローの最適化を常に検討すること：
-- **直列 → 並列**: 独立した処理は `Promise.all` で同時実行
-- **遅延取得 → プリフェッチ**: ユーザーの操作待ち時間にデータを先行取得
-- **再取得 → キャッシュ/フィルタリング**: 既存データを活用し無駄なAPI呼び出しを削減
-- コードの複雑な最適化より、処理の流れを見直す方が効果が大きいことが多い
+詳細は `NOTES.md` の「パフォーマンス最適化」を参照。
 
 ### Google連携
 
@@ -397,12 +268,7 @@ window.__APOLLO_CLIENT__.refetchQueries({ include: ['EncounterEditorQuery'] });
 
 #### サンドボックス対策
 
-**YOU MUST**: `@grant GM_*` を使用する場合、`@grant unsafeWindow` も追加し、`unsafeWindow` 経由で HenryCore にアクセスすること。
-
-```javascript
-const pageWindow = typeof unsafeWindow !== 'undefined' ? unsafeWindow : window;
-const core = pageWindow.HenryCore;
-```
+**YOU MUST**: `@grant GM_*` を使用する場合、`@grant unsafeWindow` も追加し、`unsafeWindow` 経由で HenryCore にアクセスすること。コード例は `NOTES.md` の「HenryCore使用パターン」を参照。
 
 #### メタデータ設定
 
@@ -414,20 +280,7 @@ const core = pageWindow.HenryCore;
 
 #### バージョン定数
 
-**YOU MUST**: スクリプト内でバージョンを参照する場合は `GM_info.script.version` を使用すること。
-
-```javascript
-const VERSION = GM_info.script.version;
-const SCRIPT_NAME = 'MyScript';
-
-// ... スクリプト処理 ...
-
-console.log(`[${SCRIPT_NAME}] Ready (v${VERSION})`);
-```
-
-**理由**: `@version` メタデータとコード内のバージョン文字列を二重管理すると不整合が起きやすい。`GM_info.script.version` を使うことで、メタデータの `@version` のみを更新すれば自動的にログ出力等にも反映される。
-
-**補足**: `@grant none` でも `GM_info` は利用可能（Tampermonkey標準機能）。
+**YOU MUST**: スクリプト内でバージョンを参照する場合は `GM_info.script.version` を使用すること。コード例と理由は `NOTES.md` の「HenryCore使用パターン」を参照。
 
 ---
 
@@ -469,6 +322,19 @@ console.log(`[${SCRIPT_NAME}] Ready (v${VERSION})`);
 - 関連パターンの検索
 
 **理由**: メインコンテキストを汚さず、調査結果のサマリーだけを受け取れる
+
+**YOU MUST**: サブエージェントを呼び出す前に、指示内容をユーザーに表示すること：
+
+```
+【サブエージェントへの指示】
+- タイプ: Explore
+- 指示内容:
+  「○○を調査して、△△を確認してください...」
+
+この指示でサブエージェントを呼び出します。
+```
+
+**理由**: ユーザーが指示内容を把握し、意図と異なる場合に事前に修正できるようにするため
 
 ### テスト・動作確認
 
@@ -693,59 +559,7 @@ GitHubから各スクリプトを動的に読み込む仕組み。詳細は `NOT
 
 ## 変更履歴
 
-| Version | Date | Changes |
-|---------|------|---------|
-| v4.54 | 2026-02-03 | 動作確認時のMCP操作簡略化（コンソール確認のみ、ページ遷移・クリック不要） |
-| v4.53 | 2026-02-02 | GraphQL 400エラー時はレスポンスボディ確認必須ルール追加 |
-| v4.52 | 2026-02-02 | サブエージェント活用ルール追加（調査・探索・レビュー時） |
-| v4.51 | 2026-02-02 | 2回失敗時に/clear再開の提案を追加 |
-| v4.50 | 2026-02-02 | 新規スクリプトはベータ版から開始ルール追加 |
-| v4.49 | 2026-02-02 | 自律作業中の報告・相談ルール追加（方向転換時・2回失敗時に報告必須） |
-| v4.48 | 2026-02-02 | カスタムルールを各セクションに整理・統合（Section 1に作業姿勢・リサーチ方針、Section 3にUI実装・パフォーマンス・Google連携、Section 4にテスト・動作確認、Section 5にツール連携を追加） |
-| v4.47 | 2026-02-02 | GraphQL/API関連ルールをSection 3に統合（カスタムルールから移動・整理） |
-| v4.46 | 2026-02-02 | GraphQL APIエラー調査手順追加（推測禁止、ペイロード比較必須） |
-| v4.45 | 2026-02-02 | Apollo Client画面更新パターン追加（refetchQueriesの使い方） |
-| v4.44 | 2026-02-02 | 自律的テスト・動作確認フロールール追加（コード修正後の自動テスト実行） |
-| v4.43 | 2026-01-30 | GraphQL API調査メモ記録ルール追加（ハマりポイントをNOTES.mdに記録） |
-| v4.42 | 2026-01-28 | 処理フロー最適化ルール追加（並列化、プリフェッチ、キャッシュ活用） |
-| v4.41 | 2026-01-28 | 情報提供時の確実性明示ルール追加（推測は推測と伝える） |
-| v4.40 | 2026-01-26 | 共通UI関数（HenryCore.ui.*）使用ルール追加 |
-| v4.39 | 2026-01-26 | スクリプト読み込み方式（@require vs eval）の説明追加 |
-| v4.38 | 2026-01-26 | Google Docs文書作成ルール追加（詳細はNOTES.md） |
-| v4.36 | 2026-01-26 | GitHub Issues記載ガイドライン追加 |
-| v4.35 | 2026-01-25 | 曖昧なテスト指示には確認項目を質問するルール追加 |
-| v4.34 | 2026-01-25 | 複雑なタスクはPlan Modeで開始するルール追加 |
-| v4.33 | 2026-01-25 | タスク管理をGitHub Issuesに一元化（保留タスクセクション削除） |
-| v4.32 | 2026-01-25 | 情報取得ルール追加（公式ドキュメント参照、Gemini相談） |
-| v4.31 | 2026-01-25 | ベータ版スクリプト配信禁止ルール追加 |
-| v4.30 | 2026-01-25 | ローダー構成を実際のファイル（henry_loader/henry_loader_dev）に基づき修正 |
-| v4.29 | 2026-01-24 | Google Docs用ローダー追加（2ローダー構成、CSP対策） |
-| v4.28 | 2026-01-24 | HTML/CSS再現時の手順ルール追加 |
-| v4.27 | 2026-01-23 | z-index階層ルール追加（ログインモーダル対策） |
-| v4.26 | 2026-01-23 | 開発環境ローカルサーバー運用ルール追加 |
-| v4.25 | 2026-01-23 | 確認後は返答を待つルール追加 |
-| v4.24 | 2026-01-22 | エラーロガー廃止（henry_error_logger削除、MCP直接確認に移行） |
-| v4.23 | 2026-01-22 | GM_info.script.versionパターンルール追加（バージョン定数） |
-| v4.22 | 2026-01-22 | コード例をNOTES.mdに移動（OAuth、GraphQL、SPA遷移） |
-| v4.21 | 2026-01-22 | fetchインターセプトProxy方式ルール追加 |
-| v4.20 | 2026-01-21 | 動的スクリプトローダー(Henry Loader)セクション追加 |
-| v4.19 | 2026-01-20 | 根本原因調査優先ルール追加 |
-| v4.18 | 2026-01-19 | スクリプト一覧セクション追加 |
-| v4.17 | 2026-01-18 | Gemini MCPへのセッションJSONL連携ルール追加 |
-| v4.16 | 2026-01-18 | MutationObserver監視範囲最適化ルール追加 |
-| v4.15 | 2026-01-17 | Gemini MCPモデル指定ルール追加（gemini-3-pro-preview） |
-| v4.14 | 2026-01-14 | SPA遷移対応（subscribeNavigation）ルール追加 |
-| v4.13 | 2026-01-13 | GraphQL インライン方式ルール追加 |
-| v4.12 | 2026-01-13 | OAuth認証時はalertで理由を伝えるルール追加 |
-| v4.11 | 2026-01-12 | スピードより確認の正確さを優先するルール追加 |
-| v4.10 | 2026-01-12 | API使用前のリファレンス確認ルール追加（GraphQL/HenryCore両方） |
-| v4.9 | 2026-01-12 | タスクID運用ルール追加、メタ視点確認ルール追加 |
-| v4.8 | 2026-01-12 | ドキュメント構造簡略化、調査メモをNOTES.mdに分離 |
-| v4.7 | 2026-01-11 | 問題解決のアプローチ追加 |
-| v4.4 | 2026-01-08 | コミュニケーション方針を詳細化 |
-| v4.0 | 2026-01-04 | ルールとリファレンスを分離、プロンプト階層導入 |
-
-> 詳細な変更履歴は `git log` を参照。
+`git log -- CLAUDE.md` を参照。
 
 ---
 

@@ -278,6 +278,76 @@ Google DocsでOAuthトークンを取得するための仕組み。Henry側で�
 
 ## GraphQL
 
+### GraphQL API 開発ガイド
+
+GraphQL APIを使用する際は、**コードを書く前に**以下の手順を踏むこと。
+
+#### 開始時チェックリスト（必須）
+
+```
+□ 既存コードに同様の機能がないか検索したか？（grep -r "キーワード" *.user.js）
+□ Henry本体で同じ操作を実行し、DevToolsでリクエストをキャプチャしたか？
+□ リクエストのペイロード構造（変数名、型名）を確認したか？
+□ レスポンスの構造（フィールド名、enum値）を確認したか？
+```
+
+**⚠️ 推測でコードを書くと平均4回失敗する。**チェックリストを飛ばすと時間を無駄にする。
+
+#### 1. 開発前：仕様確認
+
+- chrome-devtools-mcpでHenry本体のリクエストをキャプチャ
+- エンドポイント（`/graphql` or `/graphql-v2`）を確認
+- ペイロード構造（フィールド、型）を確認
+- **推測でコードを書かない。スピードより確認の正確さを優先する**
+
+#### 2. 開発中：段階的に検証
+
+1. **エラーログを確認** - 何が起きているか把握する
+2. **実際のpayloadを確認** - Henry本体のリクエスト/レスポンス形式を調べる
+3. **コンソールで試す** - コードに入れる前にブラウザコンソールで動作検証
+4. **確認してから反映** - 動くことを確かめてからファイル更新
+
+焦って推測でコードを書くと手戻りが増える。一歩ずつ確実に進める。
+
+#### 3. エラー時：ペイロード比較（推測禁止）
+
+1. **Henry本体で同じ操作を実行** - DevToolsのNetworkタブでリクエストをキャプチャ
+2. **ペイロードを比較** - Henry本体と自分のコードを**フィールド単位で**比較
+3. **差分を特定→修正** - 足りないフィールド、値の形式の違いを修正
+
+**NEVER**: 推測で原因を探ること（「Persisted Queryが必要」「エンドポイントが違う」等）。まず比較を行う。
+
+**よくある差分の例**:
+- 足りないフィールド（`medicines: []`, `filmCount: null` 等）
+- Enum値の形式（クォートの有無）
+- ネストされたオブジェクトの構造
+
+#### 4. 400エラー時のデバッグ
+
+**YOU MUST**: 400エラーが出たら、まず**レスポンスボディ**を確認すること。エラーメッセージに原因が書いてある。
+
+```javascript
+// レスポンスボディの確認方法
+onload: (response) => {
+  console.log('status:', response.status);
+  console.log('body:', response.responseText);  // ← ここに答えがある
+}
+```
+
+**よくあるエラーメッセージと対処**:
+| エラーメッセージ | 対処法 |
+|----------------|--------|
+| `Field "xxx" must have a selection of subfields` | フィールドがオブジェクト型に変更された。`xxx { value }` のようにサブフィールドを指定するか、不要なら削除 |
+| `Unknown type "XxxInput"` | 変数形式が使えない。インライン方式に変更 |
+| `Field "xxx" is undefined` | エンドポイントが違う or フィールド名が変わった |
+
+#### 5. 調査後：記録
+
+- ハマりポイントは下記「GraphQL API 調査メモ」セクションに記録
+- 全APIを網羅的に記録する必要はない。「次回の自分が助かる情報」だけ残す
+
+---
+
 ### GraphQL API 調査メモ
 
 API調査で手間取ったり、ハマったポイントを記録する。全APIを網羅的に記録する必要はなく、「次回の自分が助かる情報」だけ残す。
@@ -700,7 +770,138 @@ function refreshUI() {
 
 ---
 
+## UI実装ガイド
+
+### 共通UI関数
+
+新規スクリプト作成時は `HenryCore.ui.*` の共通UI関数を使用すること：
+
+| 関数 | 用途 |
+|------|------|
+| `HenryCore.ui.showToast(message, type, duration)` | トースト通知 |
+| `HenryCore.ui.showSpinner(message)` | スピナー（`{ close }` を返す） |
+| `HenryCore.ui.showModal(options)` | モーダル |
+| `HenryCore.ui.createInput(options)` | 入力フィールド |
+| `HenryCore.ui.createTextarea(options)` | テキストエリア |
+| `HenryCore.ui.createButton(options)` | ボタン |
+| `HenryCore.ui.tokens` | デザイントークン（色・フォント・余白等） |
+
+**例外**: HenryCoreが利用できない環境（ログイン画面、外部ドメイン）では独自実装を許容。
+
+### z-index階層ルール
+
+z-indexは以下の階層ルールに従うこと（Henryログインモーダル=1600の下に配置）：
+
+| 階層 | z-index | 用途 |
+|------|---------|------|
+| 最上位 | 1600 | Henry本体のログインモーダル（変更不可） |
+| モーダル | 1500 | Tampermonkey製モーダル、ポップアップ、トースト |
+| 常駐UI | 1400 | Tampermonkey製アイコン、ツールチップ、インジケーター |
+
+**理由**: セッションタイムアウト時のログインモーダルがスクリプトUIに隠れてしまう問題を防ぐ。
+
+**対象外**: 予約システム（manage-maokahp.reserve.ne.jp）など Henry 以外のドメイン。
+
+### HTML/CSS再現手順
+
+既存のHTML/CSSを「同じにして」「再現して」と言われた場合は、推測せず以下の手順を踏むこと：
+
+1. まずスクリーンショットで全体像を把握
+2. 完全なHTML構造を取得（`element.innerHTML`または`outerHTML`）
+3. 主要要素のcomputedStyleを一括取得
+4. 取得したデータに基づいて忠実に実装
+
+**理由**: 断片的な情報で推測実装すると何度も修正が必要になる。
+
+---
+
+## HenryCore使用パターン
+
+### エラーハンドリング
+
+`query()` は失敗時に例外を投げる。try-catchで処理し、静かに終了すること。
+
+```javascript
+try {
+  const result = await HenryCore.query(QUERY, { input: { uuid } });
+  if (!result.data?.getPatient) return null;
+} catch (e) {
+  console.error('[SCRIPT_NAME]', e.message);
+  return null;
+}
+```
+
+### サンドボックス対策
+
+`@grant GM_*` を使用する場合、`@grant unsafeWindow` も追加し、`unsafeWindow` 経由で HenryCore にアクセスすること。
+
+```javascript
+const pageWindow = typeof unsafeWindow !== 'undefined' ? unsafeWindow : window;
+const core = pageWindow.HenryCore;
+```
+
+### バージョン定数
+
+スクリプト内でバージョンを参照する場合は `GM_info.script.version` を使用すること。
+
+```javascript
+const VERSION = GM_info.script.version;
+const SCRIPT_NAME = 'MyScript';
+
+// ... スクリプト処理 ...
+
+console.log(`[${SCRIPT_NAME}] Ready (v${VERSION})`);
+```
+
+**理由**: `@version` メタデータとコード内のバージョン文字列を二重管理すると不整合が起きやすい。`GM_info.script.version` を使うことで、メタデータの `@version` のみを更新すれば自動的にログ出力等にも反映される。
+
+**補足**: `@grant none` でも `GM_info` は利用可能（Tampermonkey標準機能）。
+
+---
+
 ## その他
+
+### fetchインターセプト実装パターン
+
+fetchインターセプトでGraphQL mutationを処理する際の実装パターン。
+
+#### 患者UUID・医師UUIDの取得
+
+`HenryCore.getPatientUuid()` はURLから患者UUIDを取得するため、入院患者画面など一部の画面では動作しない。GraphQL mutationのリクエストボディには通常これらの情報が含まれているので、そこから優先取得する。
+
+```javascript
+// fetchインターセプト内での使用例
+unsafeWindow.fetch = async function(...args) {
+  const [url, options] = args;
+
+  if (typeof url === 'string' && url.includes('/graphql') && options?.body) {
+    const body = JSON.parse(options.body);
+
+    if (body.operationName === 'CreateImagingOrder') {
+      // ✅ リクエストボディから優先取得（どの画面でも動作）
+      const patientUuid = body.variables?.input?.patientUuid || HenryCore.getPatientUuid();
+      const doctorUuid = body.variables?.input?.doctorUuid || await HenryCore.getMyUuid();
+
+      // ❌ これだと入院患者画面では動作しない
+      // const patientUuid = HenryCore.getPatientUuid();
+    }
+  }
+
+  return originalFetch.apply(this, args);
+};
+```
+
+#### 背景
+
+- 外来カルテ画面: URLに `/patients/{patientUuid}/...` が含まれる → `getPatientUuid()` で取得可能
+- 入院患者画面: URLは `/patients` のみで患者UUIDが含まれない → `getPatientUuid()` は `null` を返す
+- GraphQL mutationのリクエストボディには患者UUID等が必ず含まれている
+
+#### 適用実績
+
+- `henry_reserve_integration.user.js` v4.7.9 - 入院予定患者の照射オーダー対応
+
+---
 
 ### fetchインターセプトとFirestore競合問題
 
@@ -821,9 +1022,20 @@ registerPlugin({ id, name, icon?, description?, version?, order?, onClick, group
 
 ---
 
-# MutationObserver関連
+# パフォーマンス最適化
 
-## 最適化アプローチ
+## MutationObserver最適化
+
+MutationObserverの監視範囲はなるべく狭くすること：
+
+- `document.body` 全体を監視するのではなく、対象のコンテナ（モーダル、特定のセクション等）のみを監視する
+- 2段階監視パターン: Stage 1で対象コンテナの出現を検知 → Stage 2でコンテナ内のみを監視
+- コールバック内のDOM検索も `document.querySelector` ではなく `container.querySelector` を使う
+- 高頻度で発火する場合は `debounce` を適用する
+
+**理由**: 監視範囲が広いと、無関係なDOM変更でもコールバックが実行され、パフォーマンスが低下する。
+
+### 最適化アプローチ
 
 | 方式 | メリット | デメリット |
 |------|---------|-----------|
@@ -839,7 +1051,19 @@ registerPlugin({ id, name, icon?, description?, version?, order?, onClick, group
 - henry_google_drive_bridge.user.js - body全体監視
 - henry_toolbox.user.js - body全体監視（早期リターンで緩和）
 
-改善が必要な場合は **2段階監視パターン** を適用（CLAUDE.md参照）。
+改善が必要な場合は **2段階監視パターン** を適用。
+
+## 処理フロー最適化
+
+実装時は処理フローの最適化を常に検討すること：
+
+| 最適化パターン | 説明 |
+|--------------|------|
+| 直列 → 並列 | 独立した処理は `Promise.all` で同時実行 |
+| 遅延取得 → プリフェッチ | ユーザーの操作待ち時間にデータを先行取得 |
+| 再取得 → キャッシュ/フィルタリング | 既存データを活用し無駄なAPI呼び出しを削減 |
+
+コードの複雑な最適化より、処理の流れを見直す方が効果が大きいことが多い。
 
 ---
 
