@@ -325,6 +325,15 @@
       "beta": true
     },
     {
+      "name": "henry_preadmission_order",
+      "label": "入院前オーダー（ベータ版）",
+      "file": "henry_preadmission_order.user.js",
+      "match": ["henry-app.jp"],
+      "category": "karte",
+      "order": 13,
+      "beta": true
+    },
+    {
       "name": "henry_test_helper",
       "label": "テストヘルパー（ベータ版）",
       "file": "henry_test_helper.user.js",

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry Patient Timeline
 // @namespace    https://github.com/shin-926/Henry
-// @version      2.133.0
+// @version      2.134.0
 // @description  入院患者の各種記録・オーダーをガントチャート風タイムラインで表示
 // @author       sk powered by Claude
 // @match        https://henry-app.jp/*
@@ -6101,6 +6101,27 @@
         </button>
       `;
 
+      // オーダーボタン
+      html += `
+        <button id="order-btn" style="
+          padding: 12px 16px;
+          background: linear-gradient(135deg, #ede7f6 0%, #d1c4e9 100%);
+          border: 1px solid #b39ddb;
+          border-radius: 8px;
+          font-size: 14px;
+          font-weight: 500;
+          color: #5e35b1;
+          cursor: pointer;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          gap: 8px;
+          transition: all 0.2s;
+        ">
+          オーダー
+        </button>
+      `;
+
       // ボタングリッド終了
       html += `</div>`;
 
@@ -6164,6 +6185,21 @@
           inspectionFindingsBtn.style.background = 'linear-gradient(135deg, #e8f5e9 0%, #c8e6c9 100%)';
         });
         inspectionFindingsBtn.addEventListener('click', showInspectionFindingsModal);
+      }
+
+      // オーダーボタンのイベント
+      const orderBtn = fixedInfoContent.querySelector('#order-btn');
+      if (orderBtn) {
+        orderBtn.addEventListener('mouseover', () => {
+          orderBtn.style.background = 'linear-gradient(135deg, #d1c4e9 0%, #b39ddb 100%)';
+        });
+        orderBtn.addEventListener('mouseout', () => {
+          orderBtn.style.background = 'linear-gradient(135deg, #ede7f6 0%, #d1c4e9 100%)';
+        });
+        orderBtn.addEventListener('click', () => {
+          // TODO: オーダー機能を実装予定
+          window.HenryCore.ui.showToast('オーダー機能は準備中です', 'info');
+        });
       }
 
     }
