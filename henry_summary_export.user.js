@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry Summary Export
 // @namespace    https://github.com/shin-926/Henry
-// @version      1.6.0
+// @version      1.7.6
 // @description  入院患者のサマリー用データをマークダウン形式でダウンロード
 // @author       sk powered by Claude
 // @match        https://henry-app.jp/*
@@ -198,7 +198,8 @@
     try {
       const today = new Date();
 
-      // インライン方式（変数型がスキーマに存在しないためフルクエリではインライン必須）
+      // フルクエリ + インライン形式（変数形式は型定義がスキーマに存在しないためエラー）
+      // NOTE: このクエリは /graphql でのみ利用可能（/graphql-v2 では未定義）
       const query = `
         query ListDailyWardHospitalizations {
           listDailyWardHospitalizations(input: {
@@ -209,10 +210,8 @@
           }) {
             dailyWardHospitalizations {
               wardId
-              wardName
               roomHospitalizationDistributions {
                 roomId
-                roomName
                 hospitalizations {
                   uuid
                   state
@@ -256,14 +255,15 @@
       const allPatients = [];
 
       for (const ward of wards) {
-        const wardName = ward.wardName || '';
         const rooms = ward.roomHospitalizationDistributions || [];
         for (const room of rooms) {
-          const roomName = room.roomName || '';
           const hospitalizations = room.hospitalizations || [];
           for (const hosp of hospitalizations) {
             // 入院中（ADMITTED）のみ
             if (hosp.state !== 'ADMITTED') continue;
+            // 病棟名・部屋名は statusHospitalizationLocation から取得
+            const wardName = hosp.statusHospitalizationLocation?.ward?.name || '';
+            const roomName = hosp.statusHospitalizationLocation?.room?.name || '';
             allPatients.push({
               ...hosp,
               wardName,
@@ -691,13 +691,16 @@
               }
             }
             clinicalQuantitativeDataModuleCollections {
+              cqdDefHrn
               clinicalQuantitativeDataModules {
+                title
                 recordDateRange {
                   start { year month day }
                 }
                 entries {
                   name
                   value
+                  unit { value }
                 }
               }
             }
@@ -1086,9 +1089,18 @@
   function extractBloodTestResults(outsideInspectionReportGroups, inHouseBloodTests) {
     const byDate = new Map();
     const referenceValueMap = new Map();
+    // 院内検査専用項目のデフォルト基準値（外注検査に対応項目がない場合のみ使用）
+    referenceValueMap.set('白血球数', '33-86');
+    referenceValueMap.set('赤血球数', '380-570');
+    referenceValueMap.set('Hb', '11.5-17.5');
+    referenceValueMap.set('Ht', '34.8-52.4');
+    referenceValueMap.set('MCV', '83-101');
+    referenceValueMap.set('MCH', '28-34');
+    referenceValueMap.set('MCHC', '31.6-36.6');
+    referenceValueMap.set('血小板数', '15.0-35.0');
     referenceValueMap.set('リンパ球', '20-50');
     referenceValueMap.set('単球', '2-10');
-    referenceValueMap.set('顆粒球', '54-60');
+    referenceValueMap.set('顆粒球', '40-74');
 
     for (const group of outsideInspectionReportGroups) {
       const categoryName = group.name || '未分類';
@@ -1168,6 +1180,9 @@
     if (!vitals || vitals.length === 0) return '';
     const sorted = [...vitals].sort((a, b) => (a.date || 0) - (b.date || 0));
     const lines = [];
+    // テーブルヘッダー
+    lines.push('| 時刻 | T | BP | P | SpO2 |');
+    lines.push('|------|------|--------|-----|------|');
     for (const vs of sorted) {
       const time = vs.date ? `${vs.date.getHours()}:${String(vs.date.getMinutes()).padStart(2, '0')}` : '-';
       let temp = '-', bp = '-', pulse = '-', spo2 = '-';
@@ -1177,7 +1192,7 @@
       }
       if (vs.rawData?.pulseRate?.value) pulse = String(vs.rawData.pulseRate.value / 10);
       if (vs.rawData?.spo2?.value) spo2 = String(vs.rawData.spo2.value / 10);
-      lines.push(`${time} T:${temp} BP:${bp} P:${pulse} SpO2:${spo2}`);
+      lines.push(`| ${time} | ${temp} | ${bp} | ${pulse} | ${spo2} |`);
     }
     return lines.join('\n');
   }
@@ -1198,7 +1213,9 @@
     const dayCount = hospitalization.hospitalizationDayCount?.value || '-';
 
     const age = calculateAge(patientDetails.birthDate);
-    const gender = patientDetails.sex === 'MALE' ? '男性' : patientDetails.sex === 'FEMALE' ? '女性' : '不明';
+    const sex = patientDetails.sex || '';
+    // FEMALEにはMALEが含まれるので、FEMALEを先に判定
+    const gender = sex.includes('FEMALE') ? '女性' : sex.includes('MALE') ? '男性' : '不明';
     const diseaseName = disease || '未登録';
 
     // === フロントマター ===
@@ -1384,6 +1401,8 @@
     const categoryOrder = ['vital', 'bloodSugar', 'meal', 'urine', 'doctor', 'nursing', 'rehab'];
 
     const sortedDates = Array.from(allDates).sort();
+    let isFirstRehabDay = true; // リハビリテンプレート表示用フラグ
+
     for (const dk of sortedDates) {
       lines.push(`### ${dk}\n`);
       const items = groupedByDate.get(dk) || [];
@@ -1399,25 +1418,33 @@
         const label = categoryLabels[cat] || cat;
         lines.push(`**${label}**`);
         for (const item of catItems) {
-          const text = item.text.trim();
+          let text = item.text.trim();
+
+          // 看護記録: ＜SOAP＞ヘッダーを削除、空のS)/O)行を整理
+          if (cat === 'nursing') {
+            text = text.replace(/＜SOAP＞\n?/g, '');
+            // 「S)\n内容」→「S)内容」に結合
+            text = text.replace(/([SO])\)\s*\n\s*(?=[^\n])/g, '$1)');
+          }
+
+          // リハビリ記録: 2日目以降は【特記事項】以降のみを残す
+          if (cat === 'rehab' && !isFirstRehabDay) {
+            const specialNoteMatch = text.match(/【特記事項】[\s\S]*/);
+            if (specialNoteMatch) {
+              text = specialNoteMatch[0];
+            }
+          }
+
           lines.push(text);
+        }
+        // リハビリ記録があった日をマーク
+        if (cat === 'rehab') {
+          isFirstRehabDay = false;
         }
         lines.push('');
       }
 
-      const bloodTest = bloodTestByDate.get(dk);
-      if (bloodTest) {
-        lines.push('**血液検査**');
-        for (const [category, testItems] of bloodTest.categories) {
-          const itemStrs = testItems.map(item => {
-            const flag = item.flag ? ` (${item.flag})` : '';
-            const ref = item.referenceValue ? ` [基準:${item.referenceValue}]` : '';
-            return `${item.name}: ${item.value}${flag}${ref}`;
-          });
-          lines.push(`${category}: ${itemStrs.join(', ')}`);
-        }
-        lines.push('');
-      }
+      // 経過記録内の血液検査は削除（テーブルに統合）
 
       const pressureUlcers = pressureUlcerByDate.get(dk);
       if (pressureUlcers && pressureUlcers.length > 0) {
@@ -1501,33 +1528,52 @@
 
     // === 血液検査推移テーブル ===
     if (bloodTestResults.length > 0) {
-      lines.push('## 血液検査推移（テーブル）\n');
+      lines.push('## 血液検査推移\n');
       const testDates = [...bloodTestResults].sort((a, b) => a.dateKey.localeCompare(b.dateKey)).map(r => r.dateKey);
-      const allTestItems = new Map();
+
+      // カテゴリごとに項目を整理
+      const categoryItems = new Map();
       for (const result of bloodTestResults) {
-        for (const [, items] of result.categories) {
+        for (const [categoryName, items] of result.categories) {
+          if (!categoryItems.has(categoryName)) {
+            categoryItems.set(categoryName, new Map());
+          }
+          const itemsMap = categoryItems.get(categoryName);
           for (const item of items) {
-            if (!allTestItems.has(item.name)) {
-              allTestItems.set(item.name, { referenceValue: item.referenceValue || '-', dates: new Map() });
+            if (!itemsMap.has(item.name)) {
+              itemsMap.set(item.name, { referenceValue: item.referenceValue || '-', dates: new Map() });
             }
-            if (item.referenceValue && allTestItems.get(item.name).referenceValue === '-') {
-              allTestItems.get(item.name).referenceValue = item.referenceValue;
+            if (item.referenceValue && itemsMap.get(item.name).referenceValue === '-') {
+              itemsMap.get(item.name).referenceValue = item.referenceValue;
             }
-            allTestItems.get(item.name).dates.set(result.dateKey, { value: item.value, flag: item.flag });
+            itemsMap.get(item.name).dates.set(result.dateKey, {
+              value: item.value,
+              isAbnormal: item.isAbnormal,
+              abnormalityType: item.abnormalityType
+            });
           }
         }
       }
-      lines.push(`| 検査項目 | 基準値 | ${testDates.join(' | ')} |`);
-      lines.push(`|----------|--------|${testDates.map(() => '------').join('|')}|`);
-      for (const [itemName, itemData] of allTestItems) {
-        const values = testDates.map(dk => {
-          const data = itemData.dates.get(dk);
-          if (!data) return '-';
-          return data.flag ? `${data.value} (${data.flag})` : data.value;
-        });
-        lines.push(`| ${itemName} | ${itemData.referenceValue} | ${values.join(' | ')} |`);
+
+      // カテゴリごとにテーブル出力
+      for (const [categoryName, itemsMap] of categoryItems) {
+        lines.push(`### ${categoryName}\n`);
+        lines.push(`| 項目 | 基準値 | ${testDates.join(' | ')} |`);
+        lines.push(`|------|--------|${testDates.map(() => '------').join('|')}|`);
+        for (const [itemName, itemData] of itemsMap) {
+          const values = testDates.map(dk => {
+            const data = itemData.dates.get(dk);
+            if (!data) return '-';
+            // 異常値は太字で表示
+            if (data.isAbnormal) {
+              return `**${data.value}**`;
+            }
+            return data.value;
+          });
+          lines.push(`| ${itemName} | ${itemData.referenceValue} | ${values.join(' | ')} |`);
+        }
+        lines.push('');
       }
-      lines.push('');
     }
 
     return lines.join('\n');
@@ -1836,9 +1882,9 @@
       const patientDetails = {
         uuid: patientUuid,
         fullName: patientName,
-        kanaName: hospData?.patient?.kanaName,
-        birthDate: hospData?.patient?.birthDate,
-        sex: hospData?.patient?.sex
+        kanaName: hospData?.patient?.fullNamePhonetic,
+        birthDate: hospData?.patient?.detail?.birthDate,
+        sex: hospData?.patient?.detail?.sexType
       };
 
       const hospStartDate = new Date(

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry Patient Timeline
 // @namespace    https://github.com/shin-926/Henry
-// @version      2.122.0
+// @version      2.124.0
 // @description  入院患者の各種記録・オーダーをガントチャート風タイムラインで表示
 // @author       sk powered by Claude
 // @match        https://henry-app.jp/*
@@ -447,6 +447,9 @@
             lastHospitalizationLocation {
               ward { name }
               room { name }
+            }
+            hospitalizationDoctor {
+              doctor { name }
             }
           }
         }
@@ -4151,13 +4154,15 @@
     }
 
     // 記録追加ボタンのイベント
-    addRecordBtn.addEventListener('click', () => {
+    const handleAddRecordClick = () => {
       if (currentView !== 'timeline') return;
       showAddRecordModal();
-    });
+    };
+    addRecordBtn.addEventListener('click', handleAddRecordClick);
+    cleaner.add(() => addRecordBtn.removeEventListener('click', handleAddRecordClick));
 
     // 編集ボタンのクリックイベント（イベントデリゲーション）
-    recordContent.addEventListener('click', (e) => {
+    const handleRecordContentClick = (e) => {
       const editBtn = e.target.closest('.edit-record-btn');
       if (!editBtn) return;
 
@@ -4177,7 +4182,9 @@
         editorData: record.editorData,
         performTime: record.date  // 元の実施日時を渡す
       });
-    });
+    };
+    recordContent.addEventListener('click', handleRecordContentClick);
+    cleaner.add(() => recordContent.removeEventListener('click', handleRecordContentClick));
 
     // モーダルを閉じる（クリーンアップ付き）
     function closeModal() {
@@ -4187,9 +4194,11 @@
 
     // 閉じる
     closeBtn.onclick = closeModal;
-    modal.addEventListener('click', (e) => {
+    const handleModalClick = (e) => {
       if (e.target === modal) closeModal();
-    });
+    };
+    modal.addEventListener('click', handleModalClick);
+    cleaner.add(() => modal.removeEventListener('click', handleModalClick));
 
     // キーボードショートカット
     const handleKeydown = (e) => {
@@ -4528,12 +4537,17 @@
       if (!input) return;
 
       let timeout;
-      input.addEventListener('input', () => {
+      const handlePatientSearchInput = () => {
         clearTimeout(timeout);
         timeout = setTimeout(() => {
           patientSearchText = input.value;
           renderPatientList();
         }, 200);
+      };
+      input.addEventListener('input', handlePatientSearchInput);
+      cleaner.add(() => {
+        clearTimeout(timeout);
+        input.removeEventListener('input', handlePatientSearchInput);
       });
       input.focus();
     }
@@ -4544,7 +4558,7 @@
       if (!input) return;
 
       let timeout;
-      input.addEventListener('input', () => {
+      const handleTimelineSearchInput = () => {
         clearTimeout(timeout);
         timeout = setTimeout(() => {
           searchText = input.value;
@@ -4552,6 +4566,11 @@
           applyFilters();
           renderTimeline();
         }, 300);
+      };
+      input.addEventListener('input', handleTimelineSearchInput);
+      cleaner.add(() => {
+        clearTimeout(timeout);
+        input.removeEventListener('input', handleTimelineSearchInput);
       });
     }
 
@@ -7155,7 +7174,9 @@
         const startDateStr = `${currentHospitalization.startDate.year}/${currentHospitalization.startDate.month}/${currentHospitalization.startDate.day}`;
         const dayCount = currentHospitalization.hospitalizationDayCount?.value || 0;
         const ward = currentHospitalization.lastHospitalizationLocation?.ward?.name || '-';
-        hospInfo.textContent = `${ward} | ${startDateStr}〜 (${dayCount}日目)`;
+        const doctorName = currentHospitalization.hospitalizationDoctor?.doctor?.name;
+        const doctorInfo = doctorName ? `　担当医：${doctorName}` : '';
+        hospInfo.textContent = `${ward} | ${startDateStr}〜 (${dayCount}日目)${doctorInfo}`;
 
         // 入院開始日（表示用に再計算）
         const startDate = new Date(
