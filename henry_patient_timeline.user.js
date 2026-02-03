@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry Patient Timeline
 // @namespace    https://github.com/shin-926/Henry
-// @version      2.125.0
+// @version      2.127.0
 // @description  入院患者の各種記録・オーダーをガントチャート風タイムラインで表示
 // @author       sk powered by Claude
 // @match        https://henry-app.jp/*
@@ -264,10 +264,12 @@
   }
 
   // 日付フォーマット（短縮形）
-  function formatShortDate(date) {
+  function formatShortDate(date, showWeekday = true) {
     if (!date) return '-';
+    const base = `${date.getMonth() + 1}/${date.getDate()}`;
+    if (!showWeekday) return base;
     const dayOfWeek = ['日', '月', '火', '水', '木', '金', '土'][date.getDay()];
-    return `${date.getMonth() + 1}/${date.getDate()} (${dayOfWeek})`;
+    return `${base} (${dayOfWeek})`;
   }
 
   // 日時フォーマット
@@ -3842,14 +3844,17 @@
     let searchText = '';
     let selectedDateKey = null;
     let matchingDates = new Set(); // 検索マッチがある日付キーを保持（グローバル検索用）
-    let vitalGraphState = null; // { close, overlayEl, dateKey, days } グラフモーダルの状態
-    let bloodSugarGraphState = null; // { close, overlayEl, dateKey, days } 血糖グラフモーダルの状態
-    let urineGraphState = null; // { close, overlayEl, dateKey, days } 尿量グラフモーダルの状態
-    let bloodTestModalState = null; // { close, overlayEl } 血液検査モーダルの状態
-    let pressureUlcerModalState = null; // { close, overlayEl } 褥瘡評価モーダルの状態
-    let pharmacyModalState = null; // { close, overlayEl } 薬剤部記録モーダルの状態
-    let inspectionFindingsModalState = null; // { close, overlayEl } 検査所見モーダルの状態
-    let profileModalState = null; // { overlayEl, textarea } プロフィールモーダルの状態
+    // モーダル状態を集約
+    const modals = {
+      vitalGraph: null,        // { close, overlayEl, dateKey, days }
+      bloodSugar: null,        // { close, overlayEl, dateKey, days }
+      urine: null,             // { close, overlayEl, dateKey, days }
+      bloodTest: null,         // { close, overlayEl }
+      pressureUlcer: null,     // { close, overlayEl }
+      pharmacy: null,          // { close, overlayEl }
+      inspectionFindings: null, // { close, overlayEl }
+      profile: null,           // { overlayEl, textarea }
+    };
     let isLoading = true;
     let doctorColorMap = new Map(); // 担当医→色のマッピング
     let selectedDoctors = new Set(); // 選択中の担当医（正規化名）。空=全員表示
@@ -4254,14 +4259,14 @@
         renderTimeline();
 
         // グラフモーダルが開いていれば更新（選択中の日数を維持）
-        if (vitalGraphState) {
-          showVitalGraph(selectedDateKey, vitalGraphState.days);
+        if (modals.vitalGraph) {
+          showVitalGraph(selectedDateKey, modals.vitalGraph.days);
         }
-        if (bloodSugarGraphState) {
-          showBloodSugarGraph(selectedDateKey, bloodSugarGraphState.days);
+        if (modals.bloodSugar) {
+          showBloodSugarGraph(selectedDateKey, modals.bloodSugar.days);
         }
-        if (urineGraphState) {
-          showUrineGraph(selectedDateKey, urineGraphState.days);
+        if (modals.urine) {
+          showUrineGraph(selectedDateKey, modals.urine.days);
         }
       }
     }
@@ -4442,8 +4447,8 @@
       prescriptionOrderContent.innerHTML = '<div class="no-records">読み込み中...</div>';
 
       // バイタルグラフモーダルが開いていればローディング表示に切り替え
-      if (vitalGraphState && vitalGraphState.overlayEl && vitalGraphState.overlayEl.parentNode) {
-        const titleEl = vitalGraphState.overlayEl.querySelector('.henry-modal-title');
+      if (modals.vitalGraph && modals.vitalGraph.overlayEl && modals.vitalGraph.overlayEl.parentNode) {
+        const titleEl = modals.vitalGraph.overlayEl.querySelector('.henry-modal-title');
         if (titleEl) {
           titleEl.style.display = 'flex';
           titleEl.style.justifyContent = 'space-between';
@@ -4472,8 +4477,8 @@
       }
 
       // 血糖グラフモーダルが開いていればローディング表示に切り替え
-      if (bloodSugarGraphState && bloodSugarGraphState.overlayEl && bloodSugarGraphState.overlayEl.parentNode) {
-        const titleEl = bloodSugarGraphState.overlayEl.querySelector('.henry-modal-title');
+      if (modals.bloodSugar && modals.bloodSugar.overlayEl && modals.bloodSugar.overlayEl.parentNode) {
+        const titleEl = modals.bloodSugar.overlayEl.querySelector('.henry-modal-title');
         if (titleEl) {
           titleEl.style.display = 'flex';
           titleEl.style.justifyContent = 'space-between';
@@ -4501,8 +4506,8 @@
       }
 
       // 尿量グラフモーダルが開いていればローディング表示に切り替え
-      if (urineGraphState && urineGraphState.overlayEl && urineGraphState.overlayEl.parentNode) {
-        const titleEl = urineGraphState.overlayEl.querySelector('.henry-modal-title');
+      if (modals.urine && modals.urine.overlayEl && modals.urine.overlayEl.parentNode) {
+        const titleEl = modals.urine.overlayEl.querySelector('.henry-modal-title');
         if (titleEl) {
           titleEl.style.display = 'flex';
           titleEl.style.justifyContent = 'space-between';
@@ -5129,8 +5134,8 @@
       `;
 
       // バイタルグラフ
-      if (vitalGraphState?.overlayEl?.parentNode) {
-        const titleEl = vitalGraphState.overlayEl.querySelector('.henry-modal-title');
+      if (modals.vitalGraph?.overlayEl?.parentNode) {
+        const titleEl = modals.vitalGraph.overlayEl.querySelector('.henry-modal-title');
         if (titleEl) {
           const bodyEl = titleEl.nextElementSibling;
           if (bodyEl) {
@@ -5140,8 +5145,8 @@
       }
 
       // 血糖グラフ
-      if (bloodSugarGraphState?.overlayEl?.parentNode) {
-        const titleEl = bloodSugarGraphState.overlayEl.querySelector('.henry-modal-title');
+      if (modals.bloodSugar?.overlayEl?.parentNode) {
+        const titleEl = modals.bloodSugar.overlayEl.querySelector('.henry-modal-title');
         if (titleEl) {
           const bodyEl = titleEl.nextElementSibling;
           if (bodyEl) {
@@ -5151,8 +5156,8 @@
       }
 
       // 尿量グラフ
-      if (urineGraphState?.overlayEl?.parentNode) {
-        const titleEl = urineGraphState.overlayEl.querySelector('.henry-modal-title');
+      if (modals.urine?.overlayEl?.parentNode) {
+        const titleEl = modals.urine.overlayEl.querySelector('.henry-modal-title');
         if (titleEl) {
           const bodyEl = titleEl.nextElementSibling;
           if (bodyEl) {
@@ -5209,8 +5214,8 @@
       const hasData = allVitals.some(d => d.T !== null || d.BPupper !== null || d.P !== null);
       if (!hasData) {
         // モーダルが既に開いている場合はモーダル内に「データなし」を表示
-        if (vitalGraphState && vitalGraphState.overlayEl && vitalGraphState.overlayEl.parentNode) {
-          const titleEl = vitalGraphState.overlayEl.querySelector('.henry-modal-title');
+        if (modals.vitalGraph && modals.vitalGraph.overlayEl && modals.vitalGraph.overlayEl.parentNode) {
+          const titleEl = modals.vitalGraph.overlayEl.querySelector('.henry-modal-title');
           if (titleEl) {
             titleEl.style.display = 'flex';
             titleEl.style.justifyContent = 'space-between';
@@ -5294,11 +5299,11 @@
       `;
 
       // モーダルが既に開いている場合はコンテンツのみ更新
-      if (vitalGraphState && vitalGraphState.overlayEl && vitalGraphState.overlayEl.parentNode) {
-        vitalGraphState.dateKey = endDateStr;
-        vitalGraphState.days = days;
+      if (modals.vitalGraph && modals.vitalGraph.overlayEl && modals.vitalGraph.overlayEl.parentNode) {
+        modals.vitalGraph.dateKey = endDateStr;
+        modals.vitalGraph.days = days;
         // タイトル更新（患者名を右寄せで表示）
-        const titleEl = vitalGraphState.overlayEl.querySelector('.henry-modal-title');
+        const titleEl = modals.vitalGraph.overlayEl.querySelector('.henry-modal-title');
         if (titleEl) {
           titleEl.style.display = 'flex';
           titleEl.style.justifyContent = 'space-between';
@@ -5360,7 +5365,7 @@
         }
       }
 
-      vitalGraphState = {
+      modals.vitalGraph = {
         close,
         overlayEl,
         dateKey: endDateStr,
@@ -5373,7 +5378,7 @@
           for (const mutation of mutations) {
             for (const removed of mutation.removedNodes) {
               if (removed === overlayEl) {
-                vitalGraphState = null;
+                modals.vitalGraph = null;
                 observer.disconnect();
                 return;
               }
@@ -5437,8 +5442,8 @@
       const hasData = allBloodSugar.some(d => d.morning !== null || d.noon !== null || d.evening !== null);
       if (!hasData) {
         // モーダルが既に開いている場合はモーダル内に「データなし」を表示
-        if (bloodSugarGraphState && bloodSugarGraphState.overlayEl && bloodSugarGraphState.overlayEl.parentNode) {
-          const titleEl = bloodSugarGraphState.overlayEl.querySelector('.henry-modal-title');
+        if (modals.bloodSugar && modals.bloodSugar.overlayEl && modals.bloodSugar.overlayEl.parentNode) {
+          const titleEl = modals.bloodSugar.overlayEl.querySelector('.henry-modal-title');
           if (titleEl) {
             titleEl.style.display = 'flex';
             titleEl.style.justifyContent = 'space-between';
@@ -5522,11 +5527,11 @@
       `;
 
       // モーダルが既に開いている場合はコンテンツのみ更新
-      if (bloodSugarGraphState && bloodSugarGraphState.overlayEl && bloodSugarGraphState.overlayEl.parentNode) {
-        bloodSugarGraphState.dateKey = endDateStr;
-        bloodSugarGraphState.days = days;
+      if (modals.bloodSugar && modals.bloodSugar.overlayEl && modals.bloodSugar.overlayEl.parentNode) {
+        modals.bloodSugar.dateKey = endDateStr;
+        modals.bloodSugar.days = days;
         // タイトル更新（患者名を右寄せで表示）
-        const titleEl = bloodSugarGraphState.overlayEl.querySelector('.henry-modal-title');
+        const titleEl = modals.bloodSugar.overlayEl.querySelector('.henry-modal-title');
         if (titleEl) {
           titleEl.style.display = 'flex';
           titleEl.style.justifyContent = 'space-between';
@@ -5588,7 +5593,7 @@
         }
       }
 
-      bloodSugarGraphState = {
+      modals.bloodSugar = {
         close,
         overlayEl,
         dateKey: endDateStr,
@@ -5601,7 +5606,7 @@
           for (const mutation of mutations) {
             for (const removed of mutation.removedNodes) {
               if (removed === overlayEl) {
-                bloodSugarGraphState = null;
+                modals.bloodSugar = null;
                 observer.disconnect();
                 return;
               }
@@ -5661,8 +5666,8 @@
       const hasData = allUrine.some(d => d.totalUrine !== null);
       if (!hasData) {
         // モーダルが既に開いている場合はモーダル内に「データなし」を表示
-        if (urineGraphState && urineGraphState.overlayEl && urineGraphState.overlayEl.parentNode) {
-          const titleEl = urineGraphState.overlayEl.querySelector('.henry-modal-title');
+        if (modals.urine && modals.urine.overlayEl && modals.urine.overlayEl.parentNode) {
+          const titleEl = modals.urine.overlayEl.querySelector('.henry-modal-title');
           if (titleEl) {
             titleEl.style.display = 'flex';
             titleEl.style.justifyContent = 'space-between';
@@ -5746,11 +5751,11 @@
       `;
 
       // モーダルが既に開いている場合はコンテンツのみ更新
-      if (urineGraphState && urineGraphState.overlayEl && urineGraphState.overlayEl.parentNode) {
-        urineGraphState.dateKey = endDateStr;
-        urineGraphState.days = days;
+      if (modals.urine && modals.urine.overlayEl && modals.urine.overlayEl.parentNode) {
+        modals.urine.dateKey = endDateStr;
+        modals.urine.days = days;
         // タイトル更新（患者名を右寄せで表示）
-        const titleEl = urineGraphState.overlayEl.querySelector('.henry-modal-title');
+        const titleEl = modals.urine.overlayEl.querySelector('.henry-modal-title');
         if (titleEl) {
           titleEl.style.display = 'flex';
           titleEl.style.justifyContent = 'space-between';
@@ -5812,7 +5817,7 @@
         }
       }
 
-      urineGraphState = {
+      modals.urine = {
         close,
         overlayEl,
         dateKey: endDateStr,
@@ -5825,7 +5830,7 @@
           for (const mutation of mutations) {
             for (const removed of mutation.removedNodes) {
               if (removed === overlayEl) {
-                urineGraphState = null;
+                modals.urine = null;
                 observer.disconnect();
                 return;
               }
@@ -6101,8 +6106,8 @@
 
       if (results.length === 0) {
         // モーダルが開いていれば「データなし」表示
-        if (bloodTestModalState?.overlayEl?.parentNode) {
-          const titleEl = bloodTestModalState.overlayEl.querySelector('.henry-modal-title');
+        if (modals.bloodTest?.overlayEl?.parentNode) {
+          const titleEl = modals.bloodTest.overlayEl.querySelector('.henry-modal-title');
           if (titleEl) titleEl.textContent = modalTitle;
           const bodyEl = titleEl?.nextElementSibling;
           if (bodyEl) bodyEl.innerHTML = '<div style="padding: 20px; text-align: center; color: #666;">血液検査データがありません</div>';
@@ -6241,8 +6246,8 @@
       const modalWidth = Math.min(maxWidth, requiredWidth);
 
       // モーダルが既に開いている場合はコンテンツのみ更新
-      if (bloodTestModalState?.overlayEl?.parentNode) {
-        const titleEl = bloodTestModalState.overlayEl.querySelector('.henry-modal-title');
+      if (modals.bloodTest?.overlayEl?.parentNode) {
+        const titleEl = modals.bloodTest.overlayEl.querySelector('.henry-modal-title');
         if (titleEl) titleEl.textContent = modalTitle;
         const bodyEl = titleEl?.nextElementSibling;
         if (bodyEl) {
@@ -6260,7 +6265,7 @@
       });
       const overlayEl = document.querySelector('.henry-modal-overlay:last-of-type');
 
-      bloodTestModalState = { close, overlayEl };
+      modals.bloodTest = { close, overlayEl };
 
       // MutationObserverでモーダル削除時にリセット
       if (overlayEl) {
@@ -6268,7 +6273,7 @@
           for (const mutation of mutations) {
             for (const removed of mutation.removedNodes) {
               if (removed === overlayEl) {
-                bloodTestModalState = null;
+                modals.bloodTest = null;
                 observer.disconnect();
                 return;
               }
@@ -6286,8 +6291,8 @@
 
       if (!pressureUlcerRecords || pressureUlcerRecords.length === 0) {
         // モーダルが開いていれば「データなし」表示
-        if (pressureUlcerModalState?.overlayEl?.parentNode) {
-          const titleEl = pressureUlcerModalState.overlayEl.querySelector('.henry-modal-title');
+        if (modals.pressureUlcer?.overlayEl?.parentNode) {
+          const titleEl = modals.pressureUlcer.overlayEl.querySelector('.henry-modal-title');
           if (titleEl) titleEl.textContent = modalTitle;
           const bodyEl = titleEl?.nextElementSibling;
           if (bodyEl) bodyEl.innerHTML = '<div style="padding: 20px; text-align: center; color: #666;">褥瘡評価データがありません</div>';
@@ -6302,8 +6307,8 @@
 
       if (pivoted.sites.length === 0) {
         // モーダルが開いていれば「データなし」表示
-        if (pressureUlcerModalState?.overlayEl?.parentNode) {
-          const titleEl = pressureUlcerModalState.overlayEl.querySelector('.henry-modal-title');
+        if (modals.pressureUlcer?.overlayEl?.parentNode) {
+          const titleEl = modals.pressureUlcer.overlayEl.querySelector('.henry-modal-title');
           if (titleEl) titleEl.textContent = modalTitle;
           const bodyEl = titleEl?.nextElementSibling;
           if (bodyEl) bodyEl.innerHTML = '<div style="padding: 20px; text-align: center; color: #666;">褥瘡評価データがありません</div>';
@@ -6423,8 +6428,8 @@
       const modalWidth = Math.min(maxWidth, requiredWidth);
 
       // モーダルが既に開いている場合はコンテンツのみ更新
-      if (pressureUlcerModalState?.overlayEl?.parentNode) {
-        const titleEl = pressureUlcerModalState.overlayEl.querySelector('.henry-modal-title');
+      if (modals.pressureUlcer?.overlayEl?.parentNode) {
+        const titleEl = modals.pressureUlcer.overlayEl.querySelector('.henry-modal-title');
         if (titleEl) titleEl.textContent = modalTitle;
         const bodyEl = titleEl?.nextElementSibling;
         if (bodyEl) {
@@ -6442,7 +6447,7 @@
       });
       const overlayEl = document.querySelector('.henry-modal-overlay:last-of-type');
 
-      pressureUlcerModalState = { close, overlayEl };
+      modals.pressureUlcer = { close, overlayEl };
 
       // MutationObserverでモーダル削除時にリセット
       if (overlayEl) {
@@ -6450,7 +6455,7 @@
           for (const mutation of mutations) {
             for (const removed of mutation.removedNodes) {
               if (removed === overlayEl) {
-                pressureUlcerModalState = null;
+                modals.pressureUlcer = null;
                 observer.disconnect();
                 return;
               }
@@ -6472,16 +6477,16 @@
       const modalTitle = `💊 薬剤部記録 - ${selectedPatient.fullName}`;
 
       // モーダルが開いている場合はタイトル更新
-      if (pharmacyModalState?.overlayEl?.parentNode) {
-        const titleEl = pharmacyModalState.overlayEl.querySelector('.henry-modal-title');
+      if (modals.pharmacy?.overlayEl?.parentNode) {
+        const titleEl = modals.pharmacy.overlayEl.querySelector('.henry-modal-title');
         if (titleEl) titleEl.textContent = modalTitle;
       }
 
       // プリフェッチ済みデータを使用
       if (pharmacyRecords.length === 0) {
         // モーダルが開いていれば「データなし」表示
-        if (pharmacyModalState?.overlayEl?.parentNode) {
-          const titleEl = pharmacyModalState.overlayEl.querySelector('.henry-modal-title');
+        if (modals.pharmacy?.overlayEl?.parentNode) {
+          const titleEl = modals.pharmacy.overlayEl.querySelector('.henry-modal-title');
           const bodyEl = titleEl?.nextElementSibling;
           if (bodyEl) bodyEl.innerHTML = '<div style="padding: 20px; text-align: center; color: #666;">薬剤部記録がありません</div>';
           return;
@@ -6514,9 +6519,7 @@
           font-size: 12px;
           color: #666;
         `;
-        const dateStr = record.date
-          ? `${record.date.getFullYear()}/${record.date.getMonth() + 1}/${record.date.getDate()} ${record.date.getHours()}:${String(record.date.getMinutes()).padStart(2, '0')}`
-          : '日付不明';
+        const dateStr = record.date ? formatDateTime(record.date) : '日付不明';
         headerDiv.innerHTML = `
           <span style="font-weight: 500; color: #00838f;">${escapeHtml(dateStr)}</span>
           <span>${escapeHtml(record.author)}</span>
@@ -6544,8 +6547,8 @@
       }
 
       // モーダルが既に開いている場合はコンテンツのみ更新
-      if (pharmacyModalState?.overlayEl?.parentNode) {
-        const titleEl = pharmacyModalState.overlayEl.querySelector('.henry-modal-title');
+      if (modals.pharmacy?.overlayEl?.parentNode) {
+        const titleEl = modals.pharmacy.overlayEl.querySelector('.henry-modal-title');
         const bodyEl = titleEl?.nextElementSibling;
         if (bodyEl) {
           bodyEl.innerHTML = '';
@@ -6562,7 +6565,7 @@
       });
       const overlayEl = document.querySelector('.henry-modal-overlay:last-of-type');
 
-      pharmacyModalState = { close, overlayEl };
+      modals.pharmacy = { close, overlayEl };
 
       // MutationObserverでモーダル削除時にリセット
       if (overlayEl) {
@@ -6570,7 +6573,7 @@
           for (const mutation of mutations) {
             for (const removed of mutation.removedNodes) {
               if (removed === overlayEl) {
-                pharmacyModalState = null;
+                modals.pharmacy = null;
                 observer.disconnect();
                 return;
               }
@@ -6592,16 +6595,16 @@
       const modalTitle = `🔬 検査所見（読影結果等） - ${selectedPatient.fullName}`;
 
       // モーダルが開いている場合はタイトル更新
-      if (inspectionFindingsModalState?.overlayEl?.parentNode) {
-        const titleEl = inspectionFindingsModalState.overlayEl.querySelector('.henry-modal-title');
+      if (modals.inspectionFindings?.overlayEl?.parentNode) {
+        const titleEl = modals.inspectionFindings.overlayEl.querySelector('.henry-modal-title');
         if (titleEl) titleEl.textContent = modalTitle;
       }
 
       // プリフェッチ済みデータを使用
       if (inspectionFindingsRecords.length === 0) {
         // モーダルが開いていれば「データなし」表示
-        if (inspectionFindingsModalState?.overlayEl?.parentNode) {
-          const titleEl = inspectionFindingsModalState.overlayEl.querySelector('.henry-modal-title');
+        if (modals.inspectionFindings?.overlayEl?.parentNode) {
+          const titleEl = modals.inspectionFindings.overlayEl.querySelector('.henry-modal-title');
           const bodyEl = titleEl?.nextElementSibling;
           if (bodyEl) bodyEl.innerHTML = '<div style="padding: 20px; text-align: center; color: #666;">検査所見がありません</div>';
           return;
@@ -6634,9 +6637,7 @@
           font-size: 12px;
           color: #666;
         `;
-        const dateStr = record.date
-          ? `${record.date.getFullYear()}/${record.date.getMonth() + 1}/${record.date.getDate()} ${record.date.getHours()}:${String(record.date.getMinutes()).padStart(2, '0')}`
-          : '日付不明';
+        const dateStr = record.date ? formatDateTime(record.date) : '日付不明';
         headerDiv.innerHTML = `
           <span style="font-weight: 500; color: #2e7d32;">${escapeHtml(dateStr)}</span>
           <span>${escapeHtml(record.author)}</span>
@@ -6689,8 +6690,8 @@
       }
 
       // モーダルが既に開いている場合はコンテンツのみ更新
-      if (inspectionFindingsModalState?.overlayEl?.parentNode) {
-        const titleEl = inspectionFindingsModalState.overlayEl.querySelector('.henry-modal-title');
+      if (modals.inspectionFindings?.overlayEl?.parentNode) {
+        const titleEl = modals.inspectionFindings.overlayEl.querySelector('.henry-modal-title');
         const bodyEl = titleEl?.nextElementSibling;
         if (bodyEl) {
           bodyEl.innerHTML = '';
@@ -6707,7 +6708,7 @@
       });
       const overlayEl = document.querySelector('.henry-modal-overlay:last-of-type');
 
-      inspectionFindingsModalState = { close, overlayEl };
+      modals.inspectionFindings = { close, overlayEl };
 
       // MutationObserverでモーダル削除時にリセット
       if (overlayEl) {
@@ -6715,7 +6716,7 @@
           for (const mutation of mutations) {
             for (const removed of mutation.removedNodes) {
               if (removed === overlayEl) {
-                inspectionFindingsModalState = null;
+                modals.inspectionFindings = null;
                 observer.disconnect();
                 return;
               }
@@ -6751,11 +6752,11 @@
       const modalTitle = `プロフィール - ${selectedPatient.fullName}`;
 
       // 既存モーダルが開いている場合はインプレース更新
-      if (profileModalState?.overlayEl?.parentNode) {
-        const titleEl = profileModalState.overlayEl.querySelector('.henry-modal-title');
+      if (modals.profile?.overlayEl?.parentNode) {
+        const titleEl = modals.profile.overlayEl.querySelector('.henry-modal-title');
         if (titleEl) titleEl.textContent = modalTitle;
-        if (profileModalState.textarea) {
-          profileModalState.textarea.value = currentProfile;
+        if (modals.profile.textarea) {
+          modals.profile.textarea.value = currentProfile;
         }
         return;
       }
@@ -6828,7 +6829,7 @@
 
       // 状態を保存
       const overlayEl = document.querySelector('.henry-modal-overlay:last-of-type');
-      profileModalState = { overlayEl, textarea };
+      modals.profile = { overlayEl, textarea };
 
       // MutationObserverでモーダル削除時にリセット
       if (overlayEl) {
@@ -6836,7 +6837,7 @@
           for (const mutation of mutations) {
             for (const removed of mutation.removedNodes) {
               if (removed === overlayEl) {
-                profileModalState = null;
+                modals.profile = null;
                 observer.disconnect();
                 return;
               }
@@ -6855,7 +6856,7 @@
       targetDate.setHours(0, 0, 0, 0);
 
       // 表示用の日付文字列
-      const dateLabel = `${targetDate.getMonth() + 1}/${targetDate.getDate()}`;
+      const dateLabel = formatShortDate(targetDate, false);
 
       let html = '';
 
@@ -7229,29 +7230,29 @@
         renderTimeline();
 
         // グラフモーダルが開いていれば更新（患者切り替え時の連動）
-        if (vitalGraphState) {
-          showVitalGraph(selectedDateKey, vitalGraphState.days);
+        if (modals.vitalGraph) {
+          showVitalGraph(selectedDateKey, modals.vitalGraph.days);
         }
-        if (bloodSugarGraphState) {
-          showBloodSugarGraph(selectedDateKey, bloodSugarGraphState.days);
+        if (modals.bloodSugar) {
+          showBloodSugarGraph(selectedDateKey, modals.bloodSugar.days);
         }
-        if (urineGraphState) {
-          showUrineGraph(selectedDateKey, urineGraphState.days);
+        if (modals.urine) {
+          showUrineGraph(selectedDateKey, modals.urine.days);
         }
         // サイドパネルモーダルが開いていれば更新（患者切り替え時の連動）
-        if (bloodTestModalState) {
+        if (modals.bloodTest) {
           showBloodTestModal();
         }
-        if (pressureUlcerModalState) {
+        if (modals.pressureUlcer) {
           showPressureUlcerModal();
         }
-        if (pharmacyModalState) {
+        if (modals.pharmacy) {
           showPharmacyModal();
         }
-        if (inspectionFindingsModalState) {
+        if (modals.inspectionFindings) {
           showInspectionFindingsModal();
         }
-        if (profileModalState) {
+        if (modals.profile) {
           showProfileModal();
         }
 
