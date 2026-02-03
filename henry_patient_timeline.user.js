@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry Patient Timeline
 // @namespace    https://github.com/shin-926/Henry
-// @version      2.105.0
+// @version      2.110.0
 // @description  入院患者の各種記録・オーダーをガントチャート風タイムラインで表示
 // @author       sk powered by Claude
 // @match        https://henry-app.jp/*
@@ -1628,31 +1628,50 @@
         ? `${vs.date.getHours()}:${String(vs.date.getMinutes()).padStart(2, '0')}`
         : '-';
 
-      // 体温（ハイライト処理含む）
+      // 体温（ハイライト処理含む）- 基準: 36-37℃
       let tempCell = '-';
       if (vs.rawData?.temperature?.value) {
         const temp = vs.rawData.temperature.value / 10;
         if (temp >= 37) {
-          tempCell = `<span class="temp-high">${temp}</span>`;
+          tempCell = `<span class="vital-high">${temp}</span>`;
         } else if (temp < 36) {
-          tempCell = `<span class="temp-low">${temp}</span>`;
+          tempCell = `<span class="vital-low">${temp}</span>`;
         } else {
           tempCell = String(temp);
         }
       }
 
-      // 血圧
+      // 血圧（ハイライト処理含む）- 基準: 上90-140, 下60-90
       let bpCell = '-';
       if (vs.rawData?.bloodPressureUpperBound?.value && vs.rawData?.bloodPressureLowerBound?.value) {
         const upper = vs.rawData.bloodPressureUpperBound.value / 10;
         const lower = vs.rawData.bloodPressureLowerBound.value / 10;
-        bpCell = `${upper}/${lower}`;
+        const upperHigh = upper > 140;
+        const upperLow = upper < 90;
+        const lowerHigh = lower > 90;
+        const lowerLow = lower < 60;
+        // 上と下を個別にハイライト
+        const upperStr = upperHigh ? `<span class="vital-high">${upper}</span>`
+          : upperLow ? `<span class="vital-low">${upper}</span>`
+          : String(upper);
+        const lowerStr = lowerHigh ? `<span class="vital-high">${lower}</span>`
+          : lowerLow ? `<span class="vital-low">${lower}</span>`
+          : String(lower);
+        bpCell = `${upperStr}/${lowerStr}`;
       }
 
-      // 脈拍
-      const pulseCell = vs.rawData?.pulseRate?.value
-        ? String(vs.rawData.pulseRate.value / 10)
-        : '-';
+      // 脈拍（ハイライト処理含む）- 基準: 60-100
+      let pulseCell = '-';
+      if (vs.rawData?.pulseRate?.value) {
+        const pulse = vs.rawData.pulseRate.value / 10;
+        if (pulse > 100) {
+          pulseCell = `<span class="vital-high">${pulse}</span>`;
+        } else if (pulse < 60) {
+          pulseCell = `<span class="vital-low">${pulse}</span>`;
+        } else {
+          pulseCell = String(pulse);
+        }
+      }
 
       // SpO2
       const spo2Cell = vs.rawData?.spo2?.value
@@ -3290,16 +3309,21 @@
       flex: 1;
       overflow: hidden;
     }
-    #patient-timeline-modal .record-column,
+    #patient-timeline-modal .record-column {
+      flex: 4;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
     #patient-timeline-modal .vital-column,
     #patient-timeline-modal .prescription-order-column {
-      flex: 1;
+      flex: 3;
       display: flex;
       flex-direction: column;
       overflow: hidden;
     }
     #patient-timeline-modal .fixed-info-column {
-      flex: 1;
+      flex: 4;
       display: flex;
       flex-direction: column;
       overflow: hidden;
@@ -3327,6 +3351,24 @@
       max-height: none;
       overflow-y: auto;
     }
+    #patient-timeline-modal #sidebar-summary-content textarea {
+      width: 100%;
+      height: 100%;
+      border: none;
+      background: transparent;
+      resize: none;
+      font-size: 13px;
+      line-height: 1.6;
+      padding: 0;
+      outline: none;
+      font-family: inherit;
+    }
+    #patient-timeline-modal #sidebar-summary-content textarea:focus {
+      background: rgba(33, 150, 243, 0.05);
+    }
+    #patient-timeline-modal #sidebar-summary-content textarea:disabled {
+      opacity: 0.6;
+    }
     /* ボタングリッド：残り40%を使用 */
     #patient-timeline-modal .button-grid {
       flex: 1;
@@ -3334,6 +3376,7 @@
       grid-template-columns: 1fr 1fr;
       gap: 8px;
       align-content: start;
+      padding-top: 12px;
     }
     #patient-timeline-modal .record-column,
     #patient-timeline-modal .vital-column,
@@ -3423,19 +3466,13 @@
     #patient-timeline-modal .record-card[data-record-id^="meal-"] .record-card-text {
       font-family: monospace;
     }
-    #patient-timeline-modal .temp-high {
-      background: #ffebee;
+    #patient-timeline-modal .vital-high {
       color: #c62828;
-      padding: 2px 6px;
-      border-radius: 4px;
-      font-weight: 600;
+      font-weight: 700;
     }
-    #patient-timeline-modal .temp-low {
-      background: #e3f2fd;
+    #patient-timeline-modal .vital-low {
       color: #1565c0;
-      padding: 2px 6px;
-      border-radius: 4px;
-      font-weight: 600;
+      font-weight: 700;
     }
     #patient-timeline-modal .vital-table {
       font-family: monospace;
@@ -4904,9 +4941,14 @@
         (item.date ? `${item.date.getHours()}:${String(item.date.getMinutes()).padStart(2, '0')}` : '-');
 
       // バイタルカードは体温ハイライト用HTMLを含むためエスケープしない
+      // SOAP形式を整形（＜SOAP＞ラベル削除、S)等の直後の改行削除）
+      const formatSOAP = (text) => text
+        .replace(/＜SOAP＞\n?/g, '')
+        .replace(/([SOAP]\))\n/g, '$1');
+
       const textHtml = item.category === 'vital'
         ? item.text.replace(/\n/g, '<br>')
-        : highlightText(item.text, searchText).replace(/\n/g, '<br>');
+        : highlightText(formatSOAP(item.text), searchText).replace(/\n/g, '<br>');
 
       // 医師記録かつ自分が作成したものに編集ボタンを表示
       const canEdit = item.category === 'doctor' && item.creatorUuid && myUuid && item.creatorUuid === myUuid;
@@ -5650,25 +5692,48 @@
       // 固定情報カラム（右端サイドパネル）を描画
       renderFixedInfoColumn();
 
-      // プロフィールとサマリーを1回のAPI呼び出しで取得し、右サイドパネルを更新
+      // サマリーテキストエリアを取得
+      const summaryTextarea = document.getElementById('sidebar-summary-textarea');
+      if (!summaryTextarea) return;
+
+      // blurイベントで自動保存（一度だけ登録）
+      if (!summaryTextarea.dataset.hasBlurHandler) {
+        summaryTextarea.dataset.hasBlurHandler = 'true';
+        summaryTextarea.addEventListener('blur', async () => {
+          if (!selectedPatient) return;
+
+          const summary = summaryTextarea.value.trim();
+          // 保存中は無効化
+          summaryTextarea.disabled = true;
+
+          try {
+            await savePatientSummary(
+              selectedPatient.uuid,
+              selectedPatient.fullName,
+              summary
+            );
+            // 保存成功のフィードバック（控えめに）
+            console.log(`[${SCRIPT_NAME}] サマリー自動保存完了`);
+          } catch (e) {
+            console.error(`[${SCRIPT_NAME}] サマリー保存エラー:`, e);
+            window.HenryCore.ui.showToast(`保存エラー: ${e.message}`, 'error');
+          } finally {
+            summaryTextarea.disabled = false;
+          }
+        });
+      }
+
+      // サマリーを読み込んでテキストエリアに設定
       if (selectedPatient) {
         loadPatientSummary(selectedPatient.uuid).then(data => {
-          const summaryContent = document.getElementById('sidebar-summary-content');
-
-          // サマリー表示
-          if (summaryContent) {
-            if (data && data.summary) {
-              summaryContent.innerHTML = escapeHtml(data.summary).replace(/\n/g, '<br>');
-            } else {
-              summaryContent.innerHTML = '<span class="empty">クリックして入力</span>';
-            }
+          if (data && data.summary) {
+            summaryTextarea.value = data.summary;
+          } else {
+            summaryTextarea.value = '';
           }
         }).catch(e => {
-          console.error(`[${SCRIPT_NAME}] プロフィール/サマリー読み込みエラー:`, e);
-          const summaryContent = document.getElementById('sidebar-summary-content');
-          if (summaryContent) {
-            summaryContent.innerHTML = '<span class="empty">クリックして入力</span>';
-          }
+          console.error(`[${SCRIPT_NAME}] サマリー読み込みエラー:`, e);
+          summaryTextarea.value = '';
         });
       }
     }
@@ -5694,12 +5759,12 @@
     function renderFixedInfoColumn() {
       let html = '';
 
-      // サマリーカード（クリックで編集モーダル）
+      // サマリーカード（インライン編集）
       html += `
-        <div id="sidebar-summary-card" class="info-card clickable" style="cursor: pointer;">
+        <div id="sidebar-summary-card" class="info-card">
           <div class="info-card-header">📝 サマリー</div>
           <div class="info-card-content" id="sidebar-summary-content">
-            <span class="empty">クリックして入力</span>
+            <textarea id="sidebar-summary-textarea" placeholder="サマリーを入力..."></textarea>
           </div>
         </div>
       `;
@@ -5816,12 +5881,6 @@
       html += `</div>`;
 
       fixedInfoContent.innerHTML = html;
-
-      // サマリーカードのイベント
-      const sidebarSummaryCard = fixedInfoContent.querySelector('#sidebar-summary-card');
-      if (sidebarSummaryCard) {
-        sidebarSummaryCard.addEventListener('click', showSummaryModal);
-      }
 
       // プロフィールボタンのイベント
       const profileBtn = fixedInfoContent.querySelector('#profile-btn');
@@ -6510,90 +6569,6 @@
       }
     }
 
-    // サマリー入力モーダル
-    async function showSummaryModal() {
-      if (!selectedPatient) {
-        window.HenryCore.ui.showToast('患者が選択されていません', 'error');
-        return;
-      }
-
-      // 現在のサマリーを読み込む
-      let currentSummary = '';
-      try {
-        const data = await loadPatientSummary(selectedPatient.uuid);
-        if (data && data.summary) {
-          currentSummary = data.summary;
-        }
-      } catch (e) {
-        console.error(`[${SCRIPT_NAME}] サマリー読み込みエラー:`, e);
-      }
-
-      // モーダルコンテンツを構築
-      const contentDiv = document.createElement('div');
-      contentDiv.style.cssText = 'padding: 16px;';
-
-      const textarea = document.createElement('textarea');
-      textarea.id = 'summary-modal-input';
-      textarea.value = currentSummary;
-      textarea.placeholder = '患者サマリーを入力...';
-      textarea.style.cssText = `
-        width: 100%;
-        min-height: 300px;
-        padding: 12px;
-        border: 1px solid #e0e0e0;
-        border-radius: 6px;
-        font-family: "Noto Sans JP", sans-serif;
-        font-size: 14px;
-        line-height: 1.6;
-        resize: vertical;
-        box-sizing: border-box;
-      `;
-      contentDiv.appendChild(textarea);
-
-      let summaryModal;
-      summaryModal = window.HenryCore.ui.showModal({
-        title: `📝 サマリー - ${selectedPatient.fullName}`,
-        content: contentDiv,
-        width: '750px',
-        actions: [
-          { label: 'キャンセル', variant: 'secondary', onClick: () => summaryModal.close() },
-          {
-            label: '保存',
-            variant: 'primary',
-            onClick: async () => {
-              const summary = textarea.value.trim();
-              if (!summary) {
-                window.HenryCore.ui.showToast('サマリーを入力してください', 'error');
-                return;
-              }
-
-              try {
-                await savePatientSummary(
-                  selectedPatient.uuid,
-                  selectedPatient.fullName,
-                  summary
-                );
-                window.HenryCore.ui.showToast('サマリーを保存しました', 'success');
-                summaryModal.close();
-
-                // 右サイドパネルのサマリーカードを更新
-                const sidebarSummaryContent = document.getElementById('sidebar-summary-content');
-                if (sidebarSummaryContent) {
-                  sidebarSummaryContent.innerHTML = escapeHtml(summary).replace(/\n/g, '<br>');
-                }
-              } catch (e) {
-                console.error(`[${SCRIPT_NAME}] サマリー保存エラー:`, e);
-                window.HenryCore.ui.showToast(`保存エラー: ${e.message}`, 'error');
-              }
-            }
-          }
-        ]
-      });
-
-      // フォーカスを設定
-      setTimeout(() => textarea.focus(), 100);
-    }
-
     // プロフィール編集モーダル
     async function showProfileModal() {
       if (!selectedPatient) {
@@ -6625,14 +6600,14 @@
       textarea.placeholder = '患者プロフィールを入力...';
       textarea.style.cssText = `
         width: 100%;
-        min-height: 300px;
+        height: 75vh;
         padding: 12px;
         border: 1px solid #e0e0e0;
         border-radius: 6px;
         font-family: "Noto Sans JP", sans-serif;
         font-size: 14px;
         line-height: 1.6;
-        resize: vertical;
+        resize: none;
         box-sizing: border-box;
       `;
       contentDiv.appendChild(textarea);
