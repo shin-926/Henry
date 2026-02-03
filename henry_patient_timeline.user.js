@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry Patient Timeline
 // @namespace    https://github.com/shin-926/Henry
-// @version      2.110.0
+// @version      2.113.0
 // @description  入院患者の各種記録・オーダーをガントチャート風タイムラインで表示
 // @author       sk powered by Claude
 // @match        https://henry-app.jp/*
@@ -5762,7 +5762,7 @@
       // サマリーカード（インライン編集）
       html += `
         <div id="sidebar-summary-card" class="info-card">
-          <div class="info-card-header">📝 サマリー</div>
+          <div class="info-card-header">サマリー</div>
           <div class="info-card-content" id="sidebar-summary-content">
             <textarea id="sidebar-summary-textarea" placeholder="サマリーを入力..."></textarea>
           </div>
@@ -5789,7 +5789,7 @@
           gap: 8px;
           transition: all 0.2s;
         ">
-          📋 プロフィール
+          プロフィール
         </button>
       `;
 
@@ -6610,11 +6610,20 @@
         resize: none;
         box-sizing: border-box;
       `;
+
+      // フォーカス時に背景色を変更（編集モードの視覚的フィードバック）
+      textarea.addEventListener('focus', () => {
+        textarea.style.background = 'rgba(33, 150, 243, 0.05)';
+      });
+      textarea.addEventListener('blur', () => {
+        textarea.style.background = '';
+      });
+
       contentDiv.appendChild(textarea);
 
       let profileModal;
       profileModal = window.HenryCore.ui.showModal({
-        title: `📋 プロフィール - ${selectedPatient.fullName}`,
+        title: `プロフィール - ${selectedPatient.fullName}`,
         content: contentDiv,
         width: '750px',
         actions: [
@@ -6635,6 +6644,7 @@
                   selectedPatient.fullName,
                   profile
                 );
+                textarea.blur(); // フォーカスを外して矢印キーで患者変更可能に
                 window.HenryCore.ui.showToast('プロフィールを保存しました', 'success');
                 profileModal.close();
               } catch (e) {
@@ -6646,8 +6656,6 @@
         ]
       });
 
-      // フォーカスを設定
-      setTimeout(() => textarea.focus(), 100);
     }
 
     // 処方・注射カラムを描画
