@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry Patient Timeline
 // @namespace    https://github.com/shin-926/Henry
-// @version      2.134.0
+// @version      2.134.1
 // @description  入院患者の各種記録・オーダーをガントチャート風タイムラインで表示
 // @author       sk powered by Claude
 // @match        https://henry-app.jp/*
@@ -3386,7 +3386,7 @@
       background: none;
       border: none;
       font-size: 20px;
-      cursor: pointer;
+      cursor: pointer !important;
       color: #666;
       padding: 4px 8px;
       border-radius: 4px;
@@ -3399,7 +3399,7 @@
       background: none;
       border: none;
       font-size: 14px;
-      cursor: pointer;
+      cursor: pointer !important;
       padding: 4px 8px;
       border-radius: 4px;
       color: #666;
@@ -3421,7 +3421,7 @@
       background: none;
       border: none;
       font-size: 24px;
-      cursor: pointer;
+      cursor: pointer !important;
       color: #666;
       padding: 0;
       line-height: 1;
@@ -3464,7 +3464,7 @@
       padding: 3px 8px;
       border-radius: 12px;
       font-size: 11px;
-      cursor: pointer;
+      cursor: pointer !important;
       border: 1px solid;
       transition: all 0.2s;
       white-space: nowrap;
@@ -3505,7 +3505,7 @@
       position: relative;
       padding: 10px 12px 10px 16px;
       font-size: 13px;
-      cursor: pointer;
+      cursor: pointer !important;
       border-bottom: 1px solid #eee;
       transition: background 0.15s;
     }
@@ -3632,7 +3632,7 @@
       border-radius: 4px;
       font-size: 12px;
       font-weight: 500;
-      cursor: pointer;
+      cursor: pointer !important;
       transition: background 0.2s;
     }
     #patient-timeline-modal .add-record-btn:hover {
@@ -3644,7 +3644,7 @@
       padding: 2px 6px;
       font-size: 11px;
       color: #666;
-      cursor: pointer;
+      cursor: pointer !important;
       opacity: 0.7;
       transition: opacity 0.2s, color 0.2s;
     }
@@ -3801,7 +3801,7 @@
       min-width: 0;
     }
     #patient-timeline-modal .info-card.clickable {
-      cursor: pointer;
+      cursor: pointer !important;
       transition: background 0.2s, border-color 0.2s;
     }
     #patient-timeline-modal .info-card.clickable:hover {
@@ -3872,7 +3872,7 @@
     #patient-timeline-modal .med-link {
       color: inherit;
       text-decoration: none;
-      cursor: pointer;
+      cursor: pointer !important;
     }
     #patient-timeline-modal .med-link:hover {
       text-decoration: underline;
@@ -3949,7 +3949,7 @@
       border: 1px solid #90caf9;
       border-radius: 16px;
       font-size: 13px;
-      cursor: pointer;
+      cursor: pointer !important;
       transition: all 0.15s;
       white-space: nowrap;
     }
@@ -3989,7 +3989,7 @@
       background: #fff;
       border-radius: 4px;
       border: 1px solid #e0e0e0;
-      cursor: pointer;
+      cursor: pointer !important;
       transition: all 0.2s;
     }
     #patient-timeline-modal .legend-item:hover {
@@ -4245,12 +4245,12 @@
       // 編集モードの場合のみ「現在時刻に変更」チェックボックスを表示
       if (isEdit) {
         const checkboxWrapper = document.createElement('label');
-        checkboxWrapper.style.cssText = 'display: flex; align-items: center; gap: 4px; cursor: pointer; font-size: 13px; color: #666;';
+        checkboxWrapper.style.cssText = 'display: flex; align-items: center; gap: 4px; cursor: pointer !important; font-size: 13px; color: #666;';
 
         const checkbox = document.createElement('input');
         checkbox.type = 'checkbox';
         checkbox.id = 'use-current-time-checkbox';
-        checkbox.style.cursor = 'pointer';
+        checkbox.style.setProperty('cursor', 'pointer', 'important');
         checkbox.addEventListener('change', () => {
           if (checkbox.checked) {
             timeInput.value = currentTimeStr;
@@ -5320,7 +5320,7 @@
                         padding: 6px 16px;
                         border: none;
                         border-radius: 4px;
-                        cursor: pointer;
+                        cursor: pointer !important;
                         font-size: 13px;
                         ${d === days
                           ? 'background: #1976d2; color: white;'
@@ -5369,7 +5369,7 @@
                 padding: 6px 16px;
                 border: none;
                 border-radius: 4px;
-                cursor: pointer;
+                cursor: pointer !important;
                 font-size: 13px;
                 ${d === days
                   ? 'background: #1976d2; color: white;'
@@ -5548,7 +5548,7 @@
                         padding: 6px 16px;
                         border: none;
                         border-radius: 4px;
-                        cursor: pointer;
+                        cursor: pointer !important;
                         font-size: 13px;
                         ${d === days
                           ? 'background: #FF9800; color: white;'
@@ -5597,7 +5597,7 @@
                 padding: 6px 16px;
                 border: none;
                 border-radius: 4px;
-                cursor: pointer;
+                cursor: pointer !important;
                 font-size: 13px;
                 ${d === days
                   ? 'background: #FF9800; color: white;'
@@ -5772,7 +5772,7 @@
                         padding: 6px 16px;
                         border: none;
                         border-radius: 4px;
-                        cursor: pointer;
+                        cursor: pointer !important;
                         font-size: 13px;
                         ${d === days
                           ? 'background: #607D8B; color: white;'
@@ -5821,7 +5821,7 @@
                 padding: 6px 16px;
                 border: none;
                 border-radius: 4px;
-                cursor: pointer;
+                cursor: pointer !important;
                 font-size: 13px;
                 ${d === days
                   ? 'background: #607D8B; color: white;'
@@ -6006,7 +6006,7 @@
           font-size: 14px;
           font-weight: 500;
           color: #e65100;
-          cursor: pointer;
+          cursor: pointer !important;
           display: flex;
           align-items: center;
           justify-content: center;
@@ -6027,7 +6027,7 @@
           font-size: 14px;
           font-weight: 500;
           color: #1565c0;
-          cursor: pointer;
+          cursor: pointer !important;
           display: flex;
           align-items: center;
           justify-content: center;
@@ -6048,7 +6048,7 @@
           font-size: 14px;
           font-weight: 500;
           color: #c2185b;
-          cursor: pointer;
+          cursor: pointer !important;
           display: flex;
           align-items: center;
           justify-content: center;
@@ -6069,7 +6069,7 @@
           font-size: 14px;
           font-weight: 500;
           color: #00838f;
-          cursor: pointer;
+          cursor: pointer !important;
           display: flex;
           align-items: center;
           justify-content: center;
@@ -6090,7 +6090,7 @@
           font-size: 14px;
           font-weight: 500;
           color: #2e7d32;
-          cursor: pointer;
+          cursor: pointer !important;
           display: flex;
           align-items: center;
           justify-content: center;
@@ -6111,7 +6111,7 @@
           font-size: 14px;
           font-weight: 500;
           color: #5e35b1;
-          cursor: pointer;
+          cursor: pointer !important;
           display: flex;
           align-items: center;
           justify-content: center;
@@ -6776,7 +6776,7 @@
                 max-width: 100%;
                 border-radius: 4px;
                 margin-bottom: 8px;
-                cursor: pointer;
+                cursor: pointer !important;
               `;
               imgEl.alt = '検査画像';
               imgEl.title = 'クリックで拡大表示';
