@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         予約システム連携
 // @namespace    https://github.com/shin-926/Henry
-// @version      4.7.8
+// @version      4.7.20
 // @description  Henryカルテと予約システム間の双方向連携（再診予約・照射オーダー自動予約・自動印刷・患者プレビュー）
 // @author       sk powered by Claude & Gemini
 // @match        https://henry-app.jp/*
@@ -106,6 +106,10 @@
 
   // 照射オーダー処理中フラグ（二重インターセプト防止）
   let isProcessingImagingOrder = false;
+
+  // 処理済みリクエストを保存（再インターセプト防止）
+  // キー: patientUuid + "_" + date (例: "abc-123_2026-02-06")
+  const processedRequests = new Set();
 
   // スタイル定数
   const STYLES = {
@@ -1778,8 +1782,8 @@ html, body { margin: 0; padding: 0; }
 
       log.info(`未来日付の${orderType}を検出: ${dateObj.year}/${dateObj.month}/${dateObj.day}`);
 
-      const patientUuid = HenryCore.getPatientUuid();
-      const doctorUuid = await HenryCore.getMyUuid();
+      const patientUuid = body.variables?.input?.patientUuid || HenryCore.getPatientUuid();
+      const doctorUuid = body.variables?.input?.doctorUuid || await HenryCore.getMyUuid();
 
       if (!patientUuid || !doctorUuid) {
         throw new Error('患者情報または医師情報を取得できません');
@@ -1826,6 +1830,11 @@ html, body { margin: 0; padding: 0; }
           const [year, month, day] = reservationResult.date.split('-').map(Number);
           body.variables.input.date = { year, month, day };
         }
+
+        // 処理済みリクエストを保存（再インターセプト防止）
+        const actualDate = body.variables.input.date;
+        const requestKey = patientUuid + '_' + actualDate.year + '-' + actualDate.month + '-' + actualDate.day;
+        processedRequests.add(requestKey);
 
         const newOptions = { ...options, body: JSON.stringify(body) };
 
@@ -1897,6 +1906,11 @@ html, body { margin: 0; padding: 0; }
       if (reservationResult.date) {
         body.variables.input.date = actualDateObj;
       }
+
+      // 処理済みリクエストを保存（再インターセプト防止）
+      const finalDate = body.variables.input.date;
+      const requestKey = patientUuid + '_' + finalDate.year + '-' + finalDate.month + '-' + finalDate.day;
+      processedRequests.add(requestKey);
 
       const newOptions = { ...options, body: JSON.stringify(body) };
       log.info('EncounterIDを差し替えてリクエスト送信: ' + targetEncounterId);
@@ -1982,6 +1996,16 @@ html, body { margin: 0; padding: 0; }
 
               // 未来日付の場合
               if (dateObj && isFutureDate(dateObj)) {
+                // 処理済みリクエストはスキップ（patientUuid + 日付でチェック）
+                const patientUuid = body.variables?.input?.patientUuid;
+                const requestKey = patientUuid + '_' + dateObj.year + '-' + dateObj.month + '-' + dateObj.day;
+
+                if (processedRequests.has(requestKey)) {
+                  log.info('処理済みリクエスト - スキップ: ' + requestKey);
+                  processedRequests.delete(requestKey);
+                  return originalFetch.apply(this, args);
+                }
+
                 // 処理中の場合はスキップ（二重インターセプト防止）
                 if (isProcessingImagingOrder) {
                   log.info('照射オーダー処理中のため、このリクエストはスキップ');
