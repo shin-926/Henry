@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry Patient Timeline
 // @namespace    https://github.com/shin-926/Henry
-// @version      2.113.0
+// @version      2.122.0
 // @description  入院患者の各種記録・オーダーをガントチャート風タイムラインで表示
 // @author       sk powered by Claude
 // @match        https://henry-app.jp/*
@@ -900,6 +900,7 @@
             prescriptionOrders {
               uuid
               createTime { seconds }
+              startDate { year month day }
               orderStatus
               doctor { name }
               rps {
@@ -929,6 +930,7 @@
             injectionOrders {
               uuid
               createTime { seconds }
+              startDate { year month day }
               orderStatus
               doctor { name }
               rps {
@@ -1298,12 +1300,23 @@
     }
 
     for (const [key, data] of byDate) {
+      // 尿量ハイライト（基準: 1000-2000 mL）
+      const urine = data.totalUrine;
+      let urineText;
+      if (urine > 2000) {
+        urineText = `<span class="vital-high">${urine}</span>`;
+      } else if (urine < 1000) {
+        urineText = `<span class="vital-low">${urine}</span>`;
+      } else {
+        urineText = String(urine);
+      }
+
       result.push({
         id: `urine-${key}`,
         category: 'urine',
         date: data.date,
         title: '排泄',
-        text: `【尿量】${data.totalUrine}mL`,
+        text: `【尿量】${urineText}mL`,
         author: ''
       });
     }
@@ -1398,22 +1411,29 @@
       const bsParts = [];
       const drug = data.insulinDrug || '';
 
+      // 血糖値ハイライト関数（基準: 70-130 mg/dL）
+      const formatBS = (value) => {
+        if (value > 130) return `<span class="vital-high">${value}</span>`;
+        if (value < 70) return `<span class="vital-low">${value}</span>`;
+        return String(value);
+      };
+
       if (data.bloodSugar.morning != null) {
-        let part = `朝${data.bloodSugar.morning}`;
+        let part = `朝${formatBS(data.bloodSugar.morning)}`;
         if (drug && data.insulinUnit.morning != null) {
           part += `(${drug}${data.insulinUnit.morning}U)`;
         }
         bsParts.push(part);
       }
       if (data.bloodSugar.noon != null) {
-        let part = `昼${data.bloodSugar.noon}`;
+        let part = `昼${formatBS(data.bloodSugar.noon)}`;
         if (drug && data.insulinUnit.noon != null) {
           part += `(${drug}${data.insulinUnit.noon}U)`;
         }
         bsParts.push(part);
       }
       if (data.bloodSugar.evening != null) {
-        let part = `夕${data.bloodSugar.evening}`;
+        let part = `夕${formatBS(data.bloodSugar.evening)}`;
         if (drug && data.insulinUnit.evening != null) {
           part += `(${drug}${data.insulinUnit.evening}U)`;
         }
@@ -3284,11 +3304,23 @@
       flex-shrink: 0;
     }
     #patient-timeline-modal .date-item {
-      padding: 10px 12px;
+      position: relative;
+      padding: 10px 12px 10px 16px;
       font-size: 13px;
       cursor: pointer;
       border-bottom: 1px solid #eee;
       transition: background 0.15s;
+    }
+    #patient-timeline-modal .date-item.has-match::before {
+      content: '';
+      position: absolute;
+      left: 4px;
+      top: 50%;
+      transform: translateY(-50%);
+      width: 6px;
+      height: 6px;
+      background: #FFC107;
+      border-radius: 50%;
     }
     #patient-timeline-modal .date-item:hover {
       background: #e3f2fd;
@@ -3805,6 +3837,7 @@
     let selectedCategories = new Set(Object.keys(CATEGORIES));
     let searchText = '';
     let selectedDateKey = null;
+    let matchingDates = new Set(); // 検索マッチがある日付キーを保持（グローバル検索用）
     let vitalGraphState = null; // { close, overlayEl, dateKey, days } グラフモーダルの状態
     let bloodSugarGraphState = null; // { close, overlayEl, dateKey, days } 血糖グラフモーダルの状態
     let urineGraphState = null; // { close, overlayEl, dateKey, days } 尿量グラフモーダルの状態
@@ -3812,6 +3845,7 @@
     let pressureUlcerModalState = null; // { close, overlayEl } 褥瘡評価モーダルの状態
     let pharmacyModalState = null; // { close, overlayEl } 薬剤部記録モーダルの状態
     let inspectionFindingsModalState = null; // { close, overlayEl } 検査所見モーダルの状態
+    let profileModalState = null; // { overlayEl, textarea } プロフィールモーダルの状態
     let isLoading = true;
     let doctorColorMap = new Map(); // 担当医→色のマッピング
     let selectedDoctors = new Set(); // 選択中の担当医（正規化名）。空=全員表示
@@ -3878,7 +3912,7 @@
                 </div>
                 <div class="prescription-order-column">
                   <div class="column-header">
-                    <span>処方・注射</span>
+                    <span>注射・処方</span>
                     <div class="column-filters" id="order-filters"></div>
                   </div>
                   <div class="column-content" id="prescription-order-content"></div>
@@ -4514,6 +4548,7 @@
         clearTimeout(timeout);
         timeout = setTimeout(() => {
           searchText = input.value;
+          updateMatchingDates(); // 全日付のマッチを計算
           applyFilters();
           renderTimeline();
         }, 300);
@@ -4736,7 +4771,7 @@
       const filterGroups = {
         'record-filters': ['doctor', 'nursing', 'rehab'],
         'data-filters': ['vital', 'meal', 'urine', 'bloodSugar'],
-        'order-filters': ['prescription', 'injection']
+        'order-filters': ['injection', 'prescription']
       };
 
       // 各グループにフィルターを描画
@@ -4766,6 +4801,7 @@
               selectedCategories.add(catId);
             }
             renderCategoryFilters();
+            updateMatchingDates(); // カテゴリ変更時もマッチを再計算
             applyFilters();
             renderTimeline();
           };
@@ -4789,6 +4825,96 @@
 
         return true;
       });
+    }
+
+    // マッチがある日付を計算（グローバル検索用）
+    function updateMatchingDates() {
+      matchingDates.clear();
+      if (!searchText.trim()) return;
+
+      const lowerSearch = searchText.toLowerCase();
+
+      // タイムラインアイテム検索
+      allItems.forEach(item => {
+        // カテゴリフィルタ適用
+        if (!selectedCategories.has(item.category)) return;
+        if (!item.date) return;
+
+        // 検索マッチ判定
+        const matchText = item.text.toLowerCase().includes(lowerSearch);
+        const matchAuthor = item.author.toLowerCase().includes(lowerSearch);
+        if (matchText || matchAuthor) {
+          matchingDates.add(dateKey(item.date));
+        }
+      });
+
+      // 処方検索
+      if (selectedCategories.has('prescription')) {
+        activePrescriptions.forEach(rx => {
+          const medicines = extractMedicineNamesFromOrder(rx);
+          if (medicines.some(m => m.toLowerCase().includes(lowerSearch))) {
+            addOrderDateRangeToMatches(rx);
+          }
+        });
+      }
+
+      // 注射検索
+      if (selectedCategories.has('injection')) {
+        activeInjections.forEach(inj => {
+          const medicines = extractMedicineNamesFromOrder(inj);
+          if (medicines.some(m => m.toLowerCase().includes(lowerSearch))) {
+            addOrderDateRangeToMatches(inj);
+          }
+        });
+      }
+    }
+
+    // 処方/注射オーダーから薬品名を抽出
+    function extractMedicineNamesFromOrder(order) {
+      const medicines = [];
+      (order.rps || []).forEach(rp => {
+        (rp.instructions || []).forEach(inst => {
+          const med = inst.instruction?.medicationDosageInstruction;
+          const name = med?.localMedicine?.name || med?.mhlwMedicine?.name;
+          if (name) medicines.push(cleanMedicineName(name));
+        });
+      });
+      return medicines;
+    }
+
+    // オーダーの有効期間をマッチ日付に追加
+    function addOrderDateRangeToMatches(order) {
+      if (!order.createTime?.seconds) return;
+
+      const startDate = new Date(order.createTime.seconds * 1000);
+      startDate.setHours(0, 0, 0, 0);
+
+      const maxDuration = Math.max(...(order.rps || []).map(rp => rp.boundsDurationDays?.value || 1));
+      const endDate = new Date(startDate);
+      endDate.setDate(endDate.getDate() + maxDuration - 1);
+
+      // 入院期間との交差を考慮
+      if (!currentHospitalization?.startDate) return;
+
+      const hospStart = new Date(
+        currentHospitalization.startDate.year,
+        currentHospitalization.startDate.month - 1,
+        currentHospitalization.startDate.day
+      );
+      const hospEnd = currentHospitalization.endDate
+        ? new Date(
+            currentHospitalization.endDate.year,
+            currentHospitalization.endDate.month - 1,
+            currentHospitalization.endDate.day
+          )
+        : new Date();
+
+      const rangeStart = new Date(Math.max(startDate.getTime(), hospStart.getTime()));
+      const rangeEnd = new Date(Math.min(endDate.getTime(), hospEnd.getTime()));
+
+      for (let d = new Date(rangeStart); d <= rangeEnd; d.setDate(d.getDate() + 1)) {
+        matchingDates.add(dateKey(new Date(d)));
+      }
     }
 
     // タイムライン描画
@@ -4852,8 +4978,9 @@
         const key = dateKey(date);
         const isWeekend = date.getDay() === 0;
         const isSelected = key === selectedDateKey;
+        const hasMatch = matchingDates.has(key);
         return `
-          <div class="date-item ${isSelected ? 'selected' : ''} ${isWeekend ? 'weekend' : ''}" data-date-key="${key}">
+          <div class="date-item ${isSelected ? 'selected' : ''} ${isWeekend ? 'weekend' : ''} ${hasMatch ? 'has-match' : ''}" data-date-key="${key}">
             ${formatShortDate(date)}
           </div>
         `;
@@ -4940,13 +5067,13 @@
       const time = (item.category === 'meal' || item.category === 'vital' || item.category === 'urine' || item.category === 'bloodSugar') ? '' :
         (item.date ? `${item.date.getHours()}:${String(item.date.getMinutes()).padStart(2, '0')}` : '-');
 
-      // バイタルカードは体温ハイライト用HTMLを含むためエスケープしない
       // SOAP形式を整形（＜SOAP＞ラベル削除、S)等の直後の改行削除）
       const formatSOAP = (text) => text
         .replace(/＜SOAP＞\n?/g, '')
         .replace(/([SOAP]\))\n/g, '$1');
 
-      const textHtml = item.category === 'vital'
+      // vital/urine/bloodSugarはハイライト用HTMLを含むためエスケープしない
+      const textHtml = (item.category === 'vital' || item.category === 'urine' || item.category === 'bloodSugar')
         ? item.text.replace(/\n/g, '<br>')
         : highlightText(formatSOAP(item.text), searchText).replace(/\n/g, '<br>');
 
@@ -5954,8 +6081,8 @@
         if (bloodTestModalState?.overlayEl?.parentNode) {
           const titleEl = bloodTestModalState.overlayEl.querySelector('.henry-modal-title');
           if (titleEl) titleEl.textContent = modalTitle;
-          const contentEl = bloodTestModalState.overlayEl.querySelector('.henry-modal-content');
-          if (contentEl) contentEl.innerHTML = '<div style="padding: 20px; text-align: center; color: #666;">血液検査データがありません</div>';
+          const bodyEl = titleEl?.nextElementSibling;
+          if (bodyEl) bodyEl.innerHTML = '<div style="padding: 20px; text-align: center; color: #666;">血液検査データがありません</div>';
           return;
         }
         window.HenryCore.ui.showToast('血液検査データがありません', 'info');
@@ -6094,10 +6221,10 @@
       if (bloodTestModalState?.overlayEl?.parentNode) {
         const titleEl = bloodTestModalState.overlayEl.querySelector('.henry-modal-title');
         if (titleEl) titleEl.textContent = modalTitle;
-        const contentEl = bloodTestModalState.overlayEl.querySelector('.henry-modal-content');
-        if (contentEl) {
-          contentEl.innerHTML = '';
-          contentEl.appendChild(contentDiv);
+        const bodyEl = titleEl?.nextElementSibling;
+        if (bodyEl) {
+          bodyEl.innerHTML = '';
+          bodyEl.appendChild(contentDiv);
         }
         return;
       }
@@ -6138,8 +6265,8 @@
         if (pressureUlcerModalState?.overlayEl?.parentNode) {
           const titleEl = pressureUlcerModalState.overlayEl.querySelector('.henry-modal-title');
           if (titleEl) titleEl.textContent = modalTitle;
-          const contentEl = pressureUlcerModalState.overlayEl.querySelector('.henry-modal-content');
-          if (contentEl) contentEl.innerHTML = '<div style="padding: 20px; text-align: center; color: #666;">褥瘡評価データがありません</div>';
+          const bodyEl = titleEl?.nextElementSibling;
+          if (bodyEl) bodyEl.innerHTML = '<div style="padding: 20px; text-align: center; color: #666;">褥瘡評価データがありません</div>';
           return;
         }
         window.HenryCore.ui.showToast('褥瘡評価データがありません', 'info');
@@ -6154,8 +6281,8 @@
         if (pressureUlcerModalState?.overlayEl?.parentNode) {
           const titleEl = pressureUlcerModalState.overlayEl.querySelector('.henry-modal-title');
           if (titleEl) titleEl.textContent = modalTitle;
-          const contentEl = pressureUlcerModalState.overlayEl.querySelector('.henry-modal-content');
-          if (contentEl) contentEl.innerHTML = '<div style="padding: 20px; text-align: center; color: #666;">褥瘡評価データがありません</div>';
+          const bodyEl = titleEl?.nextElementSibling;
+          if (bodyEl) bodyEl.innerHTML = '<div style="padding: 20px; text-align: center; color: #666;">褥瘡評価データがありません</div>';
           return;
         }
         window.HenryCore.ui.showToast('褥瘡評価データがありません', 'info');
@@ -6275,10 +6402,10 @@
       if (pressureUlcerModalState?.overlayEl?.parentNode) {
         const titleEl = pressureUlcerModalState.overlayEl.querySelector('.henry-modal-title');
         if (titleEl) titleEl.textContent = modalTitle;
-        const contentEl = pressureUlcerModalState.overlayEl.querySelector('.henry-modal-content');
-        if (contentEl) {
-          contentEl.innerHTML = '';
-          contentEl.appendChild(contentDiv);
+        const bodyEl = titleEl?.nextElementSibling;
+        if (bodyEl) {
+          bodyEl.innerHTML = '';
+          bodyEl.appendChild(contentDiv);
         }
         return;
       }
@@ -6329,8 +6456,9 @@
       if (pharmacyRecords.length === 0) {
         // モーダルが開いていれば「データなし」表示
         if (pharmacyModalState?.overlayEl?.parentNode) {
-          const contentEl = pharmacyModalState.overlayEl.querySelector('.henry-modal-content');
-          if (contentEl) contentEl.innerHTML = '<div style="padding: 20px; text-align: center; color: #666;">薬剤部記録がありません</div>';
+          const titleEl = pharmacyModalState.overlayEl.querySelector('.henry-modal-title');
+          const bodyEl = titleEl?.nextElementSibling;
+          if (bodyEl) bodyEl.innerHTML = '<div style="padding: 20px; text-align: center; color: #666;">薬剤部記録がありません</div>';
           return;
         }
         window.HenryCore.ui.showToast('薬剤部記録がありません', 'info');
@@ -6392,10 +6520,11 @@
 
       // モーダルが既に開いている場合はコンテンツのみ更新
       if (pharmacyModalState?.overlayEl?.parentNode) {
-        const contentEl = pharmacyModalState.overlayEl.querySelector('.henry-modal-content');
-        if (contentEl) {
-          contentEl.innerHTML = '';
-          contentEl.appendChild(contentDiv);
+        const titleEl = pharmacyModalState.overlayEl.querySelector('.henry-modal-title');
+        const bodyEl = titleEl?.nextElementSibling;
+        if (bodyEl) {
+          bodyEl.innerHTML = '';
+          bodyEl.appendChild(contentDiv);
         }
         return;
       }
@@ -6446,8 +6575,9 @@
       if (inspectionFindingsRecords.length === 0) {
         // モーダルが開いていれば「データなし」表示
         if (inspectionFindingsModalState?.overlayEl?.parentNode) {
-          const contentEl = inspectionFindingsModalState.overlayEl.querySelector('.henry-modal-content');
-          if (contentEl) contentEl.innerHTML = '<div style="padding: 20px; text-align: center; color: #666;">検査所見がありません</div>';
+          const titleEl = inspectionFindingsModalState.overlayEl.querySelector('.henry-modal-title');
+          const bodyEl = titleEl?.nextElementSibling;
+          if (bodyEl) bodyEl.innerHTML = '<div style="padding: 20px; text-align: center; color: #666;">検査所見がありません</div>';
           return;
         }
         window.HenryCore.ui.showToast('検査所見がありません', 'info');
@@ -6534,10 +6664,11 @@
 
       // モーダルが既に開いている場合はコンテンツのみ更新
       if (inspectionFindingsModalState?.overlayEl?.parentNode) {
-        const contentEl = inspectionFindingsModalState.overlayEl.querySelector('.henry-modal-content');
-        if (contentEl) {
-          contentEl.innerHTML = '';
-          contentEl.appendChild(contentDiv);
+        const titleEl = inspectionFindingsModalState.overlayEl.querySelector('.henry-modal-title');
+        const bodyEl = titleEl?.nextElementSibling;
+        if (bodyEl) {
+          bodyEl.innerHTML = '';
+          bodyEl.appendChild(contentDiv);
         }
         return;
       }
@@ -6590,6 +6721,18 @@
         console.error(`[${SCRIPT_NAME}] プロフィール読み込みエラー:`, e);
       }
 
+      const modalTitle = `プロフィール - ${selectedPatient.fullName}`;
+
+      // 既存モーダルが開いている場合はインプレース更新
+      if (profileModalState?.overlayEl?.parentNode) {
+        const titleEl = profileModalState.overlayEl.querySelector('.henry-modal-title');
+        if (titleEl) titleEl.textContent = modalTitle;
+        if (profileModalState.textarea) {
+          profileModalState.textarea.value = currentProfile;
+        }
+        return;
+      }
+
       // モーダルコンテンツを構築
       const contentDiv = document.createElement('div');
       contentDiv.style.cssText = 'padding: 16px;';
@@ -6623,7 +6766,7 @@
 
       let profileModal;
       profileModal = window.HenryCore.ui.showModal({
-        title: `プロフィール - ${selectedPatient.fullName}`,
+        title: modalTitle,
         content: contentDiv,
         width: '750px',
         actions: [
@@ -6656,6 +6799,25 @@
         ]
       });
 
+      // 状態を保存
+      const overlayEl = document.querySelector('.henry-modal-overlay:last-of-type');
+      profileModalState = { overlayEl, textarea };
+
+      // MutationObserverでモーダル削除時にリセット
+      if (overlayEl) {
+        const observer = new MutationObserver((mutations) => {
+          for (const mutation of mutations) {
+            for (const removed of mutation.removedNodes) {
+              if (removed === overlayEl) {
+                profileModalState = null;
+                observer.disconnect();
+                return;
+              }
+            }
+          }
+        });
+        observer.observe(document.body, { childList: true });
+      }
     }
 
     // 処方・注射カラムを描画
@@ -6671,10 +6833,12 @@
 
       // === 選択日の注射 ===
       if (selectedCategories.has('injection')) {
-        const targetInjections = activeInjections.filter(inj => {
-          // 注射はcreateTimeを開始日として使用（startDateフィールドがない）
-          if (!inj.createTime?.seconds) return false;
-          const startDate = new Date(inj.createTime.seconds * 1000);
+        let targetInjections = activeInjections.filter(inj => {
+          // startDateがあれば使用、なければcreateTimeにフォールバック
+          const startDate = inj.startDate
+            ? new Date(inj.startDate.year, inj.startDate.month - 1, inj.startDate.day)
+            : (inj.createTime?.seconds ? new Date(inj.createTime.seconds * 1000) : null);
+          if (!startDate) return false;
           startDate.setHours(0, 0, 0, 0);
           const maxDuration = Math.max(...(inj.rps || []).map(rp => rp.boundsDurationDays?.value || 1));
           const endDate = new Date(startDate);
@@ -6682,16 +6846,34 @@
           return targetDate >= startDate && targetDate <= endDate;
         });
 
+        // 検索フィルタ: 検索テキストがある場合、マッチする薬品を含む注射のみ表示
+        if (searchText.trim()) {
+          const lowerSearch = searchText.toLowerCase();
+          targetInjections = targetInjections.filter(inj => {
+            const medicines = extractMedicineNamesFromOrder(inj);
+            return medicines.some(m => m.toLowerCase().includes(lowerSearch));
+          });
+        }
+
+        // マッチする注射がある場合のみセクションを表示
+        if (targetInjections.length > 0) {
         const injectionCat = CATEGORIES.injection;
         html += `<div class="injection-section" style="background: ${injectionCat.bgColor}; border-left-color: ${injectionCat.color};"><div class="section-title">◆ ${dateLabel} の注射</div>`;
 
-        if (targetInjections.length > 0) {
         html += targetInjections.flatMap(inj => {
-          // createTimeから開始日を計算
-          const startDate = new Date(inj.createTime.seconds * 1000);
+          // startDateがあれば使用、なければcreateTimeにフォールバック
+          const startDate = inj.startDate
+            ? new Date(inj.startDate.year, inj.startDate.month - 1, inj.startDate.day)
+            : new Date(inj.createTime.seconds * 1000);
           startDate.setHours(0, 0, 0, 0);
 
           return (inj.rps || []).map(rp => {
+            // RPの終了日を計算し、targetDateより前なら表示しない
+            const duration = rp.boundsDurationDays?.value || 1;
+            const rpEndDate = new Date(startDate);
+            rpEndDate.setDate(rpEndDate.getDate() + duration - 1);
+            if (targetDate > rpEndDate) return '';  // このRPは終了済み
+
             const medicines = (rp.instructions || []).map(inst => {
               const med = inst.instruction?.medicationDosageInstruction;
               const rawName = med?.localMedicine?.name || med?.mhlwMedicine?.name || null;
@@ -6699,34 +6881,38 @@
             }).filter(Boolean);
 
             const technique = (rp.localInjectionTechnique?.name || '').replace(/，/g, ',');
-            const duration = rp.boundsDurationDays?.value || 1;
-            const endDate = new Date(startDate);
-            endDate.setDate(endDate.getDate() + duration - 1);
-            const endDateStr = `${endDate.getMonth() + 1}/${endDate.getDate()}まで`;
+            const endDateStr = `${rpEndDate.getMonth() + 1}/${rpEndDate.getDate()}まで`;
 
             if (medicines.length === 0) return '';
 
             return `
               <div class="med-item">
                 <div class="med-usage">${technique ? escapeHtml(technique) + ' ' : ''}${endDateStr}</div>
-                <div class="med-name">${medicines.map(m => `<a href="https://www.google.com/search?q=${encodeURIComponent(m)}" target="_blank" class="med-link">${escapeHtml(m)}</a>`).join('<br>')}</div>
+                <div class="med-name">${medicines.map(m => `<a href="https://www.google.com/search?q=${encodeURIComponent(m)}" target="_blank" class="med-link">${highlightText(m, searchText)}</a>`).join('<br>')}</div>
               </div>
             `;
           });
         }).filter(Boolean).join('');
-        } else {
-          html += '<div class="empty-message">注射なし</div>';
-        }
 
         html += '</div>';
+        } else if (!searchText.trim()) {
+          // 検索テキストがない場合のみ「注射なし」を表示
+          const injectionCat = CATEGORIES.injection;
+          html += `<div class="injection-section" style="background: ${injectionCat.bgColor}; border-left-color: ${injectionCat.color};"><div class="section-title">◆ ${dateLabel} の注射</div>`;
+          html += '<div class="empty-message">注射なし</div>';
+          html += '</div>';
+        }
+        // 検索テキストがあってマッチしない場合はセクション自体を非表示
       }
 
       // === 選択日の処方 ===
       if (selectedCategories.has('prescription')) {
-        const targetPrescriptions = activePrescriptions.filter(rx => {
-          // 処方はcreateTimeを開始日として使用（startDateフィールドがない）
-          if (!rx.createTime?.seconds) return false;
-          const startDate = new Date(rx.createTime.seconds * 1000);
+        let targetPrescriptions = activePrescriptions.filter(rx => {
+          // startDateがあれば使用、なければcreateTimeにフォールバック
+          const startDate = rx.startDate
+            ? new Date(rx.startDate.year, rx.startDate.month - 1, rx.startDate.day)
+            : (rx.createTime?.seconds ? new Date(rx.createTime.seconds * 1000) : null);
+          if (!startDate) return false;
           startDate.setHours(0, 0, 0, 0);
           const maxDuration = Math.max(...(rx.rps || []).map(rp => rp.boundsDurationDays?.value || 1));
           const endDate = new Date(startDate);
@@ -6734,10 +6920,19 @@
           return targetDate >= startDate && targetDate <= endDate;
         });
 
+        // 検索フィルタ: 検索テキストがある場合、マッチする薬品を含む処方のみ表示
+        if (searchText.trim()) {
+          const lowerSearch = searchText.toLowerCase();
+          targetPrescriptions = targetPrescriptions.filter(rx => {
+            const medicines = extractMedicineNamesFromOrder(rx);
+            return medicines.some(m => m.toLowerCase().includes(lowerSearch));
+          });
+        }
+
+        // マッチする処方がある場合のみセクションを表示
+        if (targetPrescriptions.length > 0) {
         const prescriptionCat = CATEGORIES.prescription;
         html += `<div class="prescription-section" style="background: ${prescriptionCat.bgColor}; border-left-color: ${prescriptionCat.color};"><div class="section-title">◆ ${dateLabel} の処方</div>`;
-
-        if (targetPrescriptions.length > 0) {
         // 固定カテゴリの定義
         const FIXED_CATEGORIES = {
           wakeup: { label: '起床時', order: 1 },
@@ -6760,6 +6955,17 @@
 
         targetPrescriptions.forEach(rx => {
           (rx.rps || []).forEach(rp => {
+            // RPの終了日を計算し、targetDateより前ならスキップ
+            const duration = rp.boundsDurationDays?.value || 1;
+            // startDateがあれば使用、なければcreateTimeにフォールバック
+            const rxStartDate = rx.startDate
+              ? new Date(rx.startDate.year, rx.startDate.month - 1, rx.startDate.day)
+              : new Date(rx.createTime.seconds * 1000);
+            rxStartDate.setHours(0, 0, 0, 0);
+            const rpEndDate = new Date(rxStartDate);
+            rpEndDate.setDate(rpEndDate.getDate() + duration - 1);
+            if (targetDate > rpEndDate) return;  // このRPは終了済み
+
             const canonicalUsage = rp.medicationTiming?.medicationTiming?.canonicalPrescriptionUsage;
             const timings = canonicalUsage?.timings || [];
             const usageText = (canonicalUsage?.text || '用法不明').replace(/，/g, ',');
@@ -6801,15 +7007,20 @@
           <div class="usage-group">
             <div class="usage-label">[${escapeHtml(group.label)}]</div>
             <div class="usage-medicines">
-              ${group.medicines.map(m => `<a href="https://www.google.com/search?q=${encodeURIComponent(m)}" target="_blank" class="med-name med-link">${escapeHtml(m)}</a>`).join('<br>')}
+              ${group.medicines.map(m => `<a href="https://www.google.com/search?q=${encodeURIComponent(m)}" target="_blank" class="med-name med-link">${highlightText(m, searchText)}</a>`).join('<br>')}
             </div>
           </div>
         `).join('');
-        } else {
-          html += '<div class="empty-message">有効な処方なし</div>';
-        }
 
         html += '</div>';
+        } else if (!searchText.trim()) {
+          // 検索テキストがない場合のみ「有効な処方なし」を表示
+          const prescriptionCat = CATEGORIES.prescription;
+          html += `<div class="prescription-section" style="background: ${prescriptionCat.bgColor}; border-left-color: ${prescriptionCat.color};"><div class="section-title">◆ ${dateLabel} の処方</div>`;
+          html += '<div class="empty-message">有効な処方なし</div>';
+          html += '</div>';
+        }
+        // 検索テキストがあってマッチしない場合はセクション自体を非表示
       }
 
       prescriptionOrderContent.innerHTML = html;
@@ -7009,6 +7220,9 @@
         }
         if (inspectionFindingsModalState) {
           showInspectionFindingsModal();
+        }
+        if (profileModalState) {
+          showProfileModal();
         }
 
         // 前後の患者をプリフェッチ（非同期・待たない）
