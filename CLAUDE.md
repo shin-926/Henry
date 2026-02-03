@@ -423,7 +423,7 @@ chrome-devtools-mcpでリアルタイム調査。静的リファレンスは廃�
 
 ### 調査メモ・実装詳細
 
-`NOTES.md` - 調査結果、API仕様メモ、実装詳細など。保留タスクの詳細情報もここに記載。
+`NOTES.md` - 調査結果、API仕様メモ、実装詳細など。
 
 ### chrome-devtools-mcp（ブラウザ連携）
 
