@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry Patient Timeline
 // @namespace    https://github.com/shin-926/Henry
-// @version      2.130.0
+// @version      2.131.0
 // @description  入院患者の各種記録・オーダーをガントチャート風タイムラインで表示
 // @author       sk powered by Claude
 // @match        https://henry-app.jp/*
@@ -430,6 +430,78 @@
     if (!searchText || !searchText.trim()) return escapeHtml(text);
     const regex = new RegExp(`(${escapeRegExp(searchText)})`, 'gi');
     return escapeHtml(text).replace(regex, '<mark style="background: #ffeb3b; padding: 0 2px;">$1</mark>');
+  }
+
+  // GraphQLから取得したプロフィールテキストを整形
+  function formatGraphQLProfile(text) {
+    let displayText = text;
+    // 「患者プロフィール」行を削除
+    displayText = displayText.split('\n')
+      .filter(line => !line.includes('患者プロフィール'))
+      .join('\n');
+    // 【延命治療】以降を削除
+    const cutoffIndex = displayText.indexOf('【延命治療】');
+    if (cutoffIndex !== -1) {
+      displayText = displayText.substring(0, cutoffIndex).trim();
+    }
+    // 【既往歴】の前に空行を挿入
+    displayText = displayText.replace(/【既往歴】/g, '\n【既往歴】');
+    return displayText;
+  }
+
+  // オーダーから薬剤名リストを抽出
+  function extractMedicineNamesFromOrder(order) {
+    const medicines = [];
+    (order.rps || []).forEach(rp => {
+      (rp.instructions || []).forEach(inst => {
+        const med = inst.instruction?.medicationDosageInstruction;
+        const name = med?.localMedicine?.name || med?.mhlwMedicine?.name;
+        if (name) medicines.push(cleanMedicineName(name));
+      });
+    });
+    return medicines;
+  }
+
+  // 記録カードのHTML生成
+  function renderRecordCard(item, searchText, myUuid) {
+    const cat = CATEGORIES[item.category];
+    // mealカテゴリは時刻を非表示（食事データには時刻情報がないため）
+    // vitalカテゴリは時刻を非表示（テーブル内の各行に時刻があるため冗長）
+    // urineカテゴリは時刻を非表示（尿量データには時刻情報がないため）
+    // bloodSugarカテゴリは時刻を非表示（日付ベースのデータのため）
+    const time = (item.category === 'meal' || item.category === 'vital' || item.category === 'urine' || item.category === 'bloodSugar') ? '' :
+      (item.date ? `${item.date.getHours()}:${String(item.date.getMinutes()).padStart(2, '0')}` : '-');
+
+    // SOAP形式を整形（＜SOAP＞ラベル削除、S)等の直後の改行削除）
+    const formatSOAP = (text) => text
+      .replace(/＜SOAP＞\n?/g, '')
+      .replace(/([SOAP]\))\n/g, '$1');
+
+    // vital/urine/bloodSugarはハイライト用HTMLを含むためエスケープしない
+    const textHtml = (item.category === 'vital' || item.category === 'urine' || item.category === 'bloodSugar')
+      ? item.text.replace(/\n/g, '<br>')
+      : highlightText(formatSOAP(item.text), searchText).replace(/\n/g, '<br>');
+
+    // 医師記録かつ自分が作成したものに編集ボタンを表示
+    const canEdit = item.category === 'doctor' && item.creatorUuid && myUuid && item.creatorUuid === myUuid;
+    const editButton = canEdit
+      ? `<button class="edit-record-btn" data-record-id="${item.id}">編集</button>`
+      : '';
+
+    // 全カテゴリでバッジ非表示（カードの背景色・左ボーダーで区別可能）
+    const categoryBadge = '';
+
+    return `
+      <div class="record-card" style="background: ${cat.bgColor}; border-left-color: ${cat.color};" data-record-id="${item.id || ''}">
+        <div class="record-card-header">
+          <span class="record-card-time">${time}</span>
+          <span class="record-card-author">${escapeHtml(item.author.replace(/\u3000/g, ' '))}</span>
+          ${editButton}
+          ${categoryBadge}
+        </div>
+        <div class="record-card-text">${textHtml}</div>
+      </div>
+    `;
   }
 
   // 入院情報取得クエリ
@@ -4959,19 +5031,6 @@
       }
     }
 
-    // 処方/注射オーダーから薬品名を抽出
-    function extractMedicineNamesFromOrder(order) {
-      const medicines = [];
-      (order.rps || []).forEach(rp => {
-        (rp.instructions || []).forEach(inst => {
-          const med = inst.instruction?.medicationDosageInstruction;
-          const name = med?.localMedicine?.name || med?.mhlwMedicine?.name;
-          if (name) medicines.push(cleanMedicineName(name));
-        });
-      });
-      return medicines;
-    }
-
     // オーダーの有効期間をマッチ日付に追加
     function addOrderDateRangeToMatches(order) {
       if (!order.createTime?.seconds) return;
@@ -5099,12 +5158,12 @@
 
       // 記録カラム描画
       recordContent.innerHTML = records.length > 0
-        ? records.map(item => renderRecordCard(item)).join('')
+        ? records.map(item => renderRecordCard(item, state.filter.searchText, state.myUuid)).join('')
         : '<div class="no-records">この日の記録はありません</div>';
 
       // データカラム描画（バイタル+食事摂取）
       vitalContent.innerHTML = dataItems.length > 0
-        ? dataItems.map(item => renderRecordCard(item)).join('')
+        ? dataItems.map(item => renderRecordCard(item, state.filter.searchText, state.myUuid)).join('')
         : '<div class="no-records">この日のデータはありません</div>';
 
       // バイタルカードにクリックイベント追加（グラフ表示）
@@ -5145,48 +5204,6 @@
 
       // 処方・注射カラム描画
       renderPrescriptionOrderColumn(state.timeline.selectedDate);
-    }
-
-    // 記録カードを描画
-    function renderRecordCard(item) {
-      const cat = CATEGORIES[item.category];
-      // mealカテゴリは時刻を非表示（食事データには時刻情報がないため）
-      // vitalカテゴリは時刻を非表示（テーブル内の各行に時刻があるため冗長）
-      // urineカテゴリは時刻を非表示（尿量データには時刻情報がないため）
-      // bloodSugarカテゴリは時刻を非表示（日付ベースのデータのため）
-      const time = (item.category === 'meal' || item.category === 'vital' || item.category === 'urine' || item.category === 'bloodSugar') ? '' :
-        (item.date ? `${item.date.getHours()}:${String(item.date.getMinutes()).padStart(2, '0')}` : '-');
-
-      // SOAP形式を整形（＜SOAP＞ラベル削除、S)等の直後の改行削除）
-      const formatSOAP = (text) => text
-        .replace(/＜SOAP＞\n?/g, '')
-        .replace(/([SOAP]\))\n/g, '$1');
-
-      // vital/urine/bloodSugarはハイライト用HTMLを含むためエスケープしない
-      const textHtml = (item.category === 'vital' || item.category === 'urine' || item.category === 'bloodSugar')
-        ? item.text.replace(/\n/g, '<br>')
-        : highlightText(formatSOAP(item.text), state.filter.searchText).replace(/\n/g, '<br>');
-
-      // 医師記録かつ自分が作成したものに編集ボタンを表示
-      const canEdit = item.category === 'doctor' && item.creatorUuid && state.myUuid && item.creatorUuid === state.myUuid;
-      const editButton = canEdit
-        ? `<button class="edit-record-btn" data-record-id="${item.id}">編集</button>`
-        : '';
-
-      // 全カテゴリでバッジ非表示（カードの背景色・左ボーダーで区別可能）
-      const categoryBadge = '';
-
-      return `
-        <div class="record-card" style="background: ${cat.bgColor}; border-left-color: ${cat.color};" data-record-id="${item.id || ''}">
-          <div class="record-card-header">
-            <span class="record-card-time">${time}</span>
-            <span class="record-card-author">${escapeHtml(item.author.replace(/\u3000/g, ' '))}</span>
-            ${editButton}
-            ${categoryBadge}
-          </div>
-          <div class="record-card-text">${textHtml}</div>
-        </div>
-      `;
     }
 
     // =========================================================================
@@ -5964,23 +5981,6 @@
           summaryTextarea.value = '';
         });
       }
-    }
-
-    // GraphQL APIからのプロフィールを整形
-    function formatGraphQLProfile(text) {
-      let displayText = text;
-      // 「患者プロフィール」行を削除
-      displayText = displayText.split('\n')
-        .filter(line => !line.includes('患者プロフィール'))
-        .join('\n');
-      // 【延命治療】以降を削除
-      const cutoffIndex = displayText.indexOf('【延命治療】');
-      if (cutoffIndex !== -1) {
-        displayText = displayText.substring(0, cutoffIndex).trim();
-      }
-      // 【既往歴】の前に空行を挿入
-      displayText = displayText.replace(/【既往歴】/g, '\n【既往歴】');
-      return displayText;
     }
 
     // 固定情報カラム（右端サイドパネル）を描画
