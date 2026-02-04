@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry 入院前オーダー
 // @namespace    https://github.com/shin-926/Henry
-// @version      0.2.0
+// @version      0.3.0
 // @description  入院予定患者に対して入院前オーダー（CT検査等）を一括作成
 // @author       sk powered by Claude
 // @match        https://henry-app.jp/*
@@ -22,12 +22,12 @@
  * - 入院予定患者（7日以内）一覧から選択
  * - CTテンプレートを選択してオーダー作成
  *
- * ■ Phase 1（現在）
- * - CT検査オーダーのみ対応
+ * ■ 対応オーダー
+ * - CT検査（入院時CT）
+ * - 生体検査（ECG + 血管伸展性）
  *
  * ■ 将来対応予定
  * - 血液検査
- * - 心電図
  */
 
 (function() {
@@ -37,15 +37,65 @@
   const VERSION = GM_info.script.version;
 
   // ===========================================
-  // CTテンプレート定義
+  // オーダーテンプレート定義
   // ===========================================
+
+  // CTテンプレート
   const CT_TEMPLATES = {
     'admission-ct': {
       name: '入院時CT（頭部〜骨盤）',
       description: '頭部・胸腹部骨盤腔の造影CT',
-      bodySite: '胸部',  // ListLocalBodySitesから取得するUUIDに対応する部位名
+      bodySite: '胸部',
       note: '頭部、胸腹部、脊椎'
     }
+  };
+
+  // 生体検査テンプレート
+  const BIOPSY_TEMPLATES = {
+    'ecg-abi': {
+      name: 'ECG + 血管伸展性',
+      description: '心電図12誘導 + ABI/PWV',
+      biopsyInspectionUuid: 'ae76defa-d9d2-4ff6-bf5e-88cf33b707bf',
+      note: '動脈硬化検査付きECG',
+      diagnoses: [
+        {
+          code: '160068410',
+          name: 'ＥＣＧ１２',
+          unitCode: 0,
+          isStepValueRequiredForCalculation: false,
+          minStepValue: 0,
+          maxStepValue: 99999999,
+          stepValue: 0,
+          isSpecimenComment: false,
+          isSpecimenInspection: false,
+          applicableConsultationTypeCodes: ['60'],
+          isDiminishing: { value: true },
+          point: { value: 13000 },
+          pointType: { value: 3 }
+        },
+        {
+          code: '160071750',
+          name: '血管伸展性',
+          unitCode: 0,
+          isStepValueRequiredForCalculation: false,
+          minStepValue: 0,
+          maxStepValue: 99999999,
+          stepValue: 0,
+          isSpecimenComment: false,
+          isSpecimenInspection: false,
+          applicableConsultationTypeCodes: ['60'],
+          isDiminishing: { value: true },
+          point: { value: 10000 },
+          pointType: { value: 3 }
+        }
+      ]
+    }
+  };
+
+  // 全テンプレート（UI表示用）
+  const ALL_TEMPLATES = {
+    ct: { label: 'CT検査', templates: CT_TEMPLATES },
+    biopsy: { label: '生体検査', templates: BIOPSY_TEMPLATES }
   };
 
   // ===========================================
@@ -345,6 +395,84 @@
     }
   }
 
+  /**
+   * 生体検査オーダーを作成
+   */
+  async function createBiopsyInspectionOrder(orderData) {
+    const core = window.HenryCore;
+    if (!core) {
+      throw new Error('HenryCore が見つかりません');
+    }
+
+    const { patientUuid, doctorUuid, templateKey, orderDate } = orderData;
+
+    // テンプレート取得
+    const template = BIOPSY_TEMPLATES[templateKey];
+    if (!template) {
+      throw new Error(`テンプレート「${templateKey}」が見つかりません`);
+    }
+
+    // consultationDiagnosesを構築
+    const consultationDiagnoses = template.diagnoses.map(diag => ({
+      uuid: generateUuid(),
+      orderType: 'EXAMINATION',
+      paramValue: null,
+      isCalculatable: true,
+      masterDiagnosis: diag,
+      comments: [],
+      bodyPartComments: [],
+      specimenDiagnosis: null,
+      isFeeForService: false
+    }));
+
+    const noteText = escapeGraphQLString(template.note || template.name);
+
+    // インライン方式でmutationを構築
+    const consultationDiagnosesJson = JSON.stringify(consultationDiagnoses)
+      .replace(/"/g, '\\"');
+
+    const mutation = `
+      mutation CreateBiopsyInspectionOrder {
+        createBiopsyInspectionOrder(input: {
+          uuid: ""
+          patientUuid: "${patientUuid}"
+          doctorUuid: "${doctorUuid}"
+          inspectionDate: { year: ${orderDate.year}, month: ${orderDate.month}, day: ${orderDate.day} }
+          biopsyInspectionOrderBiopsyInspections: [{
+            uuid: ""
+            biopsyInspectionUuid: "${template.biopsyInspectionUuid}"
+            consultationDiagnoses: ${JSON.stringify(consultationDiagnoses)}
+            consultationEquipments: []
+            consultationMedicines: []
+            consultationOutsideInspections: []
+            urgency: false
+            note: ""
+          }]
+          note: "${noteText}"
+          revokeDescription: ""
+          encounterId: null
+          saveAsDraft: false
+          extendedInsuranceCombinationId: null
+          isDeleted: false
+        }) {
+          uuid
+          orderStatus
+        }
+      }
+    `;
+
+    console.log(`[${SCRIPT_NAME}] CreateBiopsyInspectionOrder 実行...`);
+    const result = await core.query(mutation);
+
+    if (result.data?.createBiopsyInspectionOrder?.uuid) {
+      console.log(`[${SCRIPT_NAME}] 生体検査オーダー作成成功: ${result.data.createBiopsyInspectionOrder.uuid}`);
+      return result.data.createBiopsyInspectionOrder;
+    } else {
+      console.error(`[${SCRIPT_NAME}] 生体検査オーダー作成失敗:`, result);
+      throw new Error('生体検査オーダー作成に失敗しました');
+    }
+  }
+
   // ===========================================
   // ユーティリティ関数
   // ===========================================
@@ -587,6 +715,29 @@
     `;
     content.appendChild(patientInfo);
 
+    // オーダー種別選択
+    const orderTypeLabel = document.createElement('label');
+    orderTypeLabel.style.cssText = 'display: block; font-size: 13px; font-weight: 500; color: #374151; margin-bottom: 4px;';
+    orderTypeLabel.textContent = 'オーダー種別';
+    content.appendChild(orderTypeLabel);
+
+    const orderTypeSelect = document.createElement('select');
+    orderTypeSelect.style.cssText = `
+      width: 100%;
+      padding: 10px 12px;
+      border: 1px solid #d1d5db;
+      border-radius: 6px;
+      font-size: 14px;
+      margin-bottom: 12px;
+    `;
+    for (const [typeKey, typeData] of Object.entries(ALL_TEMPLATES)) {
+      const option = document.createElement('option');
+      option.value = typeKey;
+      option.textContent = typeData.label;
+      orderTypeSelect.appendChild(option);
+    }
+    content.appendChild(orderTypeSelect);
+
     // テンプレート選択
     const templateLabel = document.createElement('label');
     templateLabel.style.cssText = 'display: block; font-size: 13px; font-weight: 500; color: #374151; margin-bottom: 4px;';
@@ -602,12 +753,22 @@
       font-size: 14px;
       margin-bottom: 16px;
     `;
-    for (const [key, template] of Object.entries(CT_TEMPLATES)) {
-      const option = document.createElement('option');
-      option.value = key;
-      option.textContent = template.name;
-      templateSelect.appendChild(option);
+
+    // テンプレート選択肢を更新する関数
+    function updateTemplateOptions() {
+      const selectedType = orderTypeSelect.value;
+      const templates = ALL_TEMPLATES[selectedType]?.templates || {};
+      templateSelect.innerHTML = '';
+      for (const [key, template] of Object.entries(templates)) {
+        const option = document.createElement('option');
+        option.value = key;
+        option.textContent = template.name;
+        templateSelect.appendChild(option);
+      }
     }
+
+    updateTemplateOptions();
+    orderTypeSelect.addEventListener('change', updateTemplateOptions);
     content.appendChild(templateSelect);
 
     // オーダー日選択
@@ -689,10 +850,11 @@
               return;
             }
 
+            const selectedOrderType = orderTypeSelect.value;
             const selectedTemplate = templateSelect.value;
 
             modal.close();
-            showConfirmModal(patientData, selectedTemplate, orderDate);
+            showConfirmModal(patientData, selectedOrderType, selectedTemplate, orderDate);
           }
         }
       ]
@@ -702,10 +864,11 @@
   /**
    * 確認モーダルを表示
    */
-  function showConfirmModal(patientData, templateKey, orderDate) {
+  function showConfirmModal(patientData, orderType, templateKey, orderDate) {
     const core = window.HenryCore;
 
-    const template = CT_TEMPLATES[templateKey];
+    const typeData = ALL_TEMPLATES[orderType];
+    const template = typeData?.templates[templateKey];
     const patientName = patientData.patient?.fullName || '不明';
     const orderDateStr = `${orderDate.year}/${orderDate.month}/${orderDate.day}`;
 
@@ -714,7 +877,8 @@
       <p style="margin: 0 0 16px 0; color: #333;">以下の内容でオーダーを作成します。</p>
       <div style="padding: 12px; background: #f5f5f5; border-radius: 6px; font-size: 14px; color: #333;">
         <div><strong>患者:</strong> ${patientName}</div>
-        <div style="margin-top: 4px;"><strong>テンプレート:</strong> ${template.name}</div>
+        <div style="margin-top: 4px;"><strong>種別:</strong> ${typeData?.label || orderType}</div>
+        <div style="margin-top: 4px;"><strong>テンプレート:</strong> ${template?.name || templateKey}</div>
         <div style="margin-top: 4px;"><strong>オーダー日:</strong> ${orderDateStr}</div>
       </div>
     `;
@@ -733,13 +897,22 @@
             const spinner = core.ui.showSpinner('オーダーを作成中...');
 
             try {
-              await createImagingOrder({
+              const orderData = {
                 patientUuid: patientData.patient?.uuid,
                 hospitalizationUuid: patientData.uuid,
                 templateKey: templateKey,
                 orderDate: orderDate,
                 doctorUuid: patientData.hospitalizationDoctor?.doctor?.uuid
-              });
+              };
+
+              // オーダー種別に応じて適切な関数を呼び出し
+              if (orderType === 'ct') {
+                await createImagingOrder(orderData);
+              } else if (orderType === 'biopsy') {
+                await createBiopsyInspectionOrder(orderData);
+              } else {
+                throw new Error(`不明なオーダー種別: ${orderType}`);
+              }
 
               spinner.close();
               modal.close();
