@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry Patient Timeline
 // @namespace    https://github.com/shin-926/Henry
-// @version      2.134.1
+// @version      2.134.3
 // @description  入院患者の各種記録・オーダーをガントチャート風タイムラインで表示
 // @author       sk powered by Claude
 // @match        https://henry-app.jp/*
@@ -69,9 +69,6 @@
   // 組織UUID
   // ※マオカ病院専用スクリプトのためハードコード（他病院展開予定なし）
   const ORG_UUID = 'ce6b556b-2a8d-4fce-b8dd-89ba638fc825';
-
-  // 入院病名キャッシュ（patientUuid → 主病名文字列）
-  const diseaseCache = new Map();
 
   // 担当医ごとの色パレット
   const DOCTOR_COLORS = [
@@ -153,7 +150,7 @@
     // editorDataはJSON文字列なので、GraphQL用にエスケープ
     const escapedEditorData = editorData.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\n/g, '\\n');
     return `
-      mutation {
+      mutation CreateClinicalDocument {
         createClinicalDocument(input: {
           uuid: "",
           patientUuid: "${patientUuid}",
@@ -176,7 +173,7 @@
   function buildUpdateClinicalDocumentMutation(docUuid, patientUuid, editorData, performTimeSeconds, hospitalizationUuid) {
     const escapedEditorData = editorData.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\n/g, '\\n');
     return `
-      mutation {
+      mutation UpdateClinicalDocument {
         updateClinicalDocument(input: {
           clinicalDocument: {
             uuid: "${docUuid}",
@@ -698,44 +695,6 @@
       console.error(`[${SCRIPT_NAME}] 入院情報取得エラー:`, e);
       return [];
     }
-  }
-
-  // 入院病名を一括取得してキャッシュに格納
-  async function prefetchHospitalizationDiseases(patientUuids) {
-    if (!patientUuids || patientUuids.length === 0) return;
-
-    const QUERY = `query ListPatientReceiptDiseases($input: ListPatientReceiptDiseasesRequestInput!) {
-      listPatientReceiptDiseases(input: $input) {
-        patientReceiptDiseases { patientUuid isMain masterDisease { name } masterModifiers { name position } }
-      }
-    }`;
-    try {
-      const result = await window.HenryCore.query(QUERY, {
-        input: { patientUuids, patientCareType: 'PATIENT_CARE_TYPE_INPATIENT' }
-      });
-      const diseases = result?.data?.listPatientReceiptDiseases?.patientReceiptDiseases || [];
-
-      // 患者ごとに主病名をキャッシュ
-      for (const disease of diseases) {
-        if (disease.isMain && disease.patientUuid) {
-          const baseName = disease.masterDisease?.name || '';
-          const modifiers = disease.masterModifiers || [];
-          const prefixes = modifiers.filter(m => m.position === 'PREFIX').map(m => m.name).join('');
-          const suffixes = modifiers.filter(m => m.position === 'SUFFIX').map(m => m.name).join('');
-          const fullName = prefixes + baseName + suffixes;
-          if (fullName) {
-            diseaseCache.set(disease.patientUuid, fullName);
-          }
-        }
-      }
-    } catch (e) {
-      console.error(`[${SCRIPT_NAME}] 入院病名プリフェッチエラー:`, e);
-    }
-  }
-
-  // キャッシュから入院病名を取得
-  function getCachedDisease(patientUuid) {
-    return diseaseCache.get(patientUuid) || null;
   }
 
   // 医師記録取得
@@ -4636,12 +4595,6 @@
       modalTitle.textContent = titleBase;
       hospInfo.textContent = '読み込み中...';
 
-      // 入院病名をキャッシュから取得してタイトルに追加
-      const cachedDisease = getCachedDisease(patient.uuid);
-      if (cachedDisease) {
-        modalTitle.textContent = `${titleBase} - ${cachedDisease}`;
-      }
-
       // 患者選択画面の検索ボックスをクリアし、ヘッダーに検索ボックスを表示
       controlsArea.innerHTML = '';
       controlsArea.style.display = 'none';
@@ -7408,12 +7361,6 @@
 
         renderPatientList();
         renderDoctorLegend();
-
-        // 入院病名をバックグラウンドでプリフェッチ（UIをブロックしない）
-        const patientUuids = state.patient.all.map(p => p.patient?.uuid).filter(Boolean);
-        prefetchHospitalizationDiseases(patientUuids).then(() => {
-          DEBUG && console.log(`[${SCRIPT_NAME}] 入院病名プリフェッチ完了: ${diseaseCache.size}件`);
-        });
       } catch (e) {
         console.error(`[${SCRIPT_NAME}] 患者一覧取得エラー:`, e);
         state.ui.isLoading = false;
