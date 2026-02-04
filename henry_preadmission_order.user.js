@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry 入院前オーダー
 // @namespace    https://github.com/shin-926/Henry
-// @version      0.1.0
+// @version      0.2.0
 // @description  入院予定患者に対して入院前オーダー（CT検査等）を一括作成
 // @author       sk powered by Claude
 // @match        https://henry-app.jp/*
@@ -39,18 +39,31 @@
   // ===========================================
   // CTテンプレート定義
   // ===========================================
-  // TODO: DevToolsでCTオーダー作成時のmutationをキャプチャして構造を確定
   const CT_TEMPLATES = {
     'admission-ct': {
       name: '入院時CT（頭部〜骨盤）',
       description: '頭部・胸腹部骨盤腔の造影CT',
-      // mutation用のフィールドはAPI調査後に追加
+      bodySite: '胸部',  // ListLocalBodySitesから取得するUUIDに対応する部位名
+      note: '頭部、胸腹部、脊椎'
     }
   };
 
   // ===========================================
   // GraphQL クエリ
   // ===========================================
+
+  // 部位一覧取得
+  const LIST_BODY_SITES_QUERY = `
+    query ListLocalBodySites {
+      listLocalBodySites(input: { query: "" }) {
+        bodySites {
+          uuid
+          name
+          lateralityRequirement
+        }
+      }
+    }
+  `;
 
   // 入院予定患者取得（ListPatientsV2 + hospitalizationFilter.states: ['SCHEDULED']）
   const LIST_SCHEDULED_PATIENTS_QUERY = `
@@ -195,9 +208,67 @@
     return allScheduled;
   }
 
+  // ===========================================
+  // 状態管理
+  // ===========================================
+  let bodySitesCache = null;
+
+  // ===========================================
+  // API補助関数
+  // ===========================================
+
+  /**
+   * 部位一覧を取得（キャッシュ付き）
+   */
+  async function fetchBodySites() {
+    if (bodySitesCache) return bodySitesCache;
+
+    const core = window.HenryCore;
+    try {
+      const result = await core.query(LIST_BODY_SITES_QUERY);
+      bodySitesCache = result.data?.listLocalBodySites?.bodySites || [];
+      console.log(`[${SCRIPT_NAME}] 部位一覧取得: ${bodySitesCache.length}件`);
+      return bodySitesCache;
+    } catch (e) {
+      console.error(`[${SCRIPT_NAME}] 部位一覧取得失敗:`, e?.message || e);
+      return [];
+    }
+  }
+
+  /**
+   * 部位名からUUIDを検索
+   */
+  function findBodySiteUuid(bodySiteName, bodySites) {
+    const site = bodySites.find(s => s.name === bodySiteName);
+    return site?.uuid || null;
+  }
+
+  /**
+   * UUID生成
+   */
+  function generateUuid() {
+    return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
+      const r = Math.random() * 16 | 0;
+      const v = c === 'x' ? r : (r & 0x3 | 0x8);
+      return v.toString(16);
+    });
+  }
+
+  /**
+   * GraphQL文字列エスケープ
+   */
+  function escapeGraphQLString(str) {
+    if (!str) return '';
+    return str
+      .replace(/\\/g, '\\\\')
+      .replace(/"/g, '\\"')
+      .replace(/\n/g, '\\n')
+      .replace(/\r/g, '\\r')
+      .replace(/\t/g, '\\t');
+  }
+
   /**
    * CTオーダーを作成
-   * TODO: DevToolsでmutation構造をキャプチャして実装
    */
   async function createImagingOrder(orderData) {
     const core = window.HenryCore;
@@ -205,10 +276,73 @@
       throw new Error('HenryCore が見つかりません');
     }
 
-    // TODO: mutation実装
-    // 参考: henry_rehab_order.user.js の createRehabOrder
-    console.log(`[${SCRIPT_NAME}] CTオーダー作成（未実装）:`, orderData);
-    throw new Error('CTオーダー作成はまだ実装されていません。DevToolsでAPIをキャプチャしてください。');
+    const { patientUuid, doctorUuid, templateKey, orderDate } = orderData;
+
+    // テンプレート取得
+    const template = CT_TEMPLATES[templateKey];
+    if (!template) {
+      throw new Error(`テンプレート「${templateKey}」が見つかりません`);
+    }
+
+    // 部位UUID取得
+    const bodySites = await fetchBodySites();
+    const bodySiteUuid = findBodySiteUuid(template.bodySite, bodySites);
+    if (!bodySiteUuid) {
+      throw new Error(`部位「${template.bodySite}」が見つかりません`);
+    }
+
+    const seriesUuid = generateUuid();
+    const noteText = escapeGraphQLString(template.note || template.name);
+
+    // インライン方式でmutationを構築
+    const mutation = `
+      mutation CreateImagingOrder {
+        createImagingOrder(input: {
+          uuid: ""
+          patientUuid: "${patientUuid}"
+          doctorUuid: "${doctorUuid}"
+          date: { year: ${orderDate.year}, month: ${orderDate.month}, day: ${orderDate.day} }
+          detail: {
+            uuid: ""
+            imagingModality: IMAGING_MODALITY_CT
+            note: ""
+            condition: {
+              ct: {
+                series: [{
+                  uuid: "${seriesUuid}"
+                  bodySiteUuid: "${bodySiteUuid}"
+                  filmCount: null
+                  configuration: ""
+                  note: "${noteText}"
+                  laterality: LATERALITY_NONE
+                  medicines: []
+                  isAccountingIgnored: false
+                }]
+              }
+            }
+          }
+          sessionUuid: null
+          revokeDescription: ""
+          encounterId: null
+          extendedInsuranceCombinationId: null
+          saveAsDraft: false
+        }) {
+          uuid
+          orderStatus
+        }
+      }
+    `;
+
+    console.log(`[${SCRIPT_NAME}] CreateImagingOrder 実行...`);
+    const result = await core.query(mutation);
+
+    if (result.data?.createImagingOrder?.uuid) {
+      console.log(`[${SCRIPT_NAME}] オーダー作成成功: ${result.data.createImagingOrder.uuid}`);
+      return result.data.createImagingOrder;
+    } else {
+      console.error(`[${SCRIPT_NAME}] オーダー作成失敗:`, result);
+      throw new Error('オーダー作成に失敗しました');
+    }
   }
 
   // ===========================================
