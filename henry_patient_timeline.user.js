@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry Patient Timeline
 // @namespace    https://github.com/shin-926/Henry
-// @version      2.134.3
+// @version      2.134.7
 // @description  入院患者の各種記録・オーダーをガントチャート風タイムラインで表示
 // @author       sk powered by Claude
 // @match        https://henry-app.jp/*
@@ -40,6 +40,10 @@
   const SCRIPT_NAME = 'PatientTimeline';
   const VERSION = GM_info.script.version;
   const DEBUG = false; // 本番時はfalse
+
+  // 仮想スクロール設定
+  const DATE_ITEM_HEIGHT = 36;  // 日付アイテムの高さ(px)
+  const DATE_LIST_BUFFER = 5;   // 上下に余分に描画するアイテム数
 
   // カテゴリ定義
   const CATEGORIES = {
@@ -479,21 +483,18 @@
       ? item.text.replace(/\n/g, '<br>')
       : highlightText(formatSOAP(item.text), searchText).replace(/\n/g, '<br>');
 
-    // 医師記録かつ自分が作成したものに編集ボタンを表示
+    // 医師記録かつ自分が作成したものは編集可能（カードクリックで編集）
     const canEdit = item.category === 'doctor' && item.creatorUuid && myUuid && item.creatorUuid === myUuid;
-    const editButton = canEdit
-      ? `<button class="edit-record-btn" data-record-id="${item.id}">編集</button>`
-      : '';
+    const editableClass = canEdit ? 'editable' : '';
 
     // 全カテゴリでバッジ非表示（カードの背景色・左ボーダーで区別可能）
     const categoryBadge = '';
 
     return `
-      <div class="record-card" style="background: ${cat.bgColor}; border-left-color: ${cat.color};" data-record-id="${item.id || ''}">
+      <div class="record-card ${editableClass}" style="background: ${cat.bgColor}; border-left-color: ${cat.color};" data-record-id="${item.id || ''}">
         <div class="record-card-header">
           <span class="record-card-time">${time}</span>
           <span class="record-card-author">${escapeHtml(item.author.replace(/\u3000/g, ' '))}</span>
-          ${editButton}
           ${categoryBadge}
         </div>
         <div class="record-card-text">${textHtml}</div>
@@ -3454,11 +3455,20 @@
       overflow: hidden;
     }
     #patient-timeline-modal .date-list {
-      width: 90px;
+      width: 100px;
       border-right: 1px solid #e0e0e0;
       overflow-y: auto;
       background: #fafafa;
       flex-shrink: 0;
+      position: relative;
+    }
+    #patient-timeline-modal .date-list-spacer {
+      width: 100%;
+    }
+    #patient-timeline-modal .date-list-content {
+      position: absolute;
+      left: 0;
+      right: 0;
     }
     #patient-timeline-modal .date-item {
       position: relative;
@@ -3467,6 +3477,8 @@
       cursor: pointer !important;
       border-bottom: 1px solid #eee;
       transition: background 0.15s;
+      box-sizing: border-box;
+      height: 36px;
     }
     #patient-timeline-modal .date-item.has-match::before {
       content: '';
@@ -3597,19 +3609,12 @@
     #patient-timeline-modal .add-record-btn:hover {
       background: #388E3C;
     }
-    #patient-timeline-modal .edit-record-btn {
-      background: transparent;
-      border: none;
-      padding: 2px 6px;
-      font-size: 11px;
-      color: #666;
+    #patient-timeline-modal .record-card.editable {
       cursor: pointer !important;
-      opacity: 0.7;
-      transition: opacity 0.2s, color 0.2s;
+      transition: box-shadow 0.2s;
     }
-    #patient-timeline-modal .edit-record-btn:hover {
-      opacity: 1;
-      color: #1976D2;
+    #patient-timeline-modal .record-card.editable:hover {
+      box-shadow: 0 2px 8px rgba(0,0,0,0.15);
     }
     #patient-timeline-modal .column-content {
       flex: 1;
@@ -4010,6 +4015,9 @@
         filtered: [],         // フィルタ後の項目
         selectedDate: null,   // 選択中の日付キー
         matchingDates: new Set(),  // 検索マッチする日付
+        // 仮想スクロール用
+        dates: [],            // 全日付リスト
+        itemsByDate: new Map(), // 日付→アイテムのマッピング
       },
 
       // フィルター
@@ -4024,6 +4032,11 @@
       orders: {
         prescriptions: [],
         injections: [],
+        // 日付ごとのフィルタ結果キャッシュ
+        cache: {
+          injectionsByDate: new Map(),  // dateKey -> filteredInjections
+          prescriptionsByDate: new Map(), // dateKey -> filteredPrescriptions
+        },
       },
 
       // 記録（モーダル表示用）
@@ -4351,12 +4364,13 @@
     addRecordBtn.addEventListener('click', handleAddRecordClick);
     cleaner.add(() => addRecordBtn.removeEventListener('click', handleAddRecordClick));
 
-    // 編集ボタンのクリックイベント（イベントデリゲーション）
+    // 編集可能カードのクリックイベント（イベントデリゲーション）
     const handleRecordContentClick = (e) => {
-      const editBtn = e.target.closest('.edit-record-btn');
-      if (!editBtn) return;
+      // 編集可能なカードをクリックしたか確認
+      const card = e.target.closest('.record-card.editable');
+      if (!card) return;
 
-      const recordId = editBtn.dataset.recordId;
+      const recordId = card.dataset.recordId;
       if (!recordId) return;
 
       // state.timeline.itemsから対象の記録を取得
@@ -4439,16 +4453,18 @@
 
     // 日付ナビゲーション（direction: -1=上/新しい方、1=下/古い方）
     function navigateDate(direction) {
-      const dateItems = dateListEl.querySelectorAll('.date-item');
-      const dateKeys = Array.from(dateItems).map(el => el.dataset.dateKey);
-      const currentIndex = dateKeys.indexOf(state.timeline.selectedDate);
+      const dates = state.timeline.dates;
+      if (!dates || dates.length === 0) return;
 
+      const currentIndex = dates.findIndex(d => dateKey(d) === state.timeline.selectedDate);
       if (currentIndex === -1) return;
 
       const newIndex = currentIndex + direction;
-      if (newIndex >= 0 && newIndex < dateKeys.length) {
-        state.timeline.selectedDate = dateKeys[newIndex];
-        renderTimeline();
+      if (newIndex >= 0 && newIndex < dates.length) {
+        state.timeline.selectedDate = dateKey(dates[newIndex]);
+        renderDateListVisible();  // 表示範囲を更新
+        scrollToSelectedDate();   // 選択した日付が見えるようにスクロール
+        renderTimelineContent();  // コンテンツを更新
 
         // グラフモーダルが開いていれば更新（選択中の日数を維持）
         if (state.modals.vitalGraph) {
@@ -4902,7 +4918,7 @@
 
             for (const item of patients) {
               const p = item.patient;
-              const days = item.hospitalizationDayCount?.value || 0;
+              const days = (item.hospitalizationDayCount?.value ?? -1) + 1;
               const doctorUuid = item.hospitalizationDoctor?.doctor?.uuid;
               const doctorName = item.hospitalizationDoctor?.doctor?.name || '担当医不明';
               const color = state.filter.doctorColorMap.get(doctorUuid) || { bg: '#f5f5f5', border: '#bdbdbd' };
@@ -5015,8 +5031,62 @@
       });
     }
 
+    // 日付リストの表示範囲を描画（仮想スクロール）
+    function renderDateListVisible() {
+      const dates = state.timeline.dates;
+      if (!dates || dates.length === 0) return;
+
+      const contentEl = dateListEl.querySelector('.date-list-content');
+      if (!contentEl) return;
+
+      const scrollTop = dateListEl.scrollTop;
+      const viewportHeight = dateListEl.clientHeight;
+
+      // 表示範囲を計算
+      const startIndex = Math.max(0, Math.floor(scrollTop / DATE_ITEM_HEIGHT) - DATE_LIST_BUFFER);
+      const endIndex = Math.min(dates.length, Math.ceil((scrollTop + viewportHeight) / DATE_ITEM_HEIGHT) + DATE_LIST_BUFFER);
+
+      // 表示範囲の日付をレンダリング
+      let html = '';
+      for (let i = startIndex; i < endIndex; i++) {
+        const date = dates[i];
+        const key = dateKey(date);
+        const isWeekend = date.getDay() === 0;
+        const isSelected = key === state.timeline.selectedDate;
+        const hasMatch = state.timeline.matchingDates.has(key);
+        html += `
+          <div class="date-item ${isSelected ? 'selected' : ''} ${isWeekend ? 'weekend' : ''} ${hasMatch ? 'has-match' : ''}" data-date-key="${key}" data-index="${i}">
+            ${formatShortDate(date)}
+          </div>
+        `;
+      }
+
+      contentEl.style.top = `${startIndex * DATE_ITEM_HEIGHT}px`;
+      contentEl.innerHTML = html;
+    }
+
+    // 選択した日付が見えるようにスクロール
+    function scrollToSelectedDate() {
+      const dates = state.timeline.dates;
+      if (!dates || dates.length === 0) return;
+
+      const selectedIndex = dates.findIndex(d => dateKey(d) === state.timeline.selectedDate);
+      if (selectedIndex === -1) return;
+
+      const targetScrollTop = selectedIndex * DATE_ITEM_HEIGHT;
+      const viewportHeight = dateListEl.clientHeight;
+      const currentScrollTop = dateListEl.scrollTop;
+
+      // 選択した日付が見えていなければスクロール
+      if (targetScrollTop < currentScrollTop || targetScrollTop > currentScrollTop + viewportHeight - DATE_ITEM_HEIGHT) {
+        dateListEl.scrollTop = Math.max(0, targetScrollTop - viewportHeight / 2 + DATE_ITEM_HEIGHT / 2);
+      }
+    }
+
     // タイムライン描画
-    function renderTimeline() {
+    // fullRender=true: 日付リストも再描画（検索、カテゴリ変更、患者切替時）
+    // fullRender=false: 日付選択の更新とコンテンツのみ（日付クリック時）
+    function renderTimeline(fullRender = true) {
       // スクロール位置をリセット（患者/日付変更時に前の状態が残らないように）
       if (recordContent) recordContent.scrollTop = 0;
       if (vitalContent) vitalContent.scrollTop = 0;
@@ -5039,61 +5109,84 @@
         return;
       }
 
-      // 入院開始日から今日までの日付リスト
-      const startDate = new Date(
-        state.hospitalization.current.startDate.year,
-        state.hospitalization.current.startDate.month - 1,
-        state.hospitalization.current.startDate.day
-      );
-      const endDate = state.hospitalization.current.endDate
-        ? new Date(
-            state.hospitalization.current.endDate.year,
-            state.hospitalization.current.endDate.month - 1,
-            state.hospitalization.current.endDate.day
-          )
-        : new Date();
+      if (fullRender) {
+        // 入院開始日から今日までの日付リスト
+        const startDate = new Date(
+          state.hospitalization.current.startDate.year,
+          state.hospitalization.current.startDate.month - 1,
+          state.hospitalization.current.startDate.day
+        );
+        const endDate = state.hospitalization.current.endDate
+          ? new Date(
+              state.hospitalization.current.endDate.year,
+              state.hospitalization.current.endDate.month - 1,
+              state.hospitalization.current.endDate.day
+            )
+          : new Date();
 
-      const dates = generateDateList(startDate, endDate);
+        state.timeline.dates = generateDateList(startDate, endDate);
 
-      // 日付ごとにアイテムをマッピング
-      const itemsByDate = new Map();
-      for (const item of state.timeline.filtered) {
-        if (!item.date) continue;
-        const key = dateKey(item.date);
-        if (!itemsByDate.has(key)) {
-          itemsByDate.set(key, []);
+        // 日付ごとにアイテムをマッピング
+        state.timeline.itemsByDate = new Map();
+        for (const item of state.timeline.filtered) {
+          if (!item.date) continue;
+          const key = dateKey(item.date);
+          if (!state.timeline.itemsByDate.has(key)) {
+            state.timeline.itemsByDate.set(key, []);
+          }
+          state.timeline.itemsByDate.get(key).push(item);
         }
-        itemsByDate.get(key).push(item);
       }
+
+      const dates = state.timeline.dates;
 
       // デフォルトで最新日を選択
       if (!state.timeline.selectedDate && dates.length > 0) {
         state.timeline.selectedDate = dateKey(dates[0]);
       }
 
-      // 日付リスト描画
-      dateListEl.innerHTML = dates.map(date => {
-        const key = dateKey(date);
-        const isWeekend = date.getDay() === 0;
-        const isSelected = key === state.timeline.selectedDate;
-        const hasMatch = state.timeline.matchingDates.has(key);
-        return `
-          <div class="date-item ${isSelected ? 'selected' : ''} ${isWeekend ? 'weekend' : ''} ${hasMatch ? 'has-match' : ''}" data-date-key="${key}">
-            ${formatShortDate(date)}
-          </div>
+      if (fullRender) {
+        // 仮想スクロール用の構造を作成
+        const totalHeight = dates.length * DATE_ITEM_HEIGHT;
+        dateListEl.innerHTML = `
+          <div class="date-list-spacer" style="height: ${totalHeight}px"></div>
+          <div class="date-list-content"></div>
         `;
-      }).join('');
 
-      // 日付クリックイベント
-      dateListEl.querySelectorAll('.date-item').forEach(el => {
-        el.onclick = () => {
-          state.timeline.selectedDate = el.dataset.dateKey;
-          renderTimeline();
+        // スクロールイベントで表示範囲を更新
+        dateListEl.onscroll = () => renderDateListVisible();
+
+        // 日付クリックイベント（イベントデリゲーション）
+        dateListEl.onclick = (e) => {
+          const dateItem = e.target.closest('.date-item');
+          if (!dateItem) return;
+
+          const newDateKey = dateItem.dataset.dateKey;
+          if (newDateKey === state.timeline.selectedDate) return;
+
+          state.timeline.selectedDate = newDateKey;
+          renderDateListVisible();  // 選択状態を更新
+          renderTimelineContent();  // コンテンツを更新
         };
-      });
 
+        // 初回描画
+        renderDateListVisible();
+
+        // 選択した日付が見えるようにスクロール
+        scrollToSelectedDate();
+      } else {
+        // 日付選択のみ更新
+        renderDateListVisible();
+      }
+
+      // コンテンツ描画
+      renderTimelineContent();
+    }
+
+    // タイムラインコンテンツ描画（記録・バイタル・処方）
+    function renderTimelineContent() {
       // 選択された日付のアイテムを取得
-      const selectedItems = itemsByDate.get(state.timeline.selectedDate) || [];
+      const selectedItems = state.timeline.itemsByDate.get(state.timeline.selectedDate) || [];
 
       // 記録とデータ（バイタル+食事摂取+排泄）に分類
       const records = selectedItems.filter(item => RECORD_CATEGORIES.includes(item.category));
@@ -6915,6 +7008,56 @@
     // レンダリング - 処方・注射
     // =========================================================================
 
+    // 指定日の注射をフィルタ（キャッシュ付き）
+    function getInjectionsForDate(targetDate, targetDateKey) {
+      // キャッシュ確認
+      if (state.orders.cache.injectionsByDate.has(targetDateKey)) {
+        return state.orders.cache.injectionsByDate.get(targetDateKey);
+      }
+
+      // フィルタ実行
+      const filtered = state.orders.injections.filter(inj => {
+        const startDate = inj.startDate
+          ? new Date(inj.startDate.year, inj.startDate.month - 1, inj.startDate.day)
+          : (inj.createTime?.seconds ? new Date(inj.createTime.seconds * 1000) : null);
+        if (!startDate) return false;
+        startDate.setHours(0, 0, 0, 0);
+        const maxDuration = Math.max(...(inj.rps || []).map(rp => rp.boundsDurationDays?.value || 1));
+        const endDate = new Date(startDate);
+        endDate.setDate(endDate.getDate() + maxDuration - 1);
+        return targetDate >= startDate && targetDate <= endDate;
+      });
+
+      // キャッシュに保存
+      state.orders.cache.injectionsByDate.set(targetDateKey, filtered);
+      return filtered;
+    }
+
+    // 指定日の処方をフィルタ（キャッシュ付き）
+    function getPrescriptionsForDate(targetDate, targetDateKey) {
+      // キャッシュ確認
+      if (state.orders.cache.prescriptionsByDate.has(targetDateKey)) {
+        return state.orders.cache.prescriptionsByDate.get(targetDateKey);
+      }
+
+      // フィルタ実行
+      const filtered = state.orders.prescriptions.filter(rx => {
+        const startDate = rx.startDate
+          ? new Date(rx.startDate.year, rx.startDate.month - 1, rx.startDate.day)
+          : (rx.createTime?.seconds ? new Date(rx.createTime.seconds * 1000) : null);
+        if (!startDate) return false;
+        startDate.setHours(0, 0, 0, 0);
+        const maxDuration = Math.max(...(rx.rps || []).map(rp => rp.boundsDurationDays?.value || 1));
+        const endDate = new Date(startDate);
+        endDate.setDate(endDate.getDate() + maxDuration - 1);
+        return targetDate >= startDate && targetDate <= endDate;
+      });
+
+      // キャッシュに保存
+      state.orders.cache.prescriptionsByDate.set(targetDateKey, filtered);
+      return filtered;
+    }
+
     // 処方・注射カラムを描画
     function renderPrescriptionOrderColumn(targetDateKey) {
       // state.timeline.selectedDateはYYYY-MM-DD形式
@@ -6928,18 +7071,8 @@
 
       // === 選択日の注射 ===
       if (state.filter.categories.has('injection')) {
-        let targetInjections = state.orders.injections.filter(inj => {
-          // startDateがあれば使用、なければcreateTimeにフォールバック
-          const startDate = inj.startDate
-            ? new Date(inj.startDate.year, inj.startDate.month - 1, inj.startDate.day)
-            : (inj.createTime?.seconds ? new Date(inj.createTime.seconds * 1000) : null);
-          if (!startDate) return false;
-          startDate.setHours(0, 0, 0, 0);
-          const maxDuration = Math.max(...(inj.rps || []).map(rp => rp.boundsDurationDays?.value || 1));
-          const endDate = new Date(startDate);
-          endDate.setDate(endDate.getDate() + maxDuration - 1);
-          return targetDate >= startDate && targetDate <= endDate;
-        });
+        // キャッシュ付きフィルタで日付フィルタ済みの注射を取得
+        let targetInjections = getInjectionsForDate(targetDate, targetDateKey);
 
         // 検索フィルタ: 検索テキストがある場合、マッチする薬品を含む注射のみ表示
         if (state.filter.searchText.trim()) {
@@ -7002,18 +7135,8 @@
 
       // === 選択日の処方 ===
       if (state.filter.categories.has('prescription')) {
-        let targetPrescriptions = state.orders.prescriptions.filter(rx => {
-          // startDateがあれば使用、なければcreateTimeにフォールバック
-          const startDate = rx.startDate
-            ? new Date(rx.startDate.year, rx.startDate.month - 1, rx.startDate.day)
-            : (rx.createTime?.seconds ? new Date(rx.createTime.seconds * 1000) : null);
-          if (!startDate) return false;
-          startDate.setHours(0, 0, 0, 0);
-          const maxDuration = Math.max(...(rx.rps || []).map(rp => rp.boundsDurationDays?.value || 1));
-          const endDate = new Date(startDate);
-          endDate.setDate(endDate.getDate() + maxDuration - 1);
-          return targetDate >= startDate && targetDate <= endDate;
-        });
+        // キャッシュ付きフィルタで日付フィルタ済みの処方を取得
+        let targetPrescriptions = getPrescriptionsForDate(targetDate, targetDateKey);
 
         // 検索フィルタ: 検索テキストがある場合、マッチする薬品を含む処方のみ表示
         if (state.filter.searchText.trim()) {
@@ -7185,9 +7308,19 @@
           state.hospitalization.current = cached.currentHospitalization;
           allData = cached.allData;
         } else {
-          // キャッシュがなければ取得
-          state.hospitalization.list = await fetchHospitalizations(patientUuid);
-          state.hospitalization.current = state.hospitalization.list.find(h => h.state === 'ADMITTED');
+          // Phase 1: fetchHospitalizations と startDate不要な関数を並列実行
+          const [hospitalizations, doctorRecords, nursingRecords, profile, pressureUlcerRecords, pharmacyRecords, inspectionFindingsRecords] = await Promise.all([
+            fetchHospitalizations(patientUuid),
+            fetchDoctorRecords(patientUuid),
+            fetchNursingRecords(patientUuid),
+            fetchPatientProfile(patientUuid),
+            fetchPressureUlcerRecords(patientUuid),
+            fetchPharmacyRecords(patientUuid),
+            fetchInspectionFindings(patientUuid)
+          ]);
+
+          state.hospitalization.list = hospitalizations;
+          state.hospitalization.current = hospitalizations.find(h => h.state === 'ADMITTED');
 
           if (!state.hospitalization.current) {
             hospInfo.textContent = '入院中ではありません';
@@ -7217,8 +7350,31 @@
             state.hospitalization.current.startDate.day
           );
 
-          // 全データ取得（タイムライン項目 + 固定情報）
-          allData = await fetchAllData(patientUuid, startDate);
+          // Phase 2: startDate必要な関数を並列実行
+          const [rehabRecords, calendarData] = await Promise.all([
+            fetchRehabRecords(patientUuid, startDate),
+            fetchCalendarData(patientUuid, startDate)
+          ]);
+
+          // allData を構築
+          const allItems = [...doctorRecords, ...nursingRecords, ...rehabRecords, ...calendarData.timelineItems];
+          allItems.sort((a, b) => {
+            if (!a.date) return 1;
+            if (!b.date) return -1;
+            return b.date - a.date;
+          });
+
+          allData = {
+            timelineItems: allItems,
+            activePrescriptions: calendarData.activePrescriptions,
+            activeInjections: calendarData.activeInjections,
+            outsideInspectionReportGroups: calendarData.outsideInspectionReportGroups || [],
+            inHouseBloodTests: calendarData.inHouseBloodTests || [],
+            pressureUlcerRecords: pressureUlcerRecords || [],
+            pharmacyRecords: pharmacyRecords || [],
+            inspectionFindingsRecords: inspectionFindingsRecords || [],
+            profile
+          };
 
           // キャッシュに保存
           state.cache.set(patientUuid, {
@@ -7252,7 +7408,7 @@
 
         // 入院情報表示
         const startDateStr = `${state.hospitalization.current.startDate.year}/${state.hospitalization.current.startDate.month}/${state.hospitalization.current.startDate.day}`;
-        const dayCount = state.hospitalization.current.hospitalizationDayCount?.value || 0;
+        const dayCount = (state.hospitalization.current.hospitalizationDayCount?.value ?? -1) + 1;
         const ward = state.hospitalization.current.lastHospitalizationLocation?.ward?.name || '-';
         const doctorName = state.hospitalization.current.hospitalizationDoctor?.doctor?.name;
         const doctorInfo = doctorName ? `　担当医：${doctorName}` : '';
@@ -7271,6 +7427,9 @@
         // 固定情報を保存
         state.orders.prescriptions = allData.activePrescriptions;
         state.orders.injections = allData.activeInjections;
+        // 処方・注射のキャッシュをクリア（新しいデータに切り替わったため）
+        state.orders.cache.injectionsByDate.clear();
+        state.orders.cache.prescriptionsByDate.clear();
         state.records.outsideReports = allData.outsideInspectionReportGroups;
         state.records.inHouseBloodTests = allData.inHouseBloodTests;
         state.records.pressureUlcer = allData.pressureUlcerRecords;
