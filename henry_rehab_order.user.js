@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry リハビリオーダー
 // @namespace    https://henry-app.jp/
-// @version      1.3.0
+// @version      1.3.1
 // @description  リハビリオーダー作成 + リハビリ指示記事作成（入院/外来両対応）
 // @author       sk powered by Claude
 // @match        https://henry-app.jp/*
@@ -141,7 +141,7 @@
   function buildCreateClinicalDocumentMutation(patientUuid, editorData, performTimeSeconds, clinicalDocumentCustomTypeUuid, hospitalizationUuid) {
     const escapedEditorData = editorData.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\n/g, '\\n');
     return `
-      mutation {
+      mutation CreateClinicalDocument {
         createClinicalDocument(input: {
           uuid: "",
           patientUuid: "${patientUuid}",
@@ -389,7 +389,7 @@
     const escapeStr = (s) => (s || '').replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\n/g, '\\n');
 
     const mutation = `
-      mutation {
+      mutation CreateRehabilitationOrder {
         createRehabilitationOrder(input: {
           uuid: "",
           patientUuid: "${patientUuid}",

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry Disease Register
 // @namespace    https://henry-app.jp/
-// @version      3.28.0
+// @version      3.28.1
 // @description  高速病名検索・登録
 // @author       sk powered by Claude & Gemini
 // @match        https://henry-app.jp/*
@@ -2639,7 +2639,7 @@
       // HenryのGraphQL APIでは変数型（$input: SomeInput!）がエラーになるため
       // 将来的にAPI側が対応したら変数方式に移行したい
       const MUTATION = `
-        mutation {
+        mutation UpdateMultiPatientReceiptDiseases {
           updateMultiPatientReceiptDiseases(input: {
             records: [{
               recordOperation: RECORD_OPERATION_CREATE,
@@ -3001,7 +3001,7 @@
         : 'null';
 
       const MUTATION = `
-        mutation {
+        mutation UpdateMultiPatientReceiptDiseases {
           updateMultiPatientReceiptDiseases(input: {
             records: [{
               recordOperation: RECORD_OPERATION_UPDATE,
@@ -3107,7 +3107,7 @@
         : 'null';
 
       const MUTATION = `
-        mutation {
+        mutation UpdateMultiPatientReceiptDiseases {
           updateMultiPatientReceiptDiseases(input: {
             records: [{
               recordOperation: RECORD_OPERATION_DELETE,
