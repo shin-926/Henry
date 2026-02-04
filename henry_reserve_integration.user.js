@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         予約システム連携
 // @namespace    https://github.com/shin-926/Henry
-// @version      4.7.20
+// @version      4.7.23
 // @description  Henryカルテと予約システム間の双方向連携（再診予約・照射オーダー自動予約・自動印刷・患者プレビュー）
 // @author       sk powered by Claude & Gemini
 // @match        https://henry-app.jp/*
@@ -1746,7 +1746,7 @@ html, body { margin: 0; padding: 0; }
         const json = await clonedResponse.json();
         const orderData = json.data?.createImagingOrder || json.data?.upsertImagingOrder;
 
-        if (orderData?.uuid && orderData?.isOutpatient) {
+        if (orderData?.uuid) {
           log.info(logMessage);
           setTimeout(() => Printer.print(orderData), CONFIG.PRINT_DELAY_MS);
         }
@@ -1806,46 +1806,21 @@ html, body { margin: 0; padding: 0; }
 
       const displayDate = `${dateObj.year}/${dateObj.month}/${dateObj.day}`;
 
-      // 入院患者の場合：予約システム連携のみ（外来予約は作成しない）
+      // 入院患者の場合：予約システム連携スキップ（時間指定不要）
       if (isHospitalized) {
-        const confirmMessage = `未来日付（${displayDate}）の${orderType}です。\n\n予約システムで予約を取りますか？\n（入院患者のため外来予約は作成されません）\n\n患者: ${patientInfo.id} ${patientInfo.name}`;
-        if (!confirm(confirmMessage)) {
-          log.info('ユーザーが予約システム連携をキャンセル - オーダー保存せず終了');
-          showImagingNotification('キャンセルしました', 'info');
-          return new Response(JSON.stringify({ data: null, errors: [{ message: 'キャンセルされました' }] }), {
-            status: 200,
-            headers: { 'Content-Type': 'application/json' }
-          });
-        }
+        log.info('入院中/入院予定の患者のため、予約システム連携をスキップ');
 
-        // 予約システムを開いて予約日時を取得
-        showImagingNotification('予約システムで予約を取ってください', 'info');
-        const reservationResult = await openReserveForImagingOrder(patientInfo, dateObj, modality);
-        log.info('予約日時: ' + JSON.stringify(reservationResult));
-
-        log.info('入院中/入院予定の患者のため、外来予約をスキップ');
-
-        // 日付のみ更新（encounterIdは変更しない）
-        if (reservationResult.date) {
-          const [year, month, day] = reservationResult.date.split('-').map(Number);
-          body.variables.input.date = { year, month, day };
-        }
+        // 通知を表示
+        showImagingNotification('入院期間中のため予約システムでの予約は不要です', 'info');
 
         // 処理済みリクエストを保存（再インターセプト防止）
-        const actualDate = body.variables.input.date;
-        const requestKey = patientUuid + '_' + actualDate.year + '-' + actualDate.month + '-' + actualDate.day;
+        const requestKey = patientUuid + '_' + dateObj.year + '-' + dateObj.month + '-' + dateObj.day;
         processedRequests.add(requestKey);
 
-        const newOptions = { ...options, body: JSON.stringify(body) };
-
         // オーダーをそのまま保存
-        const response = await originalFetch.call(fetchContext, url, newOptions);
+        const response = await originalFetch.call(fetchContext, url, options);
 
-        // 通知・印刷
-        const resultDisplayDate = reservationResult.date
-          ? reservationResult.date.replace(/-/g, '/')
-          : displayDate;
-        showImagingNotification(`${resultDisplayDate} ${reservationResult.time} の予約を取りました（入院患者）`, 'success');
+        // 印刷実行
         await printOrderFromResponse(response, hospitalizedPrintLogMessage);
 
         return response;
