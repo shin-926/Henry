@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry 入院前オーダー
 // @namespace    https://github.com/shin-926/Henry
-// @version      0.3.0
+// @version      0.4.0
 // @description  入院予定患者に対して入院前オーダー（CT検査等）を一括作成
 // @author       sk powered by Claude
 // @match        https://henry-app.jp/*
@@ -25,9 +25,7 @@
  * ■ 対応オーダー
  * - CT検査（入院時CT）
  * - 生体検査（ECG + 血管伸展性）
- *
- * ■ 将来対応予定
- * - 血液検査
+ * - 血液検査（入院時採血セット）
  */
 
 (function() {
@@ -92,10 +90,50 @@
     }
   };
 
+  // 血液検査テンプレート（検体検査）
+  const SPECIMEN_TEMPLATES = {
+    'admission-blood': {
+      name: '入院時採血セット',
+      description: '入院時の標準血液検査（27項目）',
+      specimenInspectionUuid: '63e3df8d-99d3-4aae-8fcb-41e4f26d41b3',  // 四国中検
+      outsideInspectionLaboratoryUuid: '6fb3486c-09c3-4b03-8408-9535773c926d',
+      note: '入院時検査',
+      inspections: [
+        { code: '0115', name: '総蛋白' },
+        { code: '0117', name: 'アルブミン' },
+        { code: '0127', name: 'ALT(GPT)' },
+        { code: '0126', name: 'AST(GOT)' },
+        { code: '9217', name: 'ALP(IFCC)' },
+        { code: '9218', name: 'LD(IFCC)' },
+        { code: '0181', name: '尿酸' },
+        { code: '0182', name: '尿素窒素' },
+        { code: '0183', name: 'CRE' },
+        { code: '0225', name: 'HDL−C' },
+        { code: '0233', name: 'LDL−C' },
+        { code: '0228', name: '中性脂肪' },
+        { code: '0434', name: 'CRP' },
+        { code: '0601', name: '末梢血液一般' },
+        { code: '0132', name: 'γ−GT' },
+        { code: '0134', name: 'CK' },
+        { code: '0261', name: 'グルコース' },
+        { code: '0201', name: 'Na' },
+        { code: '0203', name: 'カリウム' },
+        { code: '0254', name: 'prBNP' },
+        { code: '0401', name: 'HBs抗原 定性' },
+        { code: '0419', name: 'HCV−II' },
+        { code: '0470', name: '(梅毒)RPR定性' },
+        { code: '0473', name: '(梅毒)TP抗体性' },
+        { code: '0204', name: 'Ca' },
+        { code: '0205', name: 'P' }
+      ]
+    }
+  };
+
   // 全テンプレート（UI表示用）
   const ALL_TEMPLATES = {
     ct: { label: 'CT検査', templates: CT_TEMPLATES },
-    biopsy: { label: '生体検査', templates: BIOPSY_TEMPLATES }
+    biopsy: { label: '生体検査', templates: BIOPSY_TEMPLATES },
+    specimen: { label: '血液検査', templates: SPECIMEN_TEMPLATES }
   };
 
   // ===========================================
@@ -470,6 +508,104 @@
     } else {
       console.error(`[${SCRIPT_NAME}] 生体検査オーダー作成失敗:`, result);
       throw new Error('生体検査オーダー作成に失敗しました');
+    }
+  }
+
+  /**
+   * 血液検査オーダーを作成
+   */
+  async function createSpecimenInspectionOrder(orderData) {
+    const core = window.HenryCore;
+    if (!core) {
+      throw new Error('HenryCore が見つかりません');
+    }
+
+    const { patientUuid, doctorUuid, templateKey, orderDate } = orderData;
+
+    // テンプレート取得
+    const template = SPECIMEN_TEMPLATES[templateKey];
+    if (!template) {
+      throw new Error(`テンプレート「${templateKey}」が見つかりません`);
+    }
+
+    const labUuid = template.outsideInspectionLaboratoryUuid;
+
+    // consultationOutsideInspections を構築
+    const consultationOutsideInspections = template.inspections.map(insp => ({
+      uuid: generateUuid(),
+      comments: [],
+      isCalculatable: true,
+      isFeeForService: false,
+      masterOutsideInspection: {
+        outsideInspectionId: `${labUuid}_${insp.code}`,
+        outsideInspectionLaboratoryUuid: labUuid,
+        inspectionCode: insp.code,
+        parentInspectionCode: null,
+        name: insp.name,
+        nameKana: '',
+        amountNeeded: null,
+        minAmountNeeded: null,
+        preservationMethod: null,
+        standardValuePrecision: null,
+        standardValueUnit: null,
+        minMaleStandardValue: null,
+        maxMaleStandardValue: null,
+        minFemaleStandardValue: null,
+        maxFemaleStandardValue: null,
+        rangeMaleStandardValue: null,
+        rangeFemaleStandardValue: null,
+        isUrineCollection: false,
+        startDate: { year: 2020, month: 1, day: 1 },
+        endDate: null,
+        searchCategory: null
+      },
+      nonHealthcareSystemOutsideInspection: null,
+      outsideInspectionLaboratory: { uuid: labUuid },
+      specimenDiagnosis: null
+    }));
+
+    const noteText = escapeGraphQLString(template.note || template.name);
+
+    // インライン方式でmutationを構築
+    const mutation = `
+      mutation CreateSpecimenInspectionOrder {
+        createSpecimenInspectionOrder(input: {
+          uuid: ""
+          patientUuid: "${patientUuid}"
+          doctorUuid: "${doctorUuid}"
+          inspectionDate: { year: ${orderDate.year}, month: ${orderDate.month}, day: ${orderDate.day} }
+          specimenInspectionOrderSpecimenInspections: [{
+            uuid: ""
+            specimenInspectionUuid: "${template.specimenInspectionUuid}"
+            consultationDiagnoses: []
+            consultationEquipments: []
+            consultationMedicines: []
+            consultationOutsideInspections: ${JSON.stringify(consultationOutsideInspections)}
+            urgency: false
+            note: ""
+          }]
+          note: "${noteText}"
+          revokeDescription: ""
+          encounterId: null
+          saveAsDraft: false
+          extendedInsuranceCombinationId: null
+          sendInspectionRequest: false
+        }) {
+          uuid
+          orderStatus
+        }
+      }
+    `;
+
+    console.log(`[${SCRIPT_NAME}] CreateSpecimenInspectionOrder 実行...`);
+    const result = await core.query(mutation);
+
+    if (result.data?.createSpecimenInspectionOrder?.uuid) {
+      console.log(`[${SCRIPT_NAME}] 血液検査オーダー作成成功: ${result.data.createSpecimenInspectionOrder.uuid}`);
+      return result.data.createSpecimenInspectionOrder;
+    } else {
+      console.error(`[${SCRIPT_NAME}] 血液検査オーダー作成失敗:`, result);
+      throw new Error('血液検査オーダー作成に失敗しました');
     }
   }
 
@@ -910,6 +1046,8 @@
                 await createImagingOrder(orderData);
               } else if (orderType === 'biopsy') {
                 await createBiopsyInspectionOrder(orderData);
+              } else if (orderType === 'specimen') {
+                await createSpecimenInspectionOrder(orderData);
               } else {
                 throw new Error(`不明なオーダー種別: ${orderType}`);
               }
