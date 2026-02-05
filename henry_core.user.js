@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry Core
 // @namespace    https://henry-app.jp/
-// @version      2.27.0
+// @version      2.28.0
 // @description  Henry スクリプト実行基盤 (GoogleAuth統合 / Google Docs対応)
 // @author       sk powered by Claude & Gemini
 // @match        https://henry-app.jp/*
@@ -76,6 +76,7 @@
  *   createTag({ text })                                 - タグ/バッジ（ピル型）
  *   createBadge({ text, variant? })                     - ステータスバッジ（'default' | 'active'）
  *   showModal({ title, content, actions?, width?, closeOnOverlayClick? })
+ *   showConfirm({ title, message, confirmLabel?, cancelLabel? }) - 確認ダイアログ → Promise<boolean>
  *   showToast(message, type?, duration?)            - トースト通知
  *   showSpinner(message?)                           - ローディング表示 → { close }
  *
@@ -1074,6 +1075,40 @@
       }
 
       return { close };
+    },
+
+    /**
+     * 確認ダイアログを表示
+     * @param {Object} options - オプション
+     * @param {string} options.title - タイトル
+     * @param {string} options.message - メッセージ
+     * @param {string} [options.confirmLabel='OK'] - 確認ボタンのラベル
+     * @param {string} [options.cancelLabel='キャンセル'] - キャンセルボタンのラベル
+     * @returns {Promise<boolean>} - 確認されたらtrue、キャンセルされたらfalse
+     */
+    showConfirm: ({ title, message, confirmLabel = 'OK', cancelLabel = 'キャンセル' }) => {
+      return new Promise(resolve => {
+        const content = document.createElement('div');
+        content.textContent = message;
+
+        UI.showModal({
+          title,
+          content,
+          closeOnOverlayClick: false,
+          actions: [
+            {
+              label: cancelLabel,
+              variant: 'secondary',
+              onClick: () => resolve(false)
+            },
+            {
+              label: confirmLabel,
+              variant: 'primary',
+              onClick: () => resolve(true)
+            }
+          ]
+        });
+      });
     },
 
     /**
