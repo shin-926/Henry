@@ -479,6 +479,8 @@ GitHubから各スクリプトを動的に読み込む仕組み。詳細は `NOT
 - mainブランチへのプッシュは本番リリース時のみ
 - **「GitHubにプッシュしていないから更新されていない」という誤解をしないこと**
 
+**YOU MUST**: 「ローカルサーバーを起動して」と言われたら、`NOTES.md` の「ローカル開発サーバー」セクションを参照して対応すること。
+
 #### Loader修正時
 
 **YOU MUST**: Loader（henry_loader.user.js / henry_loader_dev.user.js）を修正した時は、ファイルの内容を `pbcopy` でクリップボードにコピーすること（ユーザーがTampermonkeyに貼り付けられるように）。他のスクリプトはLoader経由で自動更新されるためコピー不要。

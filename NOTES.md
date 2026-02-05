@@ -65,6 +65,33 @@ MCPサーバーが接続されるのを確認（起動時に `chrome-devtools` �
 
 ---
 
+## ローカル開発サーバー
+
+Henry Loader（開発用）がスクリプトを取得するためのローカルサーバー。
+
+### 起動手順
+
+1. **ポート確認**: `lsof -i :8080`
+2. **起動中の場合**: 接続テスト `curl -s http://localhost:8080/henry_core.user.js | head -1`
+   - 正常 → 何もしない
+   - 異常（空レスポンス等） → `kill <PID>` して再起動
+3. **未起動の場合**: 起動
+
+### 起動コマンド
+
+```bash
+python3 -m http.server 8080 --directory /Users/shinichiro/Documents/Henry
+```
+
+### 確認コマンド
+
+```bash
+# サーバー起動確認
+curl -s http://localhost:8080/henry_core.user.js | head -3
+```
+
+---
+
 # E2Eテスト
 
 ## テスト実行方法
