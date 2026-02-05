@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry 入院前オーダー
 // @namespace    https://github.com/shin-926/Henry
-// @version      0.34.0
+// @version      0.35.4
 // @description  入院予定患者に対して入院前オーダー（CT検査等）を一括作成
 // @author       sk powered by Claude
 // @match        https://henry-app.jp/*
@@ -151,7 +151,7 @@
   // 血液検査テンプレート（検体検査）
   const SPECIMEN_TEMPLATES = {
     'admission-blood': {
-      name: '入院時採血セット',
+      name: '血液検査など',
       description: '入院時の標準血液検査',
       specimenInspectionUuid: '63e3df8d-99d3-4aae-8fcb-41e4f26d41b3',  // 四国中検
       outsideInspectionLaboratoryUuid: '6fb3486c-09c3-4b03-8408-9535773c926d',
@@ -894,13 +894,14 @@
   };
 
   // 指示簿のデフォルトテキスト
-  const STANDING_ORDER_DEFAULT_TEXT = `【呼吸状態悪化時】
-・SpO2 92%以下で酸素投与2Lを開始し、適宜増減して92％以上をキープ
-　-- 4L未満は経鼻カニュラ、4L以上はマスクで投与
-　-- 酸素投与量　Min off / Max 10L
+  const STANDING_ORDER_DEFAULT_TEXT = `【呼吸状態悪化時（SpO2 92%未満）】
+・酸素投与を2Lから開始し適宜増減可
+　-- 92％以上をキープ
+　-- 5L未満は経鼻カニュラ、5L以上はマスクで投与
+　-- 酸素投与量　最低0L／最大10L
 
 【発熱時、疼痛時】
-・カロナール(500) 0.5錠もしくは 1錠内服
+・カロナール(500) 0.5錠もしくは1錠内服
 ・ロキソプロフェン 1錠内服
 ・カロナール坐剤(400) 0.5個もしくは1個挿肛
 
@@ -911,12 +912,12 @@
 ・アムロジピン2.5㎎ 1錠内服
 
 【便秘時】
-・グリセリン浣腸 1個使用
-・ピコスルファート 10-20滴使用
+・ピコスルファート 10-20滴内服
+・グリセリン浣腸 1個
 
 【低血糖時】
-・50Tz 40mL 静注
-・ブドウ糖20g 内服`;
+・ブドウ糖20g内服
+・50Tz40mL静注`;
 
   // 入院時指示の選択肢
   const INSTRUCTION_OPTIONS = {
@@ -972,7 +973,7 @@
   const ALL_TEMPLATES = {
     imagingBiopsy: { label: '画像検査・生体検査', templates: { ...CT_TEMPLATES, ...BIOPSY_TEMPLATES } },
     treatmentPlan: { label: '入院診療計画書', templates: {} },
-    specimen: { label: '血液検査', templates: SPECIMEN_TEMPLATES },
+    specimen: { label: '検体検査', templates: SPECIMEN_TEMPLATES },
     rehab: { label: 'リハビリ', templates: REHAB_TEMPLATES },
     instruction: { label: '入院時指示', templates: INSTRUCTION_TEMPLATES },
     standingOrder: { label: '指示簿', templates: STANDING_ORDER_TEMPLATES }
@@ -1313,7 +1314,11 @@
       if (series?.length) {
         for (const s of series) {
           if (s.bodySite?.name) {
-            bodySites.push(s.bodySite.name);
+            // 補足がある場合はオブジェクトとして追加
+            bodySites.push({
+              name: s.bodySite.name,
+              note: s.note || ''
+            });
           }
         }
       }
@@ -1321,7 +1326,7 @@
 
     return {
       title: modalityName || '画像検査',
-      items: bodySites,
+      items: bodySites,  // オブジェクトの配列 { name, note }
       note: detail.note || ''
     };
   }
@@ -1335,16 +1340,16 @@
 
     const items = [];
 
-    // リハビリ種別（運動器リハビリテーション等）
-    const rehabType = detail.rehabilitationCalculationType?.name;
-    if (rehabType) {
-      items.push(rehabType);
-    }
-
     // 病名
     const diseaseName = detail.patientReceiptDisease?.masterDisease?.name;
     if (diseaseName) {
       items.push(`病名: ${diseaseName}`);
+    }
+
+    // リハビリ種別（運動器リハビリテーション等）
+    const rehabType = detail.rehabilitationCalculationType?.name;
+    if (rehabType) {
+      items.push(rehabType);
     }
 
     return {
@@ -3108,8 +3113,8 @@
       },
       {
         key: 'specimen',
-        label: '血液検査',
-        description: '入院時採血セット（項目選択可能）',
+        label: '検体検査',
+        description: '血液検査など（項目選択可能）',
         buildDetail: () => buildSpecimenDetail()
       },
       {
@@ -3173,7 +3178,18 @@
           const itemsToShow = detail.items.slice(0, 5);
           const remaining = detail.items.length - 5;
           html += `<div style="color: #6b7280; font-size: 12px; padding-left: 8px;">`;
-          html += itemsToShow.map(item => `・${item}`).join('<br>');
+          html += itemsToShow.map(item => {
+            // 文字列とオブジェクトの両方に対応
+            if (typeof item === 'string') {
+              return `・${item}`;
+            }
+            // オブジェクトの場合（画像検査）
+            let result = `・${item.name}`;
+            if (item.note) {
+              result += `<br><span style="color: #9ca3af; font-size: 11px; padding-left: 12px;">${item.note}</span>`;
+            }
+            return result;
+          }).join('<br>');
           if (remaining > 0) {
             html += `<br><span style="color: #9ca3af;">他${remaining}件</span>`;
           } else if (detail.hasMore) {
@@ -3538,7 +3554,7 @@
       let modal;
       let confirmEnabled = false;
       modal = core.ui.showModal({
-        title: '血液検査項目の選択',
+        title: '検体検査項目の選択',
         content: modalContent,
         width: '1100px',
         closeOnOverlayClick: true,
@@ -4008,13 +4024,13 @@
 
           // periodがない算定区分は「期限なし」
           if (!periodValue) {
-            periodDisplay.textContent = `${startStr} 〜（期限なし）`;
+            periodDisplay.textContent = `${startStr}（入院日） 〜（期限なし）`;
             return;
           }
 
           // 起算日が入力されていない場合
           if (!therapyDateInput.value) {
-            periodDisplay.textContent = `${startStr} 〜 -`;
+            periodDisplay.textContent = `${startStr}（入院日） 〜 -`;
             return;
           }
 
@@ -4025,7 +4041,7 @@
           endDate.setDate(endDate.getDate() + parseInt(periodValue, 10));
 
           const endStr = `${endDate.getFullYear()}/${endDate.getMonth() + 1}/${endDate.getDate()}`;
-          periodDisplay.textContent = `${startStr} 〜 ${endStr}（${periodValue}日間）`;
+          periodDisplay.textContent = `${startStr}（入院日） 〜 ${endStr}（起算日より${periodValue}日）`;
         }
 
         // 起算日・算定区分変更時に算定期限を更新
