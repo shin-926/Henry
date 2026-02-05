@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry 入院前オーダー
 // @namespace    https://github.com/shin-926/Henry
-// @version      0.28.2
+// @version      0.30.0
 // @description  入院予定患者に対して入院前オーダー（CT検査等）を一括作成
 // @author       sk powered by Claude
 // @match        https://henry-app.jp/*
@@ -1079,9 +1079,231 @@
     }
   `;
 
+  // 既存オーダー取得（作成状況確認用）
+  // NOTE: 各オーダータイプで日付フィールド名が異なる
+  //   - imagingOrder: date
+  //   - specimenInspectionOrder: inspectionDate
+  //   - biopsyInspectionOrder: inspectionDate
+  //   - rehabilitationOrder: startDate
+  const LIST_SECTIONED_ORDERS_QUERY = `
+    query ListSectionedOrdersInPatient($input: ListSectionedOrdersInPatientRequestInput!) {
+      listSectionedOrdersInPatient(input: $input) {
+        sections {
+          sectionDate { year month day }
+          orders {
+            uuid
+            orderType
+            order {
+              imagingOrder {
+                date { year month day }
+              }
+              specimenInspectionOrder {
+                inspectionDate { year month day }
+              }
+              biopsyInspectionOrder {
+                inspectionDate { year month day }
+              }
+              rehabilitationOrder {
+                startDate { year month day }
+              }
+            }
+          }
+        }
+        nextPageToken
+      }
+    }
+  `;
+
+  // 既存記事取得（作成状況確認用）
+  const LIST_CLINICAL_DOCUMENTS_QUERY = `
+    query ListClinicalDocuments($input: ListClinicalDocumentsRequestInput!) {
+      listClinicalDocuments(input: $input) {
+        documents {
+          uuid
+          performTime { seconds }
+          type {
+            type
+            clinicalDocumentCustomTypeUuid { value }
+          }
+        }
+        nextPageToken
+      }
+    }
+  `;
+
   // ===========================================
   // API関数
   // ===========================================
+
+  /**
+   * 指定日のオーダー作成状況を取得
+   * @param {string} patientUuid - 患者UUID
+   * @param {Object} orderDate - オーダー日 { year, month, day }
+   * @returns {Object} - { specimen: boolean, imaging: boolean, biopsy: boolean, rehab: boolean }
+   */
+  async function fetchExistingOrdersOnDate(patientUuid, orderDate) {
+    const core = pageWindow.HenryCore;
+    if (!core) return {};
+
+    const result = {
+      specimen: false,
+      imaging: false,
+      biopsy: false,
+      rehab: false
+    };
+
+    try {
+      const response = await core.query(LIST_SECTIONED_ORDERS_QUERY, {
+        input: {
+          patientUuid: patientUuid,
+          searchDate: orderDate,
+          filterOrderStatus: [
+            'ORDER_STATUS_ACTIVE',
+            'ORDER_STATUS_DRAFT',
+            'ORDER_STATUS_ON_HOLD',
+            'ORDER_STATUS_PREPARING'
+          ],
+          filterOrderTypes: [],
+          patientCareType: 'PATIENT_CARE_TYPE_ANY',
+          pageSize: 100,
+          pageToken: ''
+        }
+      }, { endpoint: '/graphql' });
+
+      const sections = response?.data?.listSectionedOrdersInPatient?.sections || [];
+
+      // オーダータイプごとの日付フィールドを取得するヘルパー
+      const getOrderDate = (order) => {
+        const o = order.order;
+        if (!o) return null;
+        if (o.imagingOrder?.date) return o.imagingOrder.date;
+        if (o.specimenInspectionOrder?.inspectionDate) return o.specimenInspectionOrder.inspectionDate;
+        if (o.biopsyInspectionOrder?.inspectionDate) return o.biopsyInspectionOrder.inspectionDate;
+        if (o.rehabilitationOrder?.startDate) return o.rehabilitationOrder.startDate;
+        return null;
+      };
+
+      // 日付が一致するかチェックするヘルパー
+      const isSameDate = (d1, d2) => {
+        return d1?.year === d2?.year && d1?.month === d2?.month && d1?.day === d2?.day;
+      };
+
+      // オーダーの予定日が入院日と一致するものを「作成済み」として判定
+      for (const section of sections) {
+        for (const order of section.orders || []) {
+          const od = getOrderDate(order);
+
+          if (!isSameDate(od, orderDate)) {
+            continue;
+          }
+          switch (order.orderType) {
+            case 'ORDER_TYPE_SPECIMEN_INSPECTION':
+              result.specimen = true;
+              break;
+            case 'ORDER_TYPE_IMAGING':
+              result.imaging = true;
+              break;
+            case 'ORDER_TYPE_BIOPSY_INSPECTION':
+              result.biopsy = true;
+              break;
+            case 'ORDER_TYPE_REHABILITATION':
+              result.rehab = true;
+              break;
+          }
+        }
+      }
+    } catch (e) {
+      console.error(`[${SCRIPT_NAME}] オーダー取得エラー:`, e);
+    }
+
+    return result;
+  }
+
+  /**
+   * 指定日の記事作成状況を取得
+   * @param {string} patientUuid - 患者UUID
+   * @param {string} hospitalizationUuid - 入院UUID
+   * @param {Object} orderDate - オーダー日 { year, month, day }
+   * @returns {Object} - { instruction: boolean, standingOrder: boolean }
+   */
+  async function fetchExistingDocumentsOnDate(patientUuid, hospitalizationUuid, orderDate) {
+    const core = pageWindow.HenryCore;
+    if (!core) return {};
+
+    const result = {
+      instruction: false,
+      standingOrder: false
+    };
+
+    // 対象日の0:00〜23:59:59のUnixタイムスタンプを計算
+    const startOfDay = new Date(orderDate.year, orderDate.month - 1, orderDate.day, 0, 0, 0);
+    const endOfDay = new Date(orderDate.year, orderDate.month - 1, orderDate.day, 23, 59, 59);
+    const startSeconds = Math.floor(startOfDay.getTime() / 1000);
+    const endSeconds = Math.floor(endOfDay.getTime() / 1000);
+
+    try {
+      // 入院時指示と指示簿の両方を取得
+      const instructionTypeUuid = INSTRUCTION_TEMPLATES['admission-instruction'].clinicalDocumentCustomTypeUuid;
+      const standingOrderTypeUuid = STANDING_ORDER_TEMPLATES['standing-order'].clinicalDocumentCustomTypeUuid;
+
+      const response = await core.query(LIST_CLINICAL_DOCUMENTS_QUERY, {
+        input: {
+          patientUuid: patientUuid,
+          clinicalDocumentTypes: [
+            { type: 'CUSTOM', clinicalDocumentCustomTypeUuid: { value: instructionTypeUuid } },
+            { type: 'CUSTOM', clinicalDocumentCustomTypeUuid: { value: standingOrderTypeUuid } }
+          ],
+          pageSize: 100,
+          pageToken: ''
+        }
+      });
+
+      const documents = response?.data?.listClinicalDocuments?.documents || [];
+      for (const doc of documents) {
+        const performSeconds = doc.performTime?.seconds;
+        // 対象日の記事のみチェック
+        if (performSeconds >= startSeconds && performSeconds <= endSeconds) {
+          const customTypeUuid = doc.type?.clinicalDocumentCustomTypeUuid?.value;
+          if (customTypeUuid === INSTRUCTION_TEMPLATES['admission-instruction'].clinicalDocumentCustomTypeUuid) {
+            result.instruction = true;
+          } else if (customTypeUuid === STANDING_ORDER_TEMPLATES['standing-order'].clinicalDocumentCustomTypeUuid) {
+            result.standingOrder = true;
+          }
+        }
+      }
+    } catch (e) {
+      console.error(`[${SCRIPT_NAME}] 記事取得エラー:`, e);
+    }
+
+    return result;
+  }
+
+  /**
+   * オーダー作成状況を一括取得
+   * @param {Object} patientData - 患者データ
+   * @param {Object} orderDate - オーダー日 { year, month, day }
+   * @returns {Object} - 各オーダータイプの作成状況
+   */
+  async function getOrderCreationStatus(patientData, orderDate) {
+    const patientUuid = patientData.patient?.uuid;
+    const hospitalizationUuid = patientData.uuid;
+
+    if (!patientUuid) return {};
+
+    // 並列で取得
+    const [orders, documents] = await Promise.all([
+      fetchExistingOrdersOnDate(patientUuid, orderDate),
+      fetchExistingDocumentsOnDate(patientUuid, hospitalizationUuid, orderDate)
+    ]);
+
+    return {
+      imagingBiopsy: orders.imaging && orders.biopsy,  // 両方あれば作成済み
+      specimen: orders.specimen,
+      rehab: orders.rehab,
+      instruction: documents.instruction,
+      standingOrder: documents.standingOrder
+    };
+  }
 
   /**
    * 四国中検の全検査項目を取得（ページネーション対応、インライン方式）
@@ -2498,6 +2720,28 @@
     let rehabPlans = [];
     let rehabDataLoaded = false;
 
+    // 作成状況（初期値は全て未作成）
+    let creationStatus = {
+      imagingBiopsy: false,
+      treatmentPlan: false,  // 後で実装予定
+      specimen: false,
+      rehab: false,
+      instruction: false,
+      standingOrder: false
+    };
+
+    // 作成状況を取得（入院日を基準）
+    let spinner;
+    try {
+      spinner = core.ui.showSpinner('作成状況を確認中...');
+      const status = await getOrderCreationStatus(patientData, patientData.startDate);
+      creationStatus = { ...creationStatus, ...status };
+    } catch (e) {
+      console.error(`[${SCRIPT_NAME}] 作成状況取得エラー:`, e);
+    } finally {
+      if (spinner?.close) spinner.close();
+    }
+
     // モーダルコンテンツ
     const content = document.createElement('div');
     content.className = 'preadmission-modal';
@@ -2592,6 +2836,9 @@
       }
     ];
 
+    // カード参照を保持（作成後の状態更新用）
+    const cardRefs = {};
+
     // 各オーダーカードを生成
     for (const type of orderTypes) {
       const card = createOrderCard(type);
@@ -2600,9 +2847,9 @@
 
     content.appendChild(cardGrid);
 
-    // デフォルトでチェックされているので、リハビリのデータを初期ロード
+    // リハビリがチェックされている場合のみ、データを初期ロード
     const rehabCard = cardGrid.querySelector('[data-order-type="rehab"]');
-    if (rehabCard) {
+    if (rehabCard && !creationStatus.rehab) {  // 作成済みでない場合のみ
       const rehabDetail = rehabCard.querySelector('.order-detail');
       if (rehabDetail && !rehabDataLoaded) {
         loadRehabData(rehabDetail);
@@ -2614,6 +2861,8 @@
 
     // --- カード生成関数 ---
     function createOrderCard(type) {
+      const isCreated = creationStatus[type.key] === true;
+
       // 詳細設定エリア
       const detailContent = document.createElement('div');
       detailContent.className = 'order-detail';
@@ -2624,7 +2873,7 @@
         title: type.label,
         description: type.description,
         checkbox: {
-          checked: true,
+          checked: !isCreated,  // 作成済みならチェックOFF
           onChange: (checked) => {
             // リハビリの場合はデータをロード
             if (type.key === 'rehab' && checked && !rehabDataLoaded) {
@@ -2634,12 +2883,51 @@
           }
         },
         content: detailContent,
-        selected: true
+        selected: !isCreated  // 作成済みなら非選択状態
       });
       card.dataset.orderType = type.key;
       checkbox.classList.add('order-checkbox');
       checkbox.dataset.type = type.key;
+
+      // 作成済みバッジを追加
+      const statusBadge = document.createElement('span');
+      statusBadge.className = 'creation-status-badge';
+      statusBadge.dataset.orderType = type.key;
+      statusBadge.style.cssText = `
+        display: ${isCreated ? 'inline-flex' : 'none'};
+        align-items: center;
+        gap: 4px;
+        padding: 2px 8px;
+        background: #dcfce7;
+        color: #166534;
+        font-size: 11px;
+        font-weight: 500;
+        border-radius: 4px;
+        margin-left: 8px;
+      `;
+      statusBadge.innerHTML = '✓ 作成済み';
+
+      // タイトル要素を探してバッジを追加
+      const titleEl = card.querySelector('[class*="title"], h3, .card-title');
+      if (titleEl) {
+        titleEl.style.display = 'flex';
+        titleEl.style.alignItems = 'center';
+        titleEl.appendChild(statusBadge);
+      }
+
+      // 参照を保持
+      cardRefs[type.key] = { card, checkbox, statusBadge, setSelected };
+
       return card;
+    }
+
+    // 作成状況を更新する関数
+    function updateCreationStatus(orderType, isCreated) {
+      creationStatus[orderType] = isCreated;
+      const ref = cardRefs[orderType];
+      if (ref?.statusBadge) {
+        ref.statusBadge.style.display = isCreated ? 'inline-flex' : 'none';
+      }
     }
 
     // --- 画像検査・生体検査の詳細 ---
@@ -3561,8 +3849,12 @@
               ordersData.push(data);
             }
 
-            modal.close();
-            showBatchConfirmModal(patientData, ordersData);
+            // 選択画面は閉じずに確認モーダルを表示（作成後に状態を更新するため）
+            showBatchConfirmModal(patientData, ordersData, (orderType, success) => {
+              if (success) {
+                updateCreationStatus(orderType, true);
+              }
+            });
           }
         }
       ]
@@ -3583,7 +3875,7 @@
   /**
    * 一括作成確認モーダルを表示
    */
-  function showBatchConfirmModal(patientData, ordersData) {
+  function showBatchConfirmModal(patientData, ordersData, onOrderCreated) {
     const core = pageWindow.HenryCore;
 
     const patientName = patientData.patient?.fullName || '不明';
@@ -3626,6 +3918,10 @@
               try {
                 await createSingleOrder(patientData, data);
                 results.push({ type: data.type, success: true });
+                // 作成成功を通知
+                if (onOrderCreated) {
+                  onOrderCreated(data.type, true);
+                }
               } catch (e) {
                 console.error(`[${SCRIPT_NAME}] ${data.type} 作成エラー:`, e);
                 results.push({ type: data.type, success: false, error: e.message });
