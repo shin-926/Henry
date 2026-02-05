@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry Core
 // @namespace    https://henry-app.jp/
-// @version      2.33.0
+// @version      2.34.2
 // @description  Henry スクリプト実行基盤 (GoogleAuth統合 / Google Docs対応)
 // @author       sk powered by Claude & Gemini
 // @match        https://henry-app.jp/*
@@ -77,7 +77,7 @@
  *   createBadge({ text, variant? })                     - ステータスバッジ（'default' | 'active'）
  *   createIconText({ icon, text })                      - アイコン付きテキスト（Material Icons）
  *   createTooltip({ target, text, position? })          - ツールチップ → { show, hide, destroy }
- *   createFormField({ label, input, required? })        - フォームフィールド（ラベル+入力）
+ *   createFormField({ label, input, required?, inline? }) - フォームフィールド（ラベル+入力）
  *   createListGroup({ items, groupBy, renderItem, ... }) - グループ化リスト → { wrapper, refresh }
  *   createTable({ columns, data, renderCell?, onRowClick? }) - テーブル → { table, refresh }
  *   createCard({ title, description?, checkbox?, content, selected? }) - カード → { card, setSelected, checkbox? }
@@ -673,6 +673,7 @@
           appearance: none;
           cursor: pointer;
           outline: none;
+          width: 100%;
         }
         .henry-select-wrapper::after {
           content: 'arrow_drop_down';
@@ -723,9 +724,9 @@
         }
         .henry-form-label {
           font-family: "Noto Sans JP", sans-serif;
-          font-size: 14px;
-          font-weight: 600;
-          color: rgba(0, 0, 0, 0.57);
+          font-size: 13px;
+          font-weight: 500;
+          color: var(--henry-text-med);
         }
         .henry-form-label-required {
           font-family: "Noto Sans JP", sans-serif;
@@ -789,6 +790,17 @@
         }
         .henry-form-field {
           margin-bottom: 12px;
+        }
+        .henry-form-field-inline {
+          display: flex;
+          align-items: center;
+          gap: 12px;
+        }
+        .henry-form-field-inline .henry-form-label-wrapper {
+          display: inline-block;
+          flex-shrink: 0;
+          margin-bottom: 0;
+          width: 70px;
         }
         .henry-form-field-label {
           display: block;
@@ -1274,12 +1286,16 @@
      * @param {string} options.label - ラベルテキスト
      * @param {HTMLElement} options.input - 入力要素（createInput, createSelect等で作成したもの）
      * @param {boolean} [options.required=false] - 必須マークを表示するか
+     * @param {boolean} [options.inline=false] - 横並びレイアウト（ラベルと入力を一行に配置）
      * @returns {HTMLDivElement}
      */
-    createFormField: ({ label, input, required = false } = {}) => {
+    createFormField: ({ label, input, required = false, inline = false } = {}) => {
       UI.init();
       const field = document.createElement('div');
       field.className = 'henry-form-field';
+      if (inline) {
+        field.classList.add('henry-form-field-inline');
+      }
 
       const labelWrapper = UI.createFormLabel({ text: label, required });
       field.appendChild(labelWrapper);

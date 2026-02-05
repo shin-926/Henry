@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry 入院前オーダー
 // @namespace    https://github.com/shin-926/Henry
-// @version      0.28.0
+// @version      0.28.2
 // @description  入院予定患者に対して入院前オーダー（CT検査等）を一括作成
 // @author       sk powered by Claude
 // @match        https://henry-app.jp/*
@@ -58,6 +58,19 @@
     .preadmission-modal p,
     .preadmission-modal h3 {
       font-family: 'Noto Sans JP', sans-serif;
+    }
+
+    /* HenryCore.uiコンポーネントのフォントサイズを13pxに上書き */
+    .preadmission-modal .henry-input,
+    .preadmission-modal .henry-select,
+    .preadmission-modal .henry-textarea,
+    .preadmission-modal .henry-btn,
+    .preadmission-modal .henry-form-field label,
+    .preadmission-modal .henry-list-group-item,
+    .preadmission-modal .henry-card-title,
+    .preadmission-modal .henry-accordion-title,
+    .preadmission-modal .henry-radio-label {
+      font-size: 13px;
     }
   `);
 
@@ -935,11 +948,11 @@
     },
     monitor: {
       label: 'モニター',
-      options: ['要', '不要']
+      options: ['不要', '要']
     },
     urine: {
       label: '尿測',
-      options: ['要', '不要']
+      options: ['不要', '要']
     },
     bathing: {
       label: '保清',
@@ -947,7 +960,7 @@
     },
     activity: {
       label: '安静度',
-      options: ['フリー', 'ベッド上安静', 'ポータブルトイレのみ可']
+      options: ['フリー', 'ポータブルトイレのみ', 'ベッド上']
     },
     mobility: {
       label: '補助具',
@@ -2396,7 +2409,7 @@
 
       // 説明
       const description = document.createElement('div');
-      description.style.cssText = 'color: var(--henry-text-med); font-size: 14px; margin-bottom: 12px;';
+      description.style.cssText = 'color: var(--henry-text-med); font-size: 13px; margin-bottom: 12px;';
       description.textContent = '入院予定患者（7日以内）から選択してください';
       content.appendChild(description);
 
@@ -2417,13 +2430,13 @@
 
           const info = document.createElement('div');
           info.innerHTML = `
-            <div style="font-size: 14px; font-weight: 500; color: var(--henry-text-high);">${p.patient?.fullName || '不明'}</div>
+            <div style="font-size: 13px; font-weight: 500; color: var(--henry-text-high);">${p.patient?.fullName || '不明'}</div>
             <div style="font-size: 12px; color: var(--henry-text-med); margin-top: 2px;">（${p.patient?.serialNumber || ''}）担当: ${p.hospitalizationDoctor?.doctor?.name || '−'}</div>
           `;
           item.appendChild(info);
 
           const selectLabel = document.createElement('div');
-          selectLabel.style.cssText = 'color: var(--henry-primary); font-size: 14px;';
+          selectLabel.style.cssText = 'color: var(--henry-primary); font-size: 13px;';
           selectLabel.textContent = '選択';
           item.appendChild(selectLabel);
 
@@ -2497,7 +2510,7 @@
       <div style="display: flex; justify-content: space-between; align-items: center; gap: 16px;">
         <div style="display: flex; align-items: center; gap: 12px;">
           <span style="font-size: 16px; font-weight: 600; color: #1f2937;">入院前オーダー作成</span>
-          <span style="font-size: 14px; color: #374151;">
+          <span style="font-size: 13px; color: #374151;">
             ${patientName}<span style="color: #666; margin-left: 4px;">（入院: ${admissionDate}　担当: ${doctorName}）</span>
           </span>
         </div>
@@ -2638,13 +2651,13 @@
       ctSection.style.marginBottom = '12px';
 
       const ctTitle = document.createElement('div');
-      ctTitle.style.cssText = 'font-size: 14px; font-weight: 600; color: var(--henry-text-high); margin-bottom: 8px;';
+      ctTitle.style.cssText = 'font-size: 13px; font-weight: 600; color: var(--henry-text-high); margin-bottom: 8px;';
       ctTitle.textContent = '【CT検査】';
       ctSection.appendChild(ctTitle);
 
       const noteInput = core.ui.createInput({ value: '頭部、胸腹部、脊椎' });
       noteInput.id = 'imaging-note';
-      const noteField = core.ui.createFormField({ label: '補足', input: noteInput });
+      const noteField = core.ui.createFormField({ label: '補足', input: noteInput, inline: true });
       noteField.style.marginLeft = '8px';
       ctSection.appendChild(noteField);
       container.appendChild(ctSection);
@@ -2652,12 +2665,12 @@
       // 生体検査セクション
       const biopsySection = document.createElement('div');
       const biopsyTitle = document.createElement('div');
-      biopsyTitle.style.cssText = 'font-size: 14px; font-weight: 600; color: var(--henry-text-high); margin-bottom: 8px;';
+      biopsyTitle.style.cssText = 'font-size: 13px; font-weight: 600; color: var(--henry-text-high); margin-bottom: 8px;';
       biopsyTitle.textContent = '【生体検査】';
       biopsySection.appendChild(biopsyTitle);
 
       const biopsyList = document.createElement('div');
-      biopsyList.style.cssText = 'font-size: 14px; color: var(--henry-text-secondary); margin-left: 8px;';
+      biopsyList.style.cssText = 'font-size: 13px; color: var(--henry-text-secondary); margin-left: 8px;';
       biopsyList.innerHTML = '<div>・心電図12誘導</div><div>・ABI/PWV（血管伸展性）</div>';
       biopsySection.appendChild(biopsyList);
       container.appendChild(biopsySection);
@@ -2683,21 +2696,24 @@
       // 病名テキストエリア
       const diseaseTextarea = core.ui.createTextarea({ rows: 3 });
       diseaseTextarea.id = 'treatment-plan-disease';
-      const diseaseField = core.ui.createFormField({ label: '病名', input: diseaseTextarea });
+      diseaseTextarea.style.resize = 'none';
+      const diseaseField = core.ui.createFormField({ label: '病名', input: diseaseTextarea, inline: true });
       diseaseField.style.marginBottom = '10px';
       container.appendChild(diseaseField);
 
       // 症状テキストエリア
       const symptomTextarea = core.ui.createTextarea({ rows: 3 });
       symptomTextarea.id = 'treatment-plan-symptom';
-      const symptomField = core.ui.createFormField({ label: '症状', input: symptomTextarea });
+      symptomTextarea.style.resize = 'none';
+      const symptomField = core.ui.createFormField({ label: '症状', input: symptomTextarea, inline: true });
       symptomField.style.marginBottom = '10px';
       container.appendChild(symptomField);
 
       // 治療計画テキストエリア
       const treatmentTextarea = core.ui.createTextarea({ rows: 3 });
       treatmentTextarea.id = 'treatment-plan-treatment';
-      const treatmentField = core.ui.createFormField({ label: '治療計画', input: treatmentTextarea });
+      treatmentTextarea.style.resize = 'none';
+      const treatmentField = core.ui.createFormField({ label: '治療計画', input: treatmentTextarea, inline: true });
       treatmentField.style.marginBottom = '10px';
       container.appendChild(treatmentField);
 
@@ -2774,7 +2790,7 @@
 
       const displayEl = document.createElement('div');
       displayEl.id = 'specimen-selected-display';
-      displayEl.style.cssText = 'font-size: 14px; color: var(--henry-text-med); margin-bottom: 8px;';
+      displayEl.style.cssText = 'font-size: 13px; color: var(--henry-text-med); margin-bottom: 8px;';
       displayEl.textContent = `${selectedInspections.map(i => i.name).join(', ')}（${selectedInspections.length}項目）`;
       container.appendChild(displayEl);
 
@@ -2797,7 +2813,7 @@
 
       // 選択数表示
       const selectedCountEl = document.createElement('div');
-      selectedCountEl.style.cssText = 'font-size: 14px; color: var(--henry-text-med); margin-bottom: 12px;';
+      selectedCountEl.style.cssText = 'font-size: 13px; color: var(--henry-text-med); margin-bottom: 12px;';
       selectedCountEl.textContent = '読み込み中...';
       modalContent.appendChild(selectedCountEl);
 
@@ -2933,7 +2949,7 @@
           `;
           mainHeader.innerHTML = `
             <span class="main-arrow" style="font-size: 12px; color: #4b5563; transition: transform 0.2s; transform: rotate(${isMainExpanded ? '90deg' : '0deg'});">▶</span>
-            <span style="font-weight: 700; font-size: 14px; color: #1f2937; flex: 1;">${mainCat}</span>
+            <span style="font-weight: 700; font-size: 13px; color: #1f2937; flex: 1;">${mainCat}</span>
             <span class="main-count" style="font-size: 12px; color: ${mainSelectedCount > 0 ? '#2563eb' : '#6b7280'}; font-weight: 500;">${mainSelectedCount > 0 ? `${mainSelectedCount}/` : ''}${mainTotalCount}件</span>
           `;
 
@@ -3119,7 +3135,7 @@
         rehabDataLoaded = true;
 
         if (patientDiseases.length === 0) {
-          contentEl.innerHTML = '<div style="color: var(--henry-text-high); font-size: 14px;">登録済みの病名がありません</div>';
+          contentEl.innerHTML = '<div style="color: var(--henry-text-high); font-size: 13px;">登録済みの病名がありません</div>';
           loadingEl.style.display = 'none';
           contentEl.style.display = 'block';
           return;
@@ -3142,7 +3158,7 @@
           opt.dataset.period = calcTypeOptions[i]?.period || '';
         });
         calcTypeWrapper.style.flex = '1';
-        const calcTypeField = core.ui.createFormField({ label: '算定区分', input: { wrapper: calcTypeWrapper } });
+        const calcTypeField = core.ui.createFormField({ label: '算定区分', input: { wrapper: calcTypeWrapper }, inline: true });
         calcTypeField.style.marginBottom = '8px';
         contentEl.appendChild(calcTypeField);
 
@@ -3161,7 +3177,7 @@
           opt.dataset.startDate = diseaseOptions[i]?.startDate || '';
         });
         diseaseWrapper.style.flex = '1';
-        const diseaseField = core.ui.createFormField({ label: '診断名', input: { wrapper: diseaseWrapper } });
+        const diseaseField = core.ui.createFormField({ label: '診断名', input: { wrapper: diseaseWrapper }, inline: true });
         diseaseField.style.marginBottom = '8px';
         contentEl.appendChild(diseaseField);
 
@@ -3169,14 +3185,14 @@
         const { wrapper: startDateTypeWrapper, select: startDateTypeSelect } = core.ui.createSelect({ options: [] });
         startDateTypeSelect.id = 'rehab-start-date-type';
         startDateTypeWrapper.style.flex = '1';
-        const startDateTypeField = core.ui.createFormField({ label: '起算日種別', input: { wrapper: startDateTypeWrapper } });
+        const startDateTypeField = core.ui.createFormField({ label: '起算日種別', input: { wrapper: startDateTypeWrapper }, inline: true });
         startDateTypeField.style.marginBottom = '8px';
         contentEl.appendChild(startDateTypeField);
 
         // 起算日
         const therapyDateInput = core.ui.createInput({ type: 'date' });
         therapyDateInput.id = 'rehab-therapy-date';
-        const therapyDateField = core.ui.createFormField({ label: '起算日', input: therapyDateInput });
+        const therapyDateField = core.ui.createFormField({ label: '起算日', input: therapyDateInput, inline: true });
         therapyDateField.style.marginBottom = '8px';
         contentEl.appendChild(therapyDateField);
 
@@ -3184,8 +3200,8 @@
         const periodRow = document.createElement('div');
         periodRow.style.cssText = 'display: flex; align-items: center; margin-bottom: 8px; gap: 12px;';
         periodRow.innerHTML = `
-          <label style="width: auto; flex-shrink: 0; font-size: 14px; font-weight: 500; color: var(--henry-text-med);">算定期限</label>
-          <div id="rehab-period-display" style="flex: 1; padding: 8px 12px; background: var(--henry-bg-sub); border-radius: 4px; font-size: 14px; color: var(--henry-text-high);">-</div>
+          <label style="width: 70px; flex-shrink: 0; font-size: 13px; font-weight: 500; color: var(--henry-text-med);">算定期限</label>
+          <div id="rehab-period-display" style="flex: 1; padding: 8px 12px; background: var(--henry-bg-sub); border-radius: 4px; font-size: 13px; color: var(--henry-text-high);">-</div>
         `;
         contentEl.appendChild(periodRow);
 
@@ -3203,7 +3219,7 @@
         if (ptPlans.length > 0) {
           const ptRow = document.createElement('div');
           ptRow.style.cssText = 'margin-bottom: 6px;';
-          ptRow.innerHTML = `<label style="display: block; font-size: 14px; font-weight: 500; color: var(--henry-text-med); margin-bottom: 4px;">訓練内容（PT）</label>`;
+          ptRow.innerHTML = `<label style="display: block; font-size: 13px; font-weight: 500; color: var(--henry-text-med); margin-bottom: 4px;">訓練内容（PT）</label>`;
           const ptContainer = document.createElement('div');
           ptContainer.style.cssText = 'display: flex; flex-wrap: wrap; gap: 4px;';
           ptPlans.forEach(plan => {
@@ -3221,7 +3237,7 @@
         if (otPlans.length > 0) {
           const otRow = document.createElement('div');
           otRow.style.cssText = 'margin-bottom: 6px;';
-          otRow.innerHTML = `<label style="display: block; font-size: 14px; font-weight: 500; color: var(--henry-text-med); margin-bottom: 4px;">訓練内容（OT）</label>`;
+          otRow.innerHTML = `<label style="display: block; font-size: 13px; font-weight: 500; color: var(--henry-text-med); margin-bottom: 4px;">訓練内容（OT）</label>`;
           const otContainer = document.createElement('div');
           otContainer.style.cssText = 'display: flex; flex-wrap: wrap; gap: 4px;';
           otPlans.forEach(plan => {
@@ -3318,7 +3334,7 @@
 
       } catch (e) {
         console.error(`[${SCRIPT_NAME}] リハビリデータ取得エラー:`, e);
-        contentEl.innerHTML = '<div style="color: var(--henry-text-high); font-size: 14px;">データ取得に失敗しました</div>';
+        contentEl.innerHTML = '<div style="color: var(--henry-text-high); font-size: 13px;">データ取得に失敗しました</div>';
         loadingEl.style.display = 'none';
         contentEl.style.display = 'block';
       }
@@ -3327,100 +3343,93 @@
     // --- 入院時指示の詳細 ---
     function buildInstructionDetail() {
       const container = document.createElement('div');
-      container.style.cssText = 'font-size: 14px; display: flex; flex-direction: column; height: 100%;';
+      container.style.cssText = 'font-size: 13px; display: flex; flex-direction: column; height: 100%;';
 
-      // 共通スタイル: ラベル固定幅、一行レイアウト
-      const rowStyle = 'display: flex; align-items: center; margin-bottom: 8px;';
-      const labelStyle = 'width: 70px; flex-shrink: 0; font-weight: 500; color: var(--henry-text-med);';
-      const radioLabelStyle = 'display: flex; align-items: center; gap: 4px; cursor: pointer; margin-right: 12px;';
+      // 食事（select + 詳細入力）
+      const mealInputWrapper = document.createElement('div');
+      mealInputWrapper.style.cssText = 'display: flex; align-items: center; gap: 8px; flex: 1;';
 
-      // 食事
-      let html = `
-        <div style="${rowStyle}">
-          <label style="${labelStyle}">食事</label>
-          <select id="instruction-meal" style="width: 130px; padding: 6px 12px; border: 1px solid var(--henry-border); border-radius: 4px; font-size: 14px; margin-right: 8px;">
-            ${INSTRUCTION_OPTIONS.meal.options.map(opt => `<option value="${opt}">${opt}</option>`).join('')}
-          </select>
-          <input type="text" id="instruction-meal-detail" placeholder="詳細入力" class="henry-input" style="flex: 1;">
-        </div>
-      `;
+      const { wrapper: mealSelectWrapper, select: mealSelect } = core.ui.createSelect({
+        options: INSTRUCTION_OPTIONS.meal.options.map(opt => ({ value: opt, label: opt }))
+      });
+      mealSelect.id = 'instruction-meal';
+      mealSelectWrapper.style.width = '130px';
+      mealInputWrapper.appendChild(mealSelectWrapper);
 
-      // 安静度
-      html += `
-        <div style="${rowStyle}">
-          <label style="${labelStyle}">安静度</label>
-          <div style="display: flex; flex-wrap: wrap;">
-            ${INSTRUCTION_OPTIONS.activity.options.map((opt, i) =>
-              `<label style="${radioLabelStyle}"><input type="radio" name="instruction-activity" value="${opt}" ${i === 0 ? 'checked' : ''}> ${opt}</label>`
-            ).join('')}
-          </div>
-        </div>
-      `;
+      const mealDetailInput = core.ui.createInput({ placeholder: 'カロリー・塩分制限など' });
+      mealDetailInput.id = 'instruction-meal-detail';
+      mealDetailInput.style.flex = '1';
+      mealInputWrapper.appendChild(mealDetailInput);
 
-      // モニター
-      html += `
-        <div style="${rowStyle}">
-          <label style="${labelStyle}">モニター</label>
-          <div style="display: flex;">
-            ${INSTRUCTION_OPTIONS.monitor.options.map((opt, i) =>
-              `<label style="${radioLabelStyle}"><input type="radio" name="instruction-monitor" value="${opt}" ${i === 1 ? 'checked' : ''}> ${opt}</label>`
-            ).join('')}
-          </div>
-        </div>
-      `;
+      const mealField = core.ui.createFormField({ label: '食事', input: mealInputWrapper, inline: true });
+      mealField.style.marginBottom = '8px';
+      container.appendChild(mealField);
 
-      // 尿測
-      html += `
-        <div style="${rowStyle}">
-          <label style="${labelStyle}">尿測</label>
-          <div style="display: flex;">
-            ${INSTRUCTION_OPTIONS.urine.options.map((opt, i) =>
-              `<label style="${radioLabelStyle}"><input type="radio" name="instruction-urine" value="${opt}" ${i === 1 ? 'checked' : ''}> ${opt}</label>`
-            ).join('')}
-          </div>
-        </div>
-      `;
+      // 安静度（ラジオボタン）
+      const { wrapper: activityWrapper } = core.ui.createRadioGroup({
+        name: 'instruction-activity',
+        options: INSTRUCTION_OPTIONS.activity.options.map(opt => ({ value: opt, label: opt })),
+        defaultValue: INSTRUCTION_OPTIONS.activity.options[0]
+      });
+      const activityField = core.ui.createFormField({ label: '安静度', input: activityWrapper, inline: true });
+      activityField.style.marginBottom = '8px';
+      container.appendChild(activityField);
 
-      // 保清
-      html += `
-        <div style="${rowStyle}">
-          <label style="${labelStyle}">保清</label>
-          <div style="display: flex;">
-            ${INSTRUCTION_OPTIONS.bathing.options.map((opt, i) =>
-              `<label style="${radioLabelStyle}"><input type="radio" name="instruction-bathing" value="${opt}" ${i === 0 ? 'checked' : ''}> ${opt}</label>`
-            ).join('')}
-          </div>
-        </div>
-      `;
+      // モニター（ラジオボタン）
+      const { wrapper: monitorWrapper } = core.ui.createRadioGroup({
+        name: 'instruction-monitor',
+        options: INSTRUCTION_OPTIONS.monitor.options.map(opt => ({ value: opt, label: opt })),
+        defaultValue: INSTRUCTION_OPTIONS.monitor.options[1]
+      });
+      const monitorField = core.ui.createFormField({ label: 'モニター', input: monitorWrapper, inline: true });
+      monitorField.style.marginBottom = '8px';
+      container.appendChild(monitorField);
 
-      // 補助具
-      html += `
-        <div style="${rowStyle}">
-          <label style="${labelStyle}">補助具</label>
-          <div style="display: flex; flex-wrap: wrap;">
-            ${INSTRUCTION_OPTIONS.mobility.options.map((opt, i) =>
-              `<label style="${radioLabelStyle}"><input type="radio" name="instruction-mobility" value="${opt}" ${i === 0 ? 'checked' : ''}> ${opt}</label>`
-            ).join('')}
-          </div>
-        </div>
-      `;
+      // 尿測（ラジオボタン）
+      const { wrapper: urineWrapper } = core.ui.createRadioGroup({
+        name: 'instruction-urine',
+        options: INSTRUCTION_OPTIONS.urine.options.map(opt => ({ value: opt, label: opt })),
+        defaultValue: INSTRUCTION_OPTIONS.urine.options[1]
+      });
+      const urineField = core.ui.createFormField({ label: '尿測', input: urineWrapper, inline: true });
+      urineField.style.marginBottom = '8px';
+      container.appendChild(urineField);
 
-      // その他（自由記述）
-      html += `
-        <div style="flex: 1; display: flex; align-items: flex-start; min-height: 0;">
-          <label style="${labelStyle} margin-top: 8px;">その他</label>
-          <textarea id="instruction-freetext" placeholder="追加指示..." class="henry-textarea" style="flex: 1; height: 100%; resize: none;"></textarea>
-        </div>
-      `;
+      // 保清（ラジオボタン）
+      const { wrapper: bathingWrapper } = core.ui.createRadioGroup({
+        name: 'instruction-bathing',
+        options: INSTRUCTION_OPTIONS.bathing.options.map(opt => ({ value: opt, label: opt })),
+        defaultValue: INSTRUCTION_OPTIONS.bathing.options[0]
+      });
+      const bathingField = core.ui.createFormField({ label: '保清', input: bathingWrapper, inline: true });
+      bathingField.style.marginBottom = '8px';
+      container.appendChild(bathingField);
 
-      container.innerHTML = html;
+      // 補助具（ラジオボタン）
+      const { wrapper: mobilityWrapper } = core.ui.createRadioGroup({
+        name: 'instruction-mobility',
+        options: INSTRUCTION_OPTIONS.mobility.options.map(opt => ({ value: opt, label: opt })),
+        defaultValue: INSTRUCTION_OPTIONS.mobility.options[0]
+      });
+      const mobilityField = core.ui.createFormField({ label: '補助具', input: mobilityWrapper, inline: true });
+      mobilityField.style.marginBottom = '8px';
+      container.appendChild(mobilityField);
+
+      // その他（自由記述）- flex: 1で残りを埋める
+      const freetextTextarea = core.ui.createTextarea({ placeholder: '追加指示...' });
+      freetextTextarea.id = 'instruction-freetext';
+      freetextTextarea.style.cssText = 'flex: 1; height: 100%; resize: none;';
+      const freetextField = core.ui.createFormField({ label: 'その他', input: freetextTextarea, inline: true });
+      freetextField.style.cssText = 'flex: 1; display: flex; align-items: flex-start; min-height: 0;';
+      container.appendChild(freetextField);
+
       return container;
     }
 
     // --- 指示簿の詳細 ---
     function buildStandingOrderDetail() {
       const container = document.createElement('div');
-      container.style.cssText = 'font-size: 14px; display: flex; flex-direction: column; height: 100%;';
+      container.style.cssText = 'font-size: 13px; display: flex; flex-direction: column; height: 100%;';
 
       const textarea = core.ui.createTextarea({ value: STANDING_ORDER_DEFAULT_TEXT, rows: 10 });
       textarea.id = 'standing-order-text';
@@ -3591,7 +3600,7 @@
     content.className = 'preadmission-modal';
     content.innerHTML = `
       <p style="margin: 0 0 16px 0; color: #333;">以下のオーダーを作成します。</p>
-      <div style="padding: 12px; background: #f5f5f5; border-radius: 6px; font-size: 14px; color: #333;">
+      <div style="padding: 12px; background: #f5f5f5; border-radius: 6px; font-size: 13px; color: #333;">
         <div><strong>患者:</strong> ${patientName}</div>
         <div style="margin-top: 4px;"><strong>オーダー日:</strong> ${orderDateStr}</div>
         <div style="margin-top: 8px;"><strong>作成するオーダー（${ordersData.length}件）:</strong></div>
