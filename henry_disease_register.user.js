@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry Disease Register
 // @namespace    https://henry-app.jp/
-// @version      3.28.1
+// @version      3.29.0
 // @description  高速病名検索・登録
 // @author       sk powered by Claude & Gemini
 // @match        https://henry-app.jp/*
@@ -250,6 +250,9 @@
                       code
                       name
                     }
+                    customDiseaseName {
+                      value
+                    }
                   }
                   rehabilitationCalculationType {
                     name
@@ -291,7 +294,15 @@
         for (const order of section.orders) {
           const rehabOrder = order.order?.rehabilitationOrder;
           if (rehabOrder?.detail) {
-            const diseaseName = rehabOrder.detail.patientReceiptDisease?.masterDisease?.name;
+            const disease = rehabOrder.detail.patientReceiptDisease;
+            const masterDisease = disease?.masterDisease;
+            const customDiseaseName = disease?.customDiseaseName?.value;
+            // 未コード化病名の判定
+            const isCustom = masterDisease?.code === '0000999' && customDiseaseName;
+            let diseaseName = isCustom ? customDiseaseName : masterDisease?.name;
+            if (isCustom && diseaseName) {
+              diseaseName = '(未コード)' + diseaseName;
+            }
             const rehabType = rehabOrder.detail.rehabilitationCalculationType?.name;
             if (diseaseName) {
               history.push({
@@ -1478,6 +1489,13 @@
     .dr-candidate-item.registered:hover {
       background: #ffebee;
     }
+    .dr-custom-disease {
+      background: #fff8e1;
+      border-left: 3px solid #ffc107;
+    }
+    .dr-custom-disease:hover {
+      background: #fff3cd;
+    }
     .dr-list-item.registered {
       background: #fff8f8;
       color: #888;
@@ -2015,13 +2033,18 @@
         container.innerHTML = diseases.map((d, index) => {
           // 未コード化病名（code: 0000999）の場合は customDiseaseName を優先
           let baseName;
-          if (d.masterDisease?.code === '0000999' && d.customDiseaseName?.value) {
+          const isCustom = d.masterDisease?.code === '0000999' && d.customDiseaseName?.value;
+          if (isCustom) {
             baseName = d.customDiseaseName.value;
           } else {
             baseName = d.masterDisease?.name || '（名称なし）';
           }
           // 修飾語を適用
-          const name = this.applyModifiers(baseName, d.masterModifiers || []);
+          let name = this.applyModifiers(baseName, d.masterModifiers || []);
+          // 未コード化病名には「(未コード)」プレフィックスを追加
+          if (isCustom) {
+            name = '(未コード)' + name;
+          }
           const date = this.formatDate(d.startDate);
           const outcomeLabel = this.getOutcomeLabel(d.outcome);
           return `<div class="dr-registered-item" data-index="${index}">
@@ -2522,15 +2545,12 @@
       }
 
       const candidates = parseNaturalInput(input);
-
-      if (candidates.length === 0) {
-        container.style.display = 'block';
-        container.innerHTML = '<div class="dr-empty">候補が見つかりません</div>';
-        return;
-      }
+      const trimmedInput = input.trim();
 
       container.style.display = 'block';
-      container.innerHTML = candidates.map((c, i) => {
+
+      // 候補リストを生成
+      const candidatesHtml = candidates.map((c, i) => {
         const prefixTags = c.prefixes.map(p => `<span class="dr-candidate-tag">${p.name}</span>`).join('');
         const suffixTags = c.suffixes.map(s => `<span class="dr-candidate-tag suffix">${s.name}</span>`).join('');
         const allTags = prefixTags + suffixTags;
@@ -2547,8 +2567,18 @@
         `;
       }).join('');
 
-      // クリックイベント
-      container.querySelectorAll('.dr-candidate-item').forEach(item => {
+      // 未コード化病名オプションを最後に追加
+      const customDiseaseHtml = `
+        <div class="dr-candidate-item dr-custom-disease" data-custom="true">
+          <div class="dr-candidate-name">${trimmedInput}</div>
+          <div class="dr-candidate-detail">未コード化病名として登録</div>
+        </div>
+      `;
+
+      container.innerHTML = candidatesHtml + customDiseaseHtml;
+
+      // 候補のクリックイベント
+      container.querySelectorAll('.dr-candidate-item[data-index]').forEach(item => {
         item.onclick = () => {
           const index = parseInt(item.dataset.index);
           // 選択状態を更新
@@ -2558,6 +2588,13 @@
           this.selectCandidate(candidates[index]);
         };
       });
+
+      // 未コード化病名のクリックイベント
+      container.querySelector('[data-custom="true"]').onclick = () => {
+        container.querySelectorAll('.dr-candidate-item').forEach(el => el.classList.remove('selected'));
+        container.querySelector('[data-custom="true"]').classList.add('selected');
+        this.selectCustomDisease(trimmedInput);
+      };
     }
 
     // 候補を選択して既存の状態に反映
@@ -2575,6 +2612,30 @@
 
       // 修飾語を設定（接頭語 + 接尾語）
       this.selectedModifiers = [...candidate.prefixes, ...candidate.suffixes];
+      this.updateModifierTags();
+      this.updateModifierList(this.overlay.querySelector('#dr-modifier-search').value);
+
+      // プレビューと登録ボタンを更新
+      this.updatePreview();
+      this.updateRegisterButton();
+    }
+
+    // 未コード化病名を選択
+    selectCustomDisease(name) {
+      // 入力テキストをそのまま維持
+      this.overlay.querySelector('#dr-natural-input').value = name;
+
+      // 未コード化病名として設定
+      this.selectedDisease = {
+        code: '0000999',
+        name: name,
+        isCustom: true
+      };
+      this.overlay.querySelector('#dr-selected-disease').style.display = 'flex';
+      this.overlay.querySelector('#dr-selected-disease-name').textContent = name + '（未コード化）';
+
+      // 修飾語はクリア（未コード化病名では使用しない）
+      this.selectedModifiers = [];
       this.updateModifierTags();
       this.updateModifierList(this.overlay.querySelector('#dr-modifier-search').value);
 
@@ -2635,6 +2696,11 @@
       // outcomeは必須、未選択の場合は CONTINUED
       const outcome = outcomeValue || 'CONTINUED';
 
+      // 未コード化病名の場合はcustomDiseaseNameを設定
+      const customDiseaseNameStr = this.selectedDisease.isCustom
+        ? `{ value: "${this.selectedDisease.name.replace(/"/g, '\\"')}" }`
+        : 'null';
+
       // NOTE: インライン形式でmutationを構築
       // HenryのGraphQL APIでは変数型（$input: SomeInput!）がエラーになるため
       // 将来的にAPI側が対応したら変数方式に移行したい
@@ -2654,7 +2720,7 @@
                 startDate: { year: ${startYear}, month: ${startMonth}, day: ${startDay} },
                 outcome: ${outcome},
                 endDate: ${endDateStr},
-                customDiseaseName: null,
+                customDiseaseName: ${customDiseaseNameStr},
                 intractableDiseaseType: NOT_APPLICABLE,
                 patientCareType: PATIENT_CARE_TYPE_ANY
               }
@@ -2733,12 +2799,16 @@
 
       // 病名表示名を構築
       let baseName;
-      if (disease.masterDisease?.code === '0000999' && disease.customDiseaseName?.value) {
+      const isCustom = disease.masterDisease?.code === '0000999' && disease.customDiseaseName?.value;
+      if (isCustom) {
         baseName = disease.customDiseaseName.value;
       } else {
         baseName = disease.masterDisease?.name || '（名称なし）';
       }
-      const displayName = this.applyModifiers(baseName, disease.masterModifiers || []);
+      let displayName = this.applyModifiers(baseName, disease.masterModifiers || []);
+      if (isCustom) {
+        displayName = '(未コード)' + displayName;
+      }
 
       // 今日の日付
       const today = getToday();
@@ -3070,12 +3140,16 @@
     async deleteDisease(disease) {
       // 病名表示名を構築（確認ダイアログ用）
       let baseName;
-      if (disease.masterDisease?.code === '0000999' && disease.customDiseaseName?.value) {
+      const isCustom = disease.masterDisease?.code === '0000999' && disease.customDiseaseName?.value;
+      if (isCustom) {
         baseName = disease.customDiseaseName.value;
       } else {
         baseName = disease.masterDisease?.name || '（名称なし）';
       }
-      const displayName = this.applyModifiers(baseName, disease.masterModifiers || []);
+      let displayName = this.applyModifiers(baseName, disease.masterModifiers || []);
+      if (isCustom) {
+        displayName = '(未コード)' + displayName;
+      }
 
       // 確認ダイアログ（Henry本体と同じ形式）
       if (!confirm('本当に削除しますか？')) {
