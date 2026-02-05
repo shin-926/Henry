@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry 入院前オーダー
 // @namespace    https://github.com/shin-926/Henry
-// @version      0.26.0
+// @version      0.28.0
 // @description  入院予定患者に対して入院前オーダー（CT検査等）を一括作成
 // @author       sk powered by Claude
 // @match        https://henry-app.jp/*
@@ -2390,169 +2390,76 @@
         return;
       }
 
-      // モーダル作成
-      const overlay = document.createElement('div');
-      overlay.style.cssText = `
-        position: fixed;
-        top: 0;
-        left: 0;
-        right: 0;
-        bottom: 0;
-        background: rgba(0, 0, 0, 0.5);
-        z-index: 1500;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-      `;
-
-      const modal = document.createElement('div');
-      modal.className = 'preadmission-modal';
-      modal.style.cssText = `
-        background: white;
-        border-radius: 12px;
-        box-shadow: 0 4px 20px rgba(0,0,0,0.3);
-        max-width: 500px;
-        width: 90%;
-        max-height: 80vh;
-        display: flex;
-        flex-direction: column;
-      `;
-
-      // ヘッダー
-      const header = document.createElement('div');
-      header.style.cssText = `
-        padding: 16px 20px;
-        border-bottom: 1px solid #e0e0e0;
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-      `;
-      header.innerHTML = `
-        <h3 style="margin: 0; font-size: 18px; color: #333;">入院前オーダー</h3>
-        <button id="close-btn" style="background: none; border: none; font-size: 24px; cursor: pointer; color: #666;">&times;</button>
-      `;
+      // モーダルコンテンツ
+      const content = document.createElement('div');
+      content.style.cssText = 'display: flex; flex-direction: column; max-height: 60vh;';
 
       // 説明
       const description = document.createElement('div');
-      description.style.cssText = 'padding: 12px 20px; color: #666; font-size: 13px; border-bottom: 1px solid #e0e0e0;';
-      description.textContent = '入院予定患者（7日以内）';
+      description.style.cssText = 'color: var(--henry-text-med); font-size: 14px; margin-bottom: 12px;';
+      description.textContent = '入院予定患者（7日以内）から選択してください';
+      content.appendChild(description);
 
       // 検索ボックス
-      const searchBox = document.createElement('div');
-      searchBox.style.cssText = 'padding: 12px 20px; border-bottom: 1px solid #e0e0e0;';
-      searchBox.innerHTML = `
-        <input type="text" id="patient-search" placeholder="患者名で検索..." style="
-          width: 100%;
-          padding: 10px 12px;
-          border: 1px solid #ddd;
-          border-radius: 6px;
-          font-size: 14px;
-          box-sizing: border-box;
-        ">
-      `;
+      const searchInput = core.ui.createInput({ placeholder: '患者名で検索...' });
+      searchInput.style.marginBottom = '12px';
+      content.appendChild(searchInput);
 
-      // 患者リスト
-      const listContainer = document.createElement('div');
-      listContainer.style.cssText = `
-        flex: 1;
-        overflow-y: auto;
-        padding: 8px 0;
-      `;
+      // 患者リスト（createListGroupを使用）
+      let modal;
+      const { wrapper: listWrapper, refresh: refreshList } = core.ui.createListGroup({
+        items: patients,
+        groupBy: (p) => formatDate(p.startDate),
+        renderHeader: (dateStr) => `▼ ${dateStr}`,
+        renderItem: (p) => {
+          const item = document.createElement('div');
+          item.style.cssText = 'flex: 1; display: flex; justify-content: space-between; align-items: center;';
 
-      function renderPatientList(filterText = '') {
+          const info = document.createElement('div');
+          info.innerHTML = `
+            <div style="font-size: 14px; font-weight: 500; color: var(--henry-text-high);">${p.patient?.fullName || '不明'}</div>
+            <div style="font-size: 12px; color: var(--henry-text-med); margin-top: 2px;">（${p.patient?.serialNumber || ''}）担当: ${p.hospitalizationDoctor?.doctor?.name || '−'}</div>
+          `;
+          item.appendChild(info);
+
+          const selectLabel = document.createElement('div');
+          selectLabel.style.cssText = 'color: var(--henry-primary); font-size: 14px;';
+          selectLabel.textContent = '選択';
+          item.appendChild(selectLabel);
+
+          return item;
+        },
+        onItemClick: (p) => {
+          modal.close();
+          showOrderSettingsModal(p);
+        },
+        emptyMessage: '該当する患者がいません'
+      });
+      listWrapper.style.cssText = 'flex: 1; overflow-y: auto; max-height: 400px;';
+      content.appendChild(listWrapper);
+
+      // 検索イベント
+      searchInput.addEventListener('input', (e) => {
+        const filterText = e.target.value;
         const filtered = patients.filter(p => {
           const name = p.patient?.fullName || '';
           const kana = p.patient?.fullNamePhonetic || '';
           return name.includes(filterText) || kana.includes(filterText);
         });
-
-        listContainer.innerHTML = '';
-
-        if (filtered.length === 0) {
-          listContainer.innerHTML = '<div style="padding: 20px; text-align: center; color: #666;">該当する患者がいません</div>';
-          return;
-        }
-
-        // 入院予定日でグループ化
-        const byDate = new Map();
-        for (const p of filtered) {
-          const dateStr = formatDate(p.startDate);
-          if (!byDate.has(dateStr)) {
-            byDate.set(dateStr, []);
-          }
-          byDate.get(dateStr).push(p);
-        }
-
-        for (const [dateStr, datePatients] of byDate) {
-          // 日付ヘッダー
-          const dateHeader = document.createElement('div');
-          dateHeader.style.cssText = `
-            padding: 8px 20px;
-            background: #f5f5f5;
-            font-size: 13px;
-            color: #333;
-            font-weight: 500;
-          `;
-          dateHeader.textContent = `▼ ${dateStr}`;
-          listContainer.appendChild(dateHeader);
-
-          for (const p of datePatients) {
-            // 患者行
-            const row = document.createElement('div');
-            row.style.cssText = `
-              padding: 12px 20px;
-              cursor: pointer;
-              display: flex;
-              align-items: center;
-              gap: 12px;
-              border-bottom: 1px solid #f0f0f0;
-              transition: background 0.15s;
-            `;
-            row.addEventListener('mouseover', () => row.style.background = '#f8f9fa');
-            row.addEventListener('mouseout', () => row.style.background = 'transparent');
-
-            const serialNumber = p.patient?.serialNumber || '';
-            const doctorName = p.hospitalizationDoctor?.doctor?.name || '−';
-
-            row.innerHTML = `
-              <div style="flex: 1;">
-                <div style="font-size: 15px; font-weight: 500; color: #333;">${p.patient?.fullName || '不明'}</div>
-                <div style="font-size: 12px; color: #666; margin-top: 2px;">（${serialNumber}）担当: ${doctorName}</div>
-              </div>
-              <div style="color: #1976d2; font-size: 13px;">選択</div>
-            `;
-
-            row.addEventListener('click', () => {
-              overlay.remove();
-              showOrderSettingsModal(p);
-            });
-
-            listContainer.appendChild(row);
-          }
-        }
-      }
-
-      renderPatientList();
-
-      modal.appendChild(header);
-      modal.appendChild(description);
-      modal.appendChild(searchBox);
-      modal.appendChild(listContainer);
-      overlay.appendChild(modal);
-      document.body.appendChild(overlay);
-
-      // イベント
-      const closeBtn = header.querySelector('#close-btn');
-      closeBtn.addEventListener('click', () => overlay.remove());
-      overlay.addEventListener('click', (e) => {
-        if (e.target === overlay) overlay.remove();
+        refreshList(filtered);
       });
 
-      const searchInput = searchBox.querySelector('#patient-search');
-      searchInput.addEventListener('input', (e) => {
-        renderPatientList(e.target.value);
+      modal = core.ui.showModal({
+        title: '入院前オーダー',
+        content,
+        width: '500px',
+        actions: [
+          { label: '閉じる', variant: 'secondary' }
+        ]
       });
-      searchInput.focus();
+
+      // 検索にフォーカス
+      setTimeout(() => searchInput.focus(), 100);
 
     } catch (e) {
       spinner.close();
@@ -2694,96 +2601,67 @@
 
     // --- カード生成関数 ---
     function createOrderCard(type) {
-      const card = document.createElement('div');
-      card.dataset.orderType = type.key;
-      card.style.cssText = `
-        border: 1px solid #3b82f6;
-        border-radius: 8px;
-        background: #fff;
-        display: flex;
-        flex-direction: column;
-        overflow: hidden;
-        box-shadow: 0 0 0 1px #3b82f6;
-      `;
+      // 詳細設定エリア
+      const detailContent = document.createElement('div');
+      detailContent.className = 'order-detail';
+      detailContent.dataset.detailType = type.key;
+      detailContent.appendChild(type.buildDetail());
 
-      // ヘッダー（チェックボックス + タイトル）
-      const header = document.createElement('div');
-      header.style.cssText = `
-        padding: 12px 16px;
-        background: #f9fafb;
-        border-bottom: 1px solid #e5e7eb;
-        display: flex;
-        align-items: center;
-        gap: 10px;
-      `;
-      header.innerHTML = `
-        <input type="checkbox" class="order-checkbox" data-type="${type.key}" style="width: 18px; height: 18px; cursor: pointer;" checked>
-        <div style="font-weight: 600; font-size: 13px; color: #1f2937;">
-          ${type.label}　<span style="font-weight: normal; color: #6b7280;">${type.description}</span>
-        </div>
-      `;
-
-      const checkbox = header.querySelector('.order-checkbox');
-
-      // 詳細設定エリア（デフォルトで有効）
-      const detail = document.createElement('div');
-      detail.className = 'order-detail';
-      detail.dataset.detailType = type.key;  // 後から参照できるよう type.key を設定
-      detail.style.cssText = `
-        padding: 12px 16px;
-        flex: 1;
-        overflow-y: auto;
-        opacity: 1;
-        pointer-events: auto;
-        transition: opacity 0.2s;
-      `;
-      detail.appendChild(type.buildDetail());
-
-      // チェックボックス変更時に詳細エリアの有効/無効を切り替え
-      checkbox.addEventListener('change', () => {
-        if (checkbox.checked) {
-          detail.style.opacity = '1';
-          detail.style.pointerEvents = 'auto';
-          card.style.borderColor = '#3b82f6';
-          card.style.boxShadow = '0 0 0 1px #3b82f6';
-          // リハビリの場合はデータをロード
-          if (type.key === 'rehab' && !rehabDataLoaded) {
-            loadRehabData(detail);
+      const { card, setSelected, checkbox } = core.ui.createCard({
+        title: type.label,
+        description: type.description,
+        checkbox: {
+          checked: true,
+          onChange: (checked) => {
+            // リハビリの場合はデータをロード
+            if (type.key === 'rehab' && checked && !rehabDataLoaded) {
+              loadRehabData(detailContent);
+            }
+            updateCreateButton();
           }
-        } else {
-          detail.style.opacity = '0.5';
-          detail.style.pointerEvents = 'none';
-          card.style.borderColor = '#e5e7eb';
-          card.style.boxShadow = 'none';
-        }
-        updateCreateButton();
+        },
+        content: detailContent,
+        selected: true
       });
-
-      card.appendChild(header);
-      card.appendChild(detail);
+      card.dataset.orderType = type.key;
+      checkbox.classList.add('order-checkbox');
+      checkbox.dataset.type = type.key;
       return card;
     }
 
     // --- 画像検査・生体検査の詳細 ---
     function buildImagingBiopsyDetail() {
       const container = document.createElement('div');
-      container.innerHTML = `
-        <div style="margin-bottom: 12px;">
-          <div style="font-size: 12px; font-weight: 600; color: #1f2937; margin-bottom: 6px;">【CT検査】</div>
-          <div style="display: flex; align-items: center; margin-left: 8px; gap: 12px;">
-            <label style="width: 60px; flex-shrink: 0; font-size: 12px; font-weight: 500; color: #374151;">補足</label>
-            <input type="text" id="imaging-note" value="頭部、胸腹部、脊椎"
-              style="flex: 1; padding: 6px 10px; border: 1px solid #d1d5db; border-radius: 4px; font-size: 13px; box-sizing: border-box;">
-          </div>
-        </div>
-        <div>
-          <div style="font-size: 12px; font-weight: 600; color: #1f2937; margin-bottom: 6px;">【生体検査】</div>
-          <div style="font-size: 13px; color: #374151; margin-left: 8px;">
-            <div>・心電図12誘導</div>
-            <div>・ABI/PWV（血管伸展性）</div>
-          </div>
-        </div>
-      `;
+
+      // CT検査セクション
+      const ctSection = document.createElement('div');
+      ctSection.style.marginBottom = '12px';
+
+      const ctTitle = document.createElement('div');
+      ctTitle.style.cssText = 'font-size: 14px; font-weight: 600; color: var(--henry-text-high); margin-bottom: 8px;';
+      ctTitle.textContent = '【CT検査】';
+      ctSection.appendChild(ctTitle);
+
+      const noteInput = core.ui.createInput({ value: '頭部、胸腹部、脊椎' });
+      noteInput.id = 'imaging-note';
+      const noteField = core.ui.createFormField({ label: '補足', input: noteInput });
+      noteField.style.marginLeft = '8px';
+      ctSection.appendChild(noteField);
+      container.appendChild(ctSection);
+
+      // 生体検査セクション
+      const biopsySection = document.createElement('div');
+      const biopsyTitle = document.createElement('div');
+      biopsyTitle.style.cssText = 'font-size: 14px; font-weight: 600; color: var(--henry-text-high); margin-bottom: 8px;';
+      biopsyTitle.textContent = '【生体検査】';
+      biopsySection.appendChild(biopsyTitle);
+
+      const biopsyList = document.createElement('div');
+      biopsyList.style.cssText = 'font-size: 14px; color: var(--henry-text-secondary); margin-left: 8px;';
+      biopsyList.innerHTML = '<div>・心電図12誘導</div><div>・ABI/PWV（血管伸展性）</div>';
+      biopsySection.appendChild(biopsyList);
+      container.appendChild(biopsySection);
+
       return container;
     }
 
@@ -2793,59 +2671,82 @@
 
       // 推定入院期間の選択肢
       const periodOptions = [
-        '2週程度',
-        '1ヶ月程度',
-        '1-2ヶ月程度',
-        '2ヶ月程度',
-        '2-3ヶ月程度',
-        '3ヶ月程度',
-        'その他'
+        { value: '2週程度', label: '2週程度' },
+        { value: '1ヶ月程度', label: '1ヶ月程度' },
+        { value: '1-2ヶ月程度', label: '1-2ヶ月程度' },
+        { value: '2ヶ月程度', label: '2ヶ月程度' },
+        { value: '2-3ヶ月程度', label: '2-3ヶ月程度' },
+        { value: '3ヶ月程度', label: '3ヶ月程度' },
+        { value: 'その他', label: 'その他' }
       ];
 
-      container.innerHTML = `
-        <div style="display: flex; align-items: flex-start; margin-bottom: 10px; gap: 12px;">
-          <label style="width: 70px; flex-shrink: 0; font-size: 12px; font-weight: 500; color: #374151; padding-top: 6px;">病名</label>
-          <textarea id="treatment-plan-disease" rows="3"
-            style="flex: 1; padding: 6px 10px; border: 1px solid #d1d5db; border-radius: 4px; font-size: 13px; box-sizing: border-box; resize: none;"></textarea>
-        </div>
-        <div style="display: flex; align-items: flex-start; margin-bottom: 10px; gap: 12px;">
-          <label style="width: 70px; flex-shrink: 0; font-size: 12px; font-weight: 500; color: #374151; padding-top: 6px;">症状</label>
-          <textarea id="treatment-plan-symptom" rows="3"
-            style="flex: 1; padding: 6px 10px; border: 1px solid #d1d5db; border-radius: 4px; font-size: 13px; box-sizing: border-box; resize: none;"></textarea>
-        </div>
-        <div style="display: flex; align-items: flex-start; margin-bottom: 10px; gap: 12px;">
-          <label style="width: 70px; flex-shrink: 0; font-size: 12px; font-weight: 500; color: #374151; padding-top: 6px;">治療計画</label>
-          <textarea id="treatment-plan-treatment" rows="3"
-            style="flex: 1; padding: 6px 10px; border: 1px solid #d1d5db; border-radius: 4px; font-size: 13px; box-sizing: border-box; resize: none;"></textarea>
-        </div>
-        <div style="display: flex; align-items: center; margin-bottom: 10px; gap: 12px;">
-          <label style="width: 70px; flex-shrink: 0; font-size: 12px; font-weight: 500; color: #374151;">入院期間</label>
-          <div style="flex: 1;">
-            <select id="treatment-plan-period" style="width: 100%; padding: 6px 10px; border: 1px solid #d1d5db; border-radius: 4px; font-size: 13px; background: white;">
-              ${periodOptions.map(opt => `<option value="${opt}">${opt}</option>`).join('')}
-            </select>
-            <input type="text" id="treatment-plan-period-other" placeholder="具体的な期間を入力"
-              style="display: none; margin-top: 6px; width: 100%; padding: 6px 10px; border: 1px solid #d1d5db; border-radius: 4px; font-size: 13px; box-sizing: border-box;">
-          </div>
-        </div>
-        <div style="display: flex; align-items: center; gap: 12px;">
-          <label style="width: 70px; flex-shrink: 0; font-size: 12px; font-weight: 500; color: #374151;">栄養管理</label>
-          <div style="display: flex; gap: 16px;">
-            <label style="display: flex; align-items: center; gap: 4px; cursor: pointer;">
-              <input type="radio" name="treatment-plan-nutrition" value="なし" checked style="margin: 0;">
-              <span style="font-size: 13px; color: #374151;">なし</span>
-            </label>
-            <label style="display: flex; align-items: center; gap: 4px; cursor: pointer;">
-              <input type="radio" name="treatment-plan-nutrition" value="あり" style="margin: 0;">
-              <span style="font-size: 13px; color: #374151;">あり</span>
-            </label>
-          </div>
-        </div>
-      `;
+      // 病名テキストエリア
+      const diseaseTextarea = core.ui.createTextarea({ rows: 3 });
+      diseaseTextarea.id = 'treatment-plan-disease';
+      const diseaseField = core.ui.createFormField({ label: '病名', input: diseaseTextarea });
+      diseaseField.style.marginBottom = '10px';
+      container.appendChild(diseaseField);
+
+      // 症状テキストエリア
+      const symptomTextarea = core.ui.createTextarea({ rows: 3 });
+      symptomTextarea.id = 'treatment-plan-symptom';
+      const symptomField = core.ui.createFormField({ label: '症状', input: symptomTextarea });
+      symptomField.style.marginBottom = '10px';
+      container.appendChild(symptomField);
+
+      // 治療計画テキストエリア
+      const treatmentTextarea = core.ui.createTextarea({ rows: 3 });
+      treatmentTextarea.id = 'treatment-plan-treatment';
+      const treatmentField = core.ui.createFormField({ label: '治療計画', input: treatmentTextarea });
+      treatmentField.style.marginBottom = '10px';
+      container.appendChild(treatmentField);
+
+      // 入院期間（セレクト + その他入力欄）
+      const periodRow = document.createElement('div');
+      periodRow.style.cssText = 'display: flex; align-items: center; margin-bottom: 10px; gap: 12px;';
+
+      const periodLabel = document.createElement('label');
+      periodLabel.style.cssText = 'width: 70px; flex-shrink: 0; font-size: 12px; font-weight: 500; color: #374151;';
+      periodLabel.textContent = '入院期間';
+      periodRow.appendChild(periodLabel);
+
+      const periodInputWrapper = document.createElement('div');
+      periodInputWrapper.style.cssText = 'flex: 1;';
+
+      const { wrapper: periodSelectWrapper, select: periodSelect } = core.ui.createSelect({ options: periodOptions });
+      periodSelect.id = 'treatment-plan-period';
+      periodSelectWrapper.style.width = '100%';
+      periodInputWrapper.appendChild(periodSelectWrapper);
+
+      const periodOtherInput = core.ui.createInput({ placeholder: '具体的な期間を入力' });
+      periodOtherInput.id = 'treatment-plan-period-other';
+      periodOtherInput.style.cssText = 'display: none; margin-top: 6px; width: 100%;';
+      periodInputWrapper.appendChild(periodOtherInput);
+
+      periodRow.appendChild(periodInputWrapper);
+      container.appendChild(periodRow);
+
+      // 栄養管理（ラジオグループ）
+      const nutritionRow = document.createElement('div');
+      nutritionRow.style.cssText = 'display: flex; align-items: center; gap: 12px;';
+
+      const nutritionLabel = document.createElement('label');
+      nutritionLabel.style.cssText = 'width: 70px; flex-shrink: 0; font-size: 12px; font-weight: 500; color: #374151;';
+      nutritionLabel.textContent = '栄養管理';
+      nutritionRow.appendChild(nutritionLabel);
+
+      const { wrapper: nutritionWrapper } = core.ui.createRadioGroup({
+        name: 'treatment-plan-nutrition',
+        options: [
+          { value: 'なし', label: 'なし' },
+          { value: 'あり', label: 'あり' }
+        ],
+        value: 'なし'
+      });
+      nutritionRow.appendChild(nutritionWrapper);
+      container.appendChild(nutritionRow);
 
       // 「その他」選択時に自由記述欄を表示
-      const periodSelect = container.querySelector('#treatment-plan-period');
-      const periodOtherInput = container.querySelector('#treatment-plan-period-other');
       periodSelect.addEventListener('change', () => {
         if (periodSelect.value === 'その他') {
           periodOtherInput.style.display = 'block';
@@ -2871,153 +2772,80 @@
         }
       }
 
-      container.innerHTML = `
-        <div id="specimen-selected-display" style="font-size: 12px; color: #6b7280; margin-bottom: 8px;">
-          ${selectedInspections.map(i => i.name).join(', ')}（${selectedInspections.length}項目）
-        </div>
-        <button type="button" id="specimen-edit-btn" style="
-          padding: 6px 12px;
-          background: #f3f4f6;
-          border: 1px solid #d1d5db;
-          border-radius: 4px;
-          font-size: 12px;
-          color: #374151;
-          cursor: pointer;
-        ">項目を編集</button>
-      `;
+      const displayEl = document.createElement('div');
+      displayEl.id = 'specimen-selected-display';
+      displayEl.style.cssText = 'font-size: 14px; color: var(--henry-text-med); margin-bottom: 8px;';
+      displayEl.textContent = `${selectedInspections.map(i => i.name).join(', ')}（${selectedInspections.length}項目）`;
+      container.appendChild(displayEl);
 
-      // 「項目を編集」ボタンのクリックイベント
-      container.querySelector('#specimen-edit-btn').addEventListener('click', () => {
-        showInspectionSelectorPopup(updateSelectedDisplay);
+      const editBtn = core.ui.createButton({
+        label: '項目を編集',
+        variant: 'secondary',
+        onClick: () => showInspectionSelectorPopup(updateSelectedDisplay)
       });
+      editBtn.id = 'specimen-edit-btn';
+      container.appendChild(editBtn);
 
       return container;
     }
 
     // --- 血液検査項目選択ポップアップ ---
     async function showInspectionSelectorPopup(onConfirm) {
-      // 既存のポップアップがあれば削除
-      const existingPopup = document.getElementById('inspection-selector-popup');
-      if (existingPopup) existingPopup.remove();
+      // モーダルコンテンツ
+      const modalContent = document.createElement('div');
+      modalContent.style.cssText = 'display: flex; flex-direction: column; height: 70vh;';
 
-      // オーバーレイ
-      const overlay = document.createElement('div');
-      overlay.id = 'inspection-selector-popup';
-      overlay.style.cssText = `
-        position: fixed;
-        top: 0;
-        left: 0;
-        right: 0;
-        bottom: 0;
-        background: rgba(0, 0, 0, 0.5);
-        z-index: 1600;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-      `;
+      // 選択数表示
+      const selectedCountEl = document.createElement('div');
+      selectedCountEl.style.cssText = 'font-size: 14px; color: var(--henry-text-med); margin-bottom: 12px;';
+      selectedCountEl.textContent = '読み込み中...';
+      modalContent.appendChild(selectedCountEl);
 
-      // ポップアップ本体
-      const popup = document.createElement('div');
-      popup.className = 'preadmission-modal';
-      popup.style.cssText = `
-        background: white;
-        border-radius: 8px;
-        box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
-        max-width: 1200px;
-        width: 95%;
-        max-height: 85vh;
-        display: flex;
-        flex-direction: column;
-      `;
-
-      // ヘッダー
-      const header = document.createElement('div');
-      header.style.cssText = `
-        padding: 16px;
-        border-bottom: 1px solid #e5e7eb;
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-      `;
-      header.innerHTML = `
-        <div style="font-weight: 600; font-size: 16px; color: #1f2937;">血液検査項目の選択</div>
-        <button type="button" id="inspection-popup-close" style="
-          background: none;
-          border: none;
-          font-size: 20px;
-          cursor: pointer;
-          color: #6b7280;
-          padding: 4px 8px;
-        ">&times;</button>
-      `;
+      // 検索ボックス
+      const inspectionSearchInput = core.ui.createInput({ placeholder: '検査名で絞り込み...' });
+      inspectionSearchInput.style.marginBottom = '12px';
+      modalContent.appendChild(inspectionSearchInput);
 
       // コンテンツエリア
       const content = document.createElement('div');
-      content.style.cssText = `
-        padding: 16px;
-        overflow-y: auto;
-        flex: 1;
-      `;
-      content.innerHTML = '<div style="text-align: center; padding: 20px; color: #6b7280;">検査項目を取得中...</div>';
+      content.style.cssText = 'flex: 1; overflow-y: auto;';
+      content.innerHTML = '<div style="text-align: center; padding: 20px; color: var(--henry-text-med);">検査項目を取得中...</div>';
+      modalContent.appendChild(content);
 
-      // フッター
-      const footer = document.createElement('div');
-      footer.style.cssText = `
-        padding: 16px;
-        border-top: 1px solid #e5e7eb;
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-      `;
-      footer.innerHTML = `
-        <div id="inspection-selected-count" style="font-size: 13px; color: #6b7280;">
-          読み込み中...
-        </div>
-        <div style="display: flex; gap: 8px;">
-          <button type="button" id="inspection-cancel-btn" style="
-            padding: 8px 16px;
-            background: #f3f4f6;
-            border: 1px solid #d1d5db;
-            border-radius: 4px;
-            font-size: 13px;
-            color: #374151;
-            cursor: pointer;
-          ">キャンセル</button>
-          <button type="button" id="inspection-confirm-btn" style="
-            padding: 8px 16px;
-            background: #3b82f6;
-            border: none;
-            border-radius: 4px;
-            font-size: 13px;
-            color: white;
-            cursor: pointer;
-          " disabled>確定</button>
-        </div>
-      `;
-
-      popup.appendChild(header);
-      popup.appendChild(content);
-      popup.appendChild(footer);
-      overlay.appendChild(popup);
-      document.body.appendChild(overlay);
-
-      // 閉じるボタンのイベント
-      header.querySelector('#inspection-popup-close').addEventListener('click', () => {
-        overlay.remove();
-      });
-      footer.querySelector('#inspection-cancel-btn').addEventListener('click', () => {
-        overlay.remove();
-      });
-      overlay.addEventListener('click', (e) => {
-        if (e.target === overlay) {
-          overlay.remove();
-        }
+      // モーダル表示
+      let modal;
+      let confirmEnabled = false;
+      modal = core.ui.showModal({
+        title: '血液検査項目の選択',
+        content: modalContent,
+        width: '1100px',
+        closeOnOverlayClick: true,
+        actions: [
+          { label: 'キャンセル', variant: 'secondary' },
+          {
+            label: '確定',
+            variant: 'primary',
+            autoClose: false,
+            onClick: (e, btn) => {
+              if (!confirmEnabled) return;
+              // 選択された項目で selectedInspections を更新
+              selectedInspections = [];
+              for (const code of tempSelected) {
+                const name = inspectionNameMap.get(code) || code;
+                selectedInspections.push({ code, name });
+              }
+              console.log(`[${SCRIPT_NAME}] 血液検査項目を更新: ${selectedInspections.length}件`);
+              onConfirm();
+              modal.close();
+            }
+          }
+        ]
       });
 
       // APIから全検査項目を取得
       const allInspections = await fetchAllOutsideInspections();
       if (allInspections.length === 0) {
-        content.innerHTML = '<div style="text-align: center; padding: 20px; color: #dc2626;">検査項目の取得に失敗しました</div>';
+        content.innerHTML = '<div style="text-align: center; padding: 20px; color: var(--henry-text-high);">検査項目の取得に失敗しました</div>';
         return;
       }
 
@@ -3028,21 +2856,6 @@
 
       // コンテンツを構築
       content.innerHTML = '';
-
-      // 検索ボックス
-      const searchBox = document.createElement('div');
-      searchBox.style.cssText = 'margin-bottom: 12px;';
-      searchBox.innerHTML = `
-        <input type="text" id="inspection-search" placeholder="検査名で絞り込み..." style="
-          width: 100%;
-          padding: 8px 12px;
-          border: 1px solid #d1d5db;
-          border-radius: 4px;
-          font-size: 13px;
-          box-sizing: border-box;
-        ">
-      `;
-      content.appendChild(searchBox);
 
       // 項目リスト（カテゴリ別）
       const itemsContainer = document.createElement('div');
@@ -3261,35 +3074,18 @@
       content.appendChild(itemsContainer);
 
       // 検索イベント
-      const searchInput = searchBox.querySelector('#inspection-search');
-      searchInput.addEventListener('input', () => {
-        renderItems(searchInput.value);
+      inspectionSearchInput.addEventListener('input', () => {
+        renderItems(inspectionSearchInput.value);
       });
 
       // 選択数更新
       function updateSelectedCount() {
-        const countEl = footer.querySelector('#inspection-selected-count');
-        if (countEl) {
-          countEl.textContent = `${tempSelected.size}項目を選択中（全${allInspections.length}項目）`;
-        }
+        selectedCountEl.textContent = `${tempSelected.size}項目を選択中（全${allInspections.length}項目）`;
       }
       updateSelectedCount();
 
       // 確定ボタン有効化
-      const confirmBtn = footer.querySelector('#inspection-confirm-btn');
-      confirmBtn.disabled = false;
-
-      confirmBtn.addEventListener('click', () => {
-        // 選択された項目で selectedInspections を更新
-        selectedInspections = [];
-        for (const code of tempSelected) {
-          const name = inspectionNameMap.get(code) || code;
-          selectedInspections.push({ code, name });
-        }
-        console.log(`[${SCRIPT_NAME}] 血液検査項目を更新: ${selectedInspections.length}件`);
-        onConfirm();
-        overlay.remove();
-      });
+      confirmEnabled = true;
     }
 
     // --- リハビリの詳細 ---
@@ -3323,7 +3119,7 @@
         rehabDataLoaded = true;
 
         if (patientDiseases.length === 0) {
-          contentEl.innerHTML = '<div style="color: #dc2626; font-size: 13px;">登録済みの病名がありません</div>';
+          contentEl.innerHTML = '<div style="color: var(--henry-text-high); font-size: 14px;">登録済みの病名がありません</div>';
           loadingEl.style.display = 'none';
           contentEl.style.display = 'block';
           return;
@@ -3331,75 +3127,65 @@
 
         contentEl.innerHTML = '';
 
-        // 算定区分選択
-        const calcTypeRow = document.createElement('div');
-        calcTypeRow.style.cssText = 'display: flex; align-items: center; margin-bottom: 8px; gap: 12px;';
-        calcTypeRow.innerHTML = `<label style="width: 70px; flex-shrink: 0; font-size: 12px; font-weight: 500; color: #374151;">算定区分</label>`;
-        const calcTypeSelect = document.createElement('select');
-        calcTypeSelect.id = 'rehab-calc-type';
-        calcTypeSelect.style.cssText = 'flex: 1; padding: 6px 8px; border: 1px solid #d1d5db; border-radius: 4px; font-size: 13px;';
-        // 疾患別リハのみをフィルタ
-        rehabCalcTypes
+        // 算定区分選択（動的にdata属性を設定するため、createSelectではなく手動構築）
+        const calcTypeOptions = rehabCalcTypes
           .filter(t => t.isShikkanbetsuRehabilitation)
-          .forEach(t => {
-            const option = document.createElement('option');
-            option.value = t.uuid;
-            option.textContent = t.name;
-            // 算定期間をdata属性に保存（期限計算用）
-            option.dataset.period = t.period?.value || '';
-            // 運動器リハビリテーションをデフォルト選択
-            if (t.uuid === REHAB_TEMPLATES['admission-rehab'].rehabilitationCalculationTypeUuid) {
-              option.selected = true;
-            }
-            calcTypeSelect.appendChild(option);
-          });
-        calcTypeRow.appendChild(calcTypeSelect);
-        contentEl.appendChild(calcTypeRow);
+          .map(t => ({ value: t.uuid, label: t.name, period: t.period?.value || '' }));
+        const defaultCalcTypeValue = REHAB_TEMPLATES['admission-rehab'].rehabilitationCalculationTypeUuid;
+        const { wrapper: calcTypeWrapper, select: calcTypeSelect } = core.ui.createSelect({
+          options: calcTypeOptions,
+          value: defaultCalcTypeValue
+        });
+        calcTypeSelect.id = 'rehab-calc-type';
+        // 算定期間をdata属性に保存（期限計算用）
+        Array.from(calcTypeSelect.options).forEach((opt, i) => {
+          opt.dataset.period = calcTypeOptions[i]?.period || '';
+        });
+        calcTypeWrapper.style.flex = '1';
+        const calcTypeField = core.ui.createFormField({ label: '算定区分', input: { wrapper: calcTypeWrapper } });
+        calcTypeField.style.marginBottom = '8px';
+        contentEl.appendChild(calcTypeField);
 
         // 診断名選択
-        const diseaseRow = document.createElement('div');
-        diseaseRow.style.cssText = 'display: flex; align-items: center; margin-bottom: 8px; gap: 12px;';
-        diseaseRow.innerHTML = `<label style="width: 70px; flex-shrink: 0; font-size: 12px; font-weight: 500; color: #374151;">診断名</label>`;
-        const diseaseSelect = document.createElement('select');
-        diseaseSelect.id = 'rehab-disease';
-        diseaseSelect.style.cssText = 'flex: 1; padding: 6px 8px; border: 1px solid #d1d5db; border-radius: 4px; font-size: 13px;';
-        patientDiseases.forEach(d => {
-          const option = document.createElement('option');
-          option.value = d.uuid;
-          option.textContent = `${buildFullDiseaseName(d)}${d.isMain ? ' [主]' : ''}`;
-          option.dataset.startDate = d.startDate ? `${d.startDate.year}-${String(d.startDate.month).padStart(2, '0')}-${String(d.startDate.day).padStart(2, '0')}` : '';
-          diseaseSelect.appendChild(option);
+        const diseaseOptions = patientDiseases.map(d => ({
+          value: d.uuid,
+          label: `${buildFullDiseaseName(d)}${d.isMain ? ' [主]' : ''}`,
+          startDate: d.startDate ? `${d.startDate.year}-${String(d.startDate.month).padStart(2, '0')}-${String(d.startDate.day).padStart(2, '0')}` : ''
+        }));
+        const { wrapper: diseaseWrapper, select: diseaseSelect } = core.ui.createSelect({
+          options: diseaseOptions
         });
-        diseaseRow.appendChild(diseaseSelect);
-        contentEl.appendChild(diseaseRow);
+        diseaseSelect.id = 'rehab-disease';
+        // startDateをdata属性に保存
+        Array.from(diseaseSelect.options).forEach((opt, i) => {
+          opt.dataset.startDate = diseaseOptions[i]?.startDate || '';
+        });
+        diseaseWrapper.style.flex = '1';
+        const diseaseField = core.ui.createFormField({ label: '診断名', input: { wrapper: diseaseWrapper } });
+        diseaseField.style.marginBottom = '8px';
+        contentEl.appendChild(diseaseField);
 
-        // 起算日種別
-        const startDateTypeRow = document.createElement('div');
-        startDateTypeRow.style.cssText = 'display: flex; align-items: center; margin-bottom: 8px; gap: 12px;';
-        startDateTypeRow.innerHTML = `<label style="width: 70px; flex-shrink: 0; font-size: 12px; font-weight: 500; color: #374151;">起算日種別</label>`;
-        const startDateTypeSelect = document.createElement('select');
+        // 起算日種別（動的に変更されるため、空の状態で作成）
+        const { wrapper: startDateTypeWrapper, select: startDateTypeSelect } = core.ui.createSelect({ options: [] });
         startDateTypeSelect.id = 'rehab-start-date-type';
-        startDateTypeSelect.style.cssText = 'flex: 1; padding: 6px 8px; border: 1px solid #d1d5db; border-radius: 4px; font-size: 13px;';
-        startDateTypeRow.appendChild(startDateTypeSelect);
-        contentEl.appendChild(startDateTypeRow);
+        startDateTypeWrapper.style.flex = '1';
+        const startDateTypeField = core.ui.createFormField({ label: '起算日種別', input: { wrapper: startDateTypeWrapper } });
+        startDateTypeField.style.marginBottom = '8px';
+        contentEl.appendChild(startDateTypeField);
 
         // 起算日
-        const therapyDateRow = document.createElement('div');
-        therapyDateRow.style.cssText = 'display: flex; align-items: center; margin-bottom: 8px; gap: 12px;';
-        therapyDateRow.innerHTML = `<label style="width: 70px; flex-shrink: 0; font-size: 12px; font-weight: 500; color: #374151;">起算日</label>`;
-        const therapyDateInput = document.createElement('input');
-        therapyDateInput.type = 'date';
+        const therapyDateInput = core.ui.createInput({ type: 'date' });
         therapyDateInput.id = 'rehab-therapy-date';
-        therapyDateInput.style.cssText = 'flex: 1; padding: 6px 8px; border: 1px solid #d1d5db; border-radius: 4px; font-size: 13px;';
-        therapyDateRow.appendChild(therapyDateInput);
-        contentEl.appendChild(therapyDateRow);
+        const therapyDateField = core.ui.createFormField({ label: '起算日', input: therapyDateInput });
+        therapyDateField.style.marginBottom = '8px';
+        contentEl.appendChild(therapyDateField);
 
         // 算定期限表示
         const periodRow = document.createElement('div');
         periodRow.style.cssText = 'display: flex; align-items: center; margin-bottom: 8px; gap: 12px;';
         periodRow.innerHTML = `
-          <label style="width: 70px; flex-shrink: 0; font-size: 12px; font-weight: 500; color: #374151;">算定期限</label>
-          <div id="rehab-period-display" style="flex: 1; padding: 6px 8px; background: #f3f4f6; border-radius: 4px; font-size: 13px; color: #374151;">-</div>
+          <label style="width: auto; flex-shrink: 0; font-size: 14px; font-weight: 500; color: var(--henry-text-med);">算定期限</label>
+          <div id="rehab-period-display" style="flex: 1; padding: 8px 12px; background: var(--henry-bg-sub); border-radius: 4px; font-size: 14px; color: var(--henry-text-high);">-</div>
         `;
         contentEl.appendChild(periodRow);
 
@@ -3417,13 +3203,13 @@
         if (ptPlans.length > 0) {
           const ptRow = document.createElement('div');
           ptRow.style.cssText = 'margin-bottom: 6px;';
-          ptRow.innerHTML = `<label style="display: block; font-size: 12px; font-weight: 500; color: #374151; margin-bottom: 4px;">訓練内容（PT）</label>`;
+          ptRow.innerHTML = `<label style="display: block; font-size: 14px; font-weight: 500; color: var(--henry-text-med); margin-bottom: 4px;">訓練内容（PT）</label>`;
           const ptContainer = document.createElement('div');
           ptContainer.style.cssText = 'display: flex; flex-wrap: wrap; gap: 4px;';
           ptPlans.forEach(plan => {
             const isDefaultChecked = defaultCheckedTrainings.includes(plan.name);
             const label = document.createElement('label');
-            label.style.cssText = 'display: flex; align-items: center; gap: 3px; cursor: pointer; font-size: 11px; padding: 2px 6px; border: 1px solid #e5e7eb; border-radius: 3px; background: #f9fafb;';
+            label.style.cssText = 'display: flex; align-items: center; gap: 3px; cursor: pointer; font-size: 13px; padding: 4px 8px; border: 1px solid var(--henry-border); border-radius: 4px; background: var(--henry-bg-sub);';
             label.innerHTML = `<input type="checkbox" class="rehab-plan" value="${plan.uuid}"${isDefaultChecked ? ' checked' : ''}> ${plan.name}`;
             ptContainer.appendChild(label);
           });
@@ -3435,13 +3221,13 @@
         if (otPlans.length > 0) {
           const otRow = document.createElement('div');
           otRow.style.cssText = 'margin-bottom: 6px;';
-          otRow.innerHTML = `<label style="display: block; font-size: 12px; font-weight: 500; color: #374151; margin-bottom: 4px;">訓練内容（OT）</label>`;
+          otRow.innerHTML = `<label style="display: block; font-size: 14px; font-weight: 500; color: var(--henry-text-med); margin-bottom: 4px;">訓練内容（OT）</label>`;
           const otContainer = document.createElement('div');
           otContainer.style.cssText = 'display: flex; flex-wrap: wrap; gap: 4px;';
           otPlans.forEach(plan => {
             const isDefaultChecked = defaultCheckedTrainings.includes(plan.name);
             const label = document.createElement('label');
-            label.style.cssText = 'display: flex; align-items: center; gap: 3px; cursor: pointer; font-size: 11px; padding: 2px 6px; border: 1px solid #e5e7eb; border-radius: 3px; background: #f9fafb;';
+            label.style.cssText = 'display: flex; align-items: center; gap: 3px; cursor: pointer; font-size: 13px; padding: 4px 8px; border: 1px solid var(--henry-border); border-radius: 4px; background: var(--henry-bg-sub);';
             label.innerHTML = `<input type="checkbox" class="rehab-plan" value="${plan.uuid}"${isDefaultChecked ? ' checked' : ''}> ${plan.name}`;
             otContainer.appendChild(label);
           });
@@ -3532,7 +3318,7 @@
 
       } catch (e) {
         console.error(`[${SCRIPT_NAME}] リハビリデータ取得エラー:`, e);
-        contentEl.innerHTML = '<div style="color: #dc2626; font-size: 13px;">データ取得に失敗しました</div>';
+        contentEl.innerHTML = '<div style="color: var(--henry-text-high); font-size: 14px;">データ取得に失敗しました</div>';
         loadingEl.style.display = 'none';
         contentEl.style.display = 'block';
       }
@@ -3541,21 +3327,21 @@
     // --- 入院時指示の詳細 ---
     function buildInstructionDetail() {
       const container = document.createElement('div');
-      container.style.cssText = 'font-size: 12px; display: flex; flex-direction: column; height: 100%;';
+      container.style.cssText = 'font-size: 14px; display: flex; flex-direction: column; height: 100%;';
 
       // 共通スタイル: ラベル固定幅、一行レイアウト
-      const rowStyle = 'display: flex; align-items: center; margin-bottom: 6px;';
-      const labelStyle = 'width: 70px; flex-shrink: 0; font-weight: 500; color: #374151;';
-      const radioLabelStyle = 'display: flex; align-items: center; gap: 3px; cursor: pointer; margin-right: 8px;';
+      const rowStyle = 'display: flex; align-items: center; margin-bottom: 8px;';
+      const labelStyle = 'width: 70px; flex-shrink: 0; font-weight: 500; color: var(--henry-text-med);';
+      const radioLabelStyle = 'display: flex; align-items: center; gap: 4px; cursor: pointer; margin-right: 12px;';
 
       // 食事
       let html = `
         <div style="${rowStyle}">
           <label style="${labelStyle}">食事</label>
-          <select id="instruction-meal" style="width: 130px; padding: 4px 6px; border: 1px solid #d1d5db; border-radius: 4px; font-size: 12px; margin-right: 6px;">
+          <select id="instruction-meal" style="width: 130px; padding: 6px 12px; border: 1px solid var(--henry-border); border-radius: 4px; font-size: 14px; margin-right: 8px;">
             ${INSTRUCTION_OPTIONS.meal.options.map(opt => `<option value="${opt}">${opt}</option>`).join('')}
           </select>
-          <input type="text" id="instruction-meal-detail" placeholder="詳細入力" style="flex: 1; padding: 4px 6px; border: 1px solid #d1d5db; border-radius: 4px; font-size: 12px;">
+          <input type="text" id="instruction-meal-detail" placeholder="詳細入力" class="henry-input" style="flex: 1;">
         </div>
       `;
 
@@ -3622,8 +3408,8 @@
       // その他（自由記述）
       html += `
         <div style="flex: 1; display: flex; align-items: flex-start; min-height: 0;">
-          <label style="${labelStyle} margin-top: 4px;">その他</label>
-          <textarea id="instruction-freetext" placeholder="追加指示..." style="flex: 1; height: 100%; padding: 4px 6px; border: 1px solid #d1d5db; border-radius: 4px; font-size: 12px; resize: none; box-sizing: border-box;"></textarea>
+          <label style="${labelStyle} margin-top: 8px;">その他</label>
+          <textarea id="instruction-freetext" placeholder="追加指示..." class="henry-textarea" style="flex: 1; height: 100%; resize: none;"></textarea>
         </div>
       `;
 
@@ -3634,11 +3420,13 @@
     // --- 指示簿の詳細 ---
     function buildStandingOrderDetail() {
       const container = document.createElement('div');
-      container.style.cssText = 'font-size: 12px; display: flex; flex-direction: column; height: 100%;';
+      container.style.cssText = 'font-size: 14px; display: flex; flex-direction: column; height: 100%;';
 
-      container.innerHTML = `
-        <textarea id="standing-order-text" style="flex: 1; width: 100%; padding: 8px; border: 1px solid #d1d5db; border-radius: 4px; font-size: 12px; line-height: 1.6; resize: none; box-sizing: border-box;">${STANDING_ORDER_DEFAULT_TEXT}</textarea>
-      `;
+      const textarea = core.ui.createTextarea({ value: STANDING_ORDER_DEFAULT_TEXT, rows: 10 });
+      textarea.id = 'standing-order-text';
+      textarea.style.cssText = 'flex: 1; resize: none; line-height: 1.6;';
+      container.appendChild(textarea);
+
       return container;
     }
 

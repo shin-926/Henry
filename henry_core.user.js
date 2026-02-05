@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry Core
 // @namespace    https://henry-app.jp/
-// @version      2.32.0
+// @version      2.33.0
 // @description  Henry スクリプト実行基盤 (GoogleAuth統合 / Google Docs対応)
 // @author       sk powered by Claude & Gemini
 // @match        https://henry-app.jp/*
@@ -80,6 +80,8 @@
  *   createFormField({ label, input, required? })        - フォームフィールド（ラベル+入力）
  *   createListGroup({ items, groupBy, renderItem, ... }) - グループ化リスト → { wrapper, refresh }
  *   createTable({ columns, data, renderCell?, onRowClick? }) - テーブル → { table, refresh }
+ *   createCard({ title, description?, checkbox?, content, selected? }) - カード → { card, setSelected, checkbox? }
+ *   createAccordion({ items, allowMultiple? }) - アコーディオン → { wrapper, toggle, expand, collapse, updateBadge }
  *   showModal({ title, content, actions?, width?, closeOnOverlayClick? })
  *   showConfirm({ title, message, confirmLabel?, cancelLabel? }) - 確認ダイアログ → Promise<boolean>
  *   showToast(message, type?, duration?)            - トースト通知
@@ -854,6 +856,97 @@
         .henry-table-clickable tbody tr {
           cursor: pointer;
         }
+        .henry-card {
+          border: 1px solid var(--henry-border);
+          border-radius: 8px;
+          background: var(--henry-bg-base);
+          display: flex;
+          flex-direction: column;
+          overflow: hidden;
+          transition: border-color 0.2s, box-shadow 0.2s;
+        }
+        .henry-card-selected {
+          border-color: var(--henry-primary);
+          box-shadow: 0 0 0 1px var(--henry-primary);
+        }
+        .henry-card-header {
+          padding: 12px 16px;
+          background: var(--henry-bg-sub);
+          border-bottom: 1px solid var(--henry-border);
+          display: flex;
+          align-items: center;
+          gap: 10px;
+        }
+        .henry-card-title {
+          font-weight: 600;
+          font-size: 14px;
+          color: var(--henry-text-high);
+        }
+        .henry-card-description {
+          font-weight: 400;
+          color: var(--henry-text-med);
+        }
+        .henry-card-content {
+          padding: 12px 16px;
+          flex: 1;
+          overflow-y: auto;
+          transition: opacity 0.2s;
+        }
+        .henry-card-content-disabled {
+          opacity: 0.5;
+          pointer-events: none;
+        }
+        .henry-accordion {
+          font-family: "Noto Sans JP", sans-serif;
+        }
+        .henry-accordion-item {
+          border: 1px solid var(--henry-border);
+          border-radius: 6px;
+          margin-bottom: 8px;
+          overflow: hidden;
+        }
+        .henry-accordion-header {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          padding: 10px 12px;
+          background: #e5e7eb;
+          cursor: pointer;
+          user-select: none;
+        }
+        .henry-accordion-header:hover {
+          background: #d1d5db;
+        }
+        .henry-accordion-arrow {
+          font-size: 12px;
+          color: #4b5563;
+          transition: transform 0.2s;
+        }
+        .henry-accordion-arrow-expanded {
+          transform: rotate(90deg);
+        }
+        .henry-accordion-title {
+          font-weight: 600;
+          font-size: 14px;
+          color: var(--henry-text-high);
+          flex: 1;
+        }
+        .henry-accordion-badge {
+          font-size: 12px;
+          color: var(--henry-text-med);
+          font-weight: 500;
+        }
+        .henry-accordion-badge-active {
+          color: #2563eb;
+        }
+        .henry-accordion-content {
+          display: none;
+          background: var(--henry-bg-base);
+          border-top: 1px solid var(--henry-border);
+        }
+        .henry-accordion-content-expanded {
+          display: block;
+        }
       `;
       document.head.appendChild(style);
 
@@ -1337,6 +1430,186 @@
         table,
         refresh: (newData) => render(newData)
       };
+    },
+
+    /**
+     * カードを作成
+     * @param {Object} options - オプション
+     * @param {string} options.title - タイトル
+     * @param {string} [options.description] - 説明テキスト
+     * @param {Object} [options.checkbox] - チェックボックス設定
+     * @param {boolean} [options.checkbox.checked=false] - 初期チェック状態
+     * @param {Function} [options.checkbox.onChange] - 変更時コールバック (checked) => void
+     * @param {HTMLElement} options.content - カード内のコンテンツ
+     * @param {boolean} [options.selected=false] - 選択状態（枠線の強調）
+     * @returns {{ card: HTMLElement, setSelected: (selected: boolean) => void, checkbox?: HTMLInputElement }}
+     */
+    createCard: ({ title, description, checkbox, content, selected = false } = {}) => {
+      UI.init();
+      const card = document.createElement('div');
+      card.className = 'henry-card' + (selected ? ' henry-card-selected' : '');
+
+      // ヘッダー
+      const header = document.createElement('div');
+      header.className = 'henry-card-header';
+
+      let checkboxEl = null;
+      if (checkbox) {
+        checkboxEl = document.createElement('input');
+        checkboxEl.type = 'checkbox';
+        checkboxEl.className = 'henry-checkbox';
+        checkboxEl.checked = checkbox.checked ?? false;
+        header.appendChild(checkboxEl);
+      }
+
+      const titleWrapper = document.createElement('div');
+      titleWrapper.className = 'henry-card-title';
+      titleWrapper.textContent = title;
+      if (description) {
+        const desc = document.createElement('span');
+        desc.className = 'henry-card-description';
+        desc.textContent = '　' + description;
+        titleWrapper.appendChild(desc);
+      }
+      header.appendChild(titleWrapper);
+
+      // コンテンツ
+      const contentWrapper = document.createElement('div');
+      contentWrapper.className = 'henry-card-content';
+      contentWrapper.appendChild(content);
+
+      card.appendChild(header);
+      card.appendChild(contentWrapper);
+
+      // 選択状態の切り替え
+      const setSelected = (isSelected) => {
+        if (isSelected) {
+          card.classList.add('henry-card-selected');
+          contentWrapper.classList.remove('henry-card-content-disabled');
+        } else {
+          card.classList.remove('henry-card-selected');
+          contentWrapper.classList.add('henry-card-content-disabled');
+        }
+      };
+
+      // チェックボックス変更時
+      if (checkboxEl && checkbox) {
+        checkboxEl.addEventListener('change', () => {
+          setSelected(checkboxEl.checked);
+          if (checkbox.onChange) checkbox.onChange(checkboxEl.checked);
+        });
+        // 初期状態を反映
+        setSelected(checkboxEl.checked);
+      }
+
+      const result = { card, setSelected };
+      if (checkboxEl) result.checkbox = checkboxEl;
+      return result;
+    },
+
+    /**
+     * アコーディオンを作成
+     * @param {Object} options - オプション
+     * @param {Array<{id: string, title: string, content: HTMLElement, expanded?: boolean, badge?: string}>} options.items - アイテム
+     * @param {boolean} [options.allowMultiple=true] - 複数同時展開を許可
+     * @returns {{ wrapper: HTMLElement, toggle: (id) => void, expand: (id) => void, collapse: (id) => void, updateBadge: (id, badge) => void }}
+     */
+    createAccordion: ({ items = [], allowMultiple = true } = {}) => {
+      UI.init();
+      const wrapper = document.createElement('div');
+      wrapper.className = 'henry-accordion';
+
+      const itemElements = new Map();
+
+      for (const item of items) {
+        const itemEl = document.createElement('div');
+        itemEl.className = 'henry-accordion-item';
+        itemEl.dataset.id = item.id;
+
+        // ヘッダー
+        const header = document.createElement('div');
+        header.className = 'henry-accordion-header';
+
+        const arrow = document.createElement('span');
+        arrow.className = 'henry-accordion-arrow' + (item.expanded ? ' henry-accordion-arrow-expanded' : '');
+        arrow.textContent = '▶';
+        header.appendChild(arrow);
+
+        const title = document.createElement('span');
+        title.className = 'henry-accordion-title';
+        title.textContent = item.title;
+        header.appendChild(title);
+
+        const badge = document.createElement('span');
+        badge.className = 'henry-accordion-badge';
+        badge.textContent = item.badge || '';
+        header.appendChild(badge);
+
+        // コンテンツ
+        const content = document.createElement('div');
+        content.className = 'henry-accordion-content' + (item.expanded ? ' henry-accordion-content-expanded' : '');
+        content.appendChild(item.content);
+
+        // クリックで展開/折りたたみ
+        header.addEventListener('click', () => {
+          toggle(item.id);
+        });
+
+        itemEl.appendChild(header);
+        itemEl.appendChild(content);
+        wrapper.appendChild(itemEl);
+
+        itemElements.set(item.id, { itemEl, header, arrow, content, badge });
+      }
+
+      const toggle = (id) => {
+        const el = itemElements.get(id);
+        if (!el) return;
+        const isExpanded = el.content.classList.contains('henry-accordion-content-expanded');
+        if (isExpanded) {
+          collapse(id);
+        } else {
+          expand(id);
+        }
+      };
+
+      const expand = (id) => {
+        const el = itemElements.get(id);
+        if (!el) return;
+
+        // allowMultiple=false の場合、他を閉じる
+        if (!allowMultiple) {
+          for (const [otherId, otherEl] of itemElements) {
+            if (otherId !== id) {
+              otherEl.content.classList.remove('henry-accordion-content-expanded');
+              otherEl.arrow.classList.remove('henry-accordion-arrow-expanded');
+            }
+          }
+        }
+
+        el.content.classList.add('henry-accordion-content-expanded');
+        el.arrow.classList.add('henry-accordion-arrow-expanded');
+      };
+
+      const collapse = (id) => {
+        const el = itemElements.get(id);
+        if (!el) return;
+        el.content.classList.remove('henry-accordion-content-expanded');
+        el.arrow.classList.remove('henry-accordion-arrow-expanded');
+      };
+
+      const updateBadge = (id, badgeText, isActive = false) => {
+        const el = itemElements.get(id);
+        if (!el) return;
+        el.badge.textContent = badgeText;
+        if (isActive) {
+          el.badge.classList.add('henry-accordion-badge-active');
+        } else {
+          el.badge.classList.remove('henry-accordion-badge-active');
+        }
+      };
+
+      return { wrapper, toggle, expand, collapse, updateBadge };
     },
 
     showModal: ({ title, content, actions = [], width, closeOnOverlayClick = true }) => {
