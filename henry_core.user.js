@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry Core
 // @namespace    https://henry-app.jp/
-// @version      2.29.0
+// @version      2.30.0
 // @description  Henry スクリプト実行基盤 (GoogleAuth統合 / Google Docs対応)
 // @author       sk powered by Claude & Gemini
 // @match        https://henry-app.jp/*
@@ -76,6 +76,8 @@
  *   createTag({ text })                                 - タグ/バッジ（ピル型）
  *   createBadge({ text, variant? })                     - ステータスバッジ（'default' | 'active'）
  *   createIconText({ icon, text })                      - アイコン付きテキスト（Material Icons）
+ *   createTooltip({ target, text, position? })          - ツールチップ → { show, hide, destroy }
+ *   createFormField({ label, input, required? })        - フォームフィールド（ラベル+入力）
  *   showModal({ title, content, actions?, width?, closeOnOverlayClick? })
  *   showConfirm({ title, message, confirmLabel?, cancelLabel? }) - 確認ダイアログ → Promise<boolean>
  *   showToast(message, type?, duration?)            - トースト通知
@@ -769,6 +771,29 @@
         .henry-icon-text .material-icons {
           font-size: 18px;
         }
+        .henry-tooltip {
+          position: absolute;
+          background-color: rgba(0, 0, 0, 0.73);
+          color: #fff;
+          padding: 4px 8px;
+          border-radius: 2px;
+          font-family: "Noto Sans JP", sans-serif;
+          font-size: 12px;
+          z-index: 1400;
+          pointer-events: none;
+          white-space: nowrap;
+        }
+        .henry-form-field {
+          margin-bottom: 12px;
+        }
+        .henry-form-field-label {
+          display: block;
+          font-family: "Noto Sans JP", sans-serif;
+          font-size: 14px;
+          font-weight: 500;
+          color: rgba(0, 0, 0, 0.57);
+          margin-bottom: 4px;
+        }
       `;
       document.head.appendChild(style);
 
@@ -1033,6 +1058,87 @@
       wrapper.appendChild(iconEl);
       wrapper.appendChild(textEl);
       return wrapper;
+    },
+
+    /**
+     * ツールチップを表示
+     * @param {Object} options - オプション
+     * @param {HTMLElement} options.target - ツールチップを表示する対象要素
+     * @param {string} options.text - ツールチップのテキスト
+     * @param {string} [options.position='right'] - 表示位置（'top' | 'right' | 'bottom' | 'left'）
+     * @returns {{ show: () => void, hide: () => void, destroy: () => void }}
+     */
+    createTooltip: ({ target, text, position = 'right' } = {}) => {
+      UI.init();
+      const tooltip = document.createElement('div');
+      tooltip.className = 'henry-tooltip';
+      tooltip.textContent = text;
+      tooltip.style.visibility = 'hidden';
+      document.body.appendChild(tooltip);
+
+      const show = () => {
+        const rect = target.getBoundingClientRect();
+        const gap = 8;
+
+        switch (position) {
+          case 'top':
+            tooltip.style.left = rect.left + rect.width / 2 - tooltip.offsetWidth / 2 + 'px';
+            tooltip.style.top = rect.top - tooltip.offsetHeight - gap + 'px';
+            break;
+          case 'bottom':
+            tooltip.style.left = rect.left + rect.width / 2 - tooltip.offsetWidth / 2 + 'px';
+            tooltip.style.top = rect.bottom + gap + 'px';
+            break;
+          case 'left':
+            tooltip.style.left = rect.left - tooltip.offsetWidth - gap + 'px';
+            tooltip.style.top = rect.top + rect.height / 2 - tooltip.offsetHeight / 2 + 'px';
+            break;
+          case 'right':
+          default:
+            tooltip.style.left = rect.right + gap + 'px';
+            tooltip.style.top = rect.top + rect.height / 2 - tooltip.offsetHeight / 2 + 'px';
+        }
+        tooltip.style.visibility = 'visible';
+      };
+
+      const hide = () => {
+        tooltip.style.visibility = 'hidden';
+      };
+
+      const destroy = () => {
+        tooltip.remove();
+      };
+
+      target.addEventListener('mouseenter', show);
+      target.addEventListener('mouseleave', hide);
+
+      return { show, hide, destroy };
+    },
+
+    /**
+     * フォームフィールド（ラベル+入力）を作成
+     * @param {Object} options - オプション
+     * @param {string} options.label - ラベルテキスト
+     * @param {HTMLElement} options.input - 入力要素（createInput, createSelect等で作成したもの）
+     * @param {boolean} [options.required=false] - 必須マークを表示するか
+     * @returns {HTMLDivElement}
+     */
+    createFormField: ({ label, input, required = false } = {}) => {
+      UI.init();
+      const field = document.createElement('div');
+      field.className = 'henry-form-field';
+
+      const labelWrapper = UI.createFormLabel({ text: label, required });
+      field.appendChild(labelWrapper);
+
+      // inputがwrapperを持つ場合（createSelect, createCheckbox等）
+      if (input.wrapper) {
+        field.appendChild(input.wrapper);
+      } else {
+        field.appendChild(input);
+      }
+
+      return field;
     },
 
     showModal: ({ title, content, actions = [], width, closeOnOverlayClick = true }) => {
