@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry Core
 // @namespace    https://henry-app.jp/
-// @version      2.24.0
+// @version      2.25.0
 // @description  Henry スクリプト実行基盤 (GoogleAuth統合 / Google Docs対応)
 // @author       sk powered by Claude & Gemini
 // @match        https://henry-app.jp/*
@@ -72,6 +72,7 @@
  *   createCheckbox({ label?, checked?, onChange? }) - チェックボックス → { wrapper, checkbox }
  *   createRadioGroup({ options, name?, value?, onChange? }) - ラジオグループ → { wrapper, radios, getValue }
  *   createFormLabel({ text, required? })                - フォームラベル（必須バッジ対応）
+ *   createDivider({ spacing? })                         - 区切り線（'normal' | 'large'）
  *   showModal({ title, content, actions?, width?, closeOnOverlayClick? })
  *   showToast(message, type?, duration?)            - トースト通知
  *   showSpinner(message?)                           - ローディング表示 → { close }
@@ -722,6 +723,14 @@
           font-weight: 400;
           color: rgba(0, 0, 0, 0.57);
         }
+        .henry-divider {
+          border: none;
+          border-bottom: 1px solid rgba(0, 0, 0, 0.13);
+          margin: 16px 0;
+        }
+        .henry-divider-lg {
+          margin: 32px 0 24px;
+        }
       `;
       document.head.appendChild(style);
 
@@ -920,6 +929,19 @@
       }
 
       return wrapper;
+    },
+
+    /**
+     * 区切り線を作成
+     * @param {Object} [options={}] - オプション
+     * @param {string} [options.spacing='normal'] - 余白サイズ（'normal' | 'large'）
+     * @returns {HTMLHRElement}
+     */
+    createDivider: ({ spacing = 'normal' } = {}) => {
+      UI.init();
+      const hr = document.createElement('hr');
+      hr.className = 'henry-divider' + (spacing === 'large' ? ' henry-divider-lg' : '');
+      return hr;
     },
 
     showModal: ({ title, content, actions = [], width, closeOnOverlayClick = true }) => {
