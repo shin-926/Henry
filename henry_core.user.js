@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry Core
 // @namespace    https://henry-app.jp/
-// @version      2.30.0
+// @version      2.31.0
 // @description  Henry スクリプト実行基盤 (GoogleAuth統合 / Google Docs対応)
 // @author       sk powered by Claude & Gemini
 // @match        https://henry-app.jp/*
@@ -78,6 +78,7 @@
  *   createIconText({ icon, text })                      - アイコン付きテキスト（Material Icons）
  *   createTooltip({ target, text, position? })          - ツールチップ → { show, hide, destroy }
  *   createFormField({ label, input, required? })        - フォームフィールド（ラベル+入力）
+ *   createListGroup({ items, groupBy, renderItem, ... }) - グループ化リスト → { wrapper, refresh }
  *   showModal({ title, content, actions?, width?, closeOnOverlayClick? })
  *   showConfirm({ title, message, confirmLabel?, cancelLabel? }) - 確認ダイアログ → Promise<boolean>
  *   showToast(message, type?, duration?)            - トースト通知
@@ -794,6 +795,33 @@
           color: rgba(0, 0, 0, 0.57);
           margin-bottom: 4px;
         }
+        .henry-list-group {
+          font-family: "Noto Sans JP", sans-serif;
+        }
+        .henry-list-group-header {
+          padding: 8px 20px;
+          background: #f5f5f5;
+          font-size: 13px;
+          color: #333;
+          font-weight: 500;
+        }
+        .henry-list-group-item {
+          padding: 12px 20px;
+          cursor: pointer;
+          display: flex;
+          align-items: center;
+          gap: 12px;
+          border-bottom: 1px solid #f0f0f0;
+          transition: background 0.15s;
+        }
+        .henry-list-group-item:hover {
+          background: #f8f9fa;
+        }
+        .henry-list-group-empty {
+          padding: 20px;
+          text-align: center;
+          color: #666;
+        }
       `;
       document.head.appendChild(style);
 
@@ -1139,6 +1167,83 @@
       }
 
       return field;
+    },
+
+    /**
+     * グループ化リストを作成
+     * @param {Object} options - オプション
+     * @param {Array} options.items - アイテム配列
+     * @param {Function} options.groupBy - グループキーを返す関数 (item) => string
+     * @param {Function} [options.renderHeader] - ヘッダーをレンダリング (key, items) => string | HTMLElement
+     * @param {Function} options.renderItem - アイテムをレンダリング (item) => string | HTMLElement
+     * @param {Function} [options.onItemClick] - クリック時コールバック (item) => void
+     * @param {string} [options.emptyMessage='該当するデータがありません'] - 空の場合のメッセージ
+     * @returns {{ wrapper: HTMLElement, refresh: (newItems) => void }}
+     */
+    createListGroup: ({ items = [], groupBy, renderHeader, renderItem, onItemClick, emptyMessage = '該当するデータがありません' } = {}) => {
+      UI.init();
+      const wrapper = document.createElement('div');
+      wrapper.className = 'henry-list-group';
+
+      const render = (data) => {
+        wrapper.innerHTML = '';
+
+        if (!data || data.length === 0) {
+          const empty = document.createElement('div');
+          empty.className = 'henry-list-group-empty';
+          empty.textContent = emptyMessage;
+          wrapper.appendChild(empty);
+          return;
+        }
+
+        // グループ化
+        const groups = new Map();
+        for (const item of data) {
+          const key = groupBy(item);
+          if (!groups.has(key)) groups.set(key, []);
+          groups.get(key).push(item);
+        }
+
+        // レンダリング
+        for (const [key, groupItems] of groups) {
+          // ヘッダー
+          const header = document.createElement('div');
+          header.className = 'henry-list-group-header';
+          const headerContent = renderHeader ? renderHeader(key, groupItems) : `▼ ${key}`;
+          if (typeof headerContent === 'string') {
+            header.textContent = headerContent;
+          } else {
+            header.appendChild(headerContent);
+          }
+          wrapper.appendChild(header);
+
+          // アイテム
+          for (const item of groupItems) {
+            const row = document.createElement('div');
+            row.className = 'henry-list-group-item';
+
+            const itemContent = renderItem(item);
+            if (typeof itemContent === 'string') {
+              row.innerHTML = itemContent;
+            } else {
+              row.appendChild(itemContent);
+            }
+
+            if (onItemClick) {
+              row.addEventListener('click', () => onItemClick(item));
+            }
+
+            wrapper.appendChild(row);
+          }
+        }
+      };
+
+      render(items);
+
+      return {
+        wrapper,
+        refresh: (newItems) => render(newItems)
+      };
     },
 
     showModal: ({ title, content, actions = [], width, closeOnOverlayClick = true }) => {
