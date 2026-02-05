@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry Core
 // @namespace    https://henry-app.jp/
-// @version      2.23.0
+// @version      2.24.0
 // @description  Henry スクリプト実行基盤 (GoogleAuth統合 / Google Docs対応)
 // @author       sk powered by Claude & Gemini
 // @match        https://henry-app.jp/*
@@ -71,6 +71,7 @@
  *   createSelect({ options?, value?, onChange? })   - セレクトボックス → { wrapper, select }
  *   createCheckbox({ label?, checked?, onChange? }) - チェックボックス → { wrapper, checkbox }
  *   createRadioGroup({ options, name?, value?, onChange? }) - ラジオグループ → { wrapper, radios, getValue }
+ *   createFormLabel({ text, required? })                - フォームラベル（必須バッジ対応）
  *   showModal({ title, content, actions?, width?, closeOnOverlayClick? })
  *   showToast(message, type?, duration?)            - トースト通知
  *   showSpinner(message?)                           - ローディング表示 → { close }
@@ -704,6 +705,23 @@
           height: 13px;
           cursor: pointer;
         }
+        .henry-form-label-wrapper {
+          display: flex;
+          flex-direction: row;
+          gap: 4px 8px;
+        }
+        .henry-form-label {
+          font-family: "Noto Sans JP", sans-serif;
+          font-size: 14px;
+          font-weight: 600;
+          color: rgba(0, 0, 0, 0.57);
+        }
+        .henry-form-label-required {
+          font-family: "Noto Sans JP", sans-serif;
+          font-size: 12px;
+          font-weight: 400;
+          color: rgba(0, 0, 0, 0.57);
+        }
       `;
       document.head.appendChild(style);
 
@@ -875,6 +893,33 @@
       const getValue = () => radios.find(r => r.checked)?.value || '';
 
       return { wrapper, radios, getValue };
+    },
+
+    /**
+     * フォームラベルを作成
+     * @param {Object} options - オプション
+     * @param {string} options.text - ラベルテキスト
+     * @param {boolean} [options.required=false] - 必須マークを表示するか
+     * @returns {HTMLElement}
+     */
+    createFormLabel: ({ text, required = false } = {}) => {
+      UI.init();
+      const wrapper = document.createElement('div');
+      wrapper.className = 'henry-form-label-wrapper';
+
+      const label = document.createElement('label');
+      label.className = 'henry-form-label';
+      label.textContent = text;
+      wrapper.appendChild(label);
+
+      if (required) {
+        const badge = document.createElement('span');
+        badge.className = 'henry-form-label-required';
+        badge.textContent = '必須';
+        wrapper.appendChild(badge);
+      }
+
+      return wrapper;
     },
 
     showModal: ({ title, content, actions = [], width, closeOnOverlayClick = true }) => {
