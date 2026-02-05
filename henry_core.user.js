@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry Core
 // @namespace    https://henry-app.jp/
-// @version      2.21.0
+// @version      2.22.0
 // @description  Henry スクリプト実行基盤 (GoogleAuth統合 / Google Docs対応)
 // @author       sk powered by Claude & Gemini
 // @match        https://henry-app.jp/*
@@ -68,6 +68,8 @@
  *   createButton({ label, variant?, icon?, onClick? })
  *   createInput({ placeholder?, type?, value? })    - テキスト入力フィールド
  *   createTextarea({ placeholder?, value?, rows? }) - 複数行テキスト入力
+ *   createSelect({ options?, value?, onChange? })   - セレクトボックス → { wrapper, select }
+ *   createCheckbox({ label?, checked?, onChange? }) - チェックボックス → { wrapper, checkbox }
  *   showModal({ title, content, actions?, width?, closeOnOverlayClick? })
  *   showToast(message, type?, duration?)            - トースト通知
  *   showSpinner(message?)                           - ローディング表示 → { close }
@@ -642,6 +644,47 @@
           resize: vertical;
           line-height: 1.5;
         }
+        .henry-select-wrapper {
+          display: inline-block;
+          position: relative;
+          background: rgba(0, 0, 0, 0.03);
+          border-radius: var(--henry-radius);
+        }
+        .henry-select {
+          font-family: "Noto Sans JP", sans-serif;
+          font-size: 14px;
+          color: var(--henry-text-high);
+          padding: 6px 36px 6px 12px;
+          border: none;
+          background: transparent;
+          appearance: none;
+          cursor: pointer;
+          outline: none;
+        }
+        .henry-select-wrapper::after {
+          content: 'arrow_drop_down';
+          font-family: 'Material Icons';
+          position: absolute;
+          right: 8px;
+          top: 50%;
+          transform: translateY(-50%);
+          pointer-events: none;
+          color: var(--henry-text-med);
+        }
+        .henry-checkbox-wrapper {
+          display: inline-flex;
+          align-items: center;
+          gap: 6px;
+          cursor: pointer;
+          font-family: "Noto Sans JP", sans-serif;
+          font-size: 14px;
+          color: var(--henry-text-high);
+        }
+        .henry-checkbox {
+          width: 13px;
+          height: 13px;
+          cursor: pointer;
+        }
       `;
       document.head.appendChild(style);
 
@@ -713,6 +756,63 @@
       textarea.rows = rows;
       textarea.className = 'henry-textarea';
       return textarea;
+    },
+
+    /**
+     * セレクトボックスを作成
+     * @param {Object} [options={}] - オプション
+     * @param {Array<{value: string, label: string}>} [options.options=[]] - 選択肢
+     * @param {string} [options.value=''] - 初期値
+     * @param {Function} [options.onChange] - 変更時コールバック
+     * @returns {{wrapper: HTMLElement, select: HTMLSelectElement}}
+     */
+    createSelect: ({ options = [], value = '', onChange } = {}) => {
+      UI.init();
+      const wrapper = document.createElement('div');
+      wrapper.className = 'henry-select-wrapper';
+
+      const select = document.createElement('select');
+      select.className = 'henry-select';
+
+      options.forEach(opt => {
+        const option = document.createElement('option');
+        option.value = opt.value;
+        option.textContent = opt.label;
+        select.appendChild(option);
+      });
+
+      if (value) select.value = value;
+      if (onChange) select.addEventListener('change', onChange);
+
+      wrapper.appendChild(select);
+      return { wrapper, select };
+    },
+
+    /**
+     * チェックボックスを作成
+     * @param {Object} [options={}] - オプション
+     * @param {string} [options.label=''] - ラベルテキスト
+     * @param {boolean} [options.checked=false] - 初期チェック状態
+     * @param {Function} [options.onChange] - 変更時コールバック
+     * @returns {{wrapper: HTMLElement, checkbox: HTMLInputElement}}
+     */
+    createCheckbox: ({ label = '', checked = false, onChange } = {}) => {
+      UI.init();
+      const wrapper = document.createElement('label');
+      wrapper.className = 'henry-checkbox-wrapper';
+
+      const checkbox = document.createElement('input');
+      checkbox.type = 'checkbox';
+      checkbox.className = 'henry-checkbox';
+      checkbox.checked = checked;
+      if (onChange) checkbox.addEventListener('change', onChange);
+
+      const span = document.createElement('span');
+      span.textContent = label;
+
+      wrapper.appendChild(checkbox);
+      wrapper.appendChild(span);
+      return { wrapper, checkbox };
     },
 
     showModal: ({ title, content, actions = [], width, closeOnOverlayClick = true }) => {
