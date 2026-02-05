@@ -1,11 +1,12 @@
 // ==UserScript==
 // @name         Henry 入院前オーダー
 // @namespace    https://github.com/shin-926/Henry
-// @version      0.23.1
+// @version      0.26.0
 // @description  入院予定患者に対して入院前オーダー（CT検査等）を一括作成
 // @author       sk powered by Claude
 // @match        https://henry-app.jp/*
 // @grant        GM_xmlhttpRequest
+// @grant        GM_addStyle
 // @grant        unsafeWindow
 // @connect      googleapis.com
 // @connect      www.googleapis.com
@@ -41,6 +42,24 @@
 
   const SCRIPT_NAME = 'PreadmissionOrder';
   const VERSION = GM_info.script.version;
+
+  // フォント統一: Noto Sans JP
+  GM_addStyle(`
+    @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700&display=swap');
+
+    .preadmission-modal,
+    .preadmission-modal input,
+    .preadmission-modal select,
+    .preadmission-modal textarea,
+    .preadmission-modal button,
+    .preadmission-modal label,
+    .preadmission-modal div,
+    .preadmission-modal span,
+    .preadmission-modal p,
+    .preadmission-modal h3 {
+      font-family: 'Noto Sans JP', sans-serif;
+    }
+  `);
 
   // ページのwindowを取得（サンドボックス対応）
   const pageWindow = typeof unsafeWindow !== 'undefined' ? unsafeWindow : window;
@@ -861,44 +880,58 @@
     }
   };
 
-  // 指示簿の選択肢定義
-  const STANDING_ORDER_OPTIONS = {
-    respiratory: {
-      label: '呼吸状態悪化時',
-      defaultChecked: true,
-      spo2Thresholds: [88, 90, 92, 94, 96], // SpO2閾値
-      oxygenMin: [0, 1, 2, 3, 4, 5],        // 酸素Min
-      oxygenMax: [5, 6, 8, 10, 15]          // 酸素Max
-    },
-    feverPain: {
-      label: '発熱時、疼痛時',
-      defaultChecked: true,
-      oralMeds: ['カロナール', 'ロキソプロフェン'],
-      doses: ['0.5', '1']
-    },
-    insomnia: {
-      label: '不眠時',
-      defaultChecked: true
-    },
-    hypertension: {
-      label: '血圧上昇時(収縮期180mmHg以上)',
-      defaultChecked: true
-    },
-    constipation: {
-      label: '便秘時',
-      defaultChecked: true
-    },
-    hypoglycemia: {
-      label: '低血糖時',
-      defaultChecked: false  // 糖尿病患者以外では不要
-    }
-  };
+  // 指示簿のデフォルトテキスト
+  const STANDING_ORDER_DEFAULT_TEXT = `【呼吸状態悪化時】
+・SpO2 92%以下で酸素投与2Lを開始し、適宜増減して92％以上をキープ
+　-- 4L未満は経鼻カニュラ、4L以上はマスクで投与
+　-- 酸素投与量　Min off / Max 10L
+
+【発熱時、疼痛時】
+・カロナール(500) 0.5錠もしくは 1錠内服
+・ロキソプロフェン 1錠内服
+・カロナール坐剤(400) 0.5個もしくは1個挿肛
+
+【不眠時】
+・ブロチゾラム1錠内服
+
+【血圧上昇時(収縮期180mmHg以上）】
+・アムロジピン2.5㎎ 1錠内服
+
+【便秘時】
+・グリセリン浣腸 1個使用
+・ピコスルファート 10-20滴使用
+
+【低血糖時】
+・50Tz 40mL 静注
+・ブドウ糖20g 内服`;
 
   // 入院時指示の選択肢
   const INSTRUCTION_OPTIONS = {
     meal: {
       label: '食事',
-      options: ['常食', '糖尿病食', '心臓食', '腎臓食', 'その他']
+      options: [
+        // 一般食
+        '常食',
+        '常食（軟菜）',
+        '分粥食（流動食）',
+        '分粥食（三分）',
+        '分粥食（五分）',
+        '分粥食（七分）',
+        '分粥食（全粥）',
+        // 特別食
+        '潰瘍食',
+        '肝臓食',
+        '糖尿食',
+        '高血圧食',
+        '心臓食',
+        '膵臓病食',
+        '腎臓病食',
+        '痛風食',
+        '脂質異常症食',
+        '貧血食',
+        // その他
+        'その他'
+      ]
     },
     monitor: {
       label: 'モニター',
@@ -2373,6 +2406,7 @@
       `;
 
       const modal = document.createElement('div');
+      modal.className = 'preadmission-modal';
       modal.style.cssText = `
         background: white;
         border-radius: 12px;
@@ -2546,6 +2580,7 @@
 
     // モーダルコンテンツ
     const content = document.createElement('div');
+    content.className = 'preadmission-modal';
     content.style.cssText = 'display: flex; flex-direction: column; height: calc(90vh - 120px); overflow: hidden;';
 
     // 患者情報 + オーダー日（ヘッダー部分）
@@ -2735,10 +2770,10 @@
       container.innerHTML = `
         <div style="margin-bottom: 12px;">
           <div style="font-size: 12px; font-weight: 600; color: #1f2937; margin-bottom: 6px;">【CT検査】</div>
-          <div style="margin-left: 8px;">
-            <label style="display: block; font-size: 12px; font-weight: 500; color: #374151; margin-bottom: 4px;">補足</label>
+          <div style="display: flex; align-items: center; margin-left: 8px; gap: 12px;">
+            <label style="width: 60px; flex-shrink: 0; font-size: 12px; font-weight: 500; color: #374151;">補足</label>
             <input type="text" id="imaging-note" value="頭部、胸腹部、脊椎"
-              style="width: 100%; padding: 6px 10px; border: 1px solid #d1d5db; border-radius: 4px; font-size: 13px; box-sizing: border-box;">
+              style="flex: 1; padding: 6px 10px; border: 1px solid #d1d5db; border-radius: 4px; font-size: 13px; box-sizing: border-box;">
           </div>
         </div>
         <div>
@@ -2883,6 +2918,7 @@
 
       // ポップアップ本体
       const popup = document.createElement('div');
+      popup.className = 'preadmission-modal';
       popup.style.cssText = `
         background: white;
         border-radius: 8px;
@@ -3516,7 +3552,7 @@
       let html = `
         <div style="${rowStyle}">
           <label style="${labelStyle}">食事</label>
-          <select id="instruction-meal" style="width: 80px; padding: 4px 6px; border: 1px solid #d1d5db; border-radius: 4px; font-size: 12px; margin-right: 6px;">
+          <select id="instruction-meal" style="width: 130px; padding: 4px 6px; border: 1px solid #d1d5db; border-radius: 4px; font-size: 12px; margin-right: 6px;">
             ${INSTRUCTION_OPTIONS.meal.options.map(opt => `<option value="${opt}">${opt}</option>`).join('')}
           </select>
           <input type="text" id="instruction-meal-detail" placeholder="詳細入力" style="flex: 1; padding: 4px 6px; border: 1px solid #d1d5db; border-radius: 4px; font-size: 12px;">
@@ -3587,7 +3623,7 @@
       html += `
         <div style="flex: 1; display: flex; align-items: flex-start; min-height: 0;">
           <label style="${labelStyle} margin-top: 4px;">その他</label>
-          <textarea id="instruction-freetext" placeholder="追加指示..." style="flex: 1; min-height: 40px; padding: 4px 6px; border: 1px solid #d1d5db; border-radius: 4px; font-size: 12px; resize: vertical; box-sizing: border-box;"></textarea>
+          <textarea id="instruction-freetext" placeholder="追加指示..." style="flex: 1; height: 100%; padding: 4px 6px; border: 1px solid #d1d5db; border-radius: 4px; font-size: 12px; resize: none; box-sizing: border-box;"></textarea>
         </div>
       `;
 
@@ -3598,227 +3634,19 @@
     // --- 指示簿の詳細 ---
     function buildStandingOrderDetail() {
       const container = document.createElement('div');
-      container.style.cssText = 'font-size: 12px; display: flex; flex-direction: column; height: 100%; overflow-y: auto;';
+      container.style.cssText = 'font-size: 12px; display: flex; flex-direction: column; height: 100%;';
 
-      // 共通スタイル
-      const sectionStyle = 'margin-bottom: 10px; padding: 8px; background: #f9fafb; border-radius: 6px; border: 1px solid #e5e7eb;';
-      const headerStyle = 'display: flex; align-items: center; margin-bottom: 6px;';
-      const labelStyle = 'color: #374151; cursor: pointer; display: flex; align-items: center; gap: 6px;';
-      const contentStyle = 'margin-left: 24px; font-size: 11px; color: #4b5563; line-height: 1.5;';
-      const selectStyle = 'padding: 2px 4px; border: 1px solid #d1d5db; border-radius: 3px; font-size: 11px; background: white;';
-      const radioLabelStyle = 'display: inline-flex; align-items: center; gap: 2px; cursor: pointer; margin-right: 8px;';
-
-      // 呼吸状態悪化時
-      const spo2Options = STANDING_ORDER_OPTIONS.respiratory.spo2Thresholds
-        .map(v => `<option value="${v}" ${v === 92 ? 'selected' : ''}>${v}%</option>`).join('');
-      const o2MinOptions = STANDING_ORDER_OPTIONS.respiratory.oxygenMin
-        .map(v => `<option value="${v}" ${v === 0 ? 'selected' : ''}>${v}</option>`).join('');
-      const o2MaxOptions = STANDING_ORDER_OPTIONS.respiratory.oxygenMax
-        .map(v => `<option value="${v}" ${v === 10 ? 'selected' : ''}>${v}</option>`).join('');
-
-      let html = `
-        <div style="${sectionStyle}">
-          <div style="${headerStyle}">
-            <label style="${labelStyle}">
-              <input type="checkbox" class="standing-section-check" data-section="respiratory" checked>
-              呼吸状態悪化時
-            </label>
-          </div>
-          <div class="standing-content" data-section="respiratory" style="${contentStyle}">
-            ・SpO2 <select id="standing-spo2-start" style="${selectStyle}">${spo2Options}</select> 以下で酸素2Lマスク開始し、SpO2 <select id="standing-spo2-keep" style="${selectStyle}">${spo2Options}</select> 以上をkeep<br>
-            ・酸素投与量　Min <select id="standing-o2-min" style="${selectStyle}">${o2MinOptions}</select> L/min　Max <select id="standing-o2-max" style="${selectStyle}">${o2MaxOptions}</select> L/min
-          </div>
-        </div>
+      container.innerHTML = `
+        <textarea id="standing-order-text" style="flex: 1; width: 100%; padding: 8px; border: 1px solid #d1d5db; border-radius: 4px; font-size: 12px; line-height: 1.6; resize: none; box-sizing: border-box;">${STANDING_ORDER_DEFAULT_TEXT}</textarea>
       `;
-
-      // 発熱時、疼痛時
-      html += `
-        <div style="${sectionStyle}">
-          <div style="${headerStyle}">
-            <label style="${labelStyle}">
-              <input type="checkbox" class="standing-section-check" data-section="feverPain" checked>
-              発熱時、疼痛時
-            </label>
-          </div>
-          <div class="standing-content" data-section="feverPain" style="${contentStyle}">
-            <div style="margin-bottom: 4px;">内服可能な場合</div>
-            <div style="margin-left: 12px; margin-bottom: 4px;">
-              <label style="${radioLabelStyle}"><input type="radio" name="standing-oral-med" value="カロナール" checked> カロナール(500)</label>
-              <select id="standing-oral-dose" style="${selectStyle}">
-                <option value="0.5" selected>0.5錠</option>
-                <option value="1">1錠</option>
-              </select> 内服<br>
-              <label style="${radioLabelStyle}"><input type="radio" name="standing-oral-med" value="ロキソプロフェン"> ロキソプロフェン 1錠内服</label>
-            </div>
-            <div style="margin-bottom: 4px;">内服不能な場合</div>
-            <div style="margin-left: 12px;">
-              ・カロナール坐剤(400) <select id="standing-suppository-dose" style="${selectStyle}">
-                <option value="0.5" selected>0.5個</option>
-                <option value="1">1個</option>
-              </select> 挿肛
-            </div>
-          </div>
-        </div>
-      `;
-
-      // 不眠時
-      html += `
-        <div style="${sectionStyle}">
-          <div style="${headerStyle}">
-            <label style="${labelStyle}">
-              <input type="checkbox" class="standing-section-check" data-section="insomnia" checked>
-              不眠時
-            </label>
-          </div>
-          <div class="standing-content" data-section="insomnia" style="${contentStyle}">
-            ・ブロチゾラム1錠内服
-          </div>
-        </div>
-      `;
-
-      // 血圧上昇時
-      html += `
-        <div style="${sectionStyle}">
-          <div style="${headerStyle}">
-            <label style="${labelStyle}">
-              <input type="checkbox" class="standing-section-check" data-section="hypertension" checked>
-              血圧上昇時(収縮期180mmHg以上)
-            </label>
-          </div>
-          <div class="standing-content" data-section="hypertension" style="${contentStyle}">
-            ・アムロジピン2.5mg 1錠内服
-          </div>
-        </div>
-      `;
-
-      // 便秘時
-      html += `
-        <div style="${sectionStyle}">
-          <div style="${headerStyle}">
-            <label style="${labelStyle}">
-              <input type="checkbox" class="standing-section-check" data-section="constipation" checked>
-              便秘時
-            </label>
-          </div>
-          <div class="standing-content" data-section="constipation" style="${contentStyle}">
-            ・グリセリン浣腸 1個使用<br>
-            ・ピコスルファート 10-20滴使用
-          </div>
-        </div>
-      `;
-
-      // 低血糖時（デフォルトOFF）
-      html += `
-        <div style="${sectionStyle}">
-          <div style="${headerStyle}">
-            <label style="${labelStyle}">
-              <input type="checkbox" class="standing-section-check" data-section="hypoglycemia">
-              低血糖時
-            </label>
-            <span style="font-size: 10px; color: #9ca3af; margin-left: 8px;">※糖尿病患者向け</span>
-          </div>
-          <div class="standing-content" data-section="hypoglycemia" style="${contentStyle} opacity: 0.5;">
-            ・内服可能ならブドウ糖20g内服<br>
-            ・内服不能もしくはルートがあれば50Tz 40mL 静注
-          </div>
-        </div>
-      `;
-
-      // その他（自由記述）
-      html += `
-        <div style="${sectionStyle}">
-          <div style="${headerStyle}">
-            <label style="${labelStyle}">
-              その他
-            </label>
-          </div>
-          <textarea id="standing-freetext" placeholder="追加の指示があれば入力..." style="width: 100%; min-height: 50px; padding: 6px 8px; border: 1px solid #d1d5db; border-radius: 4px; font-size: 11px; resize: vertical; box-sizing: border-box;"></textarea>
-        </div>
-      `;
-
-      container.innerHTML = html;
-
-      // チェックボックスの状態変更時にコンテンツの表示を切り替え
-      container.querySelectorAll('.standing-section-check').forEach(checkbox => {
-        checkbox.addEventListener('change', (e) => {
-          const section = e.target.dataset.section;
-          const contentEl = container.querySelector(`.standing-content[data-section="${section}"]`);
-          if (contentEl) {
-            contentEl.style.opacity = e.target.checked ? '1' : '0.5';
-          }
-        });
-      });
-
       return container;
     }
 
     /**
-     * 指示簿の選択値からテキストを生成
+     * 指示簿のテキストを取得
      */
     function collectStandingOrderData(container) {
-      const sections = [];
-
-      // 呼吸状態悪化時
-      if (container.querySelector('.standing-section-check[data-section="respiratory"]')?.checked) {
-        const spo2Start = container.querySelector('#standing-spo2-start')?.value || '92';
-        const spo2Keep = container.querySelector('#standing-spo2-keep')?.value || '92';
-        const o2Min = container.querySelector('#standing-o2-min')?.value || '0';
-        const o2Max = container.querySelector('#standing-o2-max')?.value || '10';
-        sections.push(`【呼吸状態悪化時】
-・SpO2 ${spo2Start}%以下で酸素2Lマスク開始し、SpO2 ${spo2Keep}%以上をkeep
-・酸素投与量　Min ${o2Min === '0' ? 'off' : o2Min + 'L/min'}　Max ${o2Max}L/min`);
-      }
-
-      // 発熱時、疼痛時
-      if (container.querySelector('.standing-section-check[data-section="feverPain"]')?.checked) {
-        const oralMed = container.querySelector('input[name="standing-oral-med"]:checked')?.value || 'カロナール';
-        const oralDose = container.querySelector('#standing-oral-dose')?.value || '0.5';
-        const suppDose = container.querySelector('#standing-suppository-dose')?.value || '0.5';
-
-        let oralLine;
-        if (oralMed === 'カロナール') {
-          oralLine = `・カロナール(500) ${oralDose}錠内服`;
-        } else {
-          oralLine = `・ロキソプロフェン 1錠内服`;
-        }
-        sections.push(`【発熱時、疼痛時】
-${oralLine}
-・カロナール坐剤(400) ${suppDose}個挿肛`);
-      }
-
-      // 不眠時
-      if (container.querySelector('.standing-section-check[data-section="insomnia"]')?.checked) {
-        sections.push(`【不眠時】
-・ブロチゾラム1錠内服`);
-      }
-
-      // 血圧上昇時
-      if (container.querySelector('.standing-section-check[data-section="hypertension"]')?.checked) {
-        sections.push(`【血圧上昇時(収縮期180mmHg以上)】
-・アムロジピン2.5mg 1錠内服`);
-      }
-
-      // 便秘時
-      if (container.querySelector('.standing-section-check[data-section="constipation"]')?.checked) {
-        sections.push(`【便秘時】
-・グリセリン浣腸 1個使用
-・ピコスルファート 10-20滴使用`);
-      }
-
-      // 低血糖時
-      if (container.querySelector('.standing-section-check[data-section="hypoglycemia"]')?.checked) {
-        sections.push(`【低血糖時】
-・内服可能ならブドウ糖20g内服
-・内服不能もしくはルートがあれば50Tz 40mL 静注`);
-      }
-
-      // その他（自由記述）
-      const freeText = container.querySelector('#standing-freetext')?.value?.trim();
-      if (freeText) {
-        sections.push(`【その他】\n${freeText}`);
-      }
-
-      return sections.join('\n\n');
+      return container.querySelector('#standing-order-text')?.value?.trim() || '';
     }
 
     // 作成ボタンの有効/無効を更新
@@ -3972,6 +3800,7 @@ ${oralLine}
     }).join('');
 
     const content = document.createElement('div');
+    content.className = 'preadmission-modal';
     content.innerHTML = `
       <p style="margin: 0 0 16px 0; color: #333;">以下のオーダーを作成します。</p>
       <div style="padding: 12px; background: #f5f5f5; border-radius: 6px; font-size: 14px; color: #333;">
