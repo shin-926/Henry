@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Google Drive連携
 // @namespace    https://henry-app.jp/
-// @version      2.6.1
+// @version      2.6.2
 // @description  HenryのファイルをGoogle Drive APIで直接変換・編集。GAS不要版。
 // @author       sk powered by Claude & Gemini
 // @match        https://henry-app.jp/*
@@ -1045,6 +1045,11 @@
   // [Mode B] Google Docs側ロジック
   // ========================================== 
   function runGoogleDocsMode() {
+    // iframe内での実行を防ぐ（トップフレームでのみ実行）
+    if (window.self !== window.top) {
+      return;
+    }
+
     debugLog('Docs', 'Google Docsモード開始');
 
     // ==========================================
