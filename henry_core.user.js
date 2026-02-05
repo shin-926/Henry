@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry Core
 // @namespace    https://henry-app.jp/
-// @version      2.26.0
+// @version      2.27.0
 // @description  Henry スクリプト実行基盤 (GoogleAuth統合 / Google Docs対応)
 // @author       sk powered by Claude & Gemini
 // @match        https://henry-app.jp/*
@@ -74,6 +74,7 @@
  *   createFormLabel({ text, required? })                - フォームラベル（必須バッジ対応）
  *   createDivider({ spacing? })                         - 区切り線（'normal' | 'large'）
  *   createTag({ text })                                 - タグ/バッジ（ピル型）
+ *   createBadge({ text, variant? })                     - ステータスバッジ（'default' | 'active'）
  *   showModal({ title, content, actions?, width?, closeOnOverlayClick? })
  *   showToast(message, type?, duration?)            - トースト通知
  *   showSpinner(message?)                           - ローディング表示 → { close }
@@ -742,6 +743,19 @@
           padding: 4px 8px;
           border-radius: 10px;
         }
+        .henry-badge {
+          display: inline-block;
+          font-family: "Noto Sans JP", sans-serif;
+          font-size: 14px;
+          font-weight: 600;
+          padding: 4px 8px;
+          border-radius: 6px;
+          background-color: rgba(0, 0, 0, 0.05);
+          color: rgba(0, 0, 0, 0.32);
+        }
+        .henry-badge-active {
+          color: rgb(0, 92, 86);
+        }
       `;
       document.head.appendChild(style);
 
@@ -967,6 +981,21 @@
       tag.className = 'henry-tag';
       tag.textContent = text;
       return tag;
+    },
+
+    /**
+     * ステータスバッジを作成
+     * @param {Object} options - オプション
+     * @param {string} options.text - バッジのテキスト
+     * @param {string} [options.variant='default'] - バリアント（'default' | 'active'）
+     * @returns {HTMLSpanElement}
+     */
+    createBadge: ({ text, variant = 'default' } = {}) => {
+      UI.init();
+      const badge = document.createElement('span');
+      badge.className = 'henry-badge' + (variant === 'active' ? ' henry-badge-active' : '');
+      badge.textContent = text;
+      return badge;
     },
 
     showModal: ({ title, content, actions = [], width, closeOnOverlayClick = true }) => {
