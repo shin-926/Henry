@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry Core
 // @namespace    https://henry-app.jp/
-// @version      2.28.0
+// @version      2.29.0
 // @description  Henry スクリプト実行基盤 (GoogleAuth統合 / Google Docs対応)
 // @author       sk powered by Claude & Gemini
 // @match        https://henry-app.jp/*
@@ -75,6 +75,7 @@
  *   createDivider({ spacing? })                         - 区切り線（'normal' | 'large'）
  *   createTag({ text })                                 - タグ/バッジ（ピル型）
  *   createBadge({ text, variant? })                     - ステータスバッジ（'default' | 'active'）
+ *   createIconText({ icon, text })                      - アイコン付きテキスト（Material Icons）
  *   showModal({ title, content, actions?, width?, closeOnOverlayClick? })
  *   showConfirm({ title, message, confirmLabel?, cancelLabel? }) - 確認ダイアログ → Promise<boolean>
  *   showToast(message, type?, duration?)            - トースト通知
@@ -757,6 +758,17 @@
         .henry-badge-active {
           color: rgb(0, 92, 86);
         }
+        .henry-icon-text {
+          display: inline-flex;
+          align-items: center;
+          gap: 4px;
+          font-family: "Noto Sans JP", sans-serif;
+          font-size: 14px;
+          color: rgba(0, 0, 0, 0.57);
+        }
+        .henry-icon-text .material-icons {
+          font-size: 18px;
+        }
       `;
       document.head.appendChild(style);
 
@@ -997,6 +1009,30 @@
       badge.className = 'henry-badge' + (variant === 'active' ? ' henry-badge-active' : '');
       badge.textContent = text;
       return badge;
+    },
+
+    /**
+     * アイコン付きテキストを作成
+     * @param {Object} options - オプション
+     * @param {string} options.icon - Material Iconsのアイコン名（例: 'schedule', 'person'）
+     * @param {string} options.text - テキスト
+     * @returns {HTMLSpanElement}
+     */
+    createIconText: ({ icon, text } = {}) => {
+      UI.init();
+      const wrapper = document.createElement('span');
+      wrapper.className = 'henry-icon-text';
+
+      const iconEl = document.createElement('span');
+      iconEl.className = 'material-icons';
+      iconEl.textContent = icon;
+
+      const textEl = document.createElement('span');
+      textEl.textContent = text;
+
+      wrapper.appendChild(iconEl);
+      wrapper.appendChild(textEl);
+      return wrapper;
     },
 
     showModal: ({ title, content, actions = [], width, closeOnOverlayClick = true }) => {
