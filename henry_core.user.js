@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry Core
 // @namespace    https://henry-app.jp/
-// @version      2.25.0
+// @version      2.26.0
 // @description  Henry スクリプト実行基盤 (GoogleAuth統合 / Google Docs対応)
 // @author       sk powered by Claude & Gemini
 // @match        https://henry-app.jp/*
@@ -73,6 +73,7 @@
  *   createRadioGroup({ options, name?, value?, onChange? }) - ラジオグループ → { wrapper, radios, getValue }
  *   createFormLabel({ text, required? })                - フォームラベル（必須バッジ対応）
  *   createDivider({ spacing? })                         - 区切り線（'normal' | 'large'）
+ *   createTag({ text })                                 - タグ/バッジ（ピル型）
  *   showModal({ title, content, actions?, width?, closeOnOverlayClick? })
  *   showToast(message, type?, duration?)            - トースト通知
  *   showSpinner(message?)                           - ローディング表示 → { close }
@@ -731,6 +732,16 @@
         .henry-divider-lg {
           margin: 32px 0 24px;
         }
+        .henry-tag {
+          display: inline-block;
+          font-family: "Noto Sans JP", sans-serif;
+          font-size: 12px;
+          font-weight: 400;
+          color: rgba(0, 0, 0, 0.24);
+          background-color: rgba(0, 0, 0, 0.03);
+          padding: 4px 8px;
+          border-radius: 10px;
+        }
       `;
       document.head.appendChild(style);
 
@@ -942,6 +953,20 @@
       const hr = document.createElement('hr');
       hr.className = 'henry-divider' + (spacing === 'large' ? ' henry-divider-lg' : '');
       return hr;
+    },
+
+    /**
+     * タグ/バッジを作成
+     * @param {Object} options - オプション
+     * @param {string} options.text - タグのテキスト
+     * @returns {HTMLSpanElement}
+     */
+    createTag: ({ text } = {}) => {
+      UI.init();
+      const tag = document.createElement('span');
+      tag.className = 'henry-tag';
+      tag.textContent = text;
+      return tag;
     },
 
     showModal: ({ title, content, actions = [], width, closeOnOverlayClick = true }) => {
