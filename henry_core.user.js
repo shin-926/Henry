@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry Core
 // @namespace    https://henry-app.jp/
-// @version      2.31.0
+// @version      2.32.0
 // @description  Henry スクリプト実行基盤 (GoogleAuth統合 / Google Docs対応)
 // @author       sk powered by Claude & Gemini
 // @match        https://henry-app.jp/*
@@ -79,6 +79,7 @@
  *   createTooltip({ target, text, position? })          - ツールチップ → { show, hide, destroy }
  *   createFormField({ label, input, required? })        - フォームフィールド（ラベル+入力）
  *   createListGroup({ items, groupBy, renderItem, ... }) - グループ化リスト → { wrapper, refresh }
+ *   createTable({ columns, data, renderCell?, onRowClick? }) - テーブル → { table, refresh }
  *   showModal({ title, content, actions?, width?, closeOnOverlayClick? })
  *   showConfirm({ title, message, confirmLabel?, cancelLabel? }) - 確認ダイアログ → Promise<boolean>
  *   showToast(message, type?, duration?)            - トースト通知
@@ -822,6 +823,37 @@
           text-align: center;
           color: #666;
         }
+        .henry-table {
+          width: 100%;
+          border-collapse: collapse;
+          font-family: "Noto Sans JP", sans-serif;
+          font-size: 13px;
+        }
+        .henry-table thead {
+          position: sticky;
+          top: 0;
+          background: #f5f5f5;
+        }
+        .henry-table th {
+          padding: 8px;
+          text-align: left;
+          border-bottom: 2px solid #ccc;
+          white-space: nowrap;
+          font-weight: 600;
+        }
+        .henry-table td {
+          padding: 8px;
+          border-bottom: 1px solid #eee;
+        }
+        .henry-table tbody tr {
+          transition: background 0.15s;
+        }
+        .henry-table tbody tr:hover {
+          background: #f8f9fa;
+        }
+        .henry-table-clickable tbody tr {
+          cursor: pointer;
+        }
       `;
       document.head.appendChild(style);
 
@@ -1243,6 +1275,67 @@
       return {
         wrapper,
         refresh: (newItems) => render(newItems)
+      };
+    },
+
+    /**
+     * テーブルを作成
+     * @param {Object} options - オプション
+     * @param {Array<{key: string, label: string, width?: string}>} options.columns - 列定義
+     * @param {Array} options.data - データ配列
+     * @param {Function} [options.renderCell] - セルをレンダリング (item, column) => string | HTMLElement
+     * @param {Function} [options.onRowClick] - 行クリック時コールバック (item) => void
+     * @returns {{ table: HTMLTableElement, refresh: (newData) => void }}
+     */
+    createTable: ({ columns = [], data = [], renderCell, onRowClick } = {}) => {
+      UI.init();
+      const table = document.createElement('table');
+      table.className = 'henry-table' + (onRowClick ? ' henry-table-clickable' : '');
+
+      // thead
+      const thead = document.createElement('thead');
+      const headerRow = document.createElement('tr');
+      for (const col of columns) {
+        const th = document.createElement('th');
+        th.textContent = col.label;
+        if (col.width) th.style.width = col.width;
+        headerRow.appendChild(th);
+      }
+      thead.appendChild(headerRow);
+      table.appendChild(thead);
+
+      // tbody
+      const tbody = document.createElement('tbody');
+      table.appendChild(tbody);
+
+      const render = (items) => {
+        tbody.innerHTML = '';
+        for (const item of items) {
+          const tr = document.createElement('tr');
+          for (const col of columns) {
+            const td = document.createElement('td');
+            const content = renderCell ? renderCell(item, col) : item[col.key];
+            if (typeof content === 'string') {
+              td.innerHTML = content;
+            } else if (content instanceof HTMLElement) {
+              td.appendChild(content);
+            } else {
+              td.textContent = content ?? '';
+            }
+            tr.appendChild(td);
+          }
+          if (onRowClick) {
+            tr.addEventListener('click', () => onRowClick(item));
+          }
+          tbody.appendChild(tr);
+        }
+      };
+
+      render(data);
+
+      return {
+        table,
+        refresh: (newData) => render(newData)
       };
     },
 
