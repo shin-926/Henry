@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry 入院前オーダー
 // @namespace    https://github.com/shin-926/Henry
-// @version      0.30.0
+// @version      0.33.0
 // @description  入院予定患者に対して入院前オーダー（CT検査等）を一括作成
 // @author       sk powered by Claude
 // @match        https://henry-app.jp/*
@@ -1096,15 +1096,49 @@
             order {
               imagingOrder {
                 date { year month day }
+                detail {
+                  imagingModality
+                  note
+                  condition {
+                    ct { series { bodySite { name } note } }
+                    plainRadiographyDigital { series { bodySite { name } note } }
+                    plainRadiographyAnalog { series { bodySite { name } note } }
+                    mriOther { series { bodySite { name } note } }
+                    mriAbove_1_5AndBelow_3Tesla { series { bodySite { name } note } }
+                    mammographyDigital { series { bodySite { name } note } }
+                    mammographyAnalog { series { bodySite { name } note } }
+                    dexa { series { bodySite { name } note } }
+                    fluoroscopy { series { bodySite { name } note } }
+                  }
+                }
               }
               specimenInspectionOrder {
                 inspectionDate { year month day }
+                specimenInspectionOrderSpecimenInspections {
+                  specimenInspection { name }
+                  consultationOutsideInspections {
+                    masterOutsideInspection { name }
+                  }
+                }
               }
               biopsyInspectionOrder {
                 inspectionDate { year month day }
+                note
+                biopsyInspectionOrderBiopsyInspections {
+                  biopsyInspection { name }
+                  consultationDiagnoses {
+                    masterDiagnosis { name }
+                  }
+                }
               }
               rehabilitationOrder {
                 startDate { year month day }
+                detail {
+                  patientReceiptDisease {
+                    masterDisease { name }
+                  }
+                  rehabilitationCalculationType { name }
+                }
               }
             }
           }
@@ -1120,6 +1154,7 @@
       listClinicalDocuments(input: $input) {
         documents {
           uuid
+          editorData
           performTime { seconds }
           type {
             type
@@ -1131,6 +1166,179 @@
     }
   `;
 
+  /**
+   * editorData（JSON文字列）をパースしてテキストを抽出
+   */
+  function parseEditorData(editorDataStr) {
+    try {
+      const data = JSON.parse(editorDataStr);
+      return data.blocks
+        .map(b => b.text)
+        .filter(t => t && t.trim())
+        .join('\n');
+    } catch (e) {
+      return '';
+    }
+  }
+
+  /**
+   * 記事内容から詳細を抽出（プレビュー用）
+   */
+  function extractDocumentDetails(title, editorDataStr) {
+    const text = parseEditorData(editorDataStr);
+    if (!text) return { title, items: [] };
+
+    // 改行で分割して最初の数行を取得
+    const lines = text.split('\n').filter(l => l.trim());
+    const previewLines = lines.slice(0, 5);
+
+    return {
+      title,
+      items: previewLines,
+      hasMore: lines.length > 5
+    };
+  }
+
+  // ===========================================
+  // オーダー詳細抽出関数
+  // ===========================================
+
+  // モダリティ名のマッピング
+  const MODALITY_LABELS = {
+    'IMAGING_MODALITY_CT': 'CT',
+    'IMAGING_MODALITY_PLAIN_RADIOGRAPHY_DIGITAL': '一般撮影(デジタル)',
+    'IMAGING_MODALITY_PLAIN_RADIOGRAPHY_ANALOG': '一般撮影(アナログ)',
+    'IMAGING_MODALITY_MRI_OTHER': 'MRI',
+    'IMAGING_MODALITY_MRI_ABOVE_1_5_AND_BELOW_3_TESLA': 'MRI(1.5T以上3T未満)',
+    'IMAGING_MODALITY_MAMMOGRAPHY_DIGITAL': 'マンモグラフィ(デジタル)',
+    'IMAGING_MODALITY_MAMMOGRAPHY_ANALOG': 'マンモグラフィ(アナログ)',
+    'IMAGING_MODALITY_DEXA': 'DEXA',
+    'IMAGING_MODALITY_FLUOROSCOPY': '透視'
+  };
+
+  /**
+   * 検体検査オーダーから詳細を抽出
+   */
+  function extractSpecimenOrderDetails(specimenOrder) {
+    if (!specimenOrder?.specimenInspectionOrderSpecimenInspections?.length) {
+      return { title: '検体検査', items: [] };
+    }
+
+    const names = [];
+    const items = [];
+
+    for (const si of specimenOrder.specimenInspectionOrderSpecimenInspections) {
+      if (si.specimenInspection?.name) {
+        names.push(si.specimenInspection.name);
+      }
+      if (si.consultationOutsideInspections?.length) {
+        for (const coi of si.consultationOutsideInspections) {
+          if (coi.masterOutsideInspection?.name) {
+            items.push(coi.masterOutsideInspection.name);
+          }
+        }
+      }
+    }
+
+    return {
+      title: '検体検査' + (names.length ? ` (${[...new Set(names)].join(', ')})` : ''),
+      items
+    };
+  }
+
+  /**
+   * 生体検査オーダーから詳細を抽出
+   */
+  function extractBiopsyOrderDetails(biopsyOrder) {
+    if (!biopsyOrder?.biopsyInspectionOrderBiopsyInspections?.length) {
+      return { title: '生体検査', items: [], note: biopsyOrder?.note || '' };
+    }
+
+    const names = [];
+    const items = [];
+
+    for (const bi of biopsyOrder.biopsyInspectionOrderBiopsyInspections) {
+      if (bi.biopsyInspection?.name) {
+        names.push(bi.biopsyInspection.name);
+      }
+      if (bi.consultationDiagnoses?.length) {
+        for (const cd of bi.consultationDiagnoses) {
+          if (cd.masterDiagnosis?.name) {
+            items.push(cd.masterDiagnosis.name);
+          }
+        }
+      }
+    }
+
+    return {
+      title: '生体検査' + (names.length ? ` (${[...new Set(names)].join(', ')})` : ''),
+      items,
+      note: biopsyOrder.note || ''
+    };
+  }
+
+  /**
+   * 画像オーダーから詳細を抽出
+   */
+  function extractImagingOrderDetails(imagingOrder) {
+    const detail = imagingOrder?.detail;
+    if (!detail) return { title: '画像検査', items: [], note: '' };
+
+    const modalityName = MODALITY_LABELS[detail.imagingModality] || detail.imagingModality || '';
+
+    const condition = detail.condition;
+    const modalities = [
+      'ct', 'plainRadiographyDigital', 'plainRadiographyAnalog',
+      'mriOther', 'mriAbove_1_5AndBelow_3Tesla',
+      'mammographyDigital', 'mammographyAnalog', 'dexa', 'fluoroscopy'
+    ];
+
+    const bodySites = [];
+    for (const m of modalities) {
+      const series = condition?.[m]?.series;
+      if (series?.length) {
+        for (const s of series) {
+          if (s.bodySite?.name) {
+            bodySites.push(s.bodySite.name);
+          }
+        }
+      }
+    }
+
+    return {
+      title: modalityName || '画像検査',
+      items: bodySites,
+      note: detail.note || ''
+    };
+  }
+
+  /**
+   * リハビリオーダーから詳細を抽出
+   */
+  function extractRehabOrderDetails(rehabOrder) {
+    const detail = rehabOrder?.detail;
+    if (!detail) return { title: 'リハビリ', items: [] };
+
+    const items = [];
+
+    // リハビリ種別（運動器リハビリテーション等）
+    const rehabType = detail.rehabilitationCalculationType?.name;
+    if (rehabType) {
+      items.push(rehabType);
+    }
+
+    // 病名
+    const diseaseName = detail.patientReceiptDisease?.masterDisease?.name;
+    if (diseaseName) {
+      items.push(`病名: ${diseaseName}`);
+    }
+
+    return {
+      title: 'リハビリ',
+      items
+    };
+  }
+
   // ===========================================
   // API関数
   // ===========================================
@@ -1139,17 +1347,17 @@
    * 指定日のオーダー作成状況を取得
    * @param {string} patientUuid - 患者UUID
    * @param {Object} orderDate - オーダー日 { year, month, day }
-   * @returns {Object} - { specimen: boolean, imaging: boolean, biopsy: boolean, rehab: boolean }
+   * @returns {Object} - { specimen: { exists, details[] }, imaging: {...}, biopsy: {...}, rehab: {...} }
    */
   async function fetchExistingOrdersOnDate(patientUuid, orderDate) {
     const core = pageWindow.HenryCore;
     if (!core) return {};
 
     const result = {
-      specimen: false,
-      imaging: false,
-      biopsy: false,
-      rehab: false
+      specimen: { exists: false, details: [] },
+      imaging: { exists: false, details: [] },
+      biopsy: { exists: false, details: [] },
+      rehab: { exists: false, details: [] }
     };
 
     try {
@@ -1196,18 +1404,24 @@
           if (!isSameDate(od, orderDate)) {
             continue;
           }
+
+          const o = order.order;
           switch (order.orderType) {
             case 'ORDER_TYPE_SPECIMEN_INSPECTION':
-              result.specimen = true;
+              result.specimen.exists = true;
+              result.specimen.details.push(extractSpecimenOrderDetails(o.specimenInspectionOrder));
               break;
             case 'ORDER_TYPE_IMAGING':
-              result.imaging = true;
+              result.imaging.exists = true;
+              result.imaging.details.push(extractImagingOrderDetails(o.imagingOrder));
               break;
             case 'ORDER_TYPE_BIOPSY_INSPECTION':
-              result.biopsy = true;
+              result.biopsy.exists = true;
+              result.biopsy.details.push(extractBiopsyOrderDetails(o.biopsyInspectionOrder));
               break;
             case 'ORDER_TYPE_REHABILITATION':
-              result.rehab = true;
+              result.rehab.exists = true;
+              result.rehab.details.push(extractRehabOrderDetails(o.rehabilitationOrder));
               break;
           }
         }
@@ -1224,15 +1438,15 @@
    * @param {string} patientUuid - 患者UUID
    * @param {string} hospitalizationUuid - 入院UUID
    * @param {Object} orderDate - オーダー日 { year, month, day }
-   * @returns {Object} - { instruction: boolean, standingOrder: boolean }
+   * @returns {Object} - { instruction: { exists, details[] }, standingOrder: { exists, details[] } }
    */
   async function fetchExistingDocumentsOnDate(patientUuid, hospitalizationUuid, orderDate) {
     const core = pageWindow.HenryCore;
     if (!core) return {};
 
     const result = {
-      instruction: false,
-      standingOrder: false
+      instruction: { exists: false, details: [] },
+      standingOrder: { exists: false, details: [] }
     };
 
     // 対象日の0:00〜23:59:59のUnixタイムスタンプを計算
@@ -1264,10 +1478,16 @@
         // 対象日の記事のみチェック
         if (performSeconds >= startSeconds && performSeconds <= endSeconds) {
           const customTypeUuid = doc.type?.clinicalDocumentCustomTypeUuid?.value;
-          if (customTypeUuid === INSTRUCTION_TEMPLATES['admission-instruction'].clinicalDocumentCustomTypeUuid) {
-            result.instruction = true;
-          } else if (customTypeUuid === STANDING_ORDER_TEMPLATES['standing-order'].clinicalDocumentCustomTypeUuid) {
-            result.standingOrder = true;
+          if (customTypeUuid === instructionTypeUuid) {
+            result.instruction.exists = true;
+            result.instruction.details.push(
+              extractDocumentDetails('入院時指示', doc.editorData)
+            );
+          } else if (customTypeUuid === standingOrderTypeUuid) {
+            result.standingOrder.exists = true;
+            result.standingOrder.details.push(
+              extractDocumentDetails('指示簿', doc.editorData)
+            );
           }
         }
       }
@@ -1296,12 +1516,23 @@
       fetchExistingDocumentsOnDate(patientUuid, hospitalizationUuid, orderDate)
     ]);
 
+    // imaging と biopsy の詳細をまとめる
+    const imagingBiopsyDetails = [
+      ...orders.imaging.details,
+      ...orders.biopsy.details
+    ];
+
     return {
-      imagingBiopsy: orders.imaging && orders.biopsy,  // 両方あれば作成済み
-      specimen: orders.specimen,
-      rehab: orders.rehab,
-      instruction: documents.instruction,
-      standingOrder: documents.standingOrder
+      imagingBiopsy: orders.imaging.exists && orders.biopsy.exists,  // 両方あれば作成済み
+      imagingBiopsyDetails,
+      specimen: orders.specimen.exists,
+      specimenDetails: orders.specimen.details,
+      rehab: orders.rehab.exists,
+      rehabDetails: orders.rehab.details,
+      instruction: documents.instruction.exists,
+      instructionDetails: documents.instruction.details,
+      standingOrder: documents.standingOrder.exists,
+      standingOrderDetails: documents.standingOrder.details
     };
   }
 
@@ -2839,6 +3070,99 @@
     // カード参照を保持（作成後の状態更新用）
     const cardRefs = {};
 
+    // --- ポップオーバー表示関数 ---
+    function showOrderDetailsPopover(badge, orderType) {
+      // 詳細データを取得
+      const detailsKey = orderType + 'Details';
+      const details = creationStatus[detailsKey] || [];
+
+      if (!details.length) return;
+
+      // 既存のポップオーバーを削除
+      document.querySelectorAll('.order-details-popover').forEach(el => el.remove());
+
+      // ポップオーバー作成
+      const popover = document.createElement('div');
+      popover.className = 'order-details-popover';
+      popover.style.cssText = `
+        position: absolute;
+        z-index: 2000;
+        background: #fff;
+        border: 1px solid #e5e7eb;
+        border-radius: 8px;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+        padding: 12px 16px;
+        max-width: 350px;
+        min-width: 200px;
+        font-size: 13px;
+      `;
+
+      // コンテンツ作成
+      let html = '<div style="font-weight: 600; color: #374151; margin-bottom: 8px; border-bottom: 1px solid #e5e7eb; padding-bottom: 6px;">作成済みオーダー</div>';
+
+      for (const detail of details) {
+        html += `<div style="margin-bottom: 8px;">`;
+        html += `<div style="font-weight: 500; color: #1f2937; margin-bottom: 2px;">${detail.title}</div>`;
+
+        if (detail.items?.length) {
+          const itemsToShow = detail.items.slice(0, 5);
+          const remaining = detail.items.length - 5;
+          html += `<div style="color: #6b7280; font-size: 12px; padding-left: 8px;">`;
+          html += itemsToShow.map(item => `・${item}`).join('<br>');
+          if (remaining > 0) {
+            html += `<br><span style="color: #9ca3af;">他${remaining}件</span>`;
+          } else if (detail.hasMore) {
+            html += `<br><span style="color: #9ca3af;">...</span>`;
+          }
+          html += `</div>`;
+        }
+
+        if (detail.note) {
+          const notePreview = detail.note.replace(/\n/g, ' ').slice(0, 50);
+          html += `<div style="color: #9ca3af; font-size: 11px; margin-top: 2px; padding-left: 8px;">`;
+          html += `備考: ${notePreview}${detail.note.length > 50 ? '...' : ''}`;
+          html += `</div>`;
+        }
+
+        html += `</div>`;
+      }
+
+      popover.innerHTML = html;
+      document.body.appendChild(popover);
+
+      // 位置調整
+      const badgeRect = badge.getBoundingClientRect();
+      const popoverRect = popover.getBoundingClientRect();
+
+      let top = badgeRect.bottom + 8;
+      let left = badgeRect.left;
+
+      // 画面右端からはみ出す場合
+      if (left + popoverRect.width > window.innerWidth - 16) {
+        left = window.innerWidth - popoverRect.width - 16;
+      }
+
+      // 画面下端からはみ出す場合は上に表示
+      if (top + popoverRect.height > window.innerHeight - 16) {
+        top = badgeRect.top - popoverRect.height - 8;
+      }
+
+      popover.style.top = `${top}px`;
+      popover.style.left = `${left}px`;
+
+      // ポップオーバーからマウスが離れたら閉じる
+      popover.addEventListener('mouseleave', () => {
+        hideOrderDetailsPopover();
+      });
+
+      return popover;
+    }
+
+    // ポップオーバーを閉じる
+    function hideOrderDetailsPopover() {
+      document.querySelectorAll('.order-details-popover').forEach(el => el.remove());
+    }
+
     // 各オーダーカードを生成
     for (const type of orderTypes) {
       const card = createOrderCard(type);
@@ -2893,6 +3217,11 @@
       const statusBadge = document.createElement('span');
       statusBadge.className = 'creation-status-badge';
       statusBadge.dataset.orderType = type.key;
+
+      // 詳細データがあるかチェック
+      const detailsKey = type.key + 'Details';
+      const hasDetails = creationStatus[detailsKey]?.length > 0;
+
       statusBadge.style.cssText = `
         display: ${isCreated ? 'inline-flex' : 'none'};
         align-items: center;
@@ -2906,6 +3235,30 @@
         margin-left: 8px;
       `;
       statusBadge.innerHTML = '✓ 作成済み';
+
+      // 詳細がある場合はホバーでツールチップ表示
+      if (hasDetails) {
+        let hoverTimer = null;
+        statusBadge.addEventListener('mouseenter', () => {
+          // 少し遅延を入れてからポップオーバー表示
+          hoverTimer = setTimeout(() => {
+            showOrderDetailsPopover(statusBadge, type.key);
+          }, 200);
+        });
+        statusBadge.addEventListener('mouseleave', () => {
+          if (hoverTimer) {
+            clearTimeout(hoverTimer);
+            hoverTimer = null;
+          }
+          // 少し遅延を入れてから閉じる（ポップオーバーにマウス移動を許容）
+          setTimeout(() => {
+            const popover = document.querySelector('.order-details-popover');
+            if (popover && !popover.matches(':hover')) {
+              hideOrderDetailsPopover();
+            }
+          }, 100);
+        });
+      }
 
       // タイトル要素を探してバッジを追加
       const titleEl = card.querySelector('[class*="title"], h3, .card-title');
