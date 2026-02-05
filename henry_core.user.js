@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry Core
 // @namespace    https://henry-app.jp/
-// @version      2.22.0
+// @version      2.23.0
 // @description  Henry スクリプト実行基盤 (GoogleAuth統合 / Google Docs対応)
 // @author       sk powered by Claude & Gemini
 // @match        https://henry-app.jp/*
@@ -70,6 +70,7 @@
  *   createTextarea({ placeholder?, value?, rows? }) - 複数行テキスト入力
  *   createSelect({ options?, value?, onChange? })   - セレクトボックス → { wrapper, select }
  *   createCheckbox({ label?, checked?, onChange? }) - チェックボックス → { wrapper, checkbox }
+ *   createRadioGroup({ options, name?, value?, onChange? }) - ラジオグループ → { wrapper, radios, getValue }
  *   showModal({ title, content, actions?, width?, closeOnOverlayClick? })
  *   showToast(message, type?, duration?)            - トースト通知
  *   showSpinner(message?)                           - ローディング表示 → { close }
@@ -685,6 +686,24 @@
           height: 13px;
           cursor: pointer;
         }
+        .henry-radio-group {
+          display: flex;
+          gap: 16px;
+        }
+        .henry-radio-wrapper {
+          display: inline-flex;
+          align-items: center;
+          gap: 6px;
+          cursor: pointer;
+          font-family: "Noto Sans JP", sans-serif;
+          font-size: 14px;
+          color: var(--henry-text-high);
+        }
+        .henry-radio {
+          width: 13px;
+          height: 13px;
+          cursor: pointer;
+        }
       `;
       document.head.appendChild(style);
 
@@ -813,6 +832,49 @@
       wrapper.appendChild(checkbox);
       wrapper.appendChild(span);
       return { wrapper, checkbox };
+    },
+
+    /**
+     * ラジオボタングループを作成
+     * @param {Object} options - オプション
+     * @param {Array<{value: string, label: string}>} options.options - 選択肢
+     * @param {string} [options.name] - グループ名（省略時は自動生成）
+     * @param {string} [options.value=''] - 初期選択値
+     * @param {Function} [options.onChange] - 変更時コールバック
+     * @returns {{wrapper: HTMLElement, radios: HTMLInputElement[], getValue: () => string}}
+     */
+    createRadioGroup: ({ options = [], name, value = '', onChange } = {}) => {
+      UI.init();
+      const groupName = name || `henry-radio-${Date.now()}`;
+      const wrapper = document.createElement('div');
+      wrapper.className = 'henry-radio-group';
+
+      const radios = [];
+
+      options.forEach(opt => {
+        const label = document.createElement('label');
+        label.className = 'henry-radio-wrapper';
+
+        const radio = document.createElement('input');
+        radio.type = 'radio';
+        radio.className = 'henry-radio';
+        radio.name = groupName;
+        radio.value = opt.value;
+        if (opt.value === value) radio.checked = true;
+        if (onChange) radio.addEventListener('change', onChange);
+
+        const span = document.createElement('span');
+        span.textContent = opt.label;
+
+        label.appendChild(radio);
+        label.appendChild(span);
+        wrapper.appendChild(label);
+        radios.push(radio);
+      });
+
+      const getValue = () => radios.find(r => r.checked)?.value || '';
+
+      return { wrapper, radios, getValue };
     },
 
     showModal: ({ title, content, actions = [], width, closeOnOverlayClick = true }) => {
