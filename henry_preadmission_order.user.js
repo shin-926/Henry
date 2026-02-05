@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry 入院前オーダー
 // @namespace    https://github.com/shin-926/Henry
-// @version      0.33.0
+// @version      0.34.0
 // @description  入院予定患者に対して入院前オーダー（CT検査等）を一括作成
 // @author       sk powered by Claude
 // @match        https://henry-app.jp/*
@@ -1166,6 +1166,20 @@
     }
   `;
 
+  // 患者ファイル一覧取得（入院診療計画書の作成確認用）
+  const LIST_PATIENT_FILES_QUERY = `
+    query ListPatientFiles($input: ListPatientFilesRequestInput!) {
+      listPatientFiles(input: $input) {
+        patientFiles {
+          uuid
+          file { title }
+          createTime { seconds }
+        }
+        nextPageToken
+      }
+    }
+  `;
+
   /**
    * editorData（JSON文字列）をパースしてテキストを抽出
    */
@@ -1499,6 +1513,55 @@
   }
 
   /**
+   * 入院診療計画書の作成状況を取得
+   * @param {string} patientUuid - 患者UUID
+   * @param {Object} orderDate - 入院日 { year, month, day }
+   * @returns {Object} - { exists: boolean, details: Array }
+   */
+  async function fetchExistingTreatmentPlanOnDate(patientUuid, orderDate) {
+    const core = pageWindow.HenryCore;
+    if (!core) return { exists: false, details: [] };
+
+    // 期待するファイル名: 入院診療計画書_YYYYMMDD
+    const dateStr = `${orderDate.year}${String(orderDate.month).padStart(2, '0')}${String(orderDate.day).padStart(2, '0')}`;
+    const expectedFileName = `入院診療計画書_${dateStr}`;
+
+    try {
+      // ListPatientFilesでファイル一覧を取得
+      const response = await core.query(LIST_PATIENT_FILES_QUERY, {
+        input: {
+          patientUuid: patientUuid,
+          parentFileFolderUuid: null,
+          pageSize: 100,
+          pageToken: ''
+        }
+      });
+
+      const patientFiles = response?.data?.listPatientFiles?.patientFiles || [];
+
+      // ファイル名が一致するものを検索
+      const matchingFiles = patientFiles.filter(f => {
+        const title = f.file?.title || '';
+        return title.startsWith(expectedFileName);
+      });
+
+      if (matchingFiles.length > 0) {
+        return {
+          exists: true,
+          details: [{
+            title: '入院診療計画書',
+            items: matchingFiles.map(f => f.file?.title || '')
+          }]
+        };
+      }
+    } catch (e) {
+      console.error(`[${SCRIPT_NAME}] 入院診療計画書確認エラー:`, e);
+    }
+
+    return { exists: false, details: [] };
+  }
+
+  /**
    * オーダー作成状況を一括取得
    * @param {Object} patientData - 患者データ
    * @param {Object} orderDate - オーダー日 { year, month, day }
@@ -1511,9 +1574,10 @@
     if (!patientUuid) return {};
 
     // 並列で取得
-    const [orders, documents] = await Promise.all([
+    const [orders, documents, treatmentPlan] = await Promise.all([
       fetchExistingOrdersOnDate(patientUuid, orderDate),
-      fetchExistingDocumentsOnDate(patientUuid, hospitalizationUuid, orderDate)
+      fetchExistingDocumentsOnDate(patientUuid, hospitalizationUuid, orderDate),
+      fetchExistingTreatmentPlanOnDate(patientUuid, orderDate)
     ]);
 
     // imaging と biopsy の詳細をまとめる
@@ -1525,6 +1589,8 @@
     return {
       imagingBiopsy: orders.imaging.exists && orders.biopsy.exists,  // 両方あれば作成済み
       imagingBiopsyDetails,
+      treatmentPlan: treatmentPlan.exists,
+      treatmentPlanDetails: treatmentPlan.details,
       specimen: orders.specimen.exists,
       specimenDetails: orders.specimen.details,
       rehab: orders.rehab.exists,
@@ -2767,9 +2833,8 @@
     const folder = await DriveAPI.getOrCreateFolder(TREATMENT_PLAN_CONFIG.OUTPUT_FOLDER_NAME);
 
     // 3. テンプレートをコピー
-    const patientName = patientData.patient?.fullName || '患者';
-    const dateStr = `${orderDate.year}${orderDate.month}${orderDate.day}`;
-    const fileName = `入院診療計画書_${patientName}_${dateStr}`;
+    const dateStr = `${orderDate.year}${String(orderDate.month).padStart(2, '0')}${String(orderDate.day).padStart(2, '0')}`;
+    const fileName = `入院診療計画書_${dateStr}`;
 
     console.log(`[${SCRIPT_NAME}] テンプレートをコピー中...`);
     const properties = {
