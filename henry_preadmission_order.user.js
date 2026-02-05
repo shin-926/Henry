@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry 入院前オーダー
 // @namespace    https://github.com/shin-926/Henry
-// @version      0.23.0
+// @version      0.23.1
 // @description  入院予定患者に対して入院前オーダー（CT検査等）を一括作成
 // @author       sk powered by Claude
 // @match        https://henry-app.jp/*
@@ -2769,22 +2769,22 @@
 
       container.innerHTML = `
         <div style="display: flex; align-items: flex-start; margin-bottom: 10px; gap: 12px;">
-          <label style="width: 80px; flex-shrink: 0; font-size: 12px; font-weight: 500; color: #374151; padding-top: 6px;">病名</label>
+          <label style="width: 70px; flex-shrink: 0; font-size: 12px; font-weight: 500; color: #374151; padding-top: 6px;">病名</label>
           <textarea id="treatment-plan-disease" rows="3"
             style="flex: 1; padding: 6px 10px; border: 1px solid #d1d5db; border-radius: 4px; font-size: 13px; box-sizing: border-box; resize: none;"></textarea>
         </div>
         <div style="display: flex; align-items: flex-start; margin-bottom: 10px; gap: 12px;">
-          <label style="width: 80px; flex-shrink: 0; font-size: 12px; font-weight: 500; color: #374151; padding-top: 6px;">症状</label>
+          <label style="width: 70px; flex-shrink: 0; font-size: 12px; font-weight: 500; color: #374151; padding-top: 6px;">症状</label>
           <textarea id="treatment-plan-symptom" rows="3"
             style="flex: 1; padding: 6px 10px; border: 1px solid #d1d5db; border-radius: 4px; font-size: 13px; box-sizing: border-box; resize: none;"></textarea>
         </div>
         <div style="display: flex; align-items: flex-start; margin-bottom: 10px; gap: 12px;">
-          <label style="width: 80px; flex-shrink: 0; font-size: 12px; font-weight: 500; color: #374151; padding-top: 6px;">治療計画</label>
+          <label style="width: 70px; flex-shrink: 0; font-size: 12px; font-weight: 500; color: #374151; padding-top: 6px;">治療計画</label>
           <textarea id="treatment-plan-treatment" rows="3"
             style="flex: 1; padding: 6px 10px; border: 1px solid #d1d5db; border-radius: 4px; font-size: 13px; box-sizing: border-box; resize: none;"></textarea>
         </div>
         <div style="display: flex; align-items: center; margin-bottom: 10px; gap: 12px;">
-          <label style="width: 80px; flex-shrink: 0; font-size: 12px; font-weight: 500; color: #374151;">入院期間</label>
+          <label style="width: 70px; flex-shrink: 0; font-size: 12px; font-weight: 500; color: #374151;">入院期間</label>
           <div style="flex: 1;">
             <select id="treatment-plan-period" style="width: 100%; padding: 6px 10px; border: 1px solid #d1d5db; border-radius: 4px; font-size: 13px; background: white;">
               ${periodOptions.map(opt => `<option value="${opt}">${opt}</option>`).join('')}
@@ -2794,7 +2794,7 @@
           </div>
         </div>
         <div style="display: flex; align-items: center; gap: 12px;">
-          <label style="width: 80px; flex-shrink: 0; font-size: 12px; font-weight: 500; color: #374151;">栄養管理</label>
+          <label style="width: 70px; flex-shrink: 0; font-size: 12px; font-weight: 500; color: #374151;">栄養管理</label>
           <div style="display: flex; gap: 16px;">
             <label style="display: flex; align-items: center; gap: 4px; cursor: pointer;">
               <input type="radio" name="treatment-plan-nutrition" value="なし" checked style="margin: 0;">
@@ -3298,7 +3298,7 @@
         // 算定区分選択
         const calcTypeRow = document.createElement('div');
         calcTypeRow.style.cssText = 'display: flex; align-items: center; margin-bottom: 8px; gap: 12px;';
-        calcTypeRow.innerHTML = `<label style="width: 80px; flex-shrink: 0; font-size: 12px; font-weight: 500; color: #374151;">算定区分</label>`;
+        calcTypeRow.innerHTML = `<label style="width: 70px; flex-shrink: 0; font-size: 12px; font-weight: 500; color: #374151;">算定区分</label>`;
         const calcTypeSelect = document.createElement('select');
         calcTypeSelect.id = 'rehab-calc-type';
         calcTypeSelect.style.cssText = 'flex: 1; padding: 6px 8px; border: 1px solid #d1d5db; border-radius: 4px; font-size: 13px;';
@@ -3323,7 +3323,7 @@
         // 診断名選択
         const diseaseRow = document.createElement('div');
         diseaseRow.style.cssText = 'display: flex; align-items: center; margin-bottom: 8px; gap: 12px;';
-        diseaseRow.innerHTML = `<label style="width: 80px; flex-shrink: 0; font-size: 12px; font-weight: 500; color: #374151;">診断名</label>`;
+        diseaseRow.innerHTML = `<label style="width: 70px; flex-shrink: 0; font-size: 12px; font-weight: 500; color: #374151;">診断名</label>`;
         const diseaseSelect = document.createElement('select');
         diseaseSelect.id = 'rehab-disease';
         diseaseSelect.style.cssText = 'flex: 1; padding: 6px 8px; border: 1px solid #d1d5db; border-radius: 4px; font-size: 13px;';
@@ -3340,7 +3340,7 @@
         // 起算日種別
         const startDateTypeRow = document.createElement('div');
         startDateTypeRow.style.cssText = 'display: flex; align-items: center; margin-bottom: 8px; gap: 12px;';
-        startDateTypeRow.innerHTML = `<label style="width: 80px; flex-shrink: 0; font-size: 12px; font-weight: 500; color: #374151;">起算日種別</label>`;
+        startDateTypeRow.innerHTML = `<label style="width: 70px; flex-shrink: 0; font-size: 12px; font-weight: 500; color: #374151;">起算日種別</label>`;
         const startDateTypeSelect = document.createElement('select');
         startDateTypeSelect.id = 'rehab-start-date-type';
         startDateTypeSelect.style.cssText = 'flex: 1; padding: 6px 8px; border: 1px solid #d1d5db; border-radius: 4px; font-size: 13px;';
@@ -3350,7 +3350,7 @@
         // 起算日
         const therapyDateRow = document.createElement('div');
         therapyDateRow.style.cssText = 'display: flex; align-items: center; margin-bottom: 8px; gap: 12px;';
-        therapyDateRow.innerHTML = `<label style="width: 80px; flex-shrink: 0; font-size: 12px; font-weight: 500; color: #374151;">起算日</label>`;
+        therapyDateRow.innerHTML = `<label style="width: 70px; flex-shrink: 0; font-size: 12px; font-weight: 500; color: #374151;">起算日</label>`;
         const therapyDateInput = document.createElement('input');
         therapyDateInput.type = 'date';
         therapyDateInput.id = 'rehab-therapy-date';
@@ -3362,7 +3362,7 @@
         const periodRow = document.createElement('div');
         periodRow.style.cssText = 'display: flex; align-items: center; margin-bottom: 8px; gap: 12px;';
         periodRow.innerHTML = `
-          <label style="width: 80px; flex-shrink: 0; font-size: 12px; font-weight: 500; color: #374151;">算定期限</label>
+          <label style="width: 70px; flex-shrink: 0; font-size: 12px; font-weight: 500; color: #374151;">算定期限</label>
           <div id="rehab-period-display" style="flex: 1; padding: 6px 8px; background: #f3f4f6; border-radius: 4px; font-size: 13px; color: #374151;">-</div>
         `;
         contentEl.appendChild(periodRow);
@@ -3515,7 +3515,7 @@
       // 食事
       let html = `
         <div style="${rowStyle}">
-          <label style="${labelStyle}">食事:</label>
+          <label style="${labelStyle}">食事</label>
           <select id="instruction-meal" style="width: 80px; padding: 4px 6px; border: 1px solid #d1d5db; border-radius: 4px; font-size: 12px; margin-right: 6px;">
             ${INSTRUCTION_OPTIONS.meal.options.map(opt => `<option value="${opt}">${opt}</option>`).join('')}
           </select>
@@ -3526,7 +3526,7 @@
       // 安静度
       html += `
         <div style="${rowStyle}">
-          <label style="${labelStyle}">安静度:</label>
+          <label style="${labelStyle}">安静度</label>
           <div style="display: flex; flex-wrap: wrap;">
             ${INSTRUCTION_OPTIONS.activity.options.map((opt, i) =>
               `<label style="${radioLabelStyle}"><input type="radio" name="instruction-activity" value="${opt}" ${i === 0 ? 'checked' : ''}> ${opt}</label>`
@@ -3538,7 +3538,7 @@
       // モニター
       html += `
         <div style="${rowStyle}">
-          <label style="${labelStyle}">モニター:</label>
+          <label style="${labelStyle}">モニター</label>
           <div style="display: flex;">
             ${INSTRUCTION_OPTIONS.monitor.options.map((opt, i) =>
               `<label style="${radioLabelStyle}"><input type="radio" name="instruction-monitor" value="${opt}" ${i === 1 ? 'checked' : ''}> ${opt}</label>`
@@ -3550,7 +3550,7 @@
       // 尿測
       html += `
         <div style="${rowStyle}">
-          <label style="${labelStyle}">尿測:</label>
+          <label style="${labelStyle}">尿測</label>
           <div style="display: flex;">
             ${INSTRUCTION_OPTIONS.urine.options.map((opt, i) =>
               `<label style="${radioLabelStyle}"><input type="radio" name="instruction-urine" value="${opt}" ${i === 1 ? 'checked' : ''}> ${opt}</label>`
@@ -3562,7 +3562,7 @@
       // 保清
       html += `
         <div style="${rowStyle}">
-          <label style="${labelStyle}">保清:</label>
+          <label style="${labelStyle}">保清</label>
           <div style="display: flex;">
             ${INSTRUCTION_OPTIONS.bathing.options.map((opt, i) =>
               `<label style="${radioLabelStyle}"><input type="radio" name="instruction-bathing" value="${opt}" ${i === 0 ? 'checked' : ''}> ${opt}</label>`
@@ -3574,7 +3574,7 @@
       // 補助具
       html += `
         <div style="${rowStyle}">
-          <label style="${labelStyle}">補助具:</label>
+          <label style="${labelStyle}">補助具</label>
           <div style="display: flex; flex-wrap: wrap;">
             ${INSTRUCTION_OPTIONS.mobility.options.map((opt, i) =>
               `<label style="${radioLabelStyle}"><input type="radio" name="instruction-mobility" value="${opt}" ${i === 0 ? 'checked' : ''}> ${opt}</label>`
@@ -3586,7 +3586,7 @@
       // その他（自由記述）
       html += `
         <div style="flex: 1; display: flex; align-items: flex-start; min-height: 0;">
-          <label style="${labelStyle} margin-top: 4px;">その他:</label>
+          <label style="${labelStyle} margin-top: 4px;">その他</label>
           <textarea id="instruction-freetext" placeholder="追加指示..." style="flex: 1; min-height: 40px; padding: 4px 6px; border: 1px solid #d1d5db; border-radius: 4px; font-size: 12px; resize: vertical; box-sizing: border-box;"></textarea>
         </div>
       `;
