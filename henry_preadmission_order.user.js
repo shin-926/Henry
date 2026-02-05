@@ -1,11 +1,16 @@
 // ==UserScript==
 // @name         Henry 入院前オーダー
 // @namespace    https://github.com/shin-926/Henry
-// @version      0.20.0
+// @version      0.23.0
 // @description  入院予定患者に対して入院前オーダー（CT検査等）を一括作成
 // @author       sk powered by Claude
 // @match        https://henry-app.jp/*
-// @grant        none
+// @grant        GM_xmlhttpRequest
+// @grant        unsafeWindow
+// @connect      googleapis.com
+// @connect      www.googleapis.com
+// @connect      docs.googleapis.com
+// @connect      storage.googleapis.com
 // @run-at       document-idle
 // @updateURL    https://raw.githubusercontent.com/shin-926/Henry/main/henry_preadmission_order.user.js
 // @downloadURL  https://raw.githubusercontent.com/shin-926/Henry/main/henry_preadmission_order.user.js
@@ -36,6 +41,24 @@
 
   const SCRIPT_NAME = 'PreadmissionOrder';
   const VERSION = GM_info.script.version;
+
+  // ページのwindowを取得（サンドボックス対応）
+  const pageWindow = typeof unsafeWindow !== 'undefined' ? unsafeWindow : window;
+
+  // ===========================================
+  // Google API設定
+  // ===========================================
+  const API_CONFIG = {
+    DRIVE_API_BASE: 'https://www.googleapis.com/drive/v3',
+    DOCS_API_BASE: 'https://docs.googleapis.com/v1',
+    ORG_UUID: 'ce6b556b-2a8d-4fce-b8dd-89ba638fc825'
+  };
+
+  // 入院診療計画書テンプレート設定
+  const TREATMENT_PLAN_CONFIG = {
+    TEMPLATE_ID: '1UZoe-UXHuG6RdkPmx6e8owAAtqIU0398x-nixJv-q0w',
+    OUTPUT_FOLDER_NAME: 'Henry一時ファイル'
+  };
 
   // ===========================================
   // オーダーテンプレート定義
@@ -901,8 +924,8 @@
 
   // 全テンプレート（UI表示用）
   const ALL_TEMPLATES = {
-    imaging: { label: '画像検査', templates: CT_TEMPLATES },
-    biopsy: { label: '生体検査', templates: BIOPSY_TEMPLATES },
+    imagingBiopsy: { label: '画像検査・生体検査', templates: { ...CT_TEMPLATES, ...BIOPSY_TEMPLATES } },
+    treatmentPlan: { label: '入院診療計画書', templates: {} },
     specimen: { label: '血液検査', templates: SPECIMEN_TEMPLATES },
     rehab: { label: 'リハビリ', templates: REHAB_TEMPLATES },
     instruction: { label: '入院時指示', templates: INSTRUCTION_TEMPLATES },
@@ -1020,7 +1043,7 @@
   async function fetchAllOutsideInspections() {
     if (allInspectionsCache) return allInspectionsCache;
 
-    const core = window.HenryCore;
+    const core = pageWindow.HenryCore;
     if (!core) {
       console.error(`[${SCRIPT_NAME}] HenryCore が見つかりません`);
       return [];
@@ -1085,7 +1108,7 @@
    * @returns {Promise<Array>} 入院予定患者リスト
    */
   async function fetchScheduledHospitalizations(daysAhead = 7) {
-    const core = window.HenryCore;
+    const core = pageWindow.HenryCore;
     if (!core) {
       console.error(`[${SCRIPT_NAME}] HenryCore が見つかりません`);
       return [];
@@ -1224,7 +1247,7 @@
   async function fetchBodySites() {
     if (bodySitesCache) return bodySitesCache;
 
-    const core = window.HenryCore;
+    const core = pageWindow.HenryCore;
     try {
       const result = await core.query(LIST_BODY_SITES_QUERY);
       bodySitesCache = result.data?.listLocalBodySites?.bodySites || [];
@@ -1272,7 +1295,7 @@
    * CTオーダーを作成
    */
   async function createImagingOrder(orderData) {
-    const core = window.HenryCore;
+    const core = pageWindow.HenryCore;
     if (!core) {
       throw new Error('HenryCore が見つかりません');
     }
@@ -1351,7 +1374,7 @@
    * 生体検査オーダーを作成
    */
   async function createBiopsyInspectionOrder(orderData) {
-    const core = window.HenryCore;
+    const core = pageWindow.HenryCore;
     if (!core) {
       throw new Error('HenryCore が見つかりません');
     }
@@ -1429,7 +1452,7 @@
    * 血液検査オーダーを作成
    */
   async function createSpecimenInspectionOrder(orderData) {
-    const core = window.HenryCore;
+    const core = pageWindow.HenryCore;
     if (!core) {
       throw new Error('HenryCore が見つかりません');
     }
@@ -1534,7 +1557,7 @@
   async function fetchRehabCalcTypes() {
     if (rehabCalcTypesCache) return rehabCalcTypesCache;
 
-    const core = window.HenryCore;
+    const core = pageWindow.HenryCore;
     const today = new Date();
     const searchDate = {
       year: today.getFullYear(),
@@ -1559,7 +1582,7 @@
    * 患者の病名一覧を取得
    */
   async function fetchPatientDiseases(patientUuid) {
-    const core = window.HenryCore;
+    const core = pageWindow.HenryCore;
     try {
       const result = await core.query(LIST_PATIENT_DISEASES_QUERY, {
         input: {
@@ -1583,7 +1606,7 @@
   async function fetchRehabPlans() {
     if (rehabPlansCache) return rehabPlansCache;
 
-    const core = window.HenryCore;
+    const core = pageWindow.HenryCore;
     try {
       const result = await core.query(LIST_REHAB_PLANS_QUERY, {});
       rehabPlansCache = result.data?.listRehabilitationPlans?.rehabilitationPlans || [];
@@ -1599,7 +1622,7 @@
    * リハビリオーダーを作成
    */
   async function createRehabilitationOrder(orderData) {
-    const core = window.HenryCore;
+    const core = pageWindow.HenryCore;
     if (!core) {
       throw new Error('HenryCore が見つかりません');
     }
@@ -1777,7 +1800,7 @@
    * 入院時指示の記事を作成
    */
   async function createAdmissionInstruction(orderData) {
-    const core = window.HenryCore;
+    const core = pageWindow.HenryCore;
     if (!core) {
       throw new Error('HenryCore が見つかりません');
     }
@@ -1847,7 +1870,7 @@
    * 指示簿（入院）の記事を作成
    */
   async function createStandingOrder(orderData) {
-    const core = window.HenryCore;
+    const core = pageWindow.HenryCore;
     if (!core) {
       throw new Error('HenryCore が見つかりません');
     }
@@ -1943,6 +1966,378 @@
   }
 
   // ===========================================
+  // Google API関連
+  // ===========================================
+
+  /**
+   * GoogleAuth APIを取得
+   */
+  function getGoogleAuth() {
+    return pageWindow.HenryCore?.modules?.GoogleAuth;
+  }
+
+  // =============================================================================
+  // Google Drive API モジュール
+  // =============================================================================
+  const DriveAPI = {
+    async request(method, url, options = {}) {
+      const googleAuth = getGoogleAuth();
+      if (!googleAuth) {
+        throw new Error('GoogleAuth モジュールが見つかりません');
+      }
+      const accessToken = await googleAuth.getValidAccessToken();
+
+      return new Promise((resolve, reject) => {
+        const headers = {
+          'Authorization': `Bearer ${accessToken}`,
+          ...options.headers
+        };
+
+        GM_xmlhttpRequest({
+          method,
+          url,
+          headers,
+          data: options.body,
+          responseType: options.responseType || 'text',
+          onload: (response) => {
+            if (response.status >= 200 && response.status < 300) {
+              if (options.responseType === 'arraybuffer') {
+                resolve(response.response);
+              } else {
+                try {
+                  resolve(JSON.parse(response.responseText));
+                } catch {
+                  resolve(response.responseText);
+                }
+              }
+            } else if (response.status === 401) {
+              googleAuth.refreshAccessToken()
+                .then(() => this.request(method, url, options))
+                .then(resolve)
+                .catch(reject);
+            } else {
+              console.error(`[${SCRIPT_NAME}] DriveAPI Error ${response.status}:`, response.responseText);
+              reject(new Error(`API Error: ${response.status}`));
+            }
+          },
+          onerror: (err) => {
+            console.error(`[${SCRIPT_NAME}] DriveAPI Network error:`, err);
+            reject(new Error('API通信エラー'));
+          }
+        });
+      });
+    },
+
+    // ファイルをコピー（親フォルダ・メタデータ指定可能）
+    async copyFile(fileId, newName, parentFolderId = null, properties = null) {
+      const url = `${API_CONFIG.DRIVE_API_BASE}/files/${fileId}/copy`;
+      const body = { name: newName };
+      if (parentFolderId) {
+        body.parents = [parentFolderId];
+      }
+      if (properties) {
+        body.properties = properties;
+      }
+      return await this.request('POST', url, {
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+      });
+    },
+
+    // マイドライブでフォルダを検索
+    async findFolder(folderName) {
+      const query = `name='${folderName}' and mimeType='application/vnd.google-apps.folder' and 'root' in parents and trashed=false`;
+      const url = `${API_CONFIG.DRIVE_API_BASE}/files?q=${encodeURIComponent(query)}&fields=files(id,name)`;
+      const result = await this.request('GET', url);
+      return result.files?.[0] || null;
+    },
+
+    // マイドライブにフォルダを作成
+    async createFolder(folderName) {
+      const url = `${API_CONFIG.DRIVE_API_BASE}/files`;
+      const result = await this.request('POST', url, {
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: folderName,
+          mimeType: 'application/vnd.google-apps.folder',
+          parents: ['root']
+        })
+      });
+      return result;
+    },
+
+    // フォルダを検索し、なければ作成
+    async getOrCreateFolder(folderName) {
+      let folder = await this.findFolder(folderName);
+      if (!folder) {
+        console.log(`[${SCRIPT_NAME}] フォルダ「${folderName}」を作成中...`);
+        folder = await this.createFolder(folderName);
+      }
+      return folder;
+    },
+
+    // ファイルをエクスポート（Google形式 → Office形式）
+    async exportFile(fileId, mimeType) {
+      const googleAuth = getGoogleAuth();
+      const accessToken = await googleAuth.getValidAccessToken();
+      const url = `${API_CONFIG.DRIVE_API_BASE}/files/${fileId}/export?mimeType=${encodeURIComponent(mimeType)}`;
+
+      return new Promise((resolve, reject) => {
+        GM_xmlhttpRequest({
+          method: 'GET',
+          url,
+          headers: { 'Authorization': `Bearer ${accessToken}` },
+          responseType: 'arraybuffer',
+          onload: (response) => {
+            if (response.status >= 200 && response.status < 300) {
+              resolve(response.response);
+            } else {
+              reject(new Error(`Export Error: ${response.status}`));
+            }
+          },
+          onerror: () => reject(new Error('Export通信エラー'))
+        });
+      });
+    },
+
+    // ファイル削除
+    async deleteFile(fileId) {
+      const url = `${API_CONFIG.DRIVE_API_BASE}/files/${fileId}`;
+      return await this.request('DELETE', url);
+    }
+  };
+
+  // =============================================================================
+  // Google Docs API モジュール
+  // =============================================================================
+  const DocsAPI = {
+    // ドキュメントを更新（batchUpdate）
+    async batchUpdate(documentId, requests) {
+      const googleAuth = getGoogleAuth();
+      const accessToken = await googleAuth.getValidAccessToken();
+      const url = `${API_CONFIG.DOCS_API_BASE}/documents/${documentId}:batchUpdate`;
+
+      return new Promise((resolve, reject) => {
+        GM_xmlhttpRequest({
+          method: 'POST',
+          url,
+          headers: {
+            'Authorization': `Bearer ${accessToken}`,
+            'Content-Type': 'application/json'
+          },
+          data: JSON.stringify({ requests }),
+          onload: (response) => {
+            if (response.status === 200) {
+              resolve(JSON.parse(response.responseText));
+            } else {
+              console.error(`[${SCRIPT_NAME}] DocsAPI batchUpdate Error:`, response.responseText);
+              reject(new Error(`Docs API Error: ${response.status}`));
+            }
+          },
+          onerror: () => reject(new Error('Docs API通信エラー'))
+        });
+      });
+    },
+
+    // テキスト置換リクエストを生成
+    createReplaceTextRequest(searchText, replaceText) {
+      return {
+        replaceAllText: {
+          containsText: {
+            text: searchText,
+            matchCase: true
+          },
+          replaceText: replaceText || ''
+        }
+      };
+    }
+  };
+
+  // =============================================================================
+  // Henry ファイルアップロード API
+  // =============================================================================
+  const HenryFileAPI = {
+    QUERIES: {
+      GetFileUploadUrl: `
+        query GetFileUploadUrl($input: GetFileUploadUrlRequestInput!) {
+          getFileUploadUrl(input: $input) {
+            uploadUrl
+            fileUrl
+          }
+        }
+      `,
+      CreatePatientFile: `
+        mutation CreatePatientFile($input: CreatePatientFileRequestInput!) {
+          createPatientFile(input: $input) {
+            uuid
+          }
+        }
+      `
+    },
+
+    async call(operationName, variables) {
+      const query = this.QUERIES[operationName];
+      if (!query) {
+        throw new Error(`Unknown operation: ${operationName}`);
+      }
+
+      const core = pageWindow.HenryCore;
+      const result = await core.query(query, variables, { endpoint: '/graphql' });
+
+      if (result?.errors) {
+        throw new Error(result.errors[0].message);
+      }
+      return result.data;
+    },
+
+    async uploadToGCS(uploadUrl, blob, fileName) {
+      return new Promise((resolve, reject) => {
+        const formData = new FormData();
+        formData.append('file', blob, fileName);
+
+        // GCSへはfetch（GM_xmlhttpRequestはFormData対応が不完全な場合がある）
+        fetch(uploadUrl, {
+          method: 'POST',
+          body: formData
+        })
+          .then(response => {
+            if (response.ok) {
+              resolve();
+            } else {
+              reject(new Error(`GCS upload failed: ${response.status}`));
+            }
+          })
+          .catch(reject);
+      });
+    },
+
+    // Henryにファイルをアップロード
+    async uploadPatientFile({ blob, fileName, patientUuid, folderUuid = null }) {
+      const uploadUrlResult = await this.call('GetFileUploadUrl', {
+        input: { pathType: 'PATIENT_FILE' }
+      });
+      const { uploadUrl, fileUrl } = uploadUrlResult.getFileUploadUrl;
+
+      await this.uploadToGCS(uploadUrl, blob, fileName);
+
+      const createResult = await this.call('CreatePatientFile', {
+        input: {
+          patientUuid,
+          parentFileFolderUuid: folderUuid ? { value: folderUuid } : null,
+          title: fileName,
+          description: '',
+          fileUrl
+        }
+      });
+
+      return createResult?.createPatientFile?.uuid;
+    }
+  };
+
+  // =============================================================================
+  // 入院診療計画書作成
+  // =============================================================================
+
+  /**
+   * 入院診療計画書を作成してHenryにアップロード
+   * @param {Object} patientData - 患者データ（patient, hospitalizationDoctor等を含む）
+   * @param {Object} treatmentPlanData - UIから入力された計画書データ
+   * @param {Object} orderDate - オーダー日（year, month, day）
+   * @returns {Promise<string|null>} 作成されたファイルのUUID、失敗時はnull
+   */
+  async function createTreatmentPlanDocument(patientData, treatmentPlanData, orderDate) {
+    console.log(`[${SCRIPT_NAME}] 入院診療計画書作成開始...`);
+
+    // 1. Google Auth確認
+    const googleAuth = getGoogleAuth();
+    if (!googleAuth) {
+      throw new Error('GoogleAuth モジュールが見つかりません');
+    }
+    if (!googleAuth.isConfigured()) {
+      alert('Google認証が設定されていません。Toolboxの設定からGoogle認証を設定してください。');
+      return null;
+    }
+    if (!googleAuth.isAuthenticated()) {
+      alert('Google認証が必要です。認証を開始します。');
+      googleAuth.startAuth();
+      return null;
+    }
+
+    // 2. 一時フォルダを取得/作成
+    console.log(`[${SCRIPT_NAME}] 一時フォルダを確認中...`);
+    const folder = await DriveAPI.getOrCreateFolder(TREATMENT_PLAN_CONFIG.OUTPUT_FOLDER_NAME);
+
+    // 3. テンプレートをコピー
+    const patientName = patientData.patient?.fullName || '患者';
+    const dateStr = `${orderDate.year}${orderDate.month}${orderDate.day}`;
+    const fileName = `入院診療計画書_${patientName}_${dateStr}`;
+
+    console.log(`[${SCRIPT_NAME}] テンプレートをコピー中...`);
+    const properties = {
+      henryPatientUuid: patientData.patient?.uuid,
+      henrySource: 'treatment-plan'
+    };
+    const newDoc = await DriveAPI.copyFile(
+      TREATMENT_PLAN_CONFIG.TEMPLATE_ID,
+      fileName,
+      folder.id,
+      properties
+    );
+    console.log(`[${SCRIPT_NAME}] コピー完了: ${newDoc.id}`);
+
+    // 4. プレースホルダーを置換
+    // 作成日のフォーマット（西暦、ゼロパディングなし）
+    const creationDateStr = `${orderDate.year}年${orderDate.month}月${orderDate.day}日`;
+
+    // 入院期間テキスト（「その他」の場合は自由記述を使用）
+    let periodText = treatmentPlanData.period || '';
+    if (periodText === 'その他' && treatmentPlanData.periodOther) {
+      periodText = treatmentPlanData.periodOther;
+    }
+
+    const requests = [
+      DocsAPI.createReplaceTextRequest('{{患者氏名}}', patientData.patient?.fullName || ''),
+      DocsAPI.createReplaceTextRequest('{{作成日}}', creationDateStr),
+      DocsAPI.createReplaceTextRequest('{{病名}}', treatmentPlanData.disease || ''),
+      DocsAPI.createReplaceTextRequest('{{症状}}', treatmentPlanData.symptom || ''),
+      DocsAPI.createReplaceTextRequest('{{治療計画}}', treatmentPlanData.treatment || ''),
+      DocsAPI.createReplaceTextRequest('{{入院期間}}', periodText),
+      DocsAPI.createReplaceTextRequest('{{主治医氏名}}', patientData.hospitalizationDoctor?.doctor?.name || ''),
+      DocsAPI.createReplaceTextRequest('{{栄養管理}}', treatmentPlanData.nutrition || 'なし')
+    ];
+
+    console.log(`[${SCRIPT_NAME}] プレースホルダーを置換中...`);
+    await DocsAPI.batchUpdate(newDoc.id, requests);
+
+    // 5. docx形式でエクスポート
+    console.log(`[${SCRIPT_NAME}] docx形式でエクスポート中...`);
+    const docxMimeType = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+    const fileBuffer = await DriveAPI.exportFile(newDoc.id, docxMimeType);
+    const blob = new Blob([fileBuffer], { type: docxMimeType });
+
+    // 6. Henryにアップロード（ルートフォルダ）
+    console.log(`[${SCRIPT_NAME}] Henryにアップロード中...`);
+    const docxFileName = `${fileName}.docx`;
+    const fileUuid = await HenryFileAPI.uploadPatientFile({
+      blob,
+      fileName: docxFileName,
+      patientUuid: patientData.patient?.uuid,
+      folderUuid: null // ルートに保存
+    });
+
+    // 7. Google Drive上の一時ファイルを削除
+    console.log(`[${SCRIPT_NAME}] 一時ファイルを削除中...`);
+    try {
+      await DriveAPI.deleteFile(newDoc.id);
+    } catch (e) {
+      console.warn(`[${SCRIPT_NAME}] 一時ファイル削除スキップ:`, e.message);
+    }
+
+    console.log(`[${SCRIPT_NAME}] 入院診療計画書作成完了: ${fileUuid}`);
+    return fileUuid;
+  }
+
+  // ===========================================
   // UI関数
   // ===========================================
 
@@ -1950,7 +2345,7 @@
    * 患者選択モーダルを表示
    */
   async function showPatientSelectModal() {
-    const core = window.HenryCore;
+    const core = pageWindow.HenryCore;
     const spinner = core.ui.showSpinner('入院予定患者を取得中...');
 
     try {
@@ -2136,7 +2531,7 @@
    * オーダー設定モーダルを表示（一覧表示 & 一括作成UI）
    */
   async function showOrderSettingsModal(patientData) {
-    const core = window.HenryCore;
+    const core = pageWindow.HenryCore;
 
     const patientName = patientData.patient?.fullName || '不明';
     const admissionDate = formatDate(patientData.startDate);
@@ -2155,23 +2550,26 @@
 
     // 患者情報 + オーダー日（ヘッダー部分）
     const headerSection = document.createElement('div');
-    headerSection.style.cssText = 'padding: 16px 20px; background: #f5f5f5; border-radius: 6px; margin-bottom: 16px; flex-shrink: 0;';
+    headerSection.style.cssText = 'padding: 12px 20px; background: #f5f5f5; border-radius: 6px; margin-bottom: 12px; flex-shrink: 0;';
     headerSection.innerHTML = `
-      <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 16px;">
-        <div style="font-size: 14px; font-weight: 600; color: #333;">
-          ${patientName}　<span style="font-weight: normal; color: #666;">入院予定日: ${admissionDate}　担当医: ${doctorName}</span>
+      <div style="display: flex; justify-content: space-between; align-items: center; gap: 16px;">
+        <div style="display: flex; align-items: center; gap: 12px;">
+          <span style="font-size: 16px; font-weight: 600; color: #1f2937;">入院前オーダー作成</span>
+          <span style="font-size: 14px; color: #374151;">
+            ${patientName}<span style="color: #666; margin-left: 4px;">（入院: ${admissionDate}　担当: ${doctorName}）</span>
+          </span>
         </div>
-        <div style="display: flex; align-items: center; gap: 16px;">
+        <div style="display: flex; align-items: center; gap: 12px; flex-shrink: 0;">
           <span style="font-size: 13px; font-weight: 500; color: #374151;">オーダー日:</span>
-          <label style="display: flex; align-items: center; gap: 4px; cursor: pointer; font-size: 14px;">
+          <label style="display: flex; align-items: center; gap: 4px; cursor: pointer; font-size: 13px;">
             <input type="radio" name="order-date" value="admission" checked>
             入院日（${admissionDateStr}）
           </label>
-          <label style="display: flex; align-items: center; gap: 4px; cursor: pointer; font-size: 14px;">
+          <label style="display: flex; align-items: center; gap: 4px; cursor: pointer; font-size: 13px;">
             <input type="radio" name="order-date" value="custom">
-            指定日:
+            指定:
           </label>
-          <input type="date" id="custom-date" style="padding: 4px 8px; border: 1px solid #d1d5db; border-radius: 4px; font-size: 13px;" disabled>
+          <input type="date" id="custom-date" style="padding: 4px 8px; border: 1px solid #d1d5db; border-radius: 4px; font-size: 12px;" disabled>
         </div>
       </div>
     `;
@@ -2202,16 +2600,16 @@
     // オーダー種別定義
     const orderTypes = [
       {
-        key: 'imaging',
-        label: '画像検査',
-        description: 'CT: 頭部〜骨盤',
-        buildDetail: () => buildImagingDetail()
+        key: 'imagingBiopsy',
+        label: '画像検査・生体検査',
+        description: 'CT + ECG + 血管伸展性',
+        buildDetail: () => buildImagingBiopsyDetail()
       },
       {
-        key: 'biopsy',
-        label: '生体検査',
-        description: 'ECG + 血管伸展性',
-        buildDetail: () => buildBiopsyDetail()
+        key: 'treatmentPlan',
+        label: '入院診療計画書',
+        description: '病名・症状・入院期間等',
+        buildDetail: () => buildTreatmentPlanDetail()
       },
       {
         key: 'specimen',
@@ -2331,28 +2729,97 @@
       return card;
     }
 
-    // --- 画像検査の詳細 ---
-    function buildImagingDetail() {
+    // --- 画像検査・生体検査の詳細 ---
+    function buildImagingBiopsyDetail() {
       const container = document.createElement('div');
       container.innerHTML = `
-        <div style="margin-bottom: 8px;">
-          <label style="display: block; font-size: 12px; font-weight: 500; color: #374151; margin-bottom: 4px;">補足</label>
-          <input type="text" id="imaging-note" value="頭部、胸腹部、脊椎"
-            style="width: 100%; padding: 6px 10px; border: 1px solid #d1d5db; border-radius: 4px; font-size: 13px; box-sizing: border-box;">
+        <div style="margin-bottom: 12px;">
+          <div style="font-size: 12px; font-weight: 600; color: #1f2937; margin-bottom: 6px;">【CT検査】</div>
+          <div style="margin-left: 8px;">
+            <label style="display: block; font-size: 12px; font-weight: 500; color: #374151; margin-bottom: 4px;">補足</label>
+            <input type="text" id="imaging-note" value="頭部、胸腹部、脊椎"
+              style="width: 100%; padding: 6px 10px; border: 1px solid #d1d5db; border-radius: 4px; font-size: 13px; box-sizing: border-box;">
+          </div>
+        </div>
+        <div>
+          <div style="font-size: 12px; font-weight: 600; color: #1f2937; margin-bottom: 6px;">【生体検査】</div>
+          <div style="font-size: 13px; color: #374151; margin-left: 8px;">
+            <div>・心電図12誘導</div>
+            <div>・ABI/PWV（血管伸展性）</div>
+          </div>
         </div>
       `;
       return container;
     }
 
-    // --- 生体検査の詳細 ---
-    function buildBiopsyDetail() {
+    // --- 入院診療計画書の詳細 ---
+    function buildTreatmentPlanDetail() {
       const container = document.createElement('div');
+
+      // 推定入院期間の選択肢
+      const periodOptions = [
+        '2週程度',
+        '1ヶ月程度',
+        '1-2ヶ月程度',
+        '2ヶ月程度',
+        '2-3ヶ月程度',
+        '3ヶ月程度',
+        'その他'
+      ];
+
       container.innerHTML = `
-        <div style="font-size: 13px; color: #374151;">
-          <div>・心電図12誘導</div>
-          <div>・ABI/PWV（血管伸展性）</div>
+        <div style="display: flex; align-items: flex-start; margin-bottom: 10px; gap: 12px;">
+          <label style="width: 80px; flex-shrink: 0; font-size: 12px; font-weight: 500; color: #374151; padding-top: 6px;">病名</label>
+          <textarea id="treatment-plan-disease" rows="3"
+            style="flex: 1; padding: 6px 10px; border: 1px solid #d1d5db; border-radius: 4px; font-size: 13px; box-sizing: border-box; resize: none;"></textarea>
+        </div>
+        <div style="display: flex; align-items: flex-start; margin-bottom: 10px; gap: 12px;">
+          <label style="width: 80px; flex-shrink: 0; font-size: 12px; font-weight: 500; color: #374151; padding-top: 6px;">症状</label>
+          <textarea id="treatment-plan-symptom" rows="3"
+            style="flex: 1; padding: 6px 10px; border: 1px solid #d1d5db; border-radius: 4px; font-size: 13px; box-sizing: border-box; resize: none;"></textarea>
+        </div>
+        <div style="display: flex; align-items: flex-start; margin-bottom: 10px; gap: 12px;">
+          <label style="width: 80px; flex-shrink: 0; font-size: 12px; font-weight: 500; color: #374151; padding-top: 6px;">治療計画</label>
+          <textarea id="treatment-plan-treatment" rows="3"
+            style="flex: 1; padding: 6px 10px; border: 1px solid #d1d5db; border-radius: 4px; font-size: 13px; box-sizing: border-box; resize: none;"></textarea>
+        </div>
+        <div style="display: flex; align-items: center; margin-bottom: 10px; gap: 12px;">
+          <label style="width: 80px; flex-shrink: 0; font-size: 12px; font-weight: 500; color: #374151;">入院期間</label>
+          <div style="flex: 1;">
+            <select id="treatment-plan-period" style="width: 100%; padding: 6px 10px; border: 1px solid #d1d5db; border-radius: 4px; font-size: 13px; background: white;">
+              ${periodOptions.map(opt => `<option value="${opt}">${opt}</option>`).join('')}
+            </select>
+            <input type="text" id="treatment-plan-period-other" placeholder="具体的な期間を入力"
+              style="display: none; margin-top: 6px; width: 100%; padding: 6px 10px; border: 1px solid #d1d5db; border-radius: 4px; font-size: 13px; box-sizing: border-box;">
+          </div>
+        </div>
+        <div style="display: flex; align-items: center; gap: 12px;">
+          <label style="width: 80px; flex-shrink: 0; font-size: 12px; font-weight: 500; color: #374151;">栄養管理</label>
+          <div style="display: flex; gap: 16px;">
+            <label style="display: flex; align-items: center; gap: 4px; cursor: pointer;">
+              <input type="radio" name="treatment-plan-nutrition" value="なし" checked style="margin: 0;">
+              <span style="font-size: 13px; color: #374151;">なし</span>
+            </label>
+            <label style="display: flex; align-items: center; gap: 4px; cursor: pointer;">
+              <input type="radio" name="treatment-plan-nutrition" value="あり" style="margin: 0;">
+              <span style="font-size: 13px; color: #374151;">あり</span>
+            </label>
+          </div>
         </div>
       `;
+
+      // 「その他」選択時に自由記述欄を表示
+      const periodSelect = container.querySelector('#treatment-plan-period');
+      const periodOtherInput = container.querySelector('#treatment-plan-period-other');
+      periodSelect.addEventListener('change', () => {
+        if (periodSelect.value === 'その他') {
+          periodOtherInput.style.display = 'block';
+        } else {
+          periodOtherInput.style.display = 'none';
+          periodOtherInput.value = '';
+        }
+      });
+
       return container;
     }
 
@@ -2830,11 +3297,11 @@
 
         // 算定区分選択
         const calcTypeRow = document.createElement('div');
-        calcTypeRow.style.cssText = 'margin-bottom: 8px;';
-        calcTypeRow.innerHTML = `<label style="display: block; font-size: 12px; font-weight: 500; color: #374151; margin-bottom: 4px;">算定区分</label>`;
+        calcTypeRow.style.cssText = 'display: flex; align-items: center; margin-bottom: 8px; gap: 12px;';
+        calcTypeRow.innerHTML = `<label style="width: 80px; flex-shrink: 0; font-size: 12px; font-weight: 500; color: #374151;">算定区分</label>`;
         const calcTypeSelect = document.createElement('select');
         calcTypeSelect.id = 'rehab-calc-type';
-        calcTypeSelect.style.cssText = 'width: 100%; padding: 6px 8px; border: 1px solid #d1d5db; border-radius: 4px; font-size: 13px;';
+        calcTypeSelect.style.cssText = 'flex: 1; padding: 6px 8px; border: 1px solid #d1d5db; border-radius: 4px; font-size: 13px;';
         // 疾患別リハのみをフィルタ
         rehabCalcTypes
           .filter(t => t.isShikkanbetsuRehabilitation)
@@ -2855,11 +3322,11 @@
 
         // 診断名選択
         const diseaseRow = document.createElement('div');
-        diseaseRow.style.cssText = 'margin-bottom: 8px;';
-        diseaseRow.innerHTML = `<label style="display: block; font-size: 12px; font-weight: 500; color: #374151; margin-bottom: 4px;">診断名</label>`;
+        diseaseRow.style.cssText = 'display: flex; align-items: center; margin-bottom: 8px; gap: 12px;';
+        diseaseRow.innerHTML = `<label style="width: 80px; flex-shrink: 0; font-size: 12px; font-weight: 500; color: #374151;">診断名</label>`;
         const diseaseSelect = document.createElement('select');
         diseaseSelect.id = 'rehab-disease';
-        diseaseSelect.style.cssText = 'width: 100%; padding: 6px 8px; border: 1px solid #d1d5db; border-radius: 4px; font-size: 13px;';
+        diseaseSelect.style.cssText = 'flex: 1; padding: 6px 8px; border: 1px solid #d1d5db; border-radius: 4px; font-size: 13px;';
         patientDiseases.forEach(d => {
           const option = document.createElement('option');
           option.value = d.uuid;
@@ -2872,31 +3339,31 @@
 
         // 起算日種別
         const startDateTypeRow = document.createElement('div');
-        startDateTypeRow.style.cssText = 'margin-bottom: 8px;';
-        startDateTypeRow.innerHTML = `<label style="display: block; font-size: 12px; font-weight: 500; color: #374151; margin-bottom: 4px;">起算日種別</label>`;
+        startDateTypeRow.style.cssText = 'display: flex; align-items: center; margin-bottom: 8px; gap: 12px;';
+        startDateTypeRow.innerHTML = `<label style="width: 80px; flex-shrink: 0; font-size: 12px; font-weight: 500; color: #374151;">起算日種別</label>`;
         const startDateTypeSelect = document.createElement('select');
         startDateTypeSelect.id = 'rehab-start-date-type';
-        startDateTypeSelect.style.cssText = 'width: 100%; padding: 6px 8px; border: 1px solid #d1d5db; border-radius: 4px; font-size: 13px;';
+        startDateTypeSelect.style.cssText = 'flex: 1; padding: 6px 8px; border: 1px solid #d1d5db; border-radius: 4px; font-size: 13px;';
         startDateTypeRow.appendChild(startDateTypeSelect);
         contentEl.appendChild(startDateTypeRow);
 
         // 起算日
         const therapyDateRow = document.createElement('div');
-        therapyDateRow.style.cssText = 'margin-bottom: 8px;';
-        therapyDateRow.innerHTML = `<label style="display: block; font-size: 12px; font-weight: 500; color: #374151; margin-bottom: 4px;">起算日</label>`;
+        therapyDateRow.style.cssText = 'display: flex; align-items: center; margin-bottom: 8px; gap: 12px;';
+        therapyDateRow.innerHTML = `<label style="width: 80px; flex-shrink: 0; font-size: 12px; font-weight: 500; color: #374151;">起算日</label>`;
         const therapyDateInput = document.createElement('input');
         therapyDateInput.type = 'date';
         therapyDateInput.id = 'rehab-therapy-date';
-        therapyDateInput.style.cssText = 'width: 100%; padding: 6px 8px; border: 1px solid #d1d5db; border-radius: 4px; font-size: 13px;';
+        therapyDateInput.style.cssText = 'flex: 1; padding: 6px 8px; border: 1px solid #d1d5db; border-radius: 4px; font-size: 13px;';
         therapyDateRow.appendChild(therapyDateInput);
         contentEl.appendChild(therapyDateRow);
 
         // 算定期限表示
         const periodRow = document.createElement('div');
-        periodRow.style.cssText = 'margin-bottom: 8px;';
+        periodRow.style.cssText = 'display: flex; align-items: center; margin-bottom: 8px; gap: 12px;';
         periodRow.innerHTML = `
-          <label style="display: block; font-size: 12px; font-weight: 500; color: #374151; margin-bottom: 4px;">算定期限</label>
-          <div id="rehab-period-display" style="padding: 6px 8px; background: #f3f4f6; border-radius: 4px; font-size: 13px; color: #374151;">-</div>
+          <label style="width: 80px; flex-shrink: 0; font-size: 12px; font-weight: 500; color: #374151;">算定期限</label>
+          <div id="rehab-period-display" style="flex: 1; padding: 6px 8px; background: #f3f4f6; border-radius: 4px; font-size: 13px; color: #374151;">-</div>
         `;
         contentEl.appendChild(periodRow);
 
@@ -3367,7 +3834,7 @@ ${oralLine}
     let modal;
     let createBtn;
     modal = core.ui.showModal({
-      title: '入院前オーダー作成',
+      title: '',  // タイトルはヘッダーに統合
       width: '90vw',
       maxWidth: '1200px',
       content: content,
@@ -3404,8 +3871,18 @@ ${oralLine}
             for (const type of selectedTypes) {
               const data = { type, orderDate };
 
-              if (type === 'imaging') {
+              if (type === 'imagingBiopsy') {
                 data.ctNote = content.querySelector('#imaging-note')?.value || '';
+              } else if (type === 'treatmentPlan') {
+                // 入院診療計画書のデータを収集（現在は未実装のため保存のみ）
+                data.treatmentPlanData = {
+                  disease: content.querySelector('#treatment-plan-disease')?.value || '',
+                  symptom: content.querySelector('#treatment-plan-symptom')?.value || '',
+                  treatment: content.querySelector('#treatment-plan-treatment')?.value || '',
+                  period: content.querySelector('#treatment-plan-period')?.value || '',
+                  periodOther: content.querySelector('#treatment-plan-period-other')?.value || '',
+                  nutrition: content.querySelector('input[name="treatment-plan-nutrition"]:checked')?.value || 'なし'
+                };
               } else if (type === 'rehab') {
                 const diseaseSelect = content.querySelector('#rehab-disease');
                 const startDateTypeSelect = content.querySelector('#rehab-start-date-type');
@@ -3482,7 +3959,7 @@ ${oralLine}
    * 一括作成確認モーダルを表示
    */
   function showBatchConfirmModal(patientData, ordersData) {
-    const core = window.HenryCore;
+    const core = pageWindow.HenryCore;
 
     const patientName = patientData.patient?.fullName || '不明';
     const orderDate = ordersData[0].orderDate;
@@ -3552,9 +4029,10 @@ ${oralLine}
    * 単一オーダーを作成
    */
   async function createSingleOrder(patientData, orderData) {
-    const { type, orderDate, ctNote, rehabData, instructionData, standingOrderText } = orderData;
+    const { type, orderDate, ctNote, treatmentPlanData, rehabData, instructionData, standingOrderText } = orderData;
 
-    if (type === 'imaging') {
+    if (type === 'imagingBiopsy') {
+      // 画像検査（CT）を作成
       await createImagingOrder({
         patientUuid: patientData.patient?.uuid,
         doctorUuid: patientData.hospitalizationDoctor?.doctor?.uuid,
@@ -3562,13 +4040,16 @@ ${oralLine}
         orderDate: orderDate,
         ctNote: ctNote
       });
-    } else if (type === 'biopsy') {
+      // 生体検査（ECG + ABI/PWV）を作成
       await createBiopsyInspectionOrder({
         patientUuid: patientData.patient?.uuid,
         doctorUuid: patientData.hospitalizationDoctor?.doctor?.uuid,
         templateKey: 'ecg-abi',
         orderDate: orderDate
       });
+    } else if (type === 'treatmentPlan') {
+      // 入院診療計画書を作成
+      await createTreatmentPlanDocument(patientData, treatmentPlanData, orderDate);
     } else if (type === 'specimen') {
       await createSpecimenInspectionOrder({
         patientUuid: patientData.patient?.uuid,
@@ -3645,7 +4126,7 @@ ${oralLine}
   // ===========================================
 
   function init() {
-    const core = window.HenryCore;
+    const core = pageWindow.HenryCore;
     if (!core) {
       console.error(`[${SCRIPT_NAME}] HenryCore が見つかりません`);
       return;
@@ -3664,10 +4145,10 @@ ${oralLine}
     console.log(`[${SCRIPT_NAME}] Ready (v${VERSION})`);
   }
 
-  if (window.HenryCore) {
+  if (pageWindow.HenryCore) {
     init();
   } else {
-    window.addEventListener('HenryCoreReady', init, { once: true });
+    pageWindow.addEventListener('HenryCoreReady', init, { once: true });
   }
 
 })();
