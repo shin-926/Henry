@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry 入院前オーダー
 // @namespace    https://github.com/shin-926/Henry
-// @version      0.36.2
+// @version      1.0.0
 // @description  入院予定患者に対して入院前オーダー（CT検査等）を一括作成
 // @author       sk powered by Claude
 // @match        https://henry-app.jp/*
@@ -2225,7 +2225,7 @@
             consultationDiagnoses: []
             consultationEquipments: []
             consultationMedicines: []
-            consultationOutsideInspections: ${JSON.stringify(consultationOutsideInspections)}
+            consultationOutsideInspections: ${jsonToGraphQL(consultationOutsideInspections)}
             urgency: false
             note: ""
           }]
@@ -2339,50 +2339,56 @@
       therapyStartDate,
       calcTypeUuid,
       startDateTypeUuid,
-      planUuids
+      planUuids,
+      complications = '',
+      contraindications = '',
+      objectiveNote = ''
     } = orderData;
 
-    const planUuidsStr = planUuids.map(u => `"${u}"`).join(', ');
-
+    // 変数方式でmutationを実行
     const mutation = `
-      mutation CreateRehabilitationOrder {
-        createRehabilitationOrder(input: {
-          uuid: "",
-          patientUuid: "${patientUuid}",
-          doctorUuid: "${doctorUuid}",
-          startDate: { year: ${startDate.year}, month: ${startDate.month}, day: ${startDate.day} },
-          endDate: { year: ${endDate.year}, month: ${endDate.month}, day: ${endDate.day} },
-          detail: {
-            uuid: "",
-            patientReceiptDiseaseUuid: { value: "${diseaseUuid}" },
-            therapyStartDate: { year: ${therapyStartDate.year}, month: ${therapyStartDate.month}, day: ${therapyStartDate.day} },
-            planEvaluationDate: null,
-            complications: "",
-            contraindications: "",
-            objectiveNote: "",
-            place: "",
-            note: "",
-            noteForPt: "",
-            noteForOt: "",
-            noteForSt: "",
-            rehabilitationPlanUuids: [${planUuidsStr}],
-            rehabilitationCalculationTypeUuid: { value: "${calcTypeUuid}" },
-            rehabilitationTherapyStartDateTypeUuid: { value: "${startDateTypeUuid}" },
-            exclusionLimitDescription: "",
-            exclusionLimitType: REHABILITATION_EXCLUSION_LIMIT_TYPE_NOT_APPLICABLE,
-            rehabilitationKasanStartDate: null,
-            rehabilitationKasanStartDateTypeUuid: null,
-            acuteDiseasePatientReceiptDiseaseUuid: null,
-            acutePhaseRehabilitationTargetConditions: []
-          }
-        }) {
+      mutation CreateRehabilitationOrder($input: RehabilitationOrderInput!) {
+        createRehabilitationOrder(input: $input) {
           uuid
         }
       }
     `;
 
+    const variables = {
+      input: {
+        uuid: '',
+        patientUuid,
+        doctorUuid,
+        startDate,
+        endDate,
+        detail: {
+          uuid: '',
+          patientReceiptDiseaseUuid: { value: diseaseUuid },
+          therapyStartDate,
+          planEvaluationDate: null,
+          complications,
+          contraindications,
+          objectiveNote,
+          place: '',
+          note: '',
+          noteForPt: '',
+          noteForOt: '',
+          noteForSt: '',
+          rehabilitationPlanUuids: planUuids,
+          rehabilitationCalculationTypeUuid: { value: calcTypeUuid },
+          rehabilitationTherapyStartDateTypeUuid: { value: startDateTypeUuid },
+          exclusionLimitDescription: '',
+          exclusionLimitType: 'REHABILITATION_EXCLUSION_LIMIT_TYPE_NOT_APPLICABLE',
+          rehabilitationKasanStartDate: null,
+          rehabilitationKasanStartDateTypeUuid: null,
+          acuteDiseasePatientReceiptDiseaseUuid: null,
+          acutePhaseRehabilitationTargetConditions: []
+        }
+      }
+    };
+
     console.log(`[${SCRIPT_NAME}] CreateRehabilitationOrder 実行...`);
-    const result = await core.query(mutation);
+    const result = await core.query(mutation, variables);
 
     if (result.data?.createRehabilitationOrder?.uuid) {
       console.log(`[${SCRIPT_NAME}] リハビリオーダー作成成功: ${result.data.createRehabilitationOrder.uuid}`);
@@ -3019,10 +3025,9 @@
 
     // 6. Henryにアップロード（ルートフォルダ）
     console.log(`[${SCRIPT_NAME}] Henryにアップロード中...`);
-    const docxFileName = `${fileName}.docx`;
     const fileUuid = await HenryFileAPI.uploadPatientFile({
       blob,
-      fileName: docxFileName,
+      fileName,
       patientUuid: patientData.patient?.uuid,
       folderUuid: null // ルートに保存
     });
@@ -4322,6 +4327,27 @@
         `;
         contentEl.appendChild(periodRow);
 
+        // 合併症
+        const complicationsInput = core.ui.createInput({ type: 'text', placeholder: '合併症があれば入力' });
+        complicationsInput.id = 'rehab-complications';
+        const complicationsField = core.ui.createFormField({ label: '合併症', input: complicationsInput, inline: true });
+        complicationsField.style.marginBottom = '8px';
+        contentEl.appendChild(complicationsField);
+
+        // 禁忌・注意事項
+        const contraindicationsInput = core.ui.createInput({ type: 'text', placeholder: '禁忌・注意事項があれば入力' });
+        contraindicationsInput.id = 'rehab-contraindications';
+        const contraindicationsField = core.ui.createFormField({ label: '禁忌・注意事項', input: contraindicationsInput, inline: true });
+        contraindicationsField.style.marginBottom = '8px';
+        contentEl.appendChild(contraindicationsField);
+
+        // 治療方針・期待するゴール
+        const objectiveNoteInput = core.ui.createInput({ type: 'text', placeholder: '治療方針・期待するゴールを入力' });
+        objectiveNoteInput.id = 'rehab-objective-note';
+        const objectiveNoteField = core.ui.createFormField({ label: '治療方針・ゴール', input: objectiveNoteInput, inline: true });
+        objectiveNoteField.style.marginBottom = '8px';
+        contentEl.appendChild(objectiveNoteField);
+
         // 訓練内容（PT/OT）
         const ptPlans = rehabPlans.filter(p => p.category === 'PT');
         const otPlans = rehabPlans.filter(p => p.category === 'OT');
@@ -4392,18 +4418,15 @@
         const initialCalcType = rehabCalcTypes.find(t => t.uuid === calcTypeSelect.value);
         updateStartDateTypes(initialCalcType);
 
-        // 発症日自動設定
+        // 病名変更時に起算日を自動設定
         function updateTherapyDate() {
-          const selectedOption = startDateTypeSelect.options[startDateTypeSelect.selectedIndex];
-          if (selectedOption && selectedOption.textContent === '発症日') {
-            const diseaseOption = diseaseSelect.options[diseaseSelect.selectedIndex];
-            if (diseaseOption && diseaseOption.dataset.startDate) {
-              therapyDateInput.value = diseaseOption.dataset.startDate;
-            }
+          const diseaseOption = diseaseSelect.options[diseaseSelect.selectedIndex];
+          if (diseaseOption && diseaseOption.dataset.startDate) {
+            therapyDateInput.value = diseaseOption.dataset.startDate;
+            updatePeriodDisplay();
           }
         }
         diseaseSelect.addEventListener('change', updateTherapyDate);
-        startDateTypeSelect.addEventListener('change', updateTherapyDate);
 
         // 算定期限を更新する関数
         function updatePeriodDisplay() {
@@ -4416,16 +4439,21 @@
           // 開始日（入院日）
           const startDateObj = patientData.startDate;
           const startStr = `${startDateObj.year}/${startDateObj.month}/${startDateObj.day}`;
+          const orderStartDate = new Date(startDateObj.year, startDateObj.month - 1, startDateObj.day);
 
           // periodがない算定区分は「期限なし」
           if (!periodValue) {
             periodDisplay.textContent = `${startStr}（入院日） 〜（期限なし）`;
+            periodDisplay.style.color = '';
+            periodDisplay.style.background = '';
             return;
           }
 
           // 起算日が入力されていない場合
           if (!therapyDateInput.value) {
             periodDisplay.textContent = `${startStr}（入院日） 〜 -`;
+            periodDisplay.style.color = '';
+            periodDisplay.style.background = '';
             return;
           }
 
@@ -4436,7 +4464,17 @@
           endDate.setDate(endDate.getDate() + parseInt(periodValue, 10));
 
           const endStr = `${endDate.getFullYear()}/${endDate.getMonth() + 1}/${endDate.getDate()}`;
-          periodDisplay.textContent = `${startStr}（入院日） 〜 ${endStr}（起算日より${periodValue}日）`;
+
+          // 算定期限がオーダー開始日より前の場合は警告
+          if (endDate < orderStartDate) {
+            periodDisplay.textContent = `⚠️ 算定期限（${endStr}）は既に終了しています。別の病名を選択してください。`;
+            periodDisplay.style.color = '#c00';
+            periodDisplay.style.background = '#fff0f0';
+          } else {
+            periodDisplay.textContent = `${startStr}（入院日） 〜 ${endStr}（起算日より${periodValue}日）`;
+            periodDisplay.style.color = '';
+            periodDisplay.style.background = '';
+          }
         }
 
         // 起算日・算定区分変更時に算定期限を更新
@@ -4651,7 +4689,10 @@
                   therapyStartDate: { year: y, month: m, day: d },
                   planUuids: selectedPlanUuids,
                   calcTypeUuid: calcTypeSelect?.value || REHAB_TEMPLATES['admission-rehab'].rehabilitationCalculationTypeUuid,
-                  period: periodValue ? parseInt(periodValue, 10) : null
+                  period: periodValue ? parseInt(periodValue, 10) : null,
+                  complications: content.querySelector('#rehab-complications')?.value || '',
+                  contraindications: content.querySelector('#rehab-contraindications')?.value || '',
+                  objectiveNote: content.querySelector('#rehab-objective-note')?.value || ''
                 };
               } else if (type === 'instruction') {
                 data.instructionData = {
@@ -4815,6 +4856,14 @@
       const period = rehabData.period || 365;
       const endDateObj = new Date(therapyDate.year, therapyDate.month - 1, therapyDate.day);
       endDateObj.setDate(endDateObj.getDate() + period);
+
+      // 算定期間が既に終了している場合はエラー
+      const startDateObj = new Date(startDate.year, startDate.month - 1, startDate.day);
+      if (endDateObj < startDateObj) {
+        const endDateStr = `${endDateObj.getFullYear()}/${endDateObj.getMonth() + 1}/${endDateObj.getDate()}`;
+        throw new Error(`選択したリハビリ病名の算定期間は ${endDateStr} に終了しています。別の病名を選択してください。`);
+      }
+
       const endDate = {
         year: endDateObj.getFullYear(),
         month: endDateObj.getMonth() + 1,
@@ -4830,7 +4879,10 @@
         therapyStartDate: rehabData.therapyStartDate,
         calcTypeUuid: rehabData.calcTypeUuid,
         startDateTypeUuid: rehabData.startDateTypeUuid,
-        planUuids: rehabData.planUuids
+        planUuids: rehabData.planUuids,
+        complications: rehabData.complications,
+        contraindications: rehabData.contraindications,
+        objectiveNote: rehabData.objectiveNote
       });
     } else if (type === 'instruction') {
       const performTimeDate = new Date(orderDate.year, orderDate.month - 1, orderDate.day, 0, 0, 0);
