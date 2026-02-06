@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry 入院時オーダー
 // @namespace    https://github.com/shin-926/Henry
-// @version      1.3.1
+// @version      1.3.2
 // @description  入院予定患者に対して入院時オーダー（CT検査等）を一括作成
 // @author       sk powered by Claude
 // @match        https://henry-app.jp/*
@@ -42,6 +42,13 @@
 
   const SCRIPT_NAME = 'AdmissionOrder';
   const VERSION = GM_info.script.version;
+
+  /** HTMLエスケープ（innerHTML に外部データを埋め込む際に使用） */
+  function escapeHTML(str) {
+    const div = document.createElement('div');
+    div.textContent = str;
+    return div.innerHTML;
+  }
 
   // フォント統一: Noto Sans JP
   GM_addStyle(`
@@ -3084,8 +3091,8 @@
 
           const info = document.createElement('div');
           info.innerHTML = `
-            <div style="font-size: 13px; font-weight: 500; color: var(--henry-text-high);">${p.patient?.fullName || '不明'}</div>
-            <div style="font-size: 12px; color: var(--henry-text-med); margin-top: 2px;">（${p.patient?.serialNumber || ''}）担当: ${p.hospitalizationDoctor?.doctor?.name || '−'}</div>
+            <div style="font-size: 13px; font-weight: 500; color: var(--henry-text-high);">${escapeHTML(p.patient?.fullName || '不明')}</div>
+            <div style="font-size: 12px; color: var(--henry-text-med); margin-top: 2px;">（${escapeHTML(p.patient?.serialNumber || '')}）担当: ${escapeHTML(p.hospitalizationDoctor?.doctor?.name || '−')}</div>
           `;
           item.appendChild(info);
 
@@ -3187,7 +3194,7 @@
         <div style="display: flex; align-items: center; gap: 12px;">
           <span style="font-size: 16px; font-weight: 600; color: #1f2937;">入院時オーダー作成</span>
           <span style="font-size: 13px; color: #374151;">
-            ${patientName}<span style="color: #666; margin-left: 4px;">（入院: ${admissionDate}　担当: ${doctorName}）</span>
+            ${escapeHTML(patientName)}<span style="color: #666; margin-left: 4px;">（入院: ${escapeHTML(admissionDate)}　担当: ${escapeHTML(doctorName)}）</span>
           </span>
         </div>
         <div style="display: flex; align-items: center; gap: 12px; flex-shrink: 0;">
@@ -3310,7 +3317,7 @@
 
         // タイトル行（編集ボタン付き）
         html += `<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 2px;">`;
-        html += `<span style="font-weight: 500; color: #1f2937;">${detail.title}</span>`;
+        html += `<span style="font-weight: 500; color: #1f2937;">${escapeHTML(detail.title)}</span>`;
         if (isImagingOrder && hasOrderUuid) {
           html += `<button class="edit-order-btn" data-detail-index="${i}" style="
             padding: 2px 8px;
@@ -3332,12 +3339,12 @@
           html += itemsToShow.map(item => {
             // 文字列とオブジェクトの両方に対応
             if (typeof item === 'string') {
-              return `・${item}`;
+              return `・${escapeHTML(item)}`;
             }
             // オブジェクトの場合（画像検査）
-            let result = `・${item.name}`;
+            let result = `・${escapeHTML(item.name)}`;
             if (item.note) {
-              result += `<br><span style="color: #9ca3af; font-size: 11px; padding-left: 12px;">${item.note}</span>`;
+              result += `<br><span style="color: #9ca3af; font-size: 11px; padding-left: 12px;">${escapeHTML(item.note)}</span>`;
             }
             return result;
           }).join('<br>');
@@ -3352,7 +3359,7 @@
         if (detail.note) {
           const notePreview = detail.note.replace(/\n/g, ' ').slice(0, 50);
           html += `<div style="color: #9ca3af; font-size: 11px; margin-top: 2px; padding-left: 8px;">`;
-          html += `備考: ${notePreview}${detail.note.length > 50 ? '...' : ''}`;
+          html += `備考: ${escapeHTML(notePreview)}${detail.note.length > 50 ? '...' : ''}`;
           html += `</div>`;
         }
 
@@ -3458,7 +3465,7 @@
       `;
       header.innerHTML = `
         <span style="font-size: 16px; font-weight: 600; color: #1f2937;">
-          ${detail.title} - 補足編集
+          ${escapeHTML(detail.title)} - 補足編集
         </span>
         <button class="close-modal-btn" style="
           background: none;
@@ -4063,7 +4070,7 @@
           `;
           mainHeader.innerHTML = `
             <span class="main-arrow" style="font-size: 12px; color: #4b5563; transition: transform 0.2s; transform: rotate(${isMainExpanded ? '90deg' : '0deg'});">▶</span>
-            <span style="font-weight: 700; font-size: 13px; color: #1f2937; flex: 1;">${mainCat}</span>
+            <span style="font-weight: 700; font-size: 13px; color: #1f2937; flex: 1;">${escapeHTML(mainCat)}</span>
             <span class="main-count" style="font-size: 12px; color: ${mainSelectedCount > 0 ? '#2563eb' : '#6b7280'}; font-weight: 500;">${mainSelectedCount > 0 ? `${mainSelectedCount}/` : ''}${mainTotalCount}件</span>
           `;
 
@@ -4361,7 +4368,7 @@
             const isDefaultChecked = defaultCheckedTrainings.includes(plan.name);
             const label = document.createElement('label');
             label.style.cssText = 'display: flex; align-items: center; gap: 3px; cursor: pointer; font-size: 13px; padding: 4px 8px; border: 1px solid var(--henry-border); border-radius: 4px; background: var(--henry-bg-sub);';
-            label.innerHTML = `<input type="checkbox" class="rehab-plan" value="${plan.uuid}"${isDefaultChecked ? ' checked' : ''}> ${plan.name}`;
+            label.innerHTML = `<input type="checkbox" class="rehab-plan" value="${escapeHTML(plan.uuid)}"${isDefaultChecked ? ' checked' : ''}> ${escapeHTML(plan.name)}`;
             ptContainer.appendChild(label);
           });
           ptRow.appendChild(ptContainer);
@@ -4379,7 +4386,7 @@
             const isDefaultChecked = defaultCheckedTrainings.includes(plan.name);
             const label = document.createElement('label');
             label.style.cssText = 'display: flex; align-items: center; gap: 3px; cursor: pointer; font-size: 13px; padding: 4px 8px; border: 1px solid var(--henry-border); border-radius: 4px; background: var(--henry-bg-sub);';
-            label.innerHTML = `<input type="checkbox" class="rehab-plan" value="${plan.uuid}"${isDefaultChecked ? ' checked' : ''}> ${plan.name}`;
+            label.innerHTML = `<input type="checkbox" class="rehab-plan" value="${escapeHTML(plan.uuid)}"${isDefaultChecked ? ' checked' : ''}> ${escapeHTML(plan.name)}`;
             otContainer.appendChild(label);
           });
           otRow.appendChild(otContainer);
@@ -4788,7 +4795,7 @@
     content.innerHTML = `
       <p style="margin: 0 0 16px 0; color: #333;">以下のオーダーを作成します。</p>
       <div style="padding: 12px; background: #f5f5f5; border-radius: 6px; font-size: 13px; color: #333;">
-        <div><strong>患者:</strong> ${patientName}</div>
+        <div><strong>患者:</strong> ${escapeHTML(patientName)}</div>
         <div style="margin-top: 4px;"><strong>オーダー日:</strong> ${orderDateStr}</div>
         <div style="margin-top: 8px;"><strong>作成するオーダー（${selectedProgressItems.length}件）:</strong></div>
         <div style="margin-top: 4px; padding-left: 8px;">${progressHtml}</div>
