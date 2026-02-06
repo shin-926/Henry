@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry Disease Register
 // @namespace    https://henry-app.jp/
-// @version      3.29.0
+// @version      3.30.0
 // @description  高速病名検索・登録
 // @author       sk powered by Claude & Gemini
 // @match        https://henry-app.jp/*
@@ -528,29 +528,55 @@
     return results;
   }
 
-  // 病名検索（インデックス使用、名前＋ひらがな両方で検索）
+  // 病名検索（インデックス使用、名前＋ひらがな両方で検索、完全一致優先）
   function searchDiseases(query) {
     if (!query) return DISEASES.slice(0, 50);
     const q = query.toLowerCase();
     const results = [];
+    const addedCodes = new Set();
+
+    // 1パス目: 完全一致を優先
+    for (let i = 0; i < diseaseNameIndex.length; i++) {
+      if (diseaseNameIndex[i] === q || diseaseKanaIndex[i] === q) {
+        results.push(DISEASES[i]);
+        addedCodes.add(DISEASES[i][0]); // code
+      }
+    }
+
+    // 2パス目: 部分一致（完全一致以外）
     for (let i = 0; i < diseaseNameIndex.length && results.length < 50; i++) {
-      if (diseaseNameIndex[i].includes(q) || diseaseKanaIndex[i].includes(q)) {
+      if (!addedCodes.has(DISEASES[i][0]) &&
+          (diseaseNameIndex[i].includes(q) || diseaseKanaIndex[i].includes(q))) {
         results.push(DISEASES[i]);
       }
     }
+
     return results;
   }
 
-  // 修飾語検索（インデックス使用、名前＋ひらがな両方で検索）
+  // 修飾語検索（インデックス使用、名前＋ひらがな両方で検索、完全一致優先）
   function searchModifiers(query) {
     if (!query) return MODIFIERS.slice(0, 50);
     const q = query.toLowerCase();
     const results = [];
+    const addedCodes = new Set();
+
+    // 1パス目: 完全一致を優先
+    for (let i = 0; i < modifierNameIndex.length; i++) {
+      if (modifierNameIndex[i] === q || modifierKanaIndex[i] === q) {
+        results.push(MODIFIERS[i]);
+        addedCodes.add(MODIFIERS[i][0]); // code
+      }
+    }
+
+    // 2パス目: 部分一致（完全一致以外）
     for (let i = 0; i < modifierNameIndex.length && results.length < 50; i++) {
-      if (modifierNameIndex[i].includes(q) || modifierKanaIndex[i].includes(q)) {
+      if (!addedCodes.has(MODIFIERS[i][0]) &&
+          (modifierNameIndex[i].includes(q) || modifierKanaIndex[i].includes(q))) {
         results.push(MODIFIERS[i]);
       }
     }
+
     return results;
   }
 
