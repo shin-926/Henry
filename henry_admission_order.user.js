@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name         Henry 入院前オーダー
+// @name         Henry 入院時オーダー
 // @namespace    https://github.com/shin-926/Henry
-// @version      1.2.4
-// @description  入院予定患者に対して入院前オーダー（CT検査等）を一括作成
+// @version      1.3.0
+// @description  入院予定患者に対して入院時オーダー（CT検査等）を一括作成
 // @author       sk powered by Claude
 // @match        https://henry-app.jp/*
 // @grant        GM_xmlhttpRequest
@@ -13,19 +13,19 @@
 // @connect      docs.googleapis.com
 // @connect      storage.googleapis.com
 // @run-at       document-idle
-// @updateURL    https://raw.githubusercontent.com/shin-926/Henry/main/henry_preadmission_order.user.js
-// @downloadURL  https://raw.githubusercontent.com/shin-926/Henry/main/henry_preadmission_order.user.js
+// @updateURL    https://raw.githubusercontent.com/shin-926/Henry/main/henry_admission_order.user.js
+// @downloadURL  https://raw.githubusercontent.com/shin-926/Henry/main/henry_admission_order.user.js
 // ==/UserScript==
 
 /*
- * 【入院前オーダー作成】
+ * 【入院時オーダー作成】
  *
  * ■ 使用場面
  * - 入院予定患者に対して、入院前にCT検査等のオーダーを作成したい場合
  *
  * ■ 機能
  * - Toolboxから起動
- * - 入院予定患者（7日以内）一覧から選択
+ * - 入院予定患者一覧から選択
  * - 6種類のオーダーを一覧表示、チェックボックスで複数選択して一括作成
  *
  * ■ 対応オーダー
@@ -47,40 +47,40 @@
   GM_addStyle(`
     @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700&display=swap');
 
-    .preadmission-modal,
-    .preadmission-modal input,
-    .preadmission-modal select,
-    .preadmission-modal textarea,
-    .preadmission-modal button,
-    .preadmission-modal label,
-    .preadmission-modal div,
-    .preadmission-modal span,
-    .preadmission-modal p,
-    .preadmission-modal h3 {
+    .admission-modal,
+    .admission-modal input,
+    .admission-modal select,
+    .admission-modal textarea,
+    .admission-modal button,
+    .admission-modal label,
+    .admission-modal div,
+    .admission-modal span,
+    .admission-modal p,
+    .admission-modal h3 {
       font-family: 'Noto Sans JP', sans-serif;
     }
 
     /* HenryCore.uiコンポーネントのフォントサイズを13pxに上書き */
-    .preadmission-modal .henry-input,
-    .preadmission-modal .henry-select,
-    .preadmission-modal .henry-textarea,
-    .preadmission-modal .henry-btn,
-    .preadmission-modal .henry-form-field label,
-    .preadmission-modal .henry-list-group-item,
-    .preadmission-modal .henry-card-title,
-    .preadmission-modal .henry-accordion-title,
-    .preadmission-modal .henry-radio-label {
+    .admission-modal .henry-input,
+    .admission-modal .henry-select,
+    .admission-modal .henry-textarea,
+    .admission-modal .henry-btn,
+    .admission-modal .henry-form-field label,
+    .admission-modal .henry-list-group-item,
+    .admission-modal .henry-card-title,
+    .admission-modal .henry-accordion-title,
+    .admission-modal .henry-radio-label {
       font-size: 13px;
     }
 
     /* 進捗スピナーアニメーション */
-    @keyframes preadmission-spin {
+    @keyframes admission-spin {
       from { transform: rotate(0deg); }
       to { transform: rotate(360deg); }
     }
-    .preadmission-progress-spinner {
+    .admission-progress-spinner {
       display: inline-block;
-      animation: preadmission-spin 1s linear infinite;
+      animation: admission-spin 1s linear infinite;
     }
   `);
 
@@ -1710,10 +1710,9 @@
 
   /**
    * 入院予定患者（SCHEDULED状態）を取得
-   * @param {number} daysAhead - 何日先まで取得するか（デフォルト: 7日）
    * @returns {Promise<Array>} 入院予定患者リスト
    */
-  async function fetchScheduledHospitalizations(daysAhead = 7) {
+  async function fetchScheduledHospitalizations() {
     const core = pageWindow.HenryCore;
     if (!core) {
       console.error(`[${SCRIPT_NAME}] HenryCore が見つかりません`);
@@ -1760,11 +1759,9 @@
         console.log(`[${SCRIPT_NAME}] state値一覧:`, states);
       }
 
-      // 7日以内の入院予定患者のみフィルタ
+      // 今日以降の入院予定患者のみフィルタ
       const today = new Date();
       today.setHours(0, 0, 0, 0);
-      const maxDate = new Date(today);
-      maxDate.setDate(today.getDate() + daysAhead);
 
       for (const entry of entries) {
         const hosp = entry.hospitalization;
@@ -1776,7 +1773,7 @@
         if (!startDate) continue;
 
         const hospDate = new Date(startDate.year, startDate.month - 1, startDate.day);
-        if (hospDate < today || hospDate > maxDate) continue;
+        if (hospDate < today) continue;
 
         const wardName = hosp.statusHospitalizationLocation?.ward?.name || '';
         const roomName = hosp.statusHospitalizationLocation?.room?.name || '';
@@ -3079,11 +3076,11 @@
     const spinner = core.ui.showSpinner('入院予定患者を取得中...');
 
     try {
-      const patients = await fetchScheduledHospitalizations(7);
+      const patients = await fetchScheduledHospitalizations();
       spinner.close();
 
       if (patients.length === 0) {
-        core.ui.showToast('7日以内の入院予定患者がいません', 'info');
+        core.ui.showToast('入院予定患者がいません', 'info');
         return;
       }
 
@@ -3094,7 +3091,7 @@
       // 説明
       const description = document.createElement('div');
       description.style.cssText = 'color: var(--henry-text-med); font-size: 13px; margin-bottom: 12px;';
-      description.textContent = '入院予定患者（7日以内）から選択してください';
+      description.textContent = '入院予定患者から選択してください';
       content.appendChild(description);
 
       // 検索ボックス
@@ -3147,7 +3144,7 @@
       });
 
       modal = core.ui.showModal({
-        title: '入院前オーダー',
+        title: '入院時オーダー',
         content,
         width: '500px',
         actions: [
@@ -3206,7 +3203,7 @@
 
     // モーダルコンテンツ
     const content = document.createElement('div');
-    content.className = 'preadmission-modal';
+    content.className = 'admission-modal';
     content.style.cssText = 'display: flex; flex-direction: column; height: calc(90vh - 120px); overflow: hidden;';
 
     // 患者情報 + オーダー日（ヘッダー部分）
@@ -3215,7 +3212,7 @@
     headerSection.innerHTML = `
       <div style="display: flex; justify-content: space-between; align-items: center; gap: 16px;">
         <div style="display: flex; align-items: center; gap: 12px;">
-          <span style="font-size: 16px; font-weight: 600; color: #1f2937;">入院前オーダー作成</span>
+          <span style="font-size: 16px; font-weight: 600; color: #1f2937;">入院時オーダー作成</span>
           <span style="font-size: 13px; color: #374151;">
             ${patientName}<span style="color: #666; margin-left: 4px;">（入院: ${admissionDate}　担当: ${doctorName}）</span>
           </span>
@@ -4815,7 +4812,7 @@
     ).join('');
 
     const content = document.createElement('div');
-    content.className = 'preadmission-modal';
+    content.className = 'admission-modal';
     content.innerHTML = `
       <p style="margin: 0 0 16px 0; color: #333;">以下のオーダーを作成します。</p>
       <div style="padding: 12px; background: #f5f5f5; border-radius: 6px; font-size: 13px; color: #333;">
@@ -4835,13 +4832,31 @@
       if (!icon) return;
 
       if (status === 'processing') {
-        icon.textContent = '⟳';
-        icon.className = 'progress-icon preadmission-progress-spinner';
-        icon.style.color = '#3b82f6';
+        icon.textContent = '';
+        icon.className = 'progress-icon';
+        Object.assign(icon.style, {
+          width: '14px',
+          height: '14px',
+          border: '2px solid #e5e7eb',
+          borderTop: '2px solid #3b82f6',
+          borderRadius: '50%',
+          animation: 'admission-spin 1s linear infinite',
+          display: 'inline-block',
+          color: '',
+        });
       } else if (status === 'done') {
         icon.textContent = '✓';
         icon.className = 'progress-icon';
-        icon.style.color = '#22c55e';
+        Object.assign(icon.style, {
+          width: '',
+          height: '',
+          border: '',
+          borderTop: '',
+          borderRadius: '',
+          animation: '',
+          display: '',
+          color: '#22c55e',
+        });
       }
     }
 
@@ -5044,8 +5059,8 @@
     }
 
     core.registerPlugin({
-      id: 'preadmission-order',
-      name: '入院前オーダー',
+      id: 'admission-order',
+      name: '入院時オーダー',
       description: '入院予定患者にCT検査等のオーダーを作成',
       icon: '📋',
       category: 'karte',
