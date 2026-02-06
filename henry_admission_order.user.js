@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry 入院時オーダー
 // @namespace    https://github.com/shin-926/Henry
-// @version      1.3.0
+// @version      1.3.1
 // @description  入院予定患者に対して入院時オーダー（CT検査等）を一括作成
 // @author       sk powered by Claude
 // @match        https://henry-app.jp/*
@@ -40,7 +40,7 @@
 (function() {
   'use strict';
 
-  const SCRIPT_NAME = 'PreadmissionOrder';
+  const SCRIPT_NAME = 'AdmissionOrder';
   const VERSION = GM_info.script.version;
 
   // フォント統一: Noto Sans JP
@@ -1699,7 +1699,6 @@
         pageToken = data?.nextPageToken || '';
       } while (pageToken);
 
-      console.log(`[${SCRIPT_NAME}] 検査項目取得完了: ${allInspections.length}件`);
       allInspectionsCache = allInspections;
       return allInspections;
     } catch (e) {
@@ -1749,15 +1748,9 @@
       }
 
       const entries = result?.data?.listPatientsV2?.entries || [];
-      console.log(`[${SCRIPT_NAME}] 取得した患者数: ${entries.length}`);
 
-      // 入院情報を持つ患者のstate値をログ出力（デバッグ用）
+      // 入院情報を持つ患者をフィルタ
       const hospEntries = entries.filter(e => e.hospitalization);
-      console.log(`[${SCRIPT_NAME}] 入院情報あり: ${hospEntries.length}件`);
-      if (hospEntries.length > 0) {
-        const states = [...new Set(hospEntries.map(e => e.hospitalization.state))];
-        console.log(`[${SCRIPT_NAME}] state値一覧:`, states);
-      }
 
       // 今日以降の入院予定患者のみフィルタ
       const today = new Date();
@@ -1807,7 +1800,6 @@
       return dateA - dateB;
     });
 
-    console.log(`[${SCRIPT_NAME}] 入院予定患者: ${allScheduled.length}名`);
     return allScheduled;
   }
 
@@ -1854,7 +1846,6 @@
     try {
       const result = await core.query(LIST_BODY_SITES_QUERY);
       bodySitesCache = result.data?.listLocalBodySites?.bodySites || [];
-      console.log(`[${SCRIPT_NAME}] 部位一覧取得: ${bodySitesCache.length}件`);
       return bodySitesCache;
     } catch (e) {
       console.error(`[${SCRIPT_NAME}] 部位一覧取得失敗:`, e?.message || e);
@@ -1988,11 +1979,9 @@
       }
     `;
 
-    console.log(`[${SCRIPT_NAME}] CreateImagingOrder 実行...`);
     const result = await core.query(mutation);
 
     if (result.data?.createImagingOrder?.uuid) {
-      console.log(`[${SCRIPT_NAME}] オーダー作成成功: ${result.data.createImagingOrder.uuid}`);
       return result.data.createImagingOrder;
     } else {
       console.error(`[${SCRIPT_NAME}] オーダー作成失敗:`, result);
@@ -2079,11 +2068,9 @@
       }
     `;
 
-    console.log(`[${SCRIPT_NAME}] UpdateImagingOrder 実行...`);
     const result = await core.query(mutation);
 
     if (result.data?.updateImagingOrder?.uuid) {
-      console.log(`[${SCRIPT_NAME}] オーダー更新成功: ${result.data.updateImagingOrder.uuid}`);
       return result.data.updateImagingOrder;
     } else {
       console.error(`[${SCRIPT_NAME}] オーダー更新失敗:`, result);
@@ -2158,11 +2145,9 @@
       }
     `;
 
-    console.log(`[${SCRIPT_NAME}] CreateBiopsyInspectionOrder 実行...`);
     const result = await core.query(mutation);
 
     if (result.data?.createBiopsyInspectionOrder?.uuid) {
-      console.log(`[${SCRIPT_NAME}] 生体検査オーダー作成成功: ${result.data.createBiopsyInspectionOrder.uuid}`);
       return result.data.createBiopsyInspectionOrder;
     } else {
       console.error(`[${SCRIPT_NAME}] 生体検査オーダー作成失敗:`, result);
@@ -2191,8 +2176,6 @@
 
     // inspections が渡されていればそれを使用、なければ selectedInspections を使用
     const targetInspections = inspections || selectedInspections;
-
-    console.log(`[${SCRIPT_NAME}] 血液検査項目: ${targetInspections.length}件`, targetInspections.map(i => i.name));
 
     // consultationOutsideInspections を構築
     const consultationOutsideInspections = targetInspections.map(insp => ({
@@ -2261,11 +2244,9 @@
       }
     `;
 
-    console.log(`[${SCRIPT_NAME}] CreateSpecimenInspectionOrder 実行...`);
     const result = await core.query(mutation);
 
     if (result.data?.createSpecimenInspectionOrder?.uuid) {
-      console.log(`[${SCRIPT_NAME}] 血液検査オーダー作成成功: ${result.data.createSpecimenInspectionOrder.uuid}`);
       return result.data.createSpecimenInspectionOrder;
     } else {
       console.error(`[${SCRIPT_NAME}] 血液検査オーダー作成失敗:`, result);
@@ -2292,7 +2273,6 @@
         input: { searchDate }
       });
       rehabCalcTypesCache = result.data?.listAllRehabilitationCalculationTypes?.rehabilitationCalculationTypes || [];
-      console.log(`[${SCRIPT_NAME}] リハビリ算定区分取得: ${rehabCalcTypesCache.length}件`);
       return rehabCalcTypesCache;
     } catch (e) {
       console.error(`[${SCRIPT_NAME}] リハビリ算定区分取得失敗:`, e?.message || e);
@@ -2332,7 +2312,6 @@
     try {
       const result = await core.query(LIST_REHAB_PLANS_QUERY, {});
       rehabPlansCache = result.data?.listRehabilitationPlans?.rehabilitationPlans || [];
-      console.log(`[${SCRIPT_NAME}] リハビリ計画取得: ${rehabPlansCache.length}件`);
       return rehabPlansCache;
     } catch (e) {
       console.error(`[${SCRIPT_NAME}] リハビリ計画取得失敗:`, e?.message || e);
@@ -2406,11 +2385,9 @@
       }
     };
 
-    console.log(`[${SCRIPT_NAME}] CreateRehabilitationOrder 実行...`);
     const result = await core.query(mutation, variables);
 
     if (result.data?.createRehabilitationOrder?.uuid) {
-      console.log(`[${SCRIPT_NAME}] リハビリオーダー作成成功: ${result.data.createRehabilitationOrder.uuid}`);
       return result.data.createRehabilitationOrder;
     } else {
       console.error(`[${SCRIPT_NAME}] リハビリオーダー作成失敗:`, result);
@@ -2561,11 +2538,9 @@
       }
     `;
 
-    console.log(`[${SCRIPT_NAME}] CreateClinicalDocument 実行...`);
     const result = await core.query(mutation);
 
     if (result.data?.createClinicalDocument?.uuid) {
-      console.log(`[${SCRIPT_NAME}] 入院時指示作成成功: ${result.data.createClinicalDocument.uuid}`);
       return result.data.createClinicalDocument;
     } else {
       console.error(`[${SCRIPT_NAME}] 入院時指示作成失敗:`, result);
@@ -2631,11 +2606,9 @@
       }
     `;
 
-    console.log(`[${SCRIPT_NAME}] CreateClinicalDocument (指示簿) 実行...`);
     const result = await core.query(mutation);
 
     if (result.data?.createClinicalDocument?.uuid) {
-      console.log(`[${SCRIPT_NAME}] 指示簿作成成功: ${result.data.createClinicalDocument.uuid}`);
       return result.data.createClinicalDocument;
     } else {
       console.error(`[${SCRIPT_NAME}] 指示簿作成失敗:`, result);
@@ -3314,7 +3287,7 @@
       popover.className = 'order-details-popover';
       popover.style.cssText = `
         position: absolute;
-        z-index: 2000;
+        z-index: 1400;
         background: #fff;
         border: 1px solid #e5e7eb;
         border-radius: 8px;
@@ -3456,7 +3429,7 @@
         right: 0;
         bottom: 0;
         background: rgba(0, 0, 0, 0.5);
-        z-index: 2100;
+        z-index: 1500;
         display: flex;
         align-items: center;
         justify-content: center;
@@ -3992,7 +3965,6 @@
                 const name = inspectionNameMap.get(code) || code;
                 selectedInspections.push({ code, name });
               }
-              console.log(`[${SCRIPT_NAME}] 血液検査項目を更新: ${selectedInspections.length}件`);
               onConfirm();
               modal.close();
             }
@@ -5030,21 +5002,6 @@
     } else {
       throw new Error(`不明なオーダー種別: ${type}`);
     }
-  }
-
-  /**
-   * フォーム行を作成
-   */
-  function createFormRow(labelText) {
-    const row = document.createElement('div');
-    row.style.cssText = 'margin-bottom: 12px;';
-
-    const label = document.createElement('label');
-    label.style.cssText = 'display: block; font-size: 13px; font-weight: 500; color: #374151; margin-bottom: 4px;';
-    label.textContent = labelText;
-
-    row.appendChild(label);
-    return row;
   }
 
   // ===========================================
