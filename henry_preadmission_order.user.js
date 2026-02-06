@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry 入院前オーダー
 // @namespace    https://github.com/shin-926/Henry
-// @version      1.0.0
+// @version      1.2.4
 // @description  入院予定患者に対して入院前オーダー（CT検査等）を一括作成
 // @author       sk powered by Claude
 // @match        https://henry-app.jp/*
@@ -71,6 +71,16 @@
     .preadmission-modal .henry-accordion-title,
     .preadmission-modal .henry-radio-label {
       font-size: 13px;
+    }
+
+    /* 進捗スピナーアニメーション */
+    @keyframes preadmission-spin {
+      from { transform: rotate(0deg); }
+      to { transform: rotate(360deg); }
+    }
+    .preadmission-progress-spinner {
+      display: inline-block;
+      animation: preadmission-spin 1s linear infinite;
     }
   `);
 
@@ -919,7 +929,7 @@
 ・ブドウ糖20g内服
 ・50Tz40mL静注`;
 
-  // 入院時指示の選択肢
+  // 入院時指示の選択肢（ラジオボタンは再クリックで解除可能、未選択時は「不詳」と出力）
   const INSTRUCTION_OPTIONS = {
     meal: {
       label: '食事',
@@ -978,6 +988,18 @@
     instruction: { label: '入院時指示', templates: INSTRUCTION_TEMPLATES },
     standingOrder: { label: '指示簿', templates: STANDING_ORDER_TEMPLATES }
   };
+
+  // 進捗表示用ラベル（処理順）
+  // imagingBiopsyは内部で画像検査と生体検査に分かれるため、個別に定義
+  const PROGRESS_LABELS = [
+    { key: 'imaging', label: '画像検査', parentType: 'imagingBiopsy' },
+    { key: 'biopsy', label: '生体検査', parentType: 'imagingBiopsy' },
+    { key: 'specimen', label: '検体検査', parentType: 'specimen' },
+    { key: 'rehab', label: 'リハビリ', parentType: 'rehab' },
+    { key: 'instruction', label: '入院時指示', parentType: 'instruction' },
+    { key: 'standingOrder', label: '指示簿', parentType: 'standingOrder' },
+    { key: 'treatmentPlan', label: '入院診療計画書', parentType: 'treatmentPlan' }
+  ];
 
   // ===========================================
   // GraphQL クエリ
@@ -2446,7 +2468,8 @@
     ];
 
     for (const item of items) {
-      let displayValue = item.value;
+      // 未選択（空文字列）の場合は「不詳」と表示
+      let displayValue = item.value || '不詳';
       if (item.detail) {
         displayValue = `${item.value}（${item.detail}）`;
       }
@@ -4520,12 +4543,31 @@
       mealField.style.marginBottom = '8px';
       container.appendChild(mealField);
 
+      // ラジオボタンに再クリックで解除する機能を追加するヘルパー
+      function enableRadioDeselect(wrapper) {
+        wrapper.querySelectorAll('input[type="radio"]').forEach(radio => {
+          radio.addEventListener('click', (e) => {
+            // data属性で前回の選択状態を追跡
+            if (radio.dataset.wasChecked === 'true') {
+              radio.checked = false;
+              radio.dataset.wasChecked = 'false';
+            } else {
+              // 同じグループの他のラジオボタンのフラグをリセット
+              wrapper.querySelectorAll('input[type="radio"]').forEach(r => {
+                r.dataset.wasChecked = 'false';
+              });
+              radio.dataset.wasChecked = 'true';
+            }
+          });
+        });
+      }
+
       // 安静度（ラジオボタン）
       const { wrapper: activityWrapper } = core.ui.createRadioGroup({
         name: 'instruction-activity',
-        options: INSTRUCTION_OPTIONS.activity.options.map(opt => ({ value: opt, label: opt })),
-        defaultValue: INSTRUCTION_OPTIONS.activity.options[0]
+        options: INSTRUCTION_OPTIONS.activity.options.map(opt => ({ value: opt, label: opt }))
       });
+      enableRadioDeselect(activityWrapper);
       const activityField = core.ui.createFormField({ label: '安静度', input: activityWrapper, inline: true });
       activityField.style.marginBottom = '8px';
       container.appendChild(activityField);
@@ -4533,9 +4575,9 @@
       // モニター（ラジオボタン）
       const { wrapper: monitorWrapper } = core.ui.createRadioGroup({
         name: 'instruction-monitor',
-        options: INSTRUCTION_OPTIONS.monitor.options.map(opt => ({ value: opt, label: opt })),
-        defaultValue: INSTRUCTION_OPTIONS.monitor.options[1]
+        options: INSTRUCTION_OPTIONS.monitor.options.map(opt => ({ value: opt, label: opt }))
       });
+      enableRadioDeselect(monitorWrapper);
       const monitorField = core.ui.createFormField({ label: 'モニター', input: monitorWrapper, inline: true });
       monitorField.style.marginBottom = '8px';
       container.appendChild(monitorField);
@@ -4543,9 +4585,9 @@
       // 尿測（ラジオボタン）
       const { wrapper: urineWrapper } = core.ui.createRadioGroup({
         name: 'instruction-urine',
-        options: INSTRUCTION_OPTIONS.urine.options.map(opt => ({ value: opt, label: opt })),
-        defaultValue: INSTRUCTION_OPTIONS.urine.options[1]
+        options: INSTRUCTION_OPTIONS.urine.options.map(opt => ({ value: opt, label: opt }))
       });
+      enableRadioDeselect(urineWrapper);
       const urineField = core.ui.createFormField({ label: '尿測', input: urineWrapper, inline: true });
       urineField.style.marginBottom = '8px';
       container.appendChild(urineField);
@@ -4553,9 +4595,9 @@
       // 保清（ラジオボタン）
       const { wrapper: bathingWrapper } = core.ui.createRadioGroup({
         name: 'instruction-bathing',
-        options: INSTRUCTION_OPTIONS.bathing.options.map(opt => ({ value: opt, label: opt })),
-        defaultValue: INSTRUCTION_OPTIONS.bathing.options[0]
+        options: INSTRUCTION_OPTIONS.bathing.options.map(opt => ({ value: opt, label: opt }))
       });
+      enableRadioDeselect(bathingWrapper);
       const bathingField = core.ui.createFormField({ label: '保清', input: bathingWrapper, inline: true });
       bathingField.style.marginBottom = '8px';
       container.appendChild(bathingField);
@@ -4563,9 +4605,9 @@
       // 補助具（ラジオボタン）
       const { wrapper: mobilityWrapper } = core.ui.createRadioGroup({
         name: 'instruction-mobility',
-        options: INSTRUCTION_OPTIONS.mobility.options.map(opt => ({ value: opt, label: opt })),
-        defaultValue: INSTRUCTION_OPTIONS.mobility.options[0]
+        options: INSTRUCTION_OPTIONS.mobility.options.map(opt => ({ value: opt, label: opt }))
       });
+      enableRadioDeselect(mobilityWrapper);
       const mobilityField = core.ui.createFormField({ label: '補助具', input: mobilityWrapper, inline: true });
       mobilityField.style.marginBottom = '8px';
       container.appendChild(mobilityField);
@@ -4698,11 +4740,11 @@
                 data.instructionData = {
                   meal: content.querySelector('#instruction-meal')?.value || '常食',
                   mealDetail: content.querySelector('#instruction-meal-detail')?.value || '',
-                  monitor: content.querySelector('input[name="instruction-monitor"]:checked')?.value || '不要',
-                  urine: content.querySelector('input[name="instruction-urine"]:checked')?.value || '不要',
-                  bathing: content.querySelector('input[name="instruction-bathing"]:checked')?.value || '入浴',
-                  activity: content.querySelector('input[name="instruction-activity"]:checked')?.value || 'フリー',
-                  mobility: content.querySelector('input[name="instruction-mobility"]:checked')?.value || 'なし',
+                  monitor: content.querySelector('input[name="instruction-monitor"]:checked')?.value || '',
+                  urine: content.querySelector('input[name="instruction-urine"]:checked')?.value || '',
+                  bathing: content.querySelector('input[name="instruction-bathing"]:checked')?.value || '',
+                  activity: content.querySelector('input[name="instruction-activity"]:checked')?.value || '',
+                  mobility: content.querySelector('input[name="instruction-mobility"]:checked')?.value || '',
                   freeText: content.querySelector('#instruction-freetext')?.value || ''
                 };
               } else if (type === 'standingOrder') {
@@ -4752,11 +4794,25 @@
     const orderDate = ordersData[0].orderDate;
     const orderDateStr = `${orderDate.year}/${orderDate.month}/${orderDate.day}`;
 
-    // 作成するオーダーの一覧を表示
-    let orderListHtml = ordersData.map(data => {
-      const label = ALL_TEMPLATES[data.type]?.label || data.type;
-      return `<div style="padding: 4px 0; border-bottom: 1px solid #f0f0f0;">・${label}</div>`;
-    }).join('');
+    // 処理順にordersDataを並べ替え（treatmentPlanを最後にする）
+    const typeOrder = ['imagingBiopsy', 'specimen', 'rehab', 'instruction', 'standingOrder', 'treatmentPlan'];
+    const sortedOrdersData = [...ordersData].sort((a, b) => {
+      return typeOrder.indexOf(a.type) - typeOrder.indexOf(b.type);
+    });
+
+    // 選択されたオーダーに基づいて進捗表示リストを生成
+    const selectedProgressItems = PROGRESS_LABELS.filter(item =>
+      sortedOrdersData.some(d => d.type === item.parentType)
+    );
+
+    // 進捗表示用HTMLを生成
+    // 状態: pending(グレー点) → processing(回転スピナー) → done(緑チェック)
+    const progressHtml = selectedProgressItems.map(item =>
+      `<div data-progress-key="${item.key}" style="padding: 4px 0; border-bottom: 1px solid #f0f0f0; display: flex; align-items: center;">
+        <span class="progress-icon" style="color: #9ca3af; margin-right: 6px; width: 14px; text-align: center;">・</span>
+        <span class="progress-label">${item.label}</span>
+      </div>`
+    ).join('');
 
     const content = document.createElement('div');
     content.className = 'preadmission-modal';
@@ -4765,10 +4821,29 @@
       <div style="padding: 12px; background: #f5f5f5; border-radius: 6px; font-size: 13px; color: #333;">
         <div><strong>患者:</strong> ${patientName}</div>
         <div style="margin-top: 4px;"><strong>オーダー日:</strong> ${orderDateStr}</div>
-        <div style="margin-top: 8px;"><strong>作成するオーダー（${ordersData.length}件）:</strong></div>
-        <div style="margin-top: 4px; padding-left: 8px;">${orderListHtml}</div>
+        <div style="margin-top: 8px;"><strong>作成するオーダー（${selectedProgressItems.length}件）:</strong></div>
+        <div style="margin-top: 4px; padding-left: 8px;">${progressHtml}</div>
       </div>
     `;
+
+    // 進捗更新関数
+    // status: 'processing' | 'done'
+    function updateProgress(key, status) {
+      const row = content.querySelector(`[data-progress-key="${key}"]`);
+      if (!row) return;
+      const icon = row.querySelector('.progress-icon');
+      if (!icon) return;
+
+      if (status === 'processing') {
+        icon.textContent = '⟳';
+        icon.className = 'progress-icon preadmission-progress-spinner';
+        icon.style.color = '#3b82f6';
+      } else if (status === 'done') {
+        icon.textContent = '✓';
+        icon.className = 'progress-icon';
+        icon.style.color = '#22c55e';
+      }
+    }
 
     let modal;
     modal = core.ui.showModal({
@@ -4780,13 +4855,30 @@
         {
           label: '作成',
           variant: 'primary',
+          autoClose: false,
           onClick: async () => {
-            const spinner = core.ui.showSpinner('オーダーを作成中...');
+            // モーダルのタイトルを更新
+            const titleEl = modal.element?.querySelector('.henry-modal-title');
+            if (titleEl) {
+              titleEl.textContent = 'オーダーを作成中...';
+            }
+
+            // ボタンを非表示
+            const actionsEl = modal.element?.querySelector('.henry-modal-actions');
+            if (actionsEl) {
+              actionsEl.style.display = 'none';
+            }
+
+            // 説明文を非表示
+            const descEl = content.querySelector('p');
+            if (descEl) {
+              descEl.style.display = 'none';
+            }
 
             const results = [];
-            for (const data of ordersData) {
+            for (const data of sortedOrdersData) {
               try {
-                await createSingleOrder(patientData, data);
+                await createSingleOrder(patientData, data, updateProgress);
                 results.push({ type: data.type, success: true });
                 // 作成成功を通知
                 if (onOrderCreated) {
@@ -4798,7 +4890,6 @@
               }
             }
 
-            spinner.close();
             modal.close();
 
             // 結果表示
@@ -4819,12 +4910,16 @@
 
   /**
    * 単一オーダーを作成
+   * @param {Object} patientData - 患者データ
+   * @param {Object} orderData - オーダーデータ
+   * @param {Function} onProgress - 進捗コールバック（key, status）
    */
-  async function createSingleOrder(patientData, orderData) {
+  async function createSingleOrder(patientData, orderData, onProgress) {
     const { type, orderDate, ctNote, treatmentPlanData, rehabData, instructionData, standingOrderText } = orderData;
 
     if (type === 'imagingBiopsy') {
       // 画像検査（CT）を作成
+      onProgress?.('imaging', 'processing');
       await createImagingOrder({
         patientUuid: patientData.patient?.uuid,
         doctorUuid: patientData.hospitalizationDoctor?.doctor?.uuid,
@@ -4832,23 +4927,30 @@
         orderDate: orderDate,
         ctNote: ctNote
       });
+      onProgress?.('imaging', 'done');
       // 生体検査（ECG + ABI/PWV）を作成
+      onProgress?.('biopsy', 'processing');
       await createBiopsyInspectionOrder({
         patientUuid: patientData.patient?.uuid,
         doctorUuid: patientData.hospitalizationDoctor?.doctor?.uuid,
         templateKey: 'ecg-abi',
         orderDate: orderDate
       });
+      onProgress?.('biopsy', 'done');
     } else if (type === 'treatmentPlan') {
       // 入院診療計画書を作成
+      onProgress?.('treatmentPlan', 'processing');
       await createTreatmentPlanDocument(patientData, treatmentPlanData, orderDate);
+      onProgress?.('treatmentPlan', 'done');
     } else if (type === 'specimen') {
+      onProgress?.('specimen', 'processing');
       await createSpecimenInspectionOrder({
         patientUuid: patientData.patient?.uuid,
         doctorUuid: patientData.hospitalizationDoctor?.doctor?.uuid,
         templateKey: 'admission-blood',
         orderDate: orderDate
       });
+      onProgress?.('specimen', 'done');
     } else if (type === 'rehab') {
       const startDate = orderDate;
       // 終了日は起算日 + 算定期間で計算（periodがない場合は365日）
@@ -4870,6 +4972,7 @@
         day: endDateObj.getDate()
       };
 
+      onProgress?.('rehab', 'processing');
       await createRehabilitationOrder({
         patientUuid: patientData.patient?.uuid,
         doctorUuid: patientData.hospitalizationDoctor?.doctor?.uuid,
@@ -4884,7 +4987,9 @@
         contraindications: rehabData.contraindications,
         objectiveNote: rehabData.objectiveNote
       });
+      onProgress?.('rehab', 'done');
     } else if (type === 'instruction') {
+      onProgress?.('instruction', 'processing');
       const performTimeDate = new Date(orderDate.year, orderDate.month - 1, orderDate.day, 0, 0, 0);
       const performTime = Math.floor(performTimeDate.getTime() / 1000);
 
@@ -4894,7 +4999,9 @@
         instructionData: instructionData,
         performTime: performTime
       });
+      onProgress?.('instruction', 'done');
     } else if (type === 'standingOrder') {
+      onProgress?.('standingOrder', 'processing');
       const performTimeDate = new Date(orderDate.year, orderDate.month - 1, orderDate.day, 0, 0, 0);
       const performTime = Math.floor(performTimeDate.getTime() / 1000);
 
@@ -4904,6 +5011,7 @@
         standingOrderText: standingOrderText,
         performTime: performTime
       });
+      onProgress?.('standingOrder', 'done');
     } else {
       throw new Error(`不明なオーダー種別: ${type}`);
     }

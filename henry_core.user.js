@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry Core
 // @namespace    https://henry-app.jp/
-// @version      2.34.2
+// @version      2.34.3
 // @description  Henry スクリプト実行基盤 (GoogleAuth統合 / Google Docs対応)
 // @author       sk powered by Claude & Gemini
 // @match        https://henry-app.jp/*
@@ -1703,7 +1703,7 @@
         });
       }
 
-      return { close };
+      return { close, element: overlay };
     },
 
     /**
