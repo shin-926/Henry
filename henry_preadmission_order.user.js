@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry 入院前オーダー
 // @namespace    https://github.com/shin-926/Henry
-// @version      0.35.4
+// @version      0.36.2
 // @description  入院予定患者に対して入院前オーダー（CT検査等）を一括作成
 // @author       sk powered by Claude
 // @match        https://henry-app.jp/*
@@ -1098,18 +1098,19 @@
               imagingOrder {
                 date { year month day }
                 detail {
+                  uuid
                   imagingModality
                   note
                   condition {
-                    ct { series { bodySite { name } note } }
-                    plainRadiographyDigital { series { bodySite { name } note } }
-                    plainRadiographyAnalog { series { bodySite { name } note } }
-                    mriOther { series { bodySite { name } note } }
-                    mriAbove_1_5AndBelow_3Tesla { series { bodySite { name } note } }
-                    mammographyDigital { series { bodySite { name } note } }
-                    mammographyAnalog { series { bodySite { name } note } }
-                    dexa { series { bodySite { name } note } }
-                    fluoroscopy { series { bodySite { name } note } }
+                    ct { series { uuid bodySite { uuid name } note laterality } }
+                    plainRadiographyDigital { series { uuid bodySite { uuid name } note laterality } }
+                    plainRadiographyAnalog { series { uuid bodySite { uuid name } note laterality } }
+                    mriOther { series { uuid bodySite { uuid name } note laterality } }
+                    mriAbove_1_5AndBelow_3Tesla { series { uuid bodySite { uuid name } note laterality } }
+                    mammographyDigital { series { uuid bodySite { uuid name } note laterality } }
+                    mammographyAnalog { series { uuid bodySite { uuid name } note laterality } }
+                    dexa { series { uuid bodySite { uuid name } note laterality } }
+                    fluoroscopy { series { uuid bodySite { uuid name } note laterality } }
                   }
                 }
               }
@@ -1294,8 +1295,11 @@
 
   /**
    * 画像オーダーから詳細を抽出
+   * @param {Object} imagingOrder - 画像検査オーダー
+   * @param {string} orderUuid - オーダーUUID（オプション）
+   * @returns {Object} - 詳細情報（編集用UUIDを含む）
    */
-  function extractImagingOrderDetails(imagingOrder) {
+  function extractImagingOrderDetails(imagingOrder, orderUuid = null) {
     const detail = imagingOrder?.detail;
     if (!detail) return { title: '画像検査', items: [], note: '' };
 
@@ -1308,16 +1312,22 @@
       'mammographyDigital', 'mammographyAnalog', 'dexa', 'fluoroscopy'
     ];
 
+    // 最初に見つかったモダリティタイプを記録（編集時に使用）
+    let activeModalityType = null;
     const bodySites = [];
     for (const m of modalities) {
       const series = condition?.[m]?.series;
       if (series?.length) {
+        if (!activeModalityType) activeModalityType = m;
         for (const s of series) {
           if (s.bodySite?.name) {
-            // 補足がある場合はオブジェクトとして追加
+            // UUID情報を含めて追加
             bodySites.push({
+              seriesUuid: s.uuid || null,
+              bodySiteUuid: s.bodySite?.uuid || null,
               name: s.bodySite.name,
-              note: s.note || ''
+              note: s.note || '',
+              laterality: s.laterality || null
             });
           }
         }
@@ -1325,8 +1335,12 @@
     }
 
     return {
+      orderUuid: orderUuid,              // オーダーUUID（編集時に使用）
+      detailUuid: detail.uuid || null,   // 詳細UUID（編集時に使用）
+      imagingModality: detail.imagingModality || null,  // モダリティ種別
+      modalityType: activeModalityType,  // condition内のキー名（ct, mriOther等）
       title: modalityName || '画像検査',
-      items: bodySites,  // オブジェクトの配列 { name, note }
+      items: bodySites,  // オブジェクトの配列 { seriesUuid, bodySiteUuid, name, note, laterality }
       note: detail.note || ''
     };
   }
@@ -1432,7 +1446,7 @@
               break;
             case 'ORDER_TYPE_IMAGING':
               result.imaging.exists = true;
-              result.imaging.details.push(extractImagingOrderDetails(o.imagingOrder));
+              result.imaging.details.push(extractImagingOrderDetails(o.imagingOrder, order.uuid));
               break;
             case 'ORDER_TYPE_BIOPSY_INSPECTION':
               result.biopsy.exists = true;
@@ -1697,7 +1711,7 @@
             doctorUuid: null,
             roomUuids: [],
             wardUuids: [],
-            states: [],
+            states: ['WILL_ADMIT'],
             onlyLatest: true
           },
           sorts: [],
@@ -1862,6 +1876,33 @@
   }
 
   /**
+   * JSONオブジェクトをGraphQLリテラル形式に変換
+   * @param {any} obj - 変換対象のオブジェクト
+   * @param {string[]} enumFields - 引用符なしで出力するフィールド名（enum値）
+   * @returns {string} GraphQL形式の文字列
+   */
+  function jsonToGraphQL(obj, enumFields = []) {
+    if (obj === null) return 'null';
+    if (typeof obj === 'boolean') return obj.toString();
+    if (typeof obj === 'number') return obj.toString();
+    if (typeof obj === 'string') return `"${escapeGraphQLString(obj)}"`;
+    if (Array.isArray(obj)) {
+      return '[' + obj.map(item => jsonToGraphQL(item, enumFields)).join(', ') + ']';
+    }
+    if (typeof obj === 'object') {
+      const entries = Object.entries(obj).map(([key, value]) => {
+        // enumFieldsに含まれるキーは引用符なしで出力
+        if (enumFields.includes(key) && typeof value === 'string') {
+          return `${key}: ${value}`;
+        }
+        return `${key}: ${jsonToGraphQL(value, enumFields)}`;
+      });
+      return '{' + entries.join(', ') + '}';
+    }
+    return String(obj);
+  }
+
+  /**
    * CTオーダーを作成
    */
   async function createImagingOrder(orderData) {
@@ -1941,6 +1982,97 @@
   }
 
   /**
+   * 画像検査オーダーを更新（編集）
+   * @param {Object} updateData - 更新データ
+   * @param {string} updateData.orderUuid - オーダーUUID
+   * @param {string} updateData.patientUuid - 患者UUID
+   * @param {string} updateData.doctorUuid - 医師UUID
+   * @param {Object} updateData.orderDate - オーダー日 { year, month, day }
+   * @param {Object} updateData.detail - 詳細データ（extractImagingOrderDetailsの戻り値）
+   * @param {Array} updateData.updatedItems - 更新後のシリーズアイテム
+   */
+  async function updateImagingOrder(updateData) {
+    const core = pageWindow.HenryCore;
+    if (!core) {
+      throw new Error('HenryCore が見つかりません');
+    }
+
+    const { orderUuid, patientUuid, doctorUuid, orderDate, detail, updatedItems } = updateData;
+
+    if (!orderUuid || !detail?.detailUuid) {
+      throw new Error('オーダーUUIDまたは詳細UUIDがありません');
+    }
+
+    // モダリティタイプに応じたconditionを構築
+    const modalityType = detail.modalityType || 'ct';
+
+    // modalityTypeをsnake_caseに変換（updateMask用）
+    const modalityTypeSnake = modalityType
+      .replace(/([A-Z])/g, '_$1')
+      .toLowerCase()
+      .replace(/^_/, '');
+
+    // 更新後のseriesデータを構築
+    const seriesData = updatedItems.map(item => {
+      const seriesStr = `{
+        uuid: "${item.seriesUuid || generateUuid()}"
+        bodySiteUuid: "${item.bodySiteUuid}"
+        filmCount: null
+        configuration: ""
+        note: "${escapeGraphQLString(item.note || '')}"
+        laterality: ${item.laterality || 'LATERALITY_NONE'}
+        medicines: []
+        isAccountingIgnored: false
+      }`;
+      return seriesStr;
+    }).join(',\n                    ');
+
+    // インライン方式でmutationを構築（input.imagingOrder形式）
+    const mutation = `
+      mutation UpdateImagingOrder {
+        updateImagingOrder(input: {
+          imagingOrder: {
+            uuid: "${orderUuid}"
+            patientUuid: "${patientUuid}"
+            doctorUuid: "${doctorUuid}"
+            date: { year: ${orderDate.year}, month: ${orderDate.month}, day: ${orderDate.day} }
+            detail: {
+              uuid: "${detail.detailUuid}"
+              imagingModality: ${detail.imagingModality}
+              note: "${escapeGraphQLString(detail.note || '')}"
+              condition: {
+                ${modalityType}: {
+                  series: [${seriesData}]
+                }
+              }
+            }
+            sessionUuid: null
+            revokeDescription: ""
+            encounterId: null
+            extendedInsuranceCombinationId: null
+            saveAsDraft: false
+          }
+          updateMask: { paths: ["detail.condition.${modalityTypeSnake}.series"] }
+        }) {
+          uuid
+          orderStatus
+        }
+      }
+    `;
+
+    console.log(`[${SCRIPT_NAME}] UpdateImagingOrder 実行...`);
+    const result = await core.query(mutation);
+
+    if (result.data?.updateImagingOrder?.uuid) {
+      console.log(`[${SCRIPT_NAME}] オーダー更新成功: ${result.data.updateImagingOrder.uuid}`);
+      return result.data.updateImagingOrder;
+    } else {
+      console.error(`[${SCRIPT_NAME}] オーダー更新失敗:`, result);
+      throw new Error('オーダー更新に失敗しました');
+    }
+  }
+
+  /**
    * 生体検査オーダーを作成
    */
   async function createBiopsyInspectionOrder(orderData) {
@@ -1973,8 +2105,9 @@
     const noteText = escapeGraphQLString(template.note || template.name);
 
     // インライン方式でmutationを構築
-    const consultationDiagnosesJson = JSON.stringify(consultationDiagnoses)
-      .replace(/"/g, '\\"');
+    // consultationDiagnosesはJSONではなくGraphQLリテラル形式に変換
+    // orderTypeはenum値なので引用符なしで出力
+    const consultationDiagnosesGQL = jsonToGraphQL(consultationDiagnoses, ['orderType']);
 
     const mutation = `
       mutation CreateBiopsyInspectionOrder {
@@ -1986,7 +2119,7 @@
           biopsyInspectionOrderBiopsyInspections: [{
             uuid: ""
             biopsyInspectionUuid: "${template.biopsyInspectionUuid}"
-            consultationDiagnoses: ${JSON.stringify(consultationDiagnoses)}
+            consultationDiagnoses: ${consultationDiagnosesGQL}
             consultationEquipments: []
             consultationMedicines: []
             consultationOutsideInspections: []
@@ -3162,17 +3295,37 @@
         border-radius: 8px;
         box-shadow: 0 4px 12px rgba(0,0,0,0.15);
         padding: 12px 16px;
-        max-width: 350px;
-        min-width: 200px;
+        max-width: 400px;
+        min-width: 250px;
         font-size: 13px;
       `;
 
       // コンテンツ作成
       let html = '<div style="font-weight: 600; color: #374151; margin-bottom: 8px; border-bottom: 1px solid #e5e7eb; padding-bottom: 6px;">作成済みオーダー</div>';
 
-      for (const detail of details) {
+      for (let i = 0; i < details.length; i++) {
+        const detail = details[i];
+        const hasOrderUuid = !!detail.orderUuid;
+        const isImagingOrder = orderType === 'imagingBiopsy' && detail.imagingModality;
+
         html += `<div style="margin-bottom: 8px;">`;
-        html += `<div style="font-weight: 500; color: #1f2937; margin-bottom: 2px;">${detail.title}</div>`;
+
+        // タイトル行（編集ボタン付き）
+        html += `<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 2px;">`;
+        html += `<span style="font-weight: 500; color: #1f2937;">${detail.title}</span>`;
+        if (isImagingOrder && hasOrderUuid) {
+          html += `<button class="edit-order-btn" data-detail-index="${i}" style="
+            padding: 2px 8px;
+            background: #f3f4f6;
+            border: 1px solid #d1d5db;
+            border-radius: 4px;
+            font-size: 11px;
+            color: #374151;
+            cursor: pointer;
+            transition: all 0.15s;
+          ">編集</button>`;
+        }
+        html += `</div>`;
 
         if (detail.items?.length) {
           const itemsToShow = detail.items.slice(0, 5);
@@ -3211,6 +3364,25 @@
       popover.innerHTML = html;
       document.body.appendChild(popover);
 
+      // 編集ボタンのイベントリスナー
+      popover.querySelectorAll('.edit-order-btn').forEach(btn => {
+        btn.addEventListener('mouseenter', () => {
+          btn.style.background = '#e5e7eb';
+        });
+        btn.addEventListener('mouseleave', () => {
+          btn.style.background = '#f3f4f6';
+        });
+        btn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          const detailIndex = parseInt(btn.dataset.detailIndex);
+          const detailToEdit = details[detailIndex];
+          if (detailToEdit) {
+            hideOrderDetailsPopover();
+            showImagingOrderEditModal(detailToEdit);
+          }
+        });
+      });
+
       // 位置調整
       const badgeRect = badge.getBoundingClientRect();
       const popoverRect = popover.getBoundingClientRect();
@@ -3242,6 +3414,229 @@
     // ポップオーバーを閉じる
     function hideOrderDetailsPopover() {
       document.querySelectorAll('.order-details-popover').forEach(el => el.remove());
+    }
+
+    // --- 画像検査オーダー編集モーダル ---
+    function showImagingOrderEditModal(detail) {
+      // 既存の編集モーダルを削除
+      document.querySelectorAll('.imaging-order-edit-modal').forEach(el => el.remove());
+
+      // モーダルオーバーレイ
+      const overlay = document.createElement('div');
+      overlay.className = 'imaging-order-edit-modal';
+      overlay.style.cssText = `
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background: rgba(0, 0, 0, 0.5);
+        z-index: 2100;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      `;
+
+      // モーダルコンテンツ
+      const modal = document.createElement('div');
+      modal.style.cssText = `
+        background: #fff;
+        border-radius: 12px;
+        box-shadow: 0 8px 32px rgba(0,0,0,0.2);
+        max-width: 500px;
+        width: 90%;
+        max-height: 80vh;
+        overflow: auto;
+      `;
+
+      // ヘッダー
+      const header = document.createElement('div');
+      header.style.cssText = `
+        padding: 16px 20px;
+        border-bottom: 1px solid #e5e7eb;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+      `;
+      header.innerHTML = `
+        <span style="font-size: 16px; font-weight: 600; color: #1f2937;">
+          ${detail.title} - 補足編集
+        </span>
+        <button class="close-modal-btn" style="
+          background: none;
+          border: none;
+          font-size: 20px;
+          color: #6b7280;
+          cursor: pointer;
+          padding: 4px;
+        ">×</button>
+      `;
+
+      // ボディ
+      const body = document.createElement('div');
+      body.style.cssText = 'padding: 20px;';
+
+      // 各シリーズの編集フィールド
+      const editFields = [];
+      for (const item of detail.items) {
+        const fieldContainer = document.createElement('div');
+        fieldContainer.style.cssText = 'margin-bottom: 16px;';
+
+        const label = document.createElement('div');
+        label.style.cssText = 'font-size: 13px; font-weight: 500; color: #374151; margin-bottom: 4px;';
+        label.textContent = item.name;
+        fieldContainer.appendChild(label);
+
+        const input = document.createElement('input');
+        input.type = 'text';
+        input.value = item.note || '';
+        input.placeholder = '補足を入力';
+        input.style.cssText = `
+          width: 100%;
+          padding: 8px 12px;
+          border: 1px solid #d1d5db;
+          border-radius: 6px;
+          font-size: 14px;
+          box-sizing: border-box;
+        `;
+        input.dataset.seriesUuid = item.seriesUuid || '';
+        input.dataset.bodySiteUuid = item.bodySiteUuid || '';
+        input.dataset.laterality = item.laterality || 'LATERALITY_NONE';
+        fieldContainer.appendChild(input);
+        editFields.push({ input, item });
+
+        body.appendChild(fieldContainer);
+      }
+
+      // フッター
+      const footer = document.createElement('div');
+      footer.style.cssText = `
+        padding: 16px 20px;
+        border-top: 1px solid #e5e7eb;
+        display: flex;
+        justify-content: flex-end;
+        gap: 12px;
+      `;
+
+      const cancelBtn = document.createElement('button');
+      cancelBtn.textContent = 'キャンセル';
+      cancelBtn.style.cssText = `
+        padding: 8px 16px;
+        background: #f3f4f6;
+        border: 1px solid #d1d5db;
+        border-radius: 6px;
+        font-size: 14px;
+        cursor: pointer;
+      `;
+
+      const saveBtn = document.createElement('button');
+      saveBtn.textContent = '保存';
+      saveBtn.style.cssText = `
+        padding: 8px 16px;
+        background: #2563eb;
+        border: none;
+        border-radius: 6px;
+        font-size: 14px;
+        color: #fff;
+        cursor: pointer;
+      `;
+
+      footer.appendChild(cancelBtn);
+      footer.appendChild(saveBtn);
+
+      modal.appendChild(header);
+      modal.appendChild(body);
+      modal.appendChild(footer);
+      overlay.appendChild(modal);
+      document.body.appendChild(overlay);
+
+      // イベントリスナー
+      const closeModal = () => {
+        overlay.remove();
+      };
+
+      header.querySelector('.close-modal-btn').addEventListener('click', closeModal);
+      cancelBtn.addEventListener('click', closeModal);
+      overlay.addEventListener('click', (e) => {
+        if (e.target === overlay) closeModal();
+      });
+
+      saveBtn.addEventListener('click', async () => {
+        // 更新データを構築
+        const updatedItems = editFields.map(({ input, item }) => ({
+          seriesUuid: input.dataset.seriesUuid || item.seriesUuid,
+          bodySiteUuid: input.dataset.bodySiteUuid || item.bodySiteUuid,
+          note: input.value,
+          laterality: input.dataset.laterality || item.laterality || 'LATERALITY_NONE'
+        }));
+
+        // 現在選択されている日付を取得
+        const selectedDateRadio = document.querySelector('input[name="order-date"]:checked')?.value;
+        let orderDate;
+        if (selectedDateRadio === 'admission') {
+          orderDate = patientData.startDate;
+        } else {
+          const customDateEl = document.getElementById('custom-date');
+          if (customDateEl?.value) {
+            const [y, m, d] = customDateEl.value.split('-').map(Number);
+            orderDate = { year: y, month: m, day: d };
+          } else {
+            orderDate = patientData.startDate;
+          }
+        }
+
+        // 医師UUIDを取得
+        const doctorUuid = patientData.hospitalizationDoctor?.doctor?.uuid;
+        if (!doctorUuid) {
+          core.ui.showToast('医師情報が取得できません', 'error');
+          return;
+        }
+
+        // ローディング表示
+        saveBtn.disabled = true;
+        saveBtn.textContent = '保存中...';
+
+        try {
+          await updateImagingOrder({
+            orderUuid: detail.orderUuid,
+            patientUuid: patientData.patient?.uuid,
+            doctorUuid: doctorUuid,
+            orderDate: orderDate,
+            detail: detail,
+            updatedItems: updatedItems
+          });
+
+          // creationStatusを更新（UI反映のため）
+          const detailsKey = 'imagingBiopsyDetails';
+          const existingDetails = creationStatus[detailsKey] || [];
+          const updatedDetails = existingDetails.map(d => {
+            if (d.orderUuid === detail.orderUuid) {
+              return {
+                ...d,
+                items: d.items.map((item, idx) => ({
+                  ...item,
+                  note: updatedItems[idx]?.note || item.note
+                }))
+              };
+            }
+            return d;
+          });
+          creationStatus[detailsKey] = updatedDetails;
+
+          core.ui.showToast('オーダーを更新しました', 'success');
+          closeModal();
+        } catch (e) {
+          console.error(`[${SCRIPT_NAME}] オーダー更新エラー:`, e);
+          core.ui.showToast('オーダーの更新に失敗しました', 'error');
+          saveBtn.disabled = false;
+          saveBtn.textContent = '保存';
+        }
+      });
+
+      // 最初の入力フィールドにフォーカス
+      if (editFields.length > 0) {
+        editFields[0].input.focus();
+      }
     }
 
     // 各オーダーカードを生成

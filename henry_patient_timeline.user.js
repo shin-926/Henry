@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry Patient Timeline
 // @namespace    https://github.com/shin-926/Henry
-// @version      2.134.7
+// @version      2.134.8
 // @description  入院患者の各種記録・オーダーをガントチャート風タイムラインで表示
 // @author       sk powered by Claude
 // @match        https://henry-app.jp/*
@@ -5776,8 +5776,8 @@
         const [year, month, day] = itemKey.split('-').map(Number);
         const timestamp = new Date(year, month - 1, day, 12, 0, 0).getTime();
 
-        // テキストから尿量を抽出（例: 【尿量】1500mL）
-        const match = item.text.match(/【尿量】(\d+)/);
+        // テキストから尿量を抽出（例: 【尿量】1500mL または 【尿量】<span class="vital-high">2500</span>mL）
+        const match = item.text.match(/【尿量】(?:<span[^>]*>)?(\d+)/);
         const totalUrine = match ? parseInt(match[1], 10) : 0;
 
         allUrine.push({
