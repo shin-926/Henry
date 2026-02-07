@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry Patient Timeline
 // @namespace    https://github.com/shin-926/Henry
-// @version      2.134.8
+// @version      2.134.9
 // @description  入院患者の各種記録・オーダーをガントチャート風タイムラインで表示
 // @author       sk powered by Claude
 // @match        https://henry-app.jp/*
@@ -701,40 +701,34 @@
   // 医師記録取得
   async function fetchDoctorRecords(patientUuid) {
     const allDocuments = [];
-    let pageToken = '';
 
     try {
-      do {
-        const result = await window.HenryCore.query(QUERIES.LIST_CLINICAL_DOCUMENTS, {
-          input: {
-            patientUuid,
-            pageToken,
-            pageSize: 100,
-            clinicalDocumentTypes: [{ type: 'HOSPITALIZATION_CONSULTATION' }]
-          }
-        });
-
-        const data = result?.data?.listClinicalDocuments;
-        const documents = data?.documents || [];
-
-        for (const doc of documents) {
-          const text = parseEditorData(doc.editorData);
-          if (text) {
-            allDocuments.push({
-              id: doc.uuid,
-              category: 'doctor',
-              date: doc.performTime?.seconds ? new Date(doc.performTime.seconds * 1000) : null,
-              title: '入院診察',
-              text,
-              author: doc.creator?.name || '不明',
-              creatorUuid: doc.creatorUuid || null,
-              editorData: doc.editorData  // 編集時に必要
-            });
-          }
+      const result = await window.HenryCore.query(QUERIES.LIST_CLINICAL_DOCUMENTS, {
+        input: {
+          patientUuid,
+          pageToken: '',
+          pageSize: 100,
+          clinicalDocumentTypes: [{ type: 'HOSPITALIZATION_CONSULTATION' }]
         }
+      });
 
-        pageToken = data?.nextPageToken || '';
-      } while (pageToken);
+      const documents = result?.data?.listClinicalDocuments?.documents || [];
+
+      for (const doc of documents) {
+        const text = parseEditorData(doc.editorData);
+        if (text) {
+          allDocuments.push({
+            id: doc.uuid,
+            category: 'doctor',
+            date: doc.performTime?.seconds ? new Date(doc.performTime.seconds * 1000) : null,
+            title: '入院診察',
+            text,
+            author: doc.creator?.name || '不明',
+            creatorUuid: doc.creatorUuid || null,
+            editorData: doc.editorData  // 編集時に必要
+          });
+        }
+      }
 
       return allDocuments;
     } catch (e) {
@@ -746,41 +740,35 @@
   // 看護記録取得
   async function fetchNursingRecords(patientUuid) {
     const allDocuments = [];
-    let pageToken = '';
 
     try {
-      do {
-        const result = await window.HenryCore.query(QUERIES.LIST_CLINICAL_DOCUMENTS, {
-          input: {
-            patientUuid,
-            pageToken,
-            pageSize: 100,
-            clinicalDocumentTypes: [{
-              type: 'CUSTOM',
-              clinicalDocumentCustomTypeUuid: { value: NURSING_RECORD_CUSTOM_TYPE_UUID }
-            }]
-          }
-        });
-
-        const data = result?.data?.listClinicalDocuments;
-        const documents = data?.documents || [];
-
-        for (const doc of documents) {
-          const text = parseEditorData(doc.editorData);
-          if (text) {
-            allDocuments.push({
-              id: doc.uuid,
-              category: 'nursing',
-              date: doc.performTime?.seconds ? new Date(doc.performTime.seconds * 1000) : null,
-              title: '看護記録',
-              text,
-              author: doc.creator?.name || '不明'
-            });
-          }
+      const result = await window.HenryCore.query(QUERIES.LIST_CLINICAL_DOCUMENTS, {
+        input: {
+          patientUuid,
+          pageToken: '',
+          pageSize: 100,
+          clinicalDocumentTypes: [{
+            type: 'CUSTOM',
+            clinicalDocumentCustomTypeUuid: { value: NURSING_RECORD_CUSTOM_TYPE_UUID }
+          }]
         }
+      });
 
-        pageToken = data?.nextPageToken || '';
-      } while (pageToken);
+      const documents = result?.data?.listClinicalDocuments?.documents || [];
+
+      for (const doc of documents) {
+        const text = parseEditorData(doc.editorData);
+        if (text) {
+          allDocuments.push({
+            id: doc.uuid,
+            category: 'nursing',
+            date: doc.performTime?.seconds ? new Date(doc.performTime.seconds * 1000) : null,
+            title: '看護記録',
+            text,
+            author: doc.creator?.name || '不明'
+          });
+        }
+      }
 
       return allDocuments;
     } catch (e) {
@@ -2193,39 +2181,33 @@
   // 褥瘡評価データを取得
   async function fetchPressureUlcerRecords(patientUuid) {
     const allDocuments = [];
-    let pageToken = '';
 
     try {
-      do {
-        const result = await window.HenryCore.query(QUERIES.LIST_CLINICAL_DOCUMENTS, {
-          input: {
-            patientUuid,
-            pageToken,
-            pageSize: 100,
-            clinicalDocumentTypes: [{
-              type: 'CUSTOM',
-              clinicalDocumentCustomTypeUuid: { value: PRESSURE_ULCER_CUSTOM_TYPE_UUID }
-            }]
-          }
-        });
-
-        const data = result?.data?.listClinicalDocuments;
-        const documents = data?.documents || [];
-
-        for (const doc of documents) {
-          const parsed = parsePressureUlcerEditorData(doc.editorData);
-          if (parsed) {
-            allDocuments.push({
-              uuid: doc.uuid,
-              date: doc.performTime?.seconds ? new Date(doc.performTime.seconds * 1000) : null,
-              author: doc.creator?.name || '不明',
-              ...parsed
-            });
-          }
+      const result = await window.HenryCore.query(QUERIES.LIST_CLINICAL_DOCUMENTS, {
+        input: {
+          patientUuid,
+          pageToken: '',
+          pageSize: 100,
+          clinicalDocumentTypes: [{
+            type: 'CUSTOM',
+            clinicalDocumentCustomTypeUuid: { value: PRESSURE_ULCER_CUSTOM_TYPE_UUID }
+          }]
         }
+      });
 
-        pageToken = data?.nextPageToken || '';
-      } while (pageToken);
+      const documents = result?.data?.listClinicalDocuments?.documents || [];
+
+      for (const doc of documents) {
+        const parsed = parsePressureUlcerEditorData(doc.editorData);
+        if (parsed) {
+          allDocuments.push({
+            uuid: doc.uuid,
+            date: doc.performTime?.seconds ? new Date(doc.performTime.seconds * 1000) : null,
+            author: doc.creator?.name || '不明',
+            ...parsed
+          });
+        }
+      }
 
       return allDocuments;
     } catch (e) {
@@ -2383,36 +2365,30 @@
   // 薬剤部記録を取得
   async function fetchPharmacyRecords(patientUuid) {
     const allRecords = [];
-    let pageToken = '';
 
     try {
-      do {
-        const result = await window.HenryCore.query(QUERIES.LIST_CLINICAL_DOCUMENTS, {
-          input: {
-            patientUuid,
-            pageToken,
-            pageSize: 100,
-            clinicalDocumentTypes: [{
-              type: 'CUSTOM',
-              clinicalDocumentCustomTypeUuid: { value: PHARMACY_RECORD_CUSTOM_TYPE_UUID }
-            }]
-          }
-        });
-
-        const data = result?.data?.listClinicalDocuments;
-        const documents = data?.documents || [];
-
-        for (const doc of documents) {
-          allRecords.push({
-            id: doc.uuid,
-            date: doc.performTime?.seconds ? new Date(doc.performTime.seconds * 1000) : null,
-            text: parseEditorData(doc.editorData),
-            author: doc.creator?.name || '不明'
-          });
+      const result = await window.HenryCore.query(QUERIES.LIST_CLINICAL_DOCUMENTS, {
+        input: {
+          patientUuid,
+          pageToken: '',
+          pageSize: 100,
+          clinicalDocumentTypes: [{
+            type: 'CUSTOM',
+            clinicalDocumentCustomTypeUuid: { value: PHARMACY_RECORD_CUSTOM_TYPE_UUID }
+          }]
         }
+      });
 
-        pageToken = data?.nextPageToken || '';
-      } while (pageToken);
+      const documents = result?.data?.listClinicalDocuments?.documents || [];
+
+      for (const doc of documents) {
+        allRecords.push({
+          id: doc.uuid,
+          date: doc.performTime?.seconds ? new Date(doc.performTime.seconds * 1000) : null,
+          text: parseEditorData(doc.editorData),
+          author: doc.creator?.name || '不明'
+        });
+      }
 
       // 日付順（古→新）でソート
       allRecords.sort((a, b) => (a.date || 0) - (b.date || 0));
@@ -2426,37 +2402,31 @@
   // 検査所見（読影結果等）を取得
   async function fetchInspectionFindings(patientUuid) {
     const allRecords = [];
-    let pageToken = '';
 
     try {
-      do {
-        const result = await window.HenryCore.query(QUERIES.LIST_CLINICAL_DOCUMENTS, {
-          input: {
-            patientUuid,
-            pageToken,
-            pageSize: 100,
-            clinicalDocumentTypes: [{
-              type: 'CUSTOM',
-              clinicalDocumentCustomTypeUuid: { value: INSPECTION_FINDINGS_CUSTOM_TYPE_UUID }
-            }]
-          }
-        });
-
-        const data = result?.data?.listClinicalDocuments;
-        const documents = data?.documents || [];
-
-        for (const doc of documents) {
-          allRecords.push({
-            id: doc.uuid,
-            date: doc.performTime?.seconds ? new Date(doc.performTime.seconds * 1000) : null,
-            editorData: doc.editorData, // 生データを保持（画像抽出用）
-            text: parseEditorData(doc.editorData),
-            author: doc.creator?.name || '不明'
-          });
+      const result = await window.HenryCore.query(QUERIES.LIST_CLINICAL_DOCUMENTS, {
+        input: {
+          patientUuid,
+          pageToken: '',
+          pageSize: 100,
+          clinicalDocumentTypes: [{
+            type: 'CUSTOM',
+            clinicalDocumentCustomTypeUuid: { value: INSPECTION_FINDINGS_CUSTOM_TYPE_UUID }
+          }]
         }
+      });
 
-        pageToken = data?.nextPageToken || '';
-      } while (pageToken);
+      const documents = result?.data?.listClinicalDocuments?.documents || [];
+
+      for (const doc of documents) {
+        allRecords.push({
+          id: doc.uuid,
+          date: doc.performTime?.seconds ? new Date(doc.performTime.seconds * 1000) : null,
+          editorData: doc.editorData, // 生データを保持（画像抽出用）
+          text: parseEditorData(doc.editorData),
+          author: doc.creator?.name || '不明'
+        });
+      }
 
       // 日付順（古→新）でソート
       allRecords.sort((a, b) => (a.date || 0) - (b.date || 0));
