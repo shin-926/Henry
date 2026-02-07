@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry 入院時オーダー
 // @namespace    https://github.com/shin-926/Henry
-// @version      1.3.3
+// @version      1.4.1
 // @description  入院予定患者に対して入院時オーダー（CT検査等）を一括作成
 // @author       sk powered by Claude
 // @match        https://henry-app.jp/*
@@ -995,7 +995,8 @@
 
   // 全テンプレート（UI表示用）
   const ALL_TEMPLATES = {
-    imagingBiopsy: { label: '画像検査・生体検査', templates: { ...CT_TEMPLATES, ...BIOPSY_TEMPLATES } },
+    imaging: { label: 'CT検査', templates: CT_TEMPLATES },
+    biopsy: { label: '生体検査', templates: BIOPSY_TEMPLATES },
     treatmentPlan: { label: '入院診療計画書', templates: {} },
     specimen: { label: '検体検査', templates: SPECIMEN_TEMPLATES },
     rehab: { label: 'リハビリ', templates: REHAB_TEMPLATES },
@@ -1004,10 +1005,9 @@
   };
 
   // 進捗表示用ラベル（処理順）
-  // imagingBiopsyは内部で画像検査と生体検査に分かれるため、個別に定義
   const PROGRESS_LABELS = [
-    { key: 'imaging', label: '画像検査', parentType: 'imagingBiopsy' },
-    { key: 'biopsy', label: '生体検査', parentType: 'imagingBiopsy' },
+    { key: 'imaging', label: '画像検査', parentType: 'imaging' },
+    { key: 'biopsy', label: '生体検査', parentType: 'biopsy' },
     { key: 'specimen', label: '検体検査', parentType: 'specimen' },
     { key: 'rehab', label: 'リハビリ', parentType: 'rehab' },
     { key: 'instruction', label: '入院時指示', parentType: 'instruction' },
@@ -1635,15 +1635,11 @@
       fetchExistingTreatmentPlanOnDate(patientUuid, orderDate)
     ]);
 
-    // imaging と biopsy の詳細をまとめる
-    const imagingBiopsyDetails = [
-      ...orders.imaging.details,
-      ...orders.biopsy.details
-    ];
-
     return {
-      imagingBiopsy: orders.imaging.exists && orders.biopsy.exists,  // 両方あれば作成済み
-      imagingBiopsyDetails,
+      imaging: orders.imaging.exists,
+      imagingDetails: orders.imaging.details,
+      biopsy: orders.biopsy.exists,
+      biopsyDetails: orders.biopsy.details,
       treatmentPlan: treatmentPlan.exists,
       treatmentPlanDetails: treatmentPlan.details,
       specimen: orders.specimen.exists,
@@ -3180,7 +3176,8 @@
 
     // 作成状況（初期値は全て未作成）
     let creationStatus = {
-      imagingBiopsy: false,
+      imaging: false,
+      biopsy: false,
       treatmentPlan: false,  // 後で実装予定
       specimen: false,
       rehab: false,
@@ -3248,6 +3245,7 @@
     cardGrid.style.cssText = `
       display: grid;
       grid-template-columns: repeat(3, 1fr);
+      grid-template-rows: 1fr 1fr;
       gap: 16px;
       flex: 1;
       overflow-y: auto;
@@ -3257,10 +3255,18 @@
     // オーダー種別定義
     const orderTypes = [
       {
-        key: 'imagingBiopsy',
-        label: '画像検査・生体検査',
-        description: 'CT + ECG + 血管伸展性',
-        buildDetail: () => buildImagingBiopsyDetail()
+        key: 'imaging',
+        label: 'CT検査',
+        description: '頭部・胸腹部・脊椎',
+        buildDetail: () => buildImagingDetail(),
+        group: 'imagingBiopsy'
+      },
+      {
+        key: 'biopsy',
+        label: '生体検査',
+        description: 'ECG + 血管伸展性',
+        buildDetail: () => buildBiopsyDetail(),
+        group: 'imagingBiopsy'
       },
       {
         key: 'treatmentPlan',
@@ -3330,7 +3336,7 @@
       for (let i = 0; i < details.length; i++) {
         const detail = details[i];
         const hasOrderUuid = !!detail.orderUuid;
-        const isImagingOrder = orderType === 'imagingBiopsy' && detail.imagingModality;
+        const isImagingOrder = orderType === 'imaging' && detail.imagingModality;
 
         html += `<div style="margin-bottom: 8px;">`;
 
@@ -3632,7 +3638,7 @@
           });
 
           // creationStatusを更新（UI反映のため）
-          const detailsKey = 'imagingBiopsyDetails';
+          const detailsKey = 'imagingDetails';
           const existingDetails = creationStatus[detailsKey] || [];
           const updatedDetails = existingDetails.map(d => {
             if (d.orderUuid === detail.orderUuid) {
@@ -3664,10 +3670,24 @@
       }
     }
 
-    // 各オーダーカードを生成
+    // 各オーダーカードを生成（group属性で縦積み対応）
+    const processedGroups = new Set();
     for (const type of orderTypes) {
-      const card = createOrderCard(type);
-      cardGrid.appendChild(card);
+      if (type.group) {
+        if (processedGroups.has(type.group)) continue;
+        processedGroups.add(type.group);
+        const groupTypes = orderTypes.filter(t => t.group === type.group);
+        const wrapper = document.createElement('div');
+        wrapper.style.cssText = 'display: flex; flex-direction: column; gap: 8px;';
+        for (const gt of groupTypes) {
+          const card = createOrderCard(gt);
+          card.style.flex = '1';
+          wrapper.appendChild(card);
+        }
+        cardGrid.appendChild(wrapper);
+      } else {
+        cardGrid.appendChild(createOrderCard(type));
+      }
     }
 
     content.appendChild(cardGrid);
@@ -3779,44 +3799,25 @@
     function updateCreationStatus(orderType, isCreated) {
       creationStatus[orderType] = isCreated;
       const ref = cardRefs[orderType];
-      if (ref?.statusBadge) {
-        ref.statusBadge.style.display = isCreated ? 'inline-flex' : 'none';
-      }
+      if (!ref?.statusBadge) return;
+      ref.statusBadge.style.display = isCreated ? 'inline-flex' : 'none';
     }
 
-    // --- 画像検査・生体検査の詳細 ---
-    function buildImagingBiopsyDetail() {
+    // --- CT検査の詳細 ---
+    function buildImagingDetail() {
       const container = document.createElement('div');
-
-      // CT検査セクション
-      const ctSection = document.createElement('div');
-      ctSection.style.marginBottom = '12px';
-
-      const ctTitle = document.createElement('div');
-      ctTitle.style.cssText = 'font-size: 13px; font-weight: 600; color: var(--henry-text-high); margin-bottom: 8px;';
-      ctTitle.textContent = '【CT検査】';
-      ctSection.appendChild(ctTitle);
-
       const noteInput = core.ui.createInput({ value: '頭部、胸腹部、脊椎' });
       noteInput.id = 'imaging-note';
       const noteField = core.ui.createFormField({ label: '補足', input: noteInput, inline: true });
-      noteField.style.marginLeft = '8px';
-      ctSection.appendChild(noteField);
-      container.appendChild(ctSection);
+      container.appendChild(noteField);
+      return container;
+    }
 
-      // 生体検査セクション
-      const biopsySection = document.createElement('div');
-      const biopsyTitle = document.createElement('div');
-      biopsyTitle.style.cssText = 'font-size: 13px; font-weight: 600; color: var(--henry-text-high); margin-bottom: 8px;';
-      biopsyTitle.textContent = '【生体検査】';
-      biopsySection.appendChild(biopsyTitle);
-
-      const biopsyList = document.createElement('div');
-      biopsyList.style.cssText = 'font-size: 13px; color: var(--henry-text-secondary); margin-left: 8px;';
-      biopsyList.innerHTML = '<div>・心電図12誘導</div><div>・ABI/PWV（血管伸展性）</div>';
-      biopsySection.appendChild(biopsyList);
-      container.appendChild(biopsySection);
-
+    // --- 生体検査の詳細 ---
+    function buildBiopsyDetail() {
+      const container = document.createElement('div');
+      container.style.cssText = 'font-size: 13px; color: var(--henry-text-secondary);';
+      container.innerHTML = '<div>・心電図12誘導</div><div>・ABI/PWV（血管伸展性）</div>';
       return container;
     }
 
@@ -4702,7 +4703,7 @@
             for (const type of selectedTypes) {
               const data = { type, orderDate };
 
-              if (type === 'imagingBiopsy') {
+              if (type === 'imaging') {
                 data.ctNote = content.querySelector('#imaging-note')?.value || '';
               } else if (type === 'treatmentPlan') {
                 // 入院診療計画書のデータを収集（現在は未実装のため保存のみ）
@@ -4805,15 +4806,15 @@
     const orderDateStr = `${orderDate.year}/${orderDate.month}/${orderDate.day}`;
 
     // 処理順にordersDataを並べ替え（treatmentPlanを最後にする）
-    const typeOrder = ['imagingBiopsy', 'specimen', 'rehab', 'instruction', 'standingOrder', 'treatmentPlan'];
+    const typeOrder = ['imaging', 'biopsy', 'specimen', 'rehab', 'instruction', 'standingOrder', 'treatmentPlan'];
     const sortedOrdersData = [...ordersData].sort((a, b) => {
       return typeOrder.indexOf(a.type) - typeOrder.indexOf(b.type);
     });
 
     // 選択されたオーダーに基づいて進捗表示リストを生成
-    const selectedProgressItems = PROGRESS_LABELS.filter(item =>
-      sortedOrdersData.some(d => d.type === item.parentType)
-    );
+    const selectedProgressItems = PROGRESS_LABELS.filter(item => {
+      return sortedOrdersData.some(d => d.type === item.parentType);
+    });
 
     // 進捗表示用HTMLを生成
     // 状態: pending(グレー点) → processing(回転スピナー) → done(緑チェック)
@@ -4910,7 +4911,7 @@
                 results.push({ type: data.type, success: true });
                 // 作成成功を通知
                 if (onOrderCreated) {
-                  onOrderCreated(data.type, true);
+                  onOrderCreated(data.type, true, data);
                 }
               } catch (e) {
                 console.error(`[${SCRIPT_NAME}] ${data.type} 作成エラー:`, e);
@@ -4946,8 +4947,7 @@
   async function createSingleOrder(patientData, orderData, onProgress) {
     const { type, orderDate, ctNote, treatmentPlanData, rehabData, instructionData, standingOrderText } = orderData;
 
-    if (type === 'imagingBiopsy') {
-      // 画像検査（CT）を作成
+    if (type === 'imaging') {
       onProgress?.('imaging', 'processing');
       await createImagingOrder({
         patientUuid: patientData.patient?.uuid,
@@ -4957,7 +4957,7 @@
         ctNote: ctNote
       });
       onProgress?.('imaging', 'done');
-      // 生体検査（ECG + ABI/PWV）を作成
+    } else if (type === 'biopsy') {
       onProgress?.('biopsy', 'processing');
       await createBiopsyInspectionOrder({
         patientUuid: patientData.patient?.uuid,
