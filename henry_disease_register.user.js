@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry Disease Register
 // @namespace    https://henry-app.jp/
-// @version      3.30.0
+// @version      3.32.0
 // @description  高速病名検索・登録
 // @author       sk powered by Claude & Gemini
 // @match        https://henry-app.jp/*
@@ -358,6 +358,30 @@
           customDiseaseName {
             value
           }
+          isDraft
+        }
+      }
+    }
+  `;
+
+  const GET_CONFIRMATION_REQUEST_QUERY = `
+    query GetUnconfirmedPatientReceiptDiseaseConfirmationRequestByPatientReceiptDisease(
+      $input: GetUnconfirmedPatientReceiptDiseaseConfirmationRequestByPatientReceiptDiseaseRequestInput!
+    ) {
+      getUnconfirmedPatientReceiptDiseaseConfirmationRequestByPatientReceiptDisease(input: $input) {
+        uuid
+      }
+    }
+  `;
+
+  const APPROVE_DISEASE_MUTATION = `
+    mutation CreatePatientReceiptDiseaseConfirmAction(
+      $input: CreatePatientReceiptDiseaseConfirmActionRequestInput!
+    ) {
+      createPatientReceiptDiseaseConfirmAction(input: $input) {
+        patientReceiptDiseaseConfirmAction {
+          uuid
+          confirmAction
         }
       }
     }
@@ -1160,6 +1184,18 @@
     }
     .dr-registered-outcome {
       color: #666;
+    }
+    .dr-draft-badge {
+      font-size: 10px;
+      padding: 1px 6px;
+      background: #ff9800;
+      color: #fff;
+      border-radius: 3px;
+      font-weight: bold;
+      cursor: pointer;
+    }
+    .dr-draft-badge:hover {
+      background: #e68900;
     }
     .dr-registered-empty {
       padding: 16px;
@@ -2078,6 +2114,7 @@
             <div class="dr-registered-meta">
               ${date ? `<span class="dr-registered-date">${date}</span>` : ''}
               ${outcomeLabel ? `<span class="dr-registered-outcome">${outcomeLabel}</span>` : ''}
+              ${d.isDraft ? '<span class="dr-draft-badge">未承認</span>' : ''}
             </div>
           </div>`;
         }).join('');
@@ -2087,6 +2124,16 @@
           item.onclick = (e) => {
             const index = parseInt(item.dataset.index);
             this.showEditPopup(e, this.registeredDiseases[index]);
+          };
+        });
+
+        // 未承認バッジのクリックイベント
+        container.querySelectorAll('.dr-draft-badge').forEach(badge => {
+          badge.onclick = (e) => {
+            e.stopPropagation();
+            const item = badge.closest('.dr-registered-item');
+            const index = parseInt(item.dataset.index);
+            this.approveDraft(this.registeredDiseases[index]);
           };
         });
 
@@ -3253,6 +3300,43 @@
           deleteBtn.disabled = false;
           deleteBtn.textContent = '削除';
         }
+      }
+    }
+
+    async approveDraft(disease) {
+      const displayName = disease.customDiseaseName?.value ||
+        this.applyModifiers(disease.masterDisease?.name, disease.masterModifiers);
+
+      try {
+        // Step 1: confirmation request UUIDを取得
+        const reqResult = await HenryCore.query(GET_CONFIRMATION_REQUEST_QUERY, {
+          input: { patientReceiptDiseaseUuid: disease.uuid }
+        });
+        const confirmationRequestUuid =
+          reqResult.data?.getUnconfirmedPatientReceiptDiseaseConfirmationRequestByPatientReceiptDisease?.uuid;
+
+        if (!confirmationRequestUuid) {
+          throw new Error('承認リクエストが見つかりません');
+        }
+
+        // Step 2: 承認mutationを実行
+        const approveResult = await HenryCore.query(APPROVE_DISEASE_MUTATION, {
+          input: {
+            patientReceiptDiseaseConfirmationRequestUuid: confirmationRequestUuid,
+            confirmAction: 'CONFIRM'
+          }
+        });
+
+        if (approveResult.data?.createPatientReceiptDiseaseConfirmAction) {
+          console.log(`[${SCRIPT_NAME}] 病名承認完了: ${displayName}`);
+          this.showSuccessMessage('承認しました');
+          this.loadRegisteredDiseases();
+        } else {
+          throw new Error('承認に失敗しました');
+        }
+      } catch (e) {
+        console.error(`[${SCRIPT_NAME}]`, e);
+        alert('承認に失敗しました: ' + e.message);
       }
     }
   }
