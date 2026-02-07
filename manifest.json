@@ -326,12 +326,12 @@
     },
     {
       "name": "henry_admission_order",
-      "label": "入院時オーダー（ベータ版）",
+      "label": "入院時オーダー",
       "file": "henry_admission_order.user.js",
       "match": ["henry-app.jp"],
       "category": "karte",
       "order": 13,
-      "beta": true
+      "enabled": true
     },
     {
       "name": "henry_test_helper",
