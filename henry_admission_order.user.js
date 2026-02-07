@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry 入院時オーダー
 // @namespace    https://github.com/shin-926/Henry
-// @version      1.4.1
+// @version      1.4.2
 // @description  入院予定患者に対して入院時オーダー（CT検査等）を一括作成
 // @author       sk powered by Claude
 // @match        https://henry-app.jp/*
@@ -3088,11 +3088,6 @@
       description.textContent = '入院予定患者から選択してください';
       content.appendChild(description);
 
-      // 検索ボックス
-      const searchInput = core.ui.createInput({ placeholder: '患者名で検索...' });
-      searchInput.style.marginBottom = '12px';
-      content.appendChild(searchInput);
-
       // 患者リスト（createListGroupを使用）
       let modal;
       const { wrapper: listWrapper, refresh: refreshList } = core.ui.createListGroup({
@@ -3126,17 +3121,6 @@
       listWrapper.style.cssText = 'flex: 1; overflow-y: auto; max-height: 400px;';
       content.appendChild(listWrapper);
 
-      // 検索イベント
-      searchInput.addEventListener('input', (e) => {
-        const filterText = e.target.value;
-        const filtered = patients.filter(p => {
-          const name = p.patient?.fullName || '';
-          const kana = p.patient?.fullNamePhonetic || '';
-          return name.includes(filterText) || kana.includes(filterText);
-        });
-        refreshList(filtered);
-      });
-
       modal = core.ui.showModal({
         title: '入院時オーダー',
         content,
@@ -3146,9 +3130,6 @@
         ]
       });
       if (activeCleaner) activeCleaner.add(() => modal.close());
-
-      // 検索にフォーカス
-      setTimeout(() => searchInput.focus(), 100);
 
     } catch (e) {
       spinner.close();
