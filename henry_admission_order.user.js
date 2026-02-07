@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry 入院時オーダー
 // @namespace    https://github.com/shin-926/Henry
-// @version      1.3.2
+// @version      1.3.3
 // @description  入院予定患者に対して入院時オーダー（CT検査等）を一括作成
 // @author       sk powered by Claude
 // @match        https://henry-app.jp/*
@@ -35,6 +35,10 @@
  * - リハビリ（運動器リハビリテーション）
  * - 入院時指示（食事・安静度・モニター等）
  * - 指示簿（入院）（発熱時・不眠時等の臨時指示）
+ *
+ * ■ SPA遷移対応
+ * - activeCleaner パターンで、画面遷移時に全モーダルを自動クローズ
+ * - henry:navigation / popstate イベントをリスンして発火
  */
 
 (function() {
@@ -42,6 +46,9 @@
 
   const SCRIPT_NAME = 'AdmissionOrder';
   const VERSION = GM_info.script.version;
+
+  /** SPA遷移時のクリーンアップ用。モーダル表示中のみ非null */
+  let activeCleaner = null;
 
   /** HTMLエスケープ（innerHTML に外部データを埋め込む際に使用） */
   function escapeHTML(str) {
@@ -3053,6 +3060,17 @@
    */
   async function showPatientSelectModal() {
     const core = pageWindow.HenryCore;
+
+    // 既存の処理があればクリーンアップ（二重起動防止）
+    if (activeCleaner) activeCleaner.exec();
+    activeCleaner = core.utils.createCleaner();
+
+    // orphaned DOM要素の包括的クリーンアップ
+    activeCleaner.add(() => {
+      document.querySelectorAll('.order-details-popover').forEach(el => el.remove());
+      document.querySelectorAll('.imaging-order-edit-modal').forEach(el => el.remove());
+    });
+
     const spinner = core.ui.showSpinner('入院予定患者を取得中...');
 
     try {
@@ -3131,6 +3149,7 @@
           { label: '閉じる', variant: 'secondary' }
         ]
       });
+      if (activeCleaner) activeCleaner.add(() => modal.close());
 
       // 検索にフォーカス
       setTimeout(() => searchInput.focus(), 100);
@@ -3554,6 +3573,7 @@
       modal.appendChild(footer);
       overlay.appendChild(modal);
       document.body.appendChild(overlay);
+      if (activeCleaner) activeCleaner.add(() => overlay.parentNode && overlay.remove());
 
       // イベントリスナー
       const closeModal = () => {
@@ -3978,6 +3998,7 @@
           }
         ]
       });
+      if (activeCleaner) activeCleaner.add(() => modal.close());
 
       // APIから全検査項目を取得
       const allInspections = await fetchAllOutsideInspections();
@@ -4368,7 +4389,13 @@
             const isDefaultChecked = defaultCheckedTrainings.includes(plan.name);
             const label = document.createElement('label');
             label.style.cssText = 'display: flex; align-items: center; gap: 3px; cursor: pointer; font-size: 13px; padding: 4px 8px; border: 1px solid var(--henry-border); border-radius: 4px; background: var(--henry-bg-sub);';
-            label.innerHTML = `<input type="checkbox" class="rehab-plan" value="${escapeHTML(plan.uuid)}"${isDefaultChecked ? ' checked' : ''}> ${escapeHTML(plan.name)}`;
+            const checkbox = document.createElement('input');
+            checkbox.type = 'checkbox';
+            checkbox.className = 'rehab-plan';
+            checkbox.value = plan.uuid;
+            if (isDefaultChecked) checkbox.checked = true;
+            label.appendChild(checkbox);
+            label.appendChild(document.createTextNode(` ${plan.name}`));
             ptContainer.appendChild(label);
           });
           ptRow.appendChild(ptContainer);
@@ -4386,7 +4413,13 @@
             const isDefaultChecked = defaultCheckedTrainings.includes(plan.name);
             const label = document.createElement('label');
             label.style.cssText = 'display: flex; align-items: center; gap: 3px; cursor: pointer; font-size: 13px; padding: 4px 8px; border: 1px solid var(--henry-border); border-radius: 4px; background: var(--henry-bg-sub);';
-            label.innerHTML = `<input type="checkbox" class="rehab-plan" value="${escapeHTML(plan.uuid)}"${isDefaultChecked ? ' checked' : ''}> ${escapeHTML(plan.name)}`;
+            const checkbox = document.createElement('input');
+            checkbox.type = 'checkbox';
+            checkbox.className = 'rehab-plan';
+            checkbox.value = plan.uuid;
+            if (isDefaultChecked) checkbox.checked = true;
+            label.appendChild(checkbox);
+            label.appendChild(document.createTextNode(` ${plan.name}`));
             otContainer.appendChild(label);
           });
           otRow.appendChild(otContainer);
@@ -4747,6 +4780,7 @@
         }
       ]
     });
+    if (activeCleaner) activeCleaner.add(() => modal.close());
 
     // 作成ボタンの参照を取得
     setTimeout(() => {
@@ -4900,6 +4934,7 @@
         }
       ]
     });
+    if (activeCleaner) activeCleaner.add(() => modal.close());
   }
 
   /**
@@ -5021,6 +5056,17 @@
       console.error(`[${SCRIPT_NAME}] HenryCore が見つかりません`);
       return;
     }
+
+    // SPA遷移時のクリーンアップ（モーダル残留防止）
+    const navHandler = () => {
+      if (activeCleaner) {
+        activeCleaner.exec();
+        activeCleaner = null;
+        console.log(`[${SCRIPT_NAME}] 画面遷移のため処理を中断しました`);
+      }
+    };
+    pageWindow.addEventListener('henry:navigation', navHandler);
+    pageWindow.addEventListener('popstate', navHandler);
 
     core.registerPlugin({
       id: 'admission-order',
