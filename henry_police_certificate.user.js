@@ -106,6 +106,7 @@
       return;
     }
 
+    const { close: hideSpinner } = HenryCore.ui.showSpinner('警察診断書を準備中...');
     try {
       const { data } = FC();
 
@@ -117,6 +118,7 @@
       ]);
 
       if (!patientInfo) {
+        hideSpinner();
         alert('患者情報を取得できませんでした');
         return;
       }
@@ -164,9 +166,11 @@
       formData.diseases = diseases;
 
       // モーダル表示
+      hideSpinner();
       showFormModal(formData, savedDraft?.savedAt);
 
     } catch (e) {
+      hideSpinner();
       console.error(`[${SCRIPT_NAME}] フォーム表示エラー:`, e);
       alert(`エラーが発生しました: ${e.message}`);
     }
