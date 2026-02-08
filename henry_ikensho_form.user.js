@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         主治医意見書作成フォーム
 // @namespace    https://henry-app.jp/
-// @version      2.7.2
+// @version      2.7.3
 // @description  主治医意見書の入力フォームとGoogle Docs出力（GAS不要版・API直接呼び出し）
 // @author       sk powered by Claude & Gemini
 // @match        https://henry-app.jp/*
@@ -1559,18 +1559,22 @@
    * フォームを表示
    */
   async function showOpinionForm(pageWindow) {
+    const { close: hideSpinner } = pageWindow.HenryCore.ui.showSpinner('主治医意見書を準備中...');
     try {
-      // 患者情報取得
+      // 下書きキャッシュのプリロードを開始（Sheets APIが最も遅いため先行実行）
+      const preloadPromise = DraftStorage._loadAll();
+
+      // 患者情報・医師情報を逐次取得
       const patientInfo = await fetchPatientInfo(pageWindow);
       if (!patientInfo) {
+        hideSpinner();
         alert('患者情報を取得できませんでした');
         return;
       }
-
-      // 医師情報取得
       const physicianName = await fetchPhysicianInfo(pageWindow);
 
-      // 下書き読み込み（Google Spreadsheet）
+      // プリロード完了を待ってから下書き検索（キャッシュ済みなので即座に完了）
+      await preloadPromise;
       const savedDraft = await DraftStorage.load(patientInfo.patient_uuid);
 
       // データの準備
@@ -1597,9 +1601,11 @@
       const formHTML = createFormHTML(formData, lastSavedAt);
 
       // モーダル表示
+      hideSpinner();
       showFormModal(pageWindow, formHTML, formData);
 
     } catch (e) {
+      hideSpinner();
       log?.error('フォーム表示エラー:', e.message);
       alert(`エラーが発生しました: ${e.message}`);
     }
