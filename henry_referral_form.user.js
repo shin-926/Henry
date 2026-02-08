@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         診療情報提供書フォーム
 // @namespace    https://henry-app.jp/
-// @version      1.6.0
+// @version      1.7.0
 // @description  診療情報提供書の入力フォームとGoogle Docs出力
 // @author       sk powered by Claude
 // @match        https://henry-app.jp/*
@@ -770,6 +770,31 @@
   }
 
   function showFormModal(formData, lastSavedAt) {
+    // 変更追跡フラグ
+    let isDirty = false;
+
+    // モーダルを閉じる前の確認・保存処理
+    async function confirmClose(modal) {
+      if (!isDirty) { modal.remove(); return; }
+
+      const save = await pageWindow.HenryCore?.ui?.showConfirm?.({
+        title: '未保存の変更',
+        message: '変更内容を下書き保存しますか？',
+        confirmLabel: '保存して閉じる',
+        cancelLabel: '保存せず閉じる'
+      });
+
+      if (save) {
+        const data = collectFormData(modal, formData);
+        const ds = pageWindow.HenryCore?.modules?.DraftStorage;
+        if (ds) {
+          const payload = { schemaVersion: DRAFT_SCHEMA_VERSION, data };
+          await ds.save(DRAFT_TYPE, formData.patient_uuid, payload, data.patient_name || '');
+        }
+      }
+      modal.remove();
+    }
+
     // 既存モーダルを削除
     const existingModal = document.getElementById('referral-form-modal');
     if (existingModal) existingModal.remove();
@@ -1280,10 +1305,17 @@
 
     document.body.appendChild(modal);
 
+    // フォーム変更を監視
+    const formBody = modal.querySelector('.rf-body');
+    if (formBody) {
+      formBody.addEventListener('input', () => { isDirty = true; });
+      formBody.addEventListener('change', () => { isDirty = true; });
+    }
+
     // イベントリスナー
-    modal.querySelector('.rf-close').addEventListener('click', () => modal.remove());
+    modal.querySelector('.rf-close').addEventListener('click', () => confirmClose(modal));
     modal.addEventListener('click', (e) => {
-      if (e.target === modal) modal.remove();
+      if (e.target === modal) confirmClose(modal);
     });
 
     // 紹介先コンボボックスの連携
@@ -1517,6 +1549,7 @@
       modal.querySelectorAll('.rf-checkbox-group input[type="checkbox"], .rf-checkbox-list input[type="checkbox"]').forEach(cb => {
         cb.checked = false;
       });
+      isDirty = false;
     });
 
     // 下書き保存
@@ -1527,6 +1560,7 @@
         const payload = { schemaVersion: DRAFT_SCHEMA_VERSION, data };
         const saved = await ds.save(DRAFT_TYPE, formData.patient_uuid, payload, data.patient_name || '');
         if (saved) {
+          isDirty = false;
           modal.querySelector('.rf-footer-left').textContent = `下書き: ${new Date().toLocaleString('ja-JP')}`;
           alert('下書きを保存しました');
         }
