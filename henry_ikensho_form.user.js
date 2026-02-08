@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         主治医意見書作成フォーム
 // @namespace    https://henry-app.jp/
-// @version      2.6.12
+// @version      2.7.1
 // @description  主治医意見書の入力フォームとGoogle Docs出力（GAS不要版・API直接呼び出し）
 // @author       sk powered by Claude & Gemini
 // @match        https://henry-app.jp/*
@@ -113,9 +113,8 @@
     `
   };
 
-  // localStorage設定
+  // localStorage → Spreadsheet マイグレーション用（マイグレーション完了後に削除可能）
   const STORAGE_KEY_PREFIX = 'henry_opinion_draft_';
-  // 下書きは期限なし（永続保存）
   const DRAFT_SCHEMA_VERSION = 1;  // 下書きの構造バージョン（構造変更時にインクリメント）
 
   let log = null;
@@ -240,6 +239,213 @@
       } catch (e) {
         console.error('[OpinionForm] getOrCreateFolder error:', e);
         throw new Error(`フォルダの取得/作成に失敗しました: ${e.message}`);
+      }
+    }
+  };
+
+  // =============================================================================
+  // 下書き管理（Google Spreadsheet）
+  // =============================================================================
+
+  const SHEETS_API_BASE = 'https://sheets.googleapis.com/v4';
+  const DRAFT_SPREADSHEET_NAME = 'Henry_下書きデータ';
+  const DRAFT_TYPE_IKENSHO = 'ikensho';
+
+  const DraftStorage = {
+    _spreadsheetId: null,
+    _cache: null, // { [patientUuid]: { rowIndex, jsonData, savedAt, patientName } }
+
+    // スプレッドシートを検索（Drive API）
+    async _findSpreadsheet() {
+      if (this._spreadsheetId) return this._spreadsheetId;
+
+      const query = `name='${DRAFT_SPREADSHEET_NAME}' and mimeType='application/vnd.google-apps.spreadsheet' and 'root' in parents and trashed=false`;
+      const url = `${API_CONFIG.DRIVE_API_BASE}/files?q=${encodeURIComponent(query)}&fields=files(id,name)`;
+      const result = await DriveAPI.request('GET', url);
+      if (result.files?.length > 0) {
+        this._spreadsheetId = result.files[0].id;
+        return this._spreadsheetId;
+      }
+      return null;
+    },
+
+    // スプレッドシートを新規作成（ヘッダー行付き）
+    async _createSpreadsheet() {
+      const url = `${SHEETS_API_BASE}/spreadsheets`;
+      const result = await DriveAPI.request('POST', url, {
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          properties: { title: DRAFT_SPREADSHEET_NAME },
+          sheets: [{
+            properties: { title: '下書き' },
+            data: [{
+              startRow: 0,
+              startColumn: 0,
+              rowData: [{
+                values: [
+                  { userEnteredValue: { stringValue: '患者UUID' } },
+                  { userEnteredValue: { stringValue: '下書き種別' } },
+                  { userEnteredValue: { stringValue: 'JSONデータ' } },
+                  { userEnteredValue: { stringValue: '保存日時' } },
+                  { userEnteredValue: { stringValue: '患者名' } }
+                ]
+              }]
+            }]
+          }]
+        })
+      });
+      this._spreadsheetId = result.spreadsheetId;
+      log?.info('下書きスプレッドシートを作成:', this._spreadsheetId);
+      return this._spreadsheetId;
+    },
+
+    // 取得 or 作成
+    async _getOrCreateSpreadsheet() {
+      let id = await this._findSpreadsheet();
+      if (!id) {
+        id = await this._createSpreadsheet();
+      }
+      return id;
+    },
+
+    // 全データを読み込んでキャッシュ（種別フィルタ付き）
+    async _loadAll() {
+      if (this._cache) return this._cache;
+
+      const spreadsheetId = await this._findSpreadsheet();
+      if (!spreadsheetId) {
+        this._cache = {};
+        return this._cache;
+      }
+
+      const url = `${SHEETS_API_BASE}/spreadsheets/${spreadsheetId}/values/${encodeURIComponent('下書き')}!A:E`;
+      const result = await DriveAPI.request('GET', url);
+      const rows = result.values || [];
+      this._cache = {};
+
+      for (let i = 1; i < rows.length; i++) {
+        const row = rows[i];
+        if (row[0] && row[1] === DRAFT_TYPE_IKENSHO) {
+          this._cache[row[0]] = {
+            rowIndex: i + 1,
+            jsonData: row[2] || '',
+            savedAt: row[3] || '',
+            patientName: row[4] || ''
+          };
+        }
+      }
+
+      return this._cache;
+    },
+
+    // 下書き保存（既存行更新 or 新規行追加）
+    async save(patientUuid, formData) {
+      const spreadsheetId = await this._getOrCreateSpreadsheet();
+      const now = new Date().toISOString();
+      const jsonStr = JSON.stringify({ schemaVersion: DRAFT_SCHEMA_VERSION, data: formData });
+      const patientName = formData.basic_info?.patient_name || '';
+
+      await this._loadAll();
+
+      const existing = this._cache[patientUuid];
+      const rowValues = [[patientUuid, DRAFT_TYPE_IKENSHO, jsonStr, now, patientName]];
+
+      let newRowIndex;
+      if (existing) {
+        const url = `${SHEETS_API_BASE}/spreadsheets/${spreadsheetId}/values/${encodeURIComponent('下書き')}!A${existing.rowIndex}:E${existing.rowIndex}?valueInputOption=RAW`;
+        await DriveAPI.request('PUT', url, {
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ values: rowValues })
+        });
+        newRowIndex = existing.rowIndex;
+      } else {
+        const url = `${SHEETS_API_BASE}/spreadsheets/${spreadsheetId}/values/${encodeURIComponent('下書き')}!A:E:append?valueInputOption=RAW&insertDataOption=INSERT_ROWS`;
+        const appendResult = await DriveAPI.request('POST', url, {
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ values: rowValues })
+        });
+        const range = appendResult?.updates?.updatedRange || '';
+        const match = range.match(/!A(\d+):/);
+        newRowIndex = match ? parseInt(match[1], 10) : Object.keys(this._cache).length + 2;
+      }
+
+      this._cache[patientUuid] = { rowIndex: newRowIndex, jsonData: jsonStr, savedAt: now, patientName };
+      log?.info('下書き保存完了（Spreadsheet）:', patientUuid);
+      return true;
+    },
+
+    // 下書き読み込み（Spreadsheet → localStorage マイグレーション付き）
+    async load(patientUuid) {
+      try {
+        await this._loadAll();
+
+        // Spreadsheet にあればそれを返す
+        const cached = this._cache[patientUuid];
+        if (cached) {
+          try {
+            const parsed = JSON.parse(cached.jsonData);
+            if (!parsed.schemaVersion || parsed.schemaVersion !== DRAFT_SCHEMA_VERSION) {
+              log?.info('互換性のない下書きをスキップ（バージョン不一致）');
+              return null;
+            }
+            if (!parsed.data?.basic_info) {
+              log?.info('不正な構造の下書きをスキップ');
+              return null;
+            }
+            return { data: parsed.data, savedAt: cached.savedAt };
+          } catch (e) {
+            log?.error('下書きJSONパースエラー:', e.message);
+            return null;
+          }
+        }
+
+        // localStorage からのマイグレーション
+        const lsKey = `${STORAGE_KEY_PREFIX}${patientUuid}`;
+        const stored = localStorage.getItem(lsKey);
+        if (stored) {
+          try {
+            const draft = JSON.parse(stored);
+            if (draft.schemaVersion === DRAFT_SCHEMA_VERSION && draft.data?.basic_info) {
+              log?.info('localStorage → Spreadsheet マイグレーション:', patientUuid);
+              await this.save(patientUuid, draft.data);
+              localStorage.removeItem(lsKey);
+              return { data: draft.data, savedAt: draft.savedAt };
+            }
+          } catch (e) {
+            log?.error('localStorage マイグレーションエラー:', e.message);
+          }
+          // 不正データはlocalStorageから削除
+          localStorage.removeItem(lsKey);
+        }
+
+        return null;
+      } catch (e) {
+        console.error(`[${SCRIPT_NAME}] 下書き読み込みエラー:`, e);
+        return null;
+      }
+    },
+
+    // 下書き削除
+    async delete(patientUuid) {
+      try {
+        const spreadsheetId = await this._findSpreadsheet();
+        if (!spreadsheetId) return;
+
+        await this._loadAll();
+        const existing = this._cache[patientUuid];
+        if (!existing) return;
+
+        // 行をクリア（削除ではなく空にする）
+        const url = `${SHEETS_API_BASE}/spreadsheets/${spreadsheetId}/values/${encodeURIComponent('下書き')}!A${existing.rowIndex}:E${existing.rowIndex}:clear`;
+        await DriveAPI.request('POST', url, {
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({})
+        });
+
+        delete this._cache[patientUuid];
+        log?.info('下書き削除完了:', patientUuid);
+      } catch (e) {
+        console.error(`[${SCRIPT_NAME}] 下書き削除エラー:`, e);
       }
     }
   };
@@ -417,72 +623,6 @@
   function formatDate(yyyymmdd) {
     if (!yyyymmdd || yyyymmdd.length !== 8) return '';
     return `${yyyymmdd.slice(0, 4)}-${yyyymmdd.slice(4, 6)}-${yyyymmdd.slice(6, 8)}`;
-  }
-
-  // =============================================================================
-  // localStorage管理
-  // =============================================================================
-
-  /**
-   * 下書き保存
-   */
-  function saveDraft(patientUuid, formData) {
-    try {
-      const key = `${STORAGE_KEY_PREFIX}${patientUuid}`;
-      const draft = {
-        schemaVersion: DRAFT_SCHEMA_VERSION,
-        data: formData,
-        savedAt: new Date().toISOString(),
-        patientName: formData.basic_info.patient_name
-      };
-      localStorage.setItem(key, JSON.stringify(draft));
-      log?.info('下書き保存完了:', key);
-      return true;
-    } catch (e) {
-      log?.error('下書き保存失敗:', e.message);
-      return false;
-    }
-  }
-
-  /**
-   * 下書き読み込み
-   * @returns {{ data: object, savedAt: string } | null}
-   */
-  function loadDraft(patientUuid) {
-    try {
-      const key = `${STORAGE_KEY_PREFIX}${patientUuid}`;
-      const stored = localStorage.getItem(key);
-      if (!stored) return null;
-
-      const draft = JSON.parse(stored);
-
-      // スキーマバージョンチェック（古い形式や不正な形式は無視）
-      if (!draft.schemaVersion || draft.schemaVersion !== DRAFT_SCHEMA_VERSION) {
-        localStorage.removeItem(key);
-        log?.info('互換性のない下書きを削除（バージョン不一致）:', key);
-        return null;
-      }
-
-      // データ構造の検証（必須プロパティのチェック）
-      if (!draft.data?.basic_info) {
-        localStorage.removeItem(key);
-        log?.info('不正な構造の下書きを削除:', key);
-        return null;
-      }
-
-      log?.info('下書き読み込み成功:', key);
-      return { data: draft.data, savedAt: draft.savedAt };
-    } catch (e) {
-      log?.error('下書き読み込み失敗:', e.message);
-      return null;
-    }
-  }
-
-  /**
-   * 古い下書きのクリーンアップ（現在は無効化 - 下書きは永続保存）
-   */
-  function cleanupOldDrafts() {
-    // 下書きは期限なしで永続保存するため、クリーンアップは行わない
   }
 
   // =============================================================================
@@ -1077,7 +1217,6 @@
   async function fetchPatientInfo(pageWindow) {
     try {
       const patientUuid = pageWindow.HenryCore.getPatientUuid();
-      console.log('[OpinionForm] patientUuid:', patientUuid);
       if (!patientUuid) {
         log?.error('患者UUIDが取得できません');
         return null;
@@ -1086,11 +1225,8 @@
       const result = await pageWindow.HenryCore.query(QUERIES.GetPatient, {
         input: { uuid: patientUuid }
       });
-      console.log('[OpinionForm] API result:', result);
 
       const patient = result.data?.getPatient;
-      console.log('[OpinionForm] patient:', patient);
-      console.log('[OpinionForm] patient全体:', JSON.stringify(patient, null, 2));
       if (!patient) {
         log?.error('患者情報が取得できません');
         return null;
@@ -1431,8 +1567,8 @@
       // 医師情報取得
       const physicianName = await fetchPhysicianInfo(pageWindow);
 
-      // 下書き読み込み
-      const savedDraft = loadDraft(patientInfo.patient_uuid);
+      // 下書き読み込み（Google Spreadsheet）
+      const savedDraft = await DraftStorage.load(patientInfo.patient_uuid);
 
       // データの準備
       const formData = savedDraft?.data || createInitialFormData(patientInfo, physicianName);
@@ -1663,33 +1799,6 @@
     section.appendChild(title);
 
     const data = formData.basic_info;
-
-    // 自動入力項目（編集可能）
-    section.appendChild(createTextField('記入日', 'date_of_writing_wareki', 'basic_info', data.date_of_writing_wareki || '', false));
-    section.appendChild(createTextField('患者名かな', 'patient_name_kana', 'basic_info', data.patient_name_kana || '', false));
-    section.appendChild(createTextField('患者名', 'patient_name', 'basic_info', data.patient_name || '', false));
-    section.appendChild(createTextField('生年月日', 'birth_date_wareki', 'basic_info', data.birth_date_wareki || '', false));
-    section.appendChild(createTextField('年齢', 'age', 'basic_info', data.age ? `${data.age}歳` : '', false));
-    section.appendChild(createRadioField(
-      '性別',
-      'sex',
-      'basic_info',
-      [
-        { label: '男', value: '1' },
-        { label: '女', value: '2' }
-      ],
-      data.sex,
-      false
-    ));
-    section.appendChild(createTextField('郵便番号', 'postal_code', 'basic_info', data.postal_code || '', false));
-    section.appendChild(createTextField('住所', 'address', 'basic_info', data.address || '', false));
-    section.appendChild(createTextField('連絡先電話番号', 'phone', 'basic_info', data.phone || '', false));
-    section.appendChild(createTextField('医師氏名', 'physician_name', 'basic_info', data.physician_name || '', false));
-    section.appendChild(createTextField('医療機関名', 'institution_name', 'basic_info', data.institution_name || '', false));
-    section.appendChild(createTextField('医療機関郵便番号', 'institution_postal_code', 'basic_info', data.institution_postal_code || '', false));
-    section.appendChild(createTextField('医療機関所在地', 'institution_address', 'basic_info', data.institution_address || '', false));
-    section.appendChild(createTextField('医療機関電話番号', 'institution_phone', 'basic_info', data.institution_phone || '', false));
-    section.appendChild(createTextField('医療機関FAX番号', 'institution_fax', 'basic_info', data.institution_fax || '', false));
 
     // 同意の有無（必須）
     section.appendChild(createRadioField(
@@ -3432,44 +3541,6 @@
   }
 
   /**
-   * 自動入力フィールドをセット
-   */
-  function setAutoFillFields(container, basicInfo) {
-    const autoFillFields = {
-      'date_of_writing_wareki': basicInfo.date_of_writing_wareki || '',
-      'patient_name_kana': basicInfo.patient_name_kana || '',
-      'patient_name': basicInfo.patient_name || '',
-      'birth_date_wareki': basicInfo.birth_date_wareki || '',
-      'age': basicInfo.age ? `${basicInfo.age}歳` : '',
-      'postal_code': basicInfo.postal_code || '',
-      'address': basicInfo.address || '',
-      'phone': basicInfo.phone || '',
-      'physician_name': basicInfo.physician_name || '',
-      'institution_name': basicInfo.institution_name || '',
-      'institution_postal_code': basicInfo.institution_postal_code || '',
-      'institution_address': basicInfo.institution_address || '',
-      'institution_phone': basicInfo.institution_phone || '',
-      'institution_fax': basicInfo.institution_fax || ''
-    };
-
-    // テキストフィールドをセット
-    Object.entries(autoFillFields).forEach(([fieldName, value]) => {
-      const input = container.querySelector(`input[data-field-name="${fieldName}"][data-section="basic_info"]`);
-      if (input) {
-        input.value = value;
-      }
-    });
-
-    // 性別のラジオボタンをセット
-    if (basicInfo.sex) {
-      const sexRadio = container.querySelector(`input[type="radio"][data-field-name="sex"][data-section="basic_info"][value="${basicInfo.sex}"]`);
-      if (sexRadio) {
-        sexRadio.checked = true;
-      }
-    }
-  }
-
-  /**
    * フォームからデータを収集
    */
   function collectFormData(container) {
@@ -3552,7 +3623,7 @@
     formHTML.addEventListener('change', () => { isDirty = true; });
 
     const modal = pageWindow.HenryCore.ui.showModal({
-      title: '主治医意見書入力フォーム',
+      title: `主治医意見書 - ${formData.basic_info.patient_name}`,
       content: formHTML,
       width: '700px',
       closeOnOverlayClick: false,
@@ -3568,13 +3639,10 @@
           variant: 'secondary',
           autoClose: false,
           onClick: () => {
-            if (!confirm('入力内容をクリアしますか？\n（自動入力項目は再セットされます）')) return;
+            if (!confirm('入力内容をクリアしますか？')) return;
 
             // フォームをクリア
             clearFormData(formHTML);
-
-            // 自動入力項目を再セット
-            setAutoFillFields(formHTML, formData.basic_info);
 
             isDirty = false;
             showFormMessage('入力内容をクリアしました', 'success');
@@ -3593,26 +3661,34 @@
         {
           label: '一時保存',
           autoClose: false,
-          onClick: (e, button) => {
+          onClick: async (e, button) => {
+            const originalText = button?.textContent;
             try {
               const collected = collectFormData(formHTML);
               // 自動入力項目をマージ（収集値を優先）
               collected.basic_info = { ...formData.basic_info, ...collected.basic_info };
 
-              if (saveDraft(formData.basic_info.patient_uuid, collected)) {
-                isDirty = false;
-                // ボタンテキストを一時的に変更（目立たない通知）
-                if (button) {
-                  const originalText = button.textContent;
-                  button.textContent = '✓ 保存しました';
-                  setTimeout(() => { button.textContent = originalText; }, 1500);
-                }
-              } else {
-                showFormMessage('保存に失敗しました', 'error');
+              // 保存中UI
+              if (button) {
+                button.disabled = true;
+                button.textContent = '保存中...';
+              }
+
+              await DraftStorage.save(formData.basic_info.patient_uuid, collected);
+              isDirty = false;
+              // ボタンテキストを一時的に変更（目立たない通知）
+              if (button) {
+                button.disabled = false;
+                button.textContent = '✓ 保存しました';
+                setTimeout(() => { button.textContent = originalText; }, 1500);
               }
             } catch (e) {
               log?.error('一時保存失敗', e.message);
               showFormMessage(`保存に失敗しました: ${e.message}`, 'error');
+              if (button) {
+                button.disabled = false;
+                button.textContent = originalText;
+              }
             }
           }
         },
@@ -3644,7 +3720,7 @@
               button.textContent = '作成中...';
 
               // 一時保存（Googleドキュメントを閉じても編集内容が残るように）
-              saveDraft(formData.basic_info.patient_uuid, collected);
+              await DraftStorage.save(formData.basic_info.patient_uuid, collected);
               isDirty = false;
 
               try {
@@ -3656,7 +3732,7 @@
                   window.open(result.documentUrl, '_blank');
 
                   // 下書きを削除（任意）
-                  // localStorage.removeItem(`${STORAGE_KEY_PREFIX}${formData.basic_info.patient_uuid}`);
+                  // await DraftStorage.delete(formData.basic_info.patient_uuid);
 
                   modal.close();
                 }
@@ -3691,9 +3767,6 @@
 
     log = pageWindow.HenryCore.utils.createLogger(SCRIPT_NAME);
     log.info(`Ready (v${VERSION})`);
-
-    // 古い下書きをクリーンアップ
-    cleanupOldDrafts();
 
     // HenryCore プラグイン登録（v2.7.0以降は自動的にToolboxに表示される）
     await pageWindow.HenryCore.registerPlugin({
