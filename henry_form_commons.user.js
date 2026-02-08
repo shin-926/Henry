@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry フォーム共通モジュール
 // @namespace    https://henry-app.jp/
-// @version      1.0.0
+// @version      1.1.0
 // @description  申込書・診断書フォームスクリプトの共通機能を提供
 // @author       sk powered by Claude
 // @match        https://henry-app.jp/*
@@ -31,7 +31,9 @@
  * - UNIT_CODES: 単位コードマッピング
  * - utils: ユーティリティ関数群
  * - data: データ取得関数群
- * - generateBaseCSS(prefix): CSS生成
+ * - generateBaseCSS(prefix): CSS生成（非推奨: generateFormCSS + showFormModal を使用）
+ * - generateFormCSS(prefix): フォームフィールドCSS生成（モーダル骨格を除く）
+ * - showFormModal(config): フォームモーダル構築（isDirty追跡・confirmClose・共通フッター）
  * - generateDoc(config): Google Docs出力の共通フロー
  * - initPlugin(config): プラグイン初期化ヘルパー
  *
@@ -985,6 +987,463 @@
   }
 
   // ==========================================
+  // フォームフィールドCSS（モーダル骨格を除く）
+  // ==========================================
+
+  /**
+   * フォームフィールド専用CSS（section, field, combobox, checkbox, radio, btn等）
+   * showFormModal() と組み合わせて使用する。モーダル骨格CSSは showModal({ variant: 'form' }) が提供する。
+   * @param {string} prefix - CSSクラスのプレフィックス
+   * @returns {string} CSS文字列
+   */
+  function generateFormCSS(prefix) {
+    return `
+      .${prefix}-section {
+        margin-bottom: 24px;
+      }
+      .${prefix}-section-title {
+        font-size: 16px;
+        font-weight: 600;
+        color: #3F51B5;
+        margin-bottom: 12px;
+        padding-bottom: 8px;
+        border-bottom: 2px solid #C5CAE9;
+      }
+      .${prefix}-row {
+        display: flex;
+        gap: 16px;
+        margin-bottom: 12px;
+      }
+      .${prefix}-field {
+        flex: 1;
+      }
+      .${prefix}-field label {
+        display: block;
+        font-size: 13px;
+        font-weight: 500;
+        color: #666;
+        margin-bottom: 4px;
+      }
+      .${prefix}-field input, .${prefix}-field textarea, .${prefix}-field select {
+        width: 100%;
+        padding: 10px 12px;
+        border: 1px solid #ddd;
+        border-radius: 6px;
+        font-size: 14px;
+        box-sizing: border-box;
+      }
+      .${prefix}-field input:focus, .${prefix}-field textarea:focus, .${prefix}-field select:focus {
+        outline: none;
+        border-color: #3F51B5;
+        box-shadow: 0 0 0 3px rgba(63, 81, 181, 0.2);
+      }
+      .${prefix}-field select {
+        background: #fff;
+        cursor: pointer;
+      }
+      .${prefix}-field select:disabled {
+        background: #f5f5f5;
+        color: #999;
+        cursor: not-allowed;
+      }
+      .${prefix}-field textarea {
+        resize: vertical;
+        min-height: 60px;
+      }
+      .${prefix}-field.readonly input {
+        background: #f5f5f5;
+        color: #666;
+      }
+      .${prefix}-combobox {
+        position: relative;
+      }
+      .${prefix}-combobox-input {
+        width: 100%;
+        padding: 10px 36px 10px 12px;
+        border: 1px solid #ddd;
+        border-radius: 6px;
+        font-size: 14px;
+        box-sizing: border-box;
+      }
+      .${prefix}-combobox-input:focus {
+        outline: none;
+        border-color: #3F51B5;
+        box-shadow: 0 0 0 3px rgba(63, 81, 181, 0.2);
+      }
+      .${prefix}-combobox-input:disabled {
+        background: #f5f5f5;
+        color: #999;
+      }
+      .${prefix}-combobox-toggle {
+        position: absolute;
+        right: 1px;
+        top: 1px;
+        bottom: 1px;
+        width: 32px;
+        background: #f5f5f5;
+        border: none;
+        border-left: 1px solid #ddd;
+        border-radius: 0 5px 5px 0;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: #666;
+        font-size: 12px;
+      }
+      .${prefix}-combobox-toggle:hover {
+        background: #e8e8e8;
+      }
+      .${prefix}-combobox-toggle:disabled {
+        cursor: not-allowed;
+        color: #bbb;
+      }
+      .${prefix}-combobox-dropdown {
+        display: none;
+        position: absolute;
+        top: 100%;
+        left: 0;
+        right: 0;
+        max-height: 200px;
+        overflow-y: auto;
+        background: #fff;
+        border: 1px solid #ddd;
+        border-top: none;
+        border-radius: 0 0 6px 6px;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+        z-index: 1000;
+      }
+      .${prefix}-combobox-dropdown.open {
+        display: block;
+      }
+      .${prefix}-combobox-option {
+        padding: 10px 12px;
+        cursor: pointer;
+        font-size: 14px;
+      }
+      .${prefix}-combobox-option:hover {
+        background: #E8EAF6;
+      }
+      .${prefix}-combobox-option.selected {
+        background: #C5CAE9;
+        color: #303F9F;
+      }
+      .${prefix}-combobox-empty {
+        padding: 10px 12px;
+        color: #999;
+        font-size: 14px;
+      }
+      .${prefix}-checkbox-group {
+        margin-top: 8px;
+      }
+      .${prefix}-checkbox-item {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 8px 12px;
+        background: #f8f9fa;
+        border-radius: 6px;
+        margin-bottom: 6px;
+      }
+      .${prefix}-checkbox-item input[type="checkbox"] {
+        width: 18px;
+        height: 18px;
+      }
+      .${prefix}-checkbox-item label {
+        margin: 0;
+        flex: 1;
+        font-size: 14px;
+        color: #333;
+      }
+      .${prefix}-checkbox-item.main-disease {
+        background: #E8EAF6;
+        border: 1px solid #9FA8DA;
+      }
+      .${prefix}-use-toggle {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        padding: 12px;
+        background: #fff3e0;
+        border-radius: 8px;
+        margin-bottom: 12px;
+      }
+      .${prefix}-use-toggle input[type="checkbox"] {
+        width: 20px;
+        height: 20px;
+      }
+      .${prefix}-use-toggle label {
+        font-weight: 500;
+        color: #e65100;
+      }
+      .${prefix}-radio-group {
+        display: flex;
+        gap: 16px;
+        margin-top: 8px;
+      }
+      .${prefix}-radio-item {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+      }
+      .${prefix}-radio-item input[type="radio"] {
+        width: 18px;
+        height: 18px;
+      }
+      .${prefix}-radio-item label {
+        font-size: 14px;
+        color: #333;
+        margin: 0;
+      }
+      .${prefix}-date-row {
+        display: flex;
+        gap: 12px;
+        align-items: center;
+      }
+      .${prefix}-date-row input[type="date"] {
+        flex: 0 1 200px;
+        min-width: 150px;
+      }
+      .${prefix}-period-group {
+        display: flex;
+        gap: 12px;
+        flex-shrink: 0;
+      }
+      .${prefix}-period-group label {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        font-size: 14px;
+        cursor: pointer;
+        white-space: nowrap;
+      }
+      .${prefix}-btn {
+        padding: 10px 24px;
+        border: none;
+        border-radius: 6px;
+        font-size: 14px;
+        font-weight: 500;
+        cursor: pointer;
+        transition: all 0.2s;
+      }
+      .${prefix}-btn-secondary {
+        background: #e0e0e0;
+        color: #333;
+      }
+      .${prefix}-btn-secondary:hover {
+        background: #d0d0d0;
+      }
+      .${prefix}-btn-primary {
+        background: #3F51B5;
+        color: white;
+      }
+      .${prefix}-btn-primary:hover {
+        background: #3949AB;
+      }
+      .${prefix}-btn-primary:disabled {
+        background: #ccc;
+        cursor: not-allowed;
+      }
+      .${prefix}-btn-link {
+        background: #E8EAF6;
+        color: #303F9F;
+        border: 1px solid #9FA8DA;
+        padding: 8px 12px;
+        white-space: nowrap;
+        font-size: 13px;
+      }
+      .${prefix}-btn-link:hover {
+        background: #C5CAE9;
+      }
+    `;
+  }
+
+  // ==========================================
+  // フォームモーダル共通構築
+  // ==========================================
+
+  /**
+   * フォームモーダルを構築・表示する共通関数
+   * HenryCore.ui.showModal({ variant: 'form' }) をラップし、isDirty追跡・confirmClose・共通フッターを提供する。
+   *
+   * @param {Object} config
+   * @param {string} config.id - モーダルID（重複排除用）
+   * @param {string} config.title - モーダルタイトル
+   * @param {string} config.prefix - CSSプレフィックス
+   * @param {string} config.bodyHTML - フォーム本体のHTML文字列
+   * @param {string} [config.headerColor='#3F51B5'] - ヘッダー背景色
+   * @param {string} [config.extraCSS=''] - スクリプト固有の追加CSS
+   * @param {string} [config.width] - モーダルの幅
+   *
+   * @param {string} config.draftType - DraftStorage タイプ
+   * @param {number} config.draftSchemaVersion - DraftStorage スキーマバージョン
+   * @param {string} config.patientUuid - 患者UUID
+   * @param {string} config.patientName - 患者名（DraftStorage保存用）
+   * @param {string|null} [config.lastSavedAt] - 前回保存日時
+   *
+   * @param {function} config.collectFormData - (bodyEl) => Object フォームデータを収集
+   * @param {function} config.onClear - (bodyEl) => void クリア処理
+   * @param {function} config.onGenerate - async (data) => void Google Docs出力
+   * @param {function} [config.onSetup] - (bodyEl, helpers) => void スクリプト固有の初期化
+   *
+   * @returns {{ close, element, body, isDirty: () => boolean, setDirty: (v) => void, setFooterLeft }}
+   */
+  function showFormModal(config) {
+    const {
+      id, title, prefix, bodyHTML,
+      headerColor = '#3F51B5', extraCSS = '', width = '90%',
+      draftType, draftSchemaVersion, patientUuid, patientName,
+      lastSavedAt = null,
+      collectFormData, onClear, onGenerate, onSetup,
+    } = config;
+
+    const HenryCore = pageWindow.HenryCore;
+    if (!HenryCore) {
+      console.error(`[${SCRIPT_NAME}] HenryCore not found`);
+      return null;
+    }
+
+    // 既存モーダル（同ID）を削除
+    const existing = document.getElementById(id);
+    if (existing) existing.remove();
+
+    // CSS付きのコンテンツを構築
+    const contentEl = document.createElement('div');
+    contentEl.innerHTML = `<style>${generateFormCSS(prefix)}${extraCSS}</style>${bodyHTML}`;
+
+    // isDirty 追跡
+    let isDirty = false;
+
+    // confirmClose: onBeforeClose に接続
+    const confirmClose = async () => {
+      if (!isDirty) return; // undefined = 閉じてOK
+      const save = await HenryCore.ui.showConfirm({
+        title: '未保存の変更',
+        message: '変更内容を下書き保存しますか？',
+        confirmLabel: '保存して閉じる',
+        cancelLabel: '保存せず閉じる'
+      });
+      if (save) {
+        const data = collectFormData(modal.body);
+        const ds = HenryCore.modules?.DraftStorage;
+        if (ds) {
+          const payload = { schemaVersion: draftSchemaVersion, data };
+          await ds.save(draftType, patientUuid, payload, patientName || '');
+        }
+      }
+      // undefined を返す = 閉じてOK
+    };
+
+    // フッターボタン
+    const actions = [
+      {
+        label: 'クリア',
+        variant: 'secondary',
+        autoClose: false,
+        onClick: async () => {
+          const confirmed = await HenryCore.ui.showConfirm({
+            title: '入力内容のクリア',
+            message: '手入力した内容をすべてクリアしますか？\n（患者情報などの自動入力項目はクリアされません）',
+            confirmLabel: 'クリア',
+            cancelLabel: 'キャンセル'
+          });
+          if (!confirmed) return;
+          if (onClear) onClear(modal.body);
+          isDirty = false;
+        },
+        className: 'form-btn-clear',
+      },
+      {
+        label: '下書き保存',
+        variant: 'secondary',
+        autoClose: false,
+        onClick: async () => {
+          const data = collectFormData(modal.body);
+          const ds = HenryCore.modules?.DraftStorage;
+          if (ds) {
+            const payload = { schemaVersion: draftSchemaVersion, data };
+            const saved = await ds.save(draftType, patientUuid, payload, patientName || '');
+            if (saved) {
+              isDirty = false;
+              modal.setFooterLeft(`下書き: ${new Date().toLocaleString('ja-JP')}`);
+              HenryCore.ui.showToast('下書きを保存しました', 'success');
+            }
+          }
+        },
+      },
+      {
+        label: 'Google Docsに出力',
+        variant: 'primary',
+        autoClose: false,
+        id: `${prefix}-generate`,
+        onClick: async (e, btn) => {
+          btn.disabled = true;
+          btn.textContent = '生成中...';
+          try {
+            const data = collectFormData(modal.body);
+            await onGenerate(data);
+            const ds = HenryCore.modules?.DraftStorage;
+            if (ds) await ds.delete(draftType, patientUuid);
+            modal.close();
+          } catch (err) {
+            console.error(`[${SCRIPT_NAME}] 出力エラー:`, err);
+            alert(`エラーが発生しました: ${err.message}`);
+            btn.disabled = false;
+            btn.textContent = 'Google Docsに出力';
+          }
+        },
+      },
+    ];
+
+    // showModal({ variant: 'form' }) を呼ぶ
+    const modal = HenryCore.ui.showModal({
+      title,
+      content: contentEl,
+      actions,
+      width,
+      variant: 'form',
+      showCloseButton: true,
+      closeOnEsc: true,
+      closeOnOverlayClick: true,
+      onBeforeClose: confirmClose,
+      headerColor,
+      footerLeft: lastSavedAt ? `下書き: ${new Date(lastSavedAt).toLocaleString('ja-JP')}` : '',
+      className: id,
+    });
+
+    // モーダルにIDを設定（重複排除用）
+    const modalContent = modal.element.querySelector('.henry-modal-content');
+    if (modalContent) modalContent.id = id;
+
+    // isDirty 追跡をbodyのinput/changeイベントで自動設定
+    if (modal.body) {
+      modal.body.addEventListener('input', () => { isDirty = true; });
+      modal.body.addEventListener('change', () => { isDirty = true; });
+    }
+
+    // クリアボタンのスタイル（赤文字）
+    const clearBtn = modal.element.querySelector('.form-btn-clear');
+    if (clearBtn) clearBtn.style.color = '#d32f2f';
+
+    // スクリプト固有の初期化
+    if (onSetup && modal.body) {
+      onSetup(modal.body, {
+        isDirty: () => isDirty,
+        setDirty: (v) => { isDirty = v; },
+      });
+    }
+
+    return {
+      close: modal.close,
+      element: modal.element,
+      body: modal.body,
+      isDirty: () => isDirty,
+      setDirty: (v) => { isDirty = v; },
+      setFooterLeft: modal.setFooterLeft,
+    };
+  }
+
+  // ==========================================
   // Google Docs出力の共通スキャフォールド
   // ==========================================
 
@@ -1087,7 +1546,9 @@
     UNIT_CODES,
     utils,
     data,
-    generateBaseCSS,
+    generateBaseCSS,   // 非推奨: generateFormCSS + showFormModal を使用すること
+    generateFormCSS,
+    showFormModal,
     generateDoc,
     initPlugin,
     getGoogleAuth

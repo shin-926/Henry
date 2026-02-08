@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         屋島総合病院 FAX診療申込書
 // @namespace    https://henry-app.jp/
-// @version      1.3.0
+// @version      1.4.0
 // @description  屋島総合病院へのFAX診療申込書を作成
 // @author       sk powered by Claude
 // @match        https://henry-app.jp/*
@@ -224,334 +224,250 @@
     }
   }
 
-  function showFormModal(formData, lastSavedAt) {
-    const existingModal = document.getElementById('yrf-form-modal');
-    if (existingModal) existingModal.remove();
-
+  function buildFormBody(formData) {
     const departments = getYashimaDepartments();
-    const { utils } = FC();
-    const escapeHtml = utils.escapeHtml;
+    const escapeHtml = FC().utils.escapeHtml;
 
     // 時間選択肢を生成
     const hourOptions = Array.from({ length: 10 }, (_, i) => 8 + i); // 8-17時
     const minuteOptions = ['00', '15', '30', '45'];
 
-    const modal = document.createElement('div');
-    modal.id = 'yrf-form-modal';
-    modal.innerHTML = `
-      <style>
-        ${FC().generateBaseCSS('yrf')}
-        .yrf-time-row {
-          display: flex;
-          gap: 8px;
-          align-items: center;
-        }
-        .yrf-time-row select {
-          width: 80px;
-        }
-        .yrf-covid-section {
-          background: #fff8e1;
-          border: 1px solid #ffe082;
-          border-radius: 8px;
-          padding: 16px;
-        }
-        .yrf-covid-section .yrf-section-title {
-          color: #f57c00;
-          border-bottom-color: #ffe082;
-        }
-        .yrf-covid-row {
-          display: flex;
-          gap: 12px;
-          align-items: center;
-          margin-bottom: 12px;
-          padding: 10px 12px;
-          background: #fffde7;
-          border-radius: 6px;
-          flex-wrap: wrap;
-        }
-        .yrf-covid-row .question {
-          flex: 1;
-          min-width: 200px;
-          font-size: 13px;
-          color: #333;
-        }
-        .yrf-covid-row .question-num {
-          font-weight: 600;
-          color: #f57c00;
-          margin-right: 4px;
-        }
-        .yrf-covid-row input[type="text"],
-        .yrf-covid-row input[type="date"],
-        .yrf-covid-row select {
-          padding: 6px 10px;
-          border: 1px solid #ddd;
-          border-radius: 4px;
-          font-size: 14px;
-        }
-        .yrf-covid-row input[type="text"] {
-          width: 120px;
-        }
-        .yrf-covid-row input[type="date"] {
-          width: 150px;
-        }
-        .yrf-covid-row select {
-          width: 70px;
-        }
-      </style>
-      <div class="yrf-container">
-        <div class="yrf-header">
-          <h2>屋島総合病院 FAX診療申込書</h2>
-          <button class="yrf-close" title="閉じる">&times;</button>
-        </div>
-        <div class="yrf-body">
-          <!-- 屋島総合病院 受診希望 -->
-          <div class="yrf-section">
-            <div class="yrf-section-title">屋島総合病院 受診希望</div>
-            <div class="yrf-row">
-              <div class="yrf-field">
-                <label>受診希望科</label>
-                <select id="yrf-dest-department">
-                  <option value="">選択してください</option>
-                  ${departments.map(dept => `
-                    <option value="${escapeHtml(dept)}" ${formData.destination_department === dept ? 'selected' : ''}>
-                      ${escapeHtml(dept)}
-                    </option>
-                  `).join('')}
-                </select>
-              </div>
-              <div class="yrf-field">
-                <label>希望医師名</label>
-                <div style="display: flex; gap: 8px; align-items: flex-start;">
-                  <div class="yrf-combobox" data-field="doctor" style="flex: 1;">
-                    <input type="text" class="yrf-combobox-input" id="yrf-dest-doctor" value="${escapeHtml(formData.destination_doctor)}" placeholder="医師名を入力" ${!formData.destination_department ? 'disabled' : ''}>
-                    <button type="button" class="yrf-combobox-toggle" ${!formData.destination_department ? 'disabled' : ''} title="リストから選択">▼</button>
-                    <div class="yrf-combobox-dropdown" id="yrf-doctor-dropdown"></div>
-                  </div>
-                  <button type="button" class="yrf-btn yrf-btn-link" id="yrf-open-schedule" title="外来診療担当表を見る">外来表</button>
-                </div>
-              </div>
-            </div>
+    return `
+      <!-- 屋島総合病院 受診希望 -->
+      <div class="yrf-section">
+        <div class="yrf-section-title">屋島総合病院 受診希望</div>
+        <div class="yrf-row">
+          <div class="yrf-field">
+            <label>受診希望科</label>
+            <select id="yrf-dest-department">
+              <option value="">選択してください</option>
+              ${departments.map(dept => `
+                <option value="${escapeHtml(dept)}" ${formData.destination_department === dept ? 'selected' : ''}>
+                  ${escapeHtml(dept)}
+                </option>
+              `).join('')}
+            </select>
           </div>
-
-          <!-- 希望来院日 -->
-          <div class="yrf-section">
-            <div class="yrf-section-title">希望来院日</div>
-            <div class="yrf-row">
-              <div class="yrf-field">
-                <label>希望日</label>
-                <input type="date" id="yrf-hope-date-1" value="${escapeHtml(formData.hope_date_1)}">
+          <div class="yrf-field">
+            <label>希望医師名</label>
+            <div style="display: flex; gap: 8px; align-items: flex-start;">
+              <div class="yrf-combobox" data-field="doctor" style="flex: 1;">
+                <input type="text" class="yrf-combobox-input" id="yrf-dest-doctor" value="${escapeHtml(formData.destination_doctor)}" placeholder="医師名を入力" ${!formData.destination_department ? 'disabled' : ''}>
+                <button type="button" class="yrf-combobox-toggle" ${!formData.destination_department ? 'disabled' : ''} title="リストから選択">▼</button>
+                <div class="yrf-combobox-dropdown" id="yrf-doctor-dropdown"></div>
               </div>
-              <div class="yrf-field">
-                <label>希望時間</label>
-                <div class="yrf-time-row">
-                  <select id="yrf-hope-time-hour">
-                    <option value="">時</option>
-                    ${hourOptions.map(h => `
-                      <option value="${h}" ${formData.hope_time_hour === String(h) ? 'selected' : ''}>${h}</option>
-                    `).join('')}
-                  </select>
-                  <span>時</span>
-                  <select id="yrf-hope-time-minute">
-                    <option value="">分</option>
-                    ${minuteOptions.map(m => `
-                      <option value="${m}" ${formData.hope_time_minute === m ? 'selected' : ''}>${m}</option>
-                    `).join('')}
-                  </select>
-                  <span>分</span>
-                </div>
-              </div>
+              <button type="button" class="yrf-btn yrf-btn-link" id="yrf-open-schedule" title="外来診療担当表を見る">外来表</button>
             </div>
-          </div>
-
-          <!-- 当院受診歴 -->
-          <div class="yrf-section">
-            <div class="yrf-section-title">屋島総合病院 受診歴</div>
-            <div class="yrf-radio-group">
-              <div class="yrf-radio-item">
-                <input type="radio" name="yrf-visit-history" id="yrf-visit-yes" value="yes" ${formData.visit_history === 'yes' ? 'checked' : ''}>
-                <label for="yrf-visit-yes">有</label>
-              </div>
-              <div class="yrf-radio-item">
-                <input type="radio" name="yrf-visit-history" id="yrf-visit-no" value="no" ${formData.visit_history === 'no' ? 'checked' : ''}>
-                <label for="yrf-visit-no">無</label>
-              </div>
-              <div class="yrf-radio-item">
-                <input type="radio" name="yrf-visit-history" id="yrf-visit-unknown" value="unknown" ${formData.visit_history === 'unknown' ? 'checked' : ''}>
-                <label for="yrf-visit-unknown">不明</label>
-              </div>
-            </div>
-          </div>
-
-          <!-- 主訴又は傷病名 -->
-          <div class="yrf-section">
-            <div class="yrf-section-title">主訴又は傷病名</div>
-            ${formData.diseases.length > 0 ? `
-              <div style="margin-bottom: 12px;">
-                <label style="display: block; font-size: 13px; font-weight: 500; color: #666; margin-bottom: 8px;">登録済み病名から選択</label>
-                <div id="yrf-diseases-list" class="yrf-checkbox-group">
-                  ${formData.diseases.map(d => `
-                    <div class="yrf-checkbox-item ${d.isMain ? 'main-disease' : ''}">
-                      <input type="checkbox" id="yrf-disease-${d.uuid}" value="${d.uuid}"
-                        ${formData.selected_diseases?.includes(d.uuid) ? 'checked' : ''}>
-                      <label for="yrf-disease-${d.uuid}">${escapeHtml(d.name)}${d.isMain ? ' (主病名)' : ''}${d.isSuspected ? ' (疑い)' : ''}</label>
-                    </div>
-                  `).join('')}
-                </div>
-              </div>
-            ` : ''}
-            <div class="yrf-field">
-              <label>自由記述</label>
-              <textarea id="yrf-diagnosis-text" placeholder="主訴又は傷病名を入力">${escapeHtml(formData.diagnosis_text)}</textarea>
-            </div>
-          </div>
-
-          <!-- 新型コロナ問診 -->
-          <div class="yrf-section yrf-covid-section">
-            <div class="yrf-section-title">新型コロナウイルス感染症への対策</div>
-
-            <div class="yrf-covid-row">
-              <div class="question"><span class="question-num">①</span>2ヶ月以内に、コロナに感染しましたか？</div>
-              <div class="yrf-radio-group">
-                <div class="yrf-radio-item">
-                  <input type="radio" name="yrf-covid-infected" id="yrf-covid-infected-no" value="no" ${formData.covid_infected === 'no' ? 'checked' : ''}>
-                  <label for="yrf-covid-infected-no">いいえ</label>
-                </div>
-                <div class="yrf-radio-item">
-                  <input type="radio" name="yrf-covid-infected" id="yrf-covid-infected-yes" value="yes" ${formData.covid_infected === 'yes' ? 'checked' : ''}>
-                  <label for="yrf-covid-infected-yes">はい</label>
-                </div>
-              </div>
-              <span style="font-size: 13px;">診断日:</span>
-              <input type="date" id="yrf-covid-infected-date" value="${escapeHtml(formData.covid_infected_date)}" ${formData.covid_infected !== 'yes' ? 'disabled' : ''}>
-            </div>
-
-            <div class="yrf-covid-row">
-              <div class="question"><span class="question-num">②</span>2週間以内に、コロナ感染者との接触や、発生施設等との関連がありませんか？</div>
-              <div class="yrf-radio-group">
-                <div class="yrf-radio-item">
-                  <input type="radio" name="yrf-covid-contact" id="yrf-covid-contact-no" value="no" ${formData.covid_contact === 'no' ? 'checked' : ''}>
-                  <label for="yrf-covid-contact-no">なし</label>
-                </div>
-                <div class="yrf-radio-item">
-                  <input type="radio" name="yrf-covid-contact" id="yrf-covid-contact-yes" value="yes" ${formData.covid_contact === 'yes' ? 'checked' : ''}>
-                  <label for="yrf-covid-contact-yes">あり</label>
-                </div>
-              </div>
-              <input type="text" id="yrf-covid-contact-detail" value="${escapeHtml(formData.covid_contact_detail)}" placeholder="詳細" ${formData.covid_contact !== 'yes' ? 'disabled' : ''}>
-            </div>
-
-            <div class="yrf-covid-row">
-              <div class="question"><span class="question-num">③</span>2週間以内に、同居家族以外との会食、大勢が集まるイベントなどへの参加はありませんか？</div>
-              <div class="yrf-radio-group">
-                <div class="yrf-radio-item">
-                  <input type="radio" name="yrf-covid-gathering" id="yrf-covid-gathering-no" value="no" ${formData.covid_gathering === 'no' ? 'checked' : ''}>
-                  <label for="yrf-covid-gathering-no">なし</label>
-                </div>
-                <div class="yrf-radio-item">
-                  <input type="radio" name="yrf-covid-gathering" id="yrf-covid-gathering-yes" value="yes" ${formData.covid_gathering === 'yes' ? 'checked' : ''}>
-                  <label for="yrf-covid-gathering-yes">あり</label>
-                </div>
-              </div>
-              <input type="text" id="yrf-covid-gathering-detail" value="${escapeHtml(formData.covid_gathering_detail)}" placeholder="詳細" ${formData.covid_gathering !== 'yes' ? 'disabled' : ''}>
-            </div>
-
-            <div class="yrf-covid-row">
-              <div class="question"><span class="question-num">④</span>1週間以内に、37度以上の発熱、咳、のどの痛み、鼻みず、嘔吐・下痢等の症状はありませんか？</div>
-              <div class="yrf-radio-group">
-                <div class="yrf-radio-item">
-                  <input type="radio" name="yrf-covid-symptoms" id="yrf-covid-symptoms-no" value="no" ${formData.covid_symptoms === 'no' ? 'checked' : ''}>
-                  <label for="yrf-covid-symptoms-no">なし</label>
-                </div>
-                <div class="yrf-radio-item">
-                  <input type="radio" name="yrf-covid-symptoms" id="yrf-covid-symptoms-yes" value="yes" ${formData.covid_symptoms === 'yes' ? 'checked' : ''}>
-                  <label for="yrf-covid-symptoms-yes">あり</label>
-                </div>
-              </div>
-              <input type="text" id="yrf-covid-symptoms-detail" value="${escapeHtml(formData.covid_symptoms_detail)}" placeholder="詳細" ${formData.covid_symptoms !== 'yes' ? 'disabled' : ''}>
-            </div>
-
-            <div class="yrf-covid-row">
-              <div class="question"><span class="question-num">⑤</span>コロナワクチン接種状況</div>
-              <div class="yrf-radio-group">
-                <div class="yrf-radio-item">
-                  <input type="radio" name="yrf-covid-vaccine" id="yrf-covid-vaccine-done" value="done" ${formData.covid_vaccine === 'done' ? 'checked' : ''}>
-                  <label for="yrf-covid-vaccine-done">済</label>
-                </div>
-                <div class="yrf-radio-item">
-                  <input type="radio" name="yrf-covid-vaccine" id="yrf-covid-vaccine-not" value="not" ${formData.covid_vaccine === 'not' ? 'checked' : ''}>
-                  <label for="yrf-covid-vaccine-not">未</label>
-                </div>
-              </div>
-              <span style="font-size: 13px;">最終:</span>
-              <input type="text" id="yrf-covid-vaccine-year" value="${escapeHtml(formData.covid_vaccine_year)}" placeholder="年" style="width: 60px;" ${formData.covid_vaccine !== 'done' ? 'disabled' : ''}>
-              <span style="font-size: 13px;">年</span>
-              <input type="text" id="yrf-covid-vaccine-month" value="${escapeHtml(formData.covid_vaccine_month)}" placeholder="月" style="width: 50px;" ${formData.covid_vaccine !== 'done' ? 'disabled' : ''}>
-              <span style="font-size: 13px;">月頃</span>
-            </div>
-          </div>
-        </div>
-        <div class="yrf-footer">
-          <div class="yrf-footer-left">
-            ${lastSavedAt ? `下書き: ${new Date(lastSavedAt).toLocaleString('ja-JP')}` : ''}
-          </div>
-          <div class="yrf-footer-right">
-            <button class="yrf-btn yrf-btn-secondary" id="yrf-clear" style="color:#d32f2f;">クリア</button>
-            <button class="yrf-btn yrf-btn-secondary" id="yrf-save-draft">下書き保存</button>
-            <button class="yrf-btn yrf-btn-primary" id="yrf-generate">Google Docsに出力</button>
           </div>
         </div>
       </div>
+
+      <!-- 希望来院日 -->
+      <div class="yrf-section">
+        <div class="yrf-section-title">希望来院日</div>
+        <div class="yrf-row">
+          <div class="yrf-field">
+            <label>希望日</label>
+            <input type="date" id="yrf-hope-date-1" value="${escapeHtml(formData.hope_date_1)}">
+          </div>
+          <div class="yrf-field">
+            <label>希望時間</label>
+            <div class="yrf-time-row">
+              <select id="yrf-hope-time-hour">
+                <option value="">時</option>
+                ${hourOptions.map(h => `
+                  <option value="${h}" ${formData.hope_time_hour === String(h) ? 'selected' : ''}>${h}</option>
+                `).join('')}
+              </select>
+              <span>時</span>
+              <select id="yrf-hope-time-minute">
+                <option value="">分</option>
+                ${minuteOptions.map(m => `
+                  <option value="${m}" ${formData.hope_time_minute === m ? 'selected' : ''}>${m}</option>
+                `).join('')}
+              </select>
+              <span>分</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 当院受診歴 -->
+      <div class="yrf-section">
+        <div class="yrf-section-title">屋島総合病院 受診歴</div>
+        <div class="yrf-radio-group">
+          <div class="yrf-radio-item">
+            <input type="radio" name="yrf-visit-history" id="yrf-visit-yes" value="yes" ${formData.visit_history === 'yes' ? 'checked' : ''}>
+            <label for="yrf-visit-yes">有</label>
+          </div>
+          <div class="yrf-radio-item">
+            <input type="radio" name="yrf-visit-history" id="yrf-visit-no" value="no" ${formData.visit_history === 'no' ? 'checked' : ''}>
+            <label for="yrf-visit-no">無</label>
+          </div>
+          <div class="yrf-radio-item">
+            <input type="radio" name="yrf-visit-history" id="yrf-visit-unknown" value="unknown" ${formData.visit_history === 'unknown' ? 'checked' : ''}>
+            <label for="yrf-visit-unknown">不明</label>
+          </div>
+        </div>
+      </div>
+
+      <!-- 主訴又は傷病名 -->
+      <div class="yrf-section">
+        <div class="yrf-section-title">主訴又は傷病名</div>
+        ${formData.diseases.length > 0 ? `
+          <div style="margin-bottom: 12px;">
+            <label style="display: block; font-size: 13px; font-weight: 500; color: #666; margin-bottom: 8px;">登録済み病名から選択</label>
+            <div id="yrf-diseases-list" class="yrf-checkbox-group">
+              ${formData.diseases.map(d => `
+                <div class="yrf-checkbox-item ${d.isMain ? 'main-disease' : ''}">
+                  <input type="checkbox" id="yrf-disease-${d.uuid}" value="${d.uuid}"
+                    ${formData.selected_diseases?.includes(d.uuid) ? 'checked' : ''}>
+                  <label for="yrf-disease-${d.uuid}">${escapeHtml(d.name)}${d.isMain ? ' (主病名)' : ''}${d.isSuspected ? ' (疑い)' : ''}</label>
+                </div>
+              `).join('')}
+            </div>
+          </div>
+        ` : ''}
+        <div class="yrf-field">
+          <label>自由記述</label>
+          <textarea id="yrf-diagnosis-text" placeholder="主訴又は傷病名を入力">${escapeHtml(formData.diagnosis_text)}</textarea>
+        </div>
+      </div>
+
+      <!-- 新型コロナ問診 -->
+      <div class="yrf-section yrf-covid-section">
+        <div class="yrf-section-title">新型コロナウイルス感染症への対策</div>
+
+        <div class="yrf-covid-row">
+          <div class="question"><span class="question-num">①</span>2ヶ月以内に、コロナに感染しましたか？</div>
+          <div class="yrf-radio-group">
+            <div class="yrf-radio-item">
+              <input type="radio" name="yrf-covid-infected" id="yrf-covid-infected-no" value="no" ${formData.covid_infected === 'no' ? 'checked' : ''}>
+              <label for="yrf-covid-infected-no">いいえ</label>
+            </div>
+            <div class="yrf-radio-item">
+              <input type="radio" name="yrf-covid-infected" id="yrf-covid-infected-yes" value="yes" ${formData.covid_infected === 'yes' ? 'checked' : ''}>
+              <label for="yrf-covid-infected-yes">はい</label>
+            </div>
+          </div>
+          <span style="font-size: 13px;">診断日:</span>
+          <input type="date" id="yrf-covid-infected-date" value="${escapeHtml(formData.covid_infected_date)}" ${formData.covid_infected !== 'yes' ? 'disabled' : ''}>
+        </div>
+
+        <div class="yrf-covid-row">
+          <div class="question"><span class="question-num">②</span>2週間以内に、コロナ感染者との接触や、発生施設等との関連がありませんか？</div>
+          <div class="yrf-radio-group">
+            <div class="yrf-radio-item">
+              <input type="radio" name="yrf-covid-contact" id="yrf-covid-contact-no" value="no" ${formData.covid_contact === 'no' ? 'checked' : ''}>
+              <label for="yrf-covid-contact-no">なし</label>
+            </div>
+            <div class="yrf-radio-item">
+              <input type="radio" name="yrf-covid-contact" id="yrf-covid-contact-yes" value="yes" ${formData.covid_contact === 'yes' ? 'checked' : ''}>
+              <label for="yrf-covid-contact-yes">あり</label>
+            </div>
+          </div>
+          <input type="text" id="yrf-covid-contact-detail" value="${escapeHtml(formData.covid_contact_detail)}" placeholder="詳細" ${formData.covid_contact !== 'yes' ? 'disabled' : ''}>
+        </div>
+
+        <div class="yrf-covid-row">
+          <div class="question"><span class="question-num">③</span>2週間以内に、同居家族以外との会食、大勢が集まるイベントなどへの参加はありませんか？</div>
+          <div class="yrf-radio-group">
+            <div class="yrf-radio-item">
+              <input type="radio" name="yrf-covid-gathering" id="yrf-covid-gathering-no" value="no" ${formData.covid_gathering === 'no' ? 'checked' : ''}>
+              <label for="yrf-covid-gathering-no">なし</label>
+            </div>
+            <div class="yrf-radio-item">
+              <input type="radio" name="yrf-covid-gathering" id="yrf-covid-gathering-yes" value="yes" ${formData.covid_gathering === 'yes' ? 'checked' : ''}>
+              <label for="yrf-covid-gathering-yes">あり</label>
+            </div>
+          </div>
+          <input type="text" id="yrf-covid-gathering-detail" value="${escapeHtml(formData.covid_gathering_detail)}" placeholder="詳細" ${formData.covid_gathering !== 'yes' ? 'disabled' : ''}>
+        </div>
+
+        <div class="yrf-covid-row">
+          <div class="question"><span class="question-num">④</span>1週間以内に、37度以上の発熱、咳、のどの痛み、鼻みず、嘔吐・下痢等の症状はありませんか？</div>
+          <div class="yrf-radio-group">
+            <div class="yrf-radio-item">
+              <input type="radio" name="yrf-covid-symptoms" id="yrf-covid-symptoms-no" value="no" ${formData.covid_symptoms === 'no' ? 'checked' : ''}>
+              <label for="yrf-covid-symptoms-no">なし</label>
+            </div>
+            <div class="yrf-radio-item">
+              <input type="radio" name="yrf-covid-symptoms" id="yrf-covid-symptoms-yes" value="yes" ${formData.covid_symptoms === 'yes' ? 'checked' : ''}>
+              <label for="yrf-covid-symptoms-yes">あり</label>
+            </div>
+          </div>
+          <input type="text" id="yrf-covid-symptoms-detail" value="${escapeHtml(formData.covid_symptoms_detail)}" placeholder="詳細" ${formData.covid_symptoms !== 'yes' ? 'disabled' : ''}>
+        </div>
+
+        <div class="yrf-covid-row">
+          <div class="question"><span class="question-num">⑤</span>コロナワクチン接種状況</div>
+          <div class="yrf-radio-group">
+            <div class="yrf-radio-item">
+              <input type="radio" name="yrf-covid-vaccine" id="yrf-covid-vaccine-done" value="done" ${formData.covid_vaccine === 'done' ? 'checked' : ''}>
+              <label for="yrf-covid-vaccine-done">済</label>
+            </div>
+            <div class="yrf-radio-item">
+              <input type="radio" name="yrf-covid-vaccine" id="yrf-covid-vaccine-not" value="not" ${formData.covid_vaccine === 'not' ? 'checked' : ''}>
+              <label for="yrf-covid-vaccine-not">未</label>
+            </div>
+          </div>
+          <span style="font-size: 13px;">最終:</span>
+          <input type="text" id="yrf-covid-vaccine-year" value="${escapeHtml(formData.covid_vaccine_year)}" placeholder="年" style="width: 60px;" ${formData.covid_vaccine !== 'done' ? 'disabled' : ''}>
+          <span style="font-size: 13px;">年</span>
+          <input type="text" id="yrf-covid-vaccine-month" value="${escapeHtml(formData.covid_vaccine_month)}" placeholder="月" style="width: 50px;" ${formData.covid_vaccine !== 'done' ? 'disabled' : ''}>
+          <span style="font-size: 13px;">月頃</span>
+        </div>
+      </div>
     `;
+  }
 
-    document.body.appendChild(modal);
-
-    // 変更追跡フラグ
-    let isDirty = false;
-    const formBody = modal.querySelector('.yrf-body');
-    if (formBody) {
-      formBody.addEventListener('input', () => { isDirty = true; });
-      formBody.addEventListener('change', () => { isDirty = true; });
-    }
-
-    // モーダルクローズ時の保存確認
-    async function confirmClose() {
-      if (!isDirty) { modal.remove(); return; }
-      const save = await pageWindow.HenryCore?.ui?.showConfirm?.({
-        title: '未保存の変更',
-        message: '変更内容を下書き保存しますか？',
-        confirmLabel: '保存して閉じる',
-        cancelLabel: '保存せず閉じる'
-      });
-      if (save) {
-        const data = collectFormData(modal, formData);
-        const ds = pageWindow.HenryCore?.modules?.DraftStorage;
-        if (ds) {
-          const payload = { schemaVersion: DRAFT_SCHEMA_VERSION, data };
-          await ds.save(DRAFT_TYPE, formData.patient_uuid, payload, data.patient_name || '');
-        }
-      }
-      modal.remove();
-    }
-
-    // イベントリスナー
-    modal.querySelector('.yrf-close').addEventListener('click', () => confirmClose());
-    modal.addEventListener('click', (e) => {
-      if (e.target === modal) confirmClose();
+  function clearFormFields(bodyEl) {
+    // テキスト入力をリセット
+    ['#yrf-dest-doctor', '#yrf-covid-infected-date', '#yrf-covid-contact-detail',
+     '#yrf-covid-gathering-detail', '#yrf-covid-symptoms-detail',
+     '#yrf-covid-vaccine-year', '#yrf-covid-vaccine-month'].forEach(sel => {
+      const el = bodyEl.querySelector(sel);
+      if (el) el.value = '';
     });
 
+    // selectをリセット
+    bodyEl.querySelector('#yrf-dest-department').value = '';
+    bodyEl.querySelector('#yrf-dest-doctor').disabled = true;
+    bodyEl.querySelector('.yrf-combobox-toggle').disabled = true;
+
+    // 時間selectをリセット
+    ['#yrf-hope-time-hour', '#yrf-hope-time-minute'].forEach(sel => {
+      const el = bodyEl.querySelector(sel);
+      if (el) el.value = '';
+    });
+
+    // 日付入力をリセット
+    const hopeDate1 = bodyEl.querySelector('#yrf-hope-date-1');
+    if (hopeDate1) hopeDate1.value = '';
+
+    // テキストエリアをリセット
+    bodyEl.querySelectorAll('textarea').forEach(ta => { ta.value = ''; });
+
+    // チェックボックスをリセット
+    bodyEl.querySelectorAll('.yrf-checkbox-group input[type="checkbox"]').forEach(cb => { cb.checked = false; });
+  }
+
+  function setupFormEvents(bodyEl) {
+    const escapeHtml = FC().utils.escapeHtml;
+
     // 外来診療担当表ボタン
-    modal.querySelector('#yrf-open-schedule').addEventListener('click', () => {
+    bodyEl.querySelector('#yrf-open-schedule')?.addEventListener('click', () => {
       window.open('https://www.yashima-hp.com/outpatient/doctor/', '_blank');
     });
 
     // 診療科・医師コンボボックスの連携
-    const deptSelect = modal.querySelector('#yrf-dest-department');
-    const doctorInput = modal.querySelector('#yrf-dest-doctor');
-    const doctorDropdown = modal.querySelector('#yrf-doctor-dropdown');
-    const doctorCombobox = modal.querySelector('.yrf-combobox[data-field="doctor"]');
+    const deptSelect = bodyEl.querySelector('#yrf-dest-department');
+    const doctorInput = bodyEl.querySelector('#yrf-dest-doctor');
+    const doctorDropdown = bodyEl.querySelector('#yrf-doctor-dropdown');
+    const doctorCombobox = bodyEl.querySelector('.yrf-combobox[data-field="doctor"]');
 
     function closeAllDropdowns() {
-      modal.querySelectorAll('.yrf-combobox-dropdown').forEach(d => d.classList.remove('open'));
+      bodyEl.querySelectorAll('.yrf-combobox-dropdown').forEach(d => d.classList.remove('open'));
     }
 
     function renderDropdownOptions(dropdown, options, currentValue) {
@@ -601,50 +517,50 @@
       }
     });
 
-    modal.addEventListener('click', (e) => {
+    bodyEl.addEventListener('click', (e) => {
       if (!e.target.closest('.yrf-combobox')) {
         closeAllDropdowns();
       }
     });
 
     // コロナ問診の連動
-    modal.querySelectorAll('input[name="yrf-covid-infected"]').forEach(radio => {
+    bodyEl.querySelectorAll('input[name="yrf-covid-infected"]').forEach(radio => {
       radio.addEventListener('change', () => {
-        const dateInput = modal.querySelector('#yrf-covid-infected-date');
+        const dateInput = bodyEl.querySelector('#yrf-covid-infected-date');
         dateInput.disabled = radio.value !== 'yes' || !radio.checked;
         if (dateInput.disabled) dateInput.value = '';
       });
     });
 
-    modal.querySelectorAll('input[name="yrf-covid-contact"]').forEach(radio => {
+    bodyEl.querySelectorAll('input[name="yrf-covid-contact"]').forEach(radio => {
       radio.addEventListener('change', () => {
-        const detailInput = modal.querySelector('#yrf-covid-contact-detail');
+        const detailInput = bodyEl.querySelector('#yrf-covid-contact-detail');
         detailInput.disabled = radio.value !== 'yes' || !radio.checked;
         if (detailInput.disabled) detailInput.value = '';
       });
     });
 
-    modal.querySelectorAll('input[name="yrf-covid-gathering"]').forEach(radio => {
+    bodyEl.querySelectorAll('input[name="yrf-covid-gathering"]').forEach(radio => {
       radio.addEventListener('change', () => {
-        const detailInput = modal.querySelector('#yrf-covid-gathering-detail');
+        const detailInput = bodyEl.querySelector('#yrf-covid-gathering-detail');
         detailInput.disabled = radio.value !== 'yes' || !radio.checked;
         if (detailInput.disabled) detailInput.value = '';
       });
     });
 
-    modal.querySelectorAll('input[name="yrf-covid-symptoms"]').forEach(radio => {
+    bodyEl.querySelectorAll('input[name="yrf-covid-symptoms"]').forEach(radio => {
       radio.addEventListener('change', () => {
-        const detailInput = modal.querySelector('#yrf-covid-symptoms-detail');
+        const detailInput = bodyEl.querySelector('#yrf-covid-symptoms-detail');
         detailInput.disabled = radio.value !== 'yes' || !radio.checked;
         if (detailInput.disabled) detailInput.value = '';
       });
     });
 
-    modal.querySelectorAll('input[name="yrf-covid-vaccine"]').forEach(radio => {
+    bodyEl.querySelectorAll('input[name="yrf-covid-vaccine"]').forEach(radio => {
       radio.addEventListener('change', () => {
         const isDone = radio.value === 'done' && radio.checked;
-        const yearInput = modal.querySelector('#yrf-covid-vaccine-year');
-        const monthInput = modal.querySelector('#yrf-covid-vaccine-month');
+        const yearInput = bodyEl.querySelector('#yrf-covid-vaccine-year');
+        const monthInput = bodyEl.querySelector('#yrf-covid-vaccine-month');
         yearInput.disabled = !isDone;
         monthInput.disabled = !isDone;
         if (!isDone) {
@@ -653,124 +569,126 @@
         }
       });
     });
+  }
 
-    // クリアボタン
-    modal.querySelector('#yrf-clear').addEventListener('click', async () => {
-      const confirmed = await pageWindow.HenryCore?.ui?.showConfirm?.({
-        title: '入力内容のクリア',
-        message: '手入力した内容をすべてクリアしますか？\n（患者情報などの自動入力項目はクリアされません）',
-        confirmLabel: 'クリア',
-        cancelLabel: 'キャンセル'
-      });
-      if (!confirmed) return;
-
-      // テキスト入力をリセット
-      ['#yrf-dest-doctor', '#yrf-covid-infected-date', '#yrf-covid-contact-detail',
-       '#yrf-covid-gathering-detail', '#yrf-covid-symptoms-detail',
-       '#yrf-covid-vaccine-year', '#yrf-covid-vaccine-month'].forEach(sel => {
-        const el = modal.querySelector(sel);
-        if (el) el.value = '';
-      });
-
-      // selectをリセット
-      modal.querySelector('#yrf-dest-department').value = '';
-      modal.querySelector('#yrf-dest-doctor').disabled = true;
-      modal.querySelector('.yrf-combobox-toggle').disabled = true;
-
-      // 時間selectをリセット
-      ['#yrf-hope-time-hour', '#yrf-hope-time-minute'].forEach(sel => {
-        const el = modal.querySelector(sel);
-        if (el) el.value = '';
-      });
-
-      // 日付入力をリセット
-      const hopeDate1 = modal.querySelector('#yrf-hope-date-1');
-      if (hopeDate1) hopeDate1.value = '';
-
-      // テキストエリアをリセット
-      modal.querySelectorAll('textarea').forEach(ta => { ta.value = ''; });
-
-      // チェックボックスをリセット
-      modal.querySelectorAll('.yrf-checkbox-group input[type="checkbox"]').forEach(cb => { cb.checked = false; });
-
-      isDirty = false;
-    });
-
-    // 下書き保存
-    modal.querySelector('#yrf-save-draft').addEventListener('click', async () => {
-      const data = collectFormData(modal, formData);
-      const ds = pageWindow.HenryCore?.modules?.DraftStorage;
-      if (ds) {
-        const payload = { schemaVersion: DRAFT_SCHEMA_VERSION, data };
-        const saved = await ds.save(DRAFT_TYPE, formData.patient_uuid, payload, data.patient_name || '');
-        if (saved) {
-          isDirty = false;
-          modal.querySelector('.yrf-footer-left').textContent = `下書き: ${new Date().toLocaleString('ja-JP')}`;
-          pageWindow.HenryCore?.ui?.showToast?.('下書きを保存しました', 'success');
-        }
+  function showFormModal(formData, lastSavedAt) {
+    const EXTRA_CSS = `
+      .yrf-time-row {
+        display: flex;
+        gap: 8px;
+        align-items: center;
       }
-    });
-
-    // Google Docs出力
-    modal.querySelector('#yrf-generate').addEventListener('click', async () => {
-      const btn = modal.querySelector('#yrf-generate');
-      btn.disabled = true;
-      btn.textContent = '生成中...';
-
-      try {
-        const data = collectFormData(modal, formData);
-        await generateGoogleDoc(data);
-        const ds = pageWindow.HenryCore?.modules?.DraftStorage;
-        if (ds) await ds.delete(DRAFT_TYPE, formData.patient_uuid);
-        modal.remove();
-      } catch (e) {
-        console.error(`[${SCRIPT_NAME}] 出力エラー:`, e);
-        alert(`エラーが発生しました: ${e.message}`);
-        btn.disabled = false;
-        btn.textContent = 'Google Docsに出力';
+      .yrf-time-row select {
+        width: 80px;
       }
+      .yrf-covid-section {
+        background: #fff8e1;
+        border: 1px solid #ffe082;
+        border-radius: 8px;
+        padding: 16px;
+      }
+      .yrf-covid-section .yrf-section-title {
+        color: #f57c00;
+        border-bottom-color: #ffe082;
+      }
+      .yrf-covid-row {
+        display: flex;
+        gap: 12px;
+        align-items: center;
+        margin-bottom: 12px;
+        padding: 10px 12px;
+        background: #fffde7;
+        border-radius: 6px;
+        flex-wrap: wrap;
+      }
+      .yrf-covid-row .question {
+        flex: 1;
+        min-width: 200px;
+        font-size: 13px;
+        color: #333;
+      }
+      .yrf-covid-row .question-num {
+        font-weight: 600;
+        color: #f57c00;
+        margin-right: 4px;
+      }
+      .yrf-covid-row input[type="text"],
+      .yrf-covid-row input[type="date"],
+      .yrf-covid-row select {
+        padding: 6px 10px;
+        border: 1px solid #ddd;
+        border-radius: 4px;
+        font-size: 14px;
+      }
+      .yrf-covid-row input[type="text"] {
+        width: 120px;
+      }
+      .yrf-covid-row input[type="date"] {
+        width: 150px;
+      }
+      .yrf-covid-row select {
+        width: 70px;
+      }
+    `;
+
+    FC().showFormModal({
+      id: 'yrf-form-modal',
+      title: '屋島総合病院 FAX診療申込書',
+      prefix: 'yrf',
+      bodyHTML: buildFormBody(formData),
+      extraCSS: EXTRA_CSS,
+      width: '90%',
+      draftType: DRAFT_TYPE,
+      draftSchemaVersion: DRAFT_SCHEMA_VERSION,
+      patientUuid: formData.patient_uuid,
+      patientName: formData.patient_name,
+      lastSavedAt,
+      collectFormData: (bodyEl) => collectFormData(bodyEl, formData),
+      onClear: (bodyEl) => clearFormFields(bodyEl),
+      onGenerate: async (data) => { await generateGoogleDoc(data); },
+      onSetup: (bodyEl) => { setupFormEvents(bodyEl); },
     });
   }
 
-  function collectFormData(modal, originalData) {
+  function collectFormData(bodyEl, originalData) {
     const data = { ...originalData };
 
     // 屋島総合病院固有
-    data.destination_department = modal.querySelector('#yrf-dest-department')?.value || '';
-    data.destination_doctor = modal.querySelector('#yrf-dest-doctor')?.value || '';
+    data.destination_department = bodyEl.querySelector('#yrf-dest-department')?.value || '';
+    data.destination_doctor = bodyEl.querySelector('#yrf-dest-doctor')?.value || '';
 
     // 希望来院日・時間
-    data.hope_date_1 = modal.querySelector('#yrf-hope-date-1')?.value || '';
-    data.hope_time_hour = modal.querySelector('#yrf-hope-time-hour')?.value || '';
-    data.hope_time_minute = modal.querySelector('#yrf-hope-time-minute')?.value || '';
+    data.hope_date_1 = bodyEl.querySelector('#yrf-hope-date-1')?.value || '';
+    data.hope_time_hour = bodyEl.querySelector('#yrf-hope-time-hour')?.value || '';
+    data.hope_time_minute = bodyEl.querySelector('#yrf-hope-time-minute')?.value || '';
 
     // 受診歴
-    data.visit_history = modal.querySelector('input[name="yrf-visit-history"]:checked')?.value || 'unknown';
+    data.visit_history = bodyEl.querySelector('input[name="yrf-visit-history"]:checked')?.value || 'unknown';
 
     // 病名
     data.selected_diseases = [];
     if (data.diseases.length > 0) {
       data.diseases.forEach(d => {
-        const cb = modal.querySelector(`#yrf-disease-${d.uuid}`);
+        const cb = bodyEl.querySelector(`#yrf-disease-${d.uuid}`);
         if (cb?.checked) {
           data.selected_diseases.push(d.uuid);
         }
       });
     }
-    data.diagnosis_text = modal.querySelector('#yrf-diagnosis-text')?.value || '';
+    data.diagnosis_text = bodyEl.querySelector('#yrf-diagnosis-text')?.value || '';
 
     // コロナ問診
-    data.covid_infected = modal.querySelector('input[name="yrf-covid-infected"]:checked')?.value || 'no';
-    data.covid_infected_date = modal.querySelector('#yrf-covid-infected-date')?.value || '';
-    data.covid_contact = modal.querySelector('input[name="yrf-covid-contact"]:checked')?.value || 'no';
-    data.covid_contact_detail = modal.querySelector('#yrf-covid-contact-detail')?.value || '';
-    data.covid_gathering = modal.querySelector('input[name="yrf-covid-gathering"]:checked')?.value || 'no';
-    data.covid_gathering_detail = modal.querySelector('#yrf-covid-gathering-detail')?.value || '';
-    data.covid_symptoms = modal.querySelector('input[name="yrf-covid-symptoms"]:checked')?.value || 'no';
-    data.covid_symptoms_detail = modal.querySelector('#yrf-covid-symptoms-detail')?.value || '';
-    data.covid_vaccine = modal.querySelector('input[name="yrf-covid-vaccine"]:checked')?.value || 'done';
-    data.covid_vaccine_year = modal.querySelector('#yrf-covid-vaccine-year')?.value || '';
-    data.covid_vaccine_month = modal.querySelector('#yrf-covid-vaccine-month')?.value || '';
+    data.covid_infected = bodyEl.querySelector('input[name="yrf-covid-infected"]:checked')?.value || 'no';
+    data.covid_infected_date = bodyEl.querySelector('#yrf-covid-infected-date')?.value || '';
+    data.covid_contact = bodyEl.querySelector('input[name="yrf-covid-contact"]:checked')?.value || 'no';
+    data.covid_contact_detail = bodyEl.querySelector('#yrf-covid-contact-detail')?.value || '';
+    data.covid_gathering = bodyEl.querySelector('input[name="yrf-covid-gathering"]:checked')?.value || 'no';
+    data.covid_gathering_detail = bodyEl.querySelector('#yrf-covid-gathering-detail')?.value || '';
+    data.covid_symptoms = bodyEl.querySelector('input[name="yrf-covid-symptoms"]:checked')?.value || 'no';
+    data.covid_symptoms_detail = bodyEl.querySelector('#yrf-covid-symptoms-detail')?.value || '';
+    data.covid_vaccine = bodyEl.querySelector('input[name="yrf-covid-vaccine"]:checked')?.value || 'done';
+    data.covid_vaccine_year = bodyEl.querySelector('#yrf-covid-vaccine-year')?.value || '';
+    data.covid_vaccine_month = bodyEl.querySelector('#yrf-covid-vaccine-month')?.value || '';
 
     return data;
   }

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         高松市立みんなの病院 診療申込書
 // @namespace    https://henry-app.jp/
-// @version      1.3.0
+// @version      1.4.0
 // @description  高松市立みんなの病院へのFAX診療申込書を作成
 // @author       sk powered by Claude
 // @match        https://henry-app.jp/*
@@ -334,361 +334,307 @@
     }
   }
 
-  function showFormModal(formData, lastSavedAt) {
-    // 既存モーダルを削除
-    const existingModal = document.getElementById('mrf-form-modal');
-    if (existingModal) existingModal.remove();
-
+  function buildFormBody(formData) {
     const departments = getMinnaDepartments();
-    const { utils } = FC();
-    const escapeHtml = utils.escapeHtml;
+    const escapeHtml = FC().utils.escapeHtml;
 
-    const modal = document.createElement('div');
-    modal.id = 'mrf-form-modal';
-    modal.innerHTML = `
-      <style>
-        ${FC().generateBaseCSS('mrf')}
-        /* みんなの病院固有CSS */
-        .mrf-container {
-          max-width: 900px;
-        }
-        .mrf-radio-group.vertical {
-          flex-direction: column;
-          gap: 8px;
-        }
-        .mrf-conditional-field {
-          margin-top: 8px;
-          padding: 12px;
-          background: #fafafa;
-          border-radius: 6px;
-          display: none;
-        }
-        .mrf-conditional-field.visible {
-          display: block;
-        }
-        .mrf-image-checkboxes {
-          display: flex;
-          gap: 16px;
-          margin-top: 8px;
-          flex-wrap: wrap;
-        }
-        .mrf-image-checkbox {
-          display: flex;
-          align-items: center;
-          gap: 6px;
-        }
-        .mrf-image-checkbox input[type="checkbox"] {
-          width: 16px;
-          height: 16px;
-        }
-        .mrf-image-checkbox label {
-          font-size: 14px;
-          color: #333;
-        }
-        .mrf-current-status-detail {
-          margin-top: 8px;
-          padding-left: 24px;
-        }
-        .mrf-current-status-detail select {
-          width: auto;
-          min-width: 150px;
-        }
-        .mrf-hidden { display: none !important; }
-      </style>
-      <div class="mrf-container">
-        <div class="mrf-header">
-          <h2>高松市立みんなの病院 FAX診療申込書</h2>
-          <button class="mrf-close" title="閉じる">&times;</button>
+    return `
+      <!-- 高松市立みんなの病院 受診希望 -->
+      <div class="mrf-section">
+        <div class="mrf-section-title">高松市立みんなの病院 受診希望</div>
+        <div class="mrf-row">
+          <div class="mrf-field">
+            <label>旧姓（任意）</label>
+            <input type="text" id="mrf-maiden-name" value="${escapeHtml(formData.maiden_name)}" placeholder="旧姓があれば入力">
+          </div>
         </div>
-        <div class="mrf-body">
-          <!-- 高松市立みんなの病院 受診希望 -->
-          <div class="mrf-section">
-            <div class="mrf-section-title">高松市立みんなの病院 受診希望</div>
-            <div class="mrf-row">
-              <div class="mrf-field">
-                <label>旧姓（任意）</label>
-                <input type="text" id="mrf-maiden-name" value="${escapeHtml(formData.maiden_name)}" placeholder="旧姓があれば入力">
-              </div>
-            </div>
-            <div class="mrf-row">
-              <div class="mrf-field">
-                <label>受診希望科</label>
-                <select id="mrf-dest-department">
-                  <option value="">選択してください</option>
-                  ${departments.map(dept => `
-                    <option value="${escapeHtml(dept)}" ${formData.destination_department === dept ? 'selected' : ''}>
-                      ${escapeHtml(dept)}
-                    </option>
-                  `).join('')}
-                </select>
-              </div>
-              <div class="mrf-field">
-                <label>希望医師名（任意）</label>
-                <div style="display: flex; gap: 8px; align-items: flex-start;">
-                  <div class="mrf-combobox" data-field="doctor" style="flex: 1;">
-                    <input type="text" class="mrf-combobox-input" id="mrf-dest-doctor" value="${escapeHtml(formData.destination_doctor)}" placeholder="医師名を入力" ${!formData.destination_department ? 'disabled' : ''}>
-                    <button type="button" class="mrf-combobox-toggle" ${!formData.destination_department ? 'disabled' : ''} title="リストから選択">▼</button>
-                    <div class="mrf-combobox-dropdown" id="mrf-doctor-dropdown"></div>
-                  </div>
-                  <button type="button" class="mrf-btn mrf-btn-link" id="mrf-open-schedule" title="外来担当表を見る">外来表</button>
-                </div>
-              </div>
-            </div>
+        <div class="mrf-row">
+          <div class="mrf-field">
+            <label>受診希望科</label>
+            <select id="mrf-dest-department">
+              <option value="">選択してください</option>
+              ${departments.map(dept => `
+                <option value="${escapeHtml(dept)}" ${formData.destination_department === dept ? 'selected' : ''}>
+                  ${escapeHtml(dept)}
+                </option>
+              `).join('')}
+            </select>
           </div>
-
-          <!-- 受診希望日 -->
-          <div class="mrf-section">
-            <div class="mrf-section-title">希望来院日</div>
-            <div class="mrf-radio-group">
-              <div class="mrf-radio-item">
-                <input type="radio" name="mrf-hope-date-type" id="mrf-hope-date-type-date" value="date" ${formData.hope_date_type === 'date' ? 'checked' : ''}>
-                <label for="mrf-hope-date-type-date">日時を指定</label>
+          <div class="mrf-field">
+            <label>希望医師名（任意）</label>
+            <div style="display: flex; gap: 8px; align-items: flex-start;">
+              <div class="mrf-combobox" data-field="doctor" style="flex: 1;">
+                <input type="text" class="mrf-combobox-input" id="mrf-dest-doctor" value="${escapeHtml(formData.destination_doctor)}" placeholder="医師名を入力" ${!formData.destination_department ? 'disabled' : ''}>
+                <button type="button" class="mrf-combobox-toggle" ${!formData.destination_department ? 'disabled' : ''} title="リストから選択">▼</button>
+                <div class="mrf-combobox-dropdown" id="mrf-doctor-dropdown"></div>
               </div>
-              <div class="mrf-radio-item">
-                <input type="radio" name="mrf-hope-date-type" id="mrf-hope-date-type-today" value="today" ${formData.hope_date_type === 'today' ? 'checked' : ''}>
-                <label for="mrf-hope-date-type-today">当日</label>
-              </div>
-              <div class="mrf-radio-item">
-                <input type="radio" name="mrf-hope-date-type" id="mrf-hope-date-type-anytime" value="anytime" ${formData.hope_date_type === 'anytime' ? 'checked' : ''}>
-                <label for="mrf-hope-date-type-anytime">いつでもよい</label>
-              </div>
+              <button type="button" class="mrf-btn mrf-btn-link" id="mrf-open-schedule" title="外来担当表を見る">外来表</button>
             </div>
-            <div class="mrf-conditional-field ${formData.hope_date_type === 'date' ? 'visible' : ''}" id="mrf-hope-date-field">
-              <div class="mrf-row">
-                <div class="mrf-field">
-                  <label>第1希望日</label>
-                  <input type="date" id="mrf-hope-date-1" value="${escapeHtml(formData.hope_date_1)}">
-                </div>
-                <div class="mrf-field" style="flex: 0.5;">
-                  <label>時間（任意）</label>
-                  <input type="time" id="mrf-hope-time-1" value="${escapeHtml(formData.hope_time_1 || '')}">
-                </div>
-              </div>
-              <div class="mrf-row">
-                <div class="mrf-field">
-                  <label>第2希望日（任意）</label>
-                  <input type="date" id="mrf-hope-date-2" value="${escapeHtml(formData.hope_date_2 || '')}">
-                </div>
-                <div class="mrf-field" style="flex: 0.5;">
-                  <label>時間（任意）</label>
-                  <input type="time" id="mrf-hope-time-2" value="${escapeHtml(formData.hope_time_2 || '')}">
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <!-- 画像の有無 -->
-          <div class="mrf-section">
-            <div class="mrf-section-title">画像の有無</div>
-            <div class="mrf-radio-group">
-              <div class="mrf-radio-item">
-                <input type="radio" name="mrf-has-image" id="mrf-has-image-yes" value="yes" ${formData.has_image ? 'checked' : ''}>
-                <label for="mrf-has-image-yes">有</label>
-              </div>
-              <div class="mrf-radio-item">
-                <input type="radio" name="mrf-has-image" id="mrf-has-image-no" value="no" ${!formData.has_image ? 'checked' : ''}>
-                <label for="mrf-has-image-no">無</label>
-              </div>
-            </div>
-            <div class="mrf-conditional-field ${formData.has_image ? 'visible' : ''}" id="mrf-image-detail-field">
-              <div class="mrf-image-checkboxes">
-                <div class="mrf-image-checkbox">
-                  <input type="checkbox" id="mrf-image-ct" ${formData.image_ct ? 'checked' : ''}>
-                  <label for="mrf-image-ct">CT</label>
-                </div>
-                <div class="mrf-image-checkbox">
-                  <input type="checkbox" id="mrf-image-mri" ${formData.image_mri ? 'checked' : ''}>
-                  <label for="mrf-image-mri">MRI</label>
-                </div>
-                <div class="mrf-image-checkbox">
-                  <input type="checkbox" id="mrf-image-xp" ${formData.image_xp ? 'checked' : ''}>
-                  <label for="mrf-image-xp">XP</label>
-                </div>
-                <div class="mrf-image-checkbox">
-                  <input type="checkbox" id="mrf-image-pet" ${formData.image_pet ? 'checked' : ''}>
-                  <label for="mrf-image-pet">PET-CT</label>
-                </div>
-              </div>
-              <div class="mrf-row" style="margin-top: 12px;">
-                <div class="mrf-field" style="flex: 0.5;">
-                  <label>撮影時期</label>
-                  <input type="text" id="mrf-image-date" value="${escapeHtml(formData.image_date)}" placeholder="例: 令和7年1月">
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <!-- 当院受診歴 -->
-          <div class="mrf-section">
-            <div class="mrf-section-title">高松市立みんなの病院 受診歴</div>
-            <div class="mrf-radio-group">
-              <div class="mrf-radio-item">
-                <input type="radio" name="mrf-visit-history" id="mrf-visit-yes" value="yes" ${formData.visit_history === 'yes' ? 'checked' : ''}>
-                <label for="mrf-visit-yes">有</label>
-              </div>
-              <div class="mrf-radio-item">
-                <input type="radio" name="mrf-visit-history" id="mrf-visit-no" value="no" ${formData.visit_history === 'no' ? 'checked' : ''}>
-                <label for="mrf-visit-no">無</label>
-              </div>
-              <div class="mrf-radio-item">
-                <input type="radio" name="mrf-visit-history" id="mrf-visit-unknown" value="unknown" ${formData.visit_history === 'unknown' ? 'checked' : ''}>
-                <label for="mrf-visit-unknown">不明</label>
-              </div>
-            </div>
-          </div>
-
-          <!-- 現在の状況 -->
-          <div class="mrf-section">
-            <div class="mrf-section-title">現在貴院に</div>
-            <div class="mrf-radio-group vertical">
-              <div class="mrf-radio-item">
-                <input type="radio" name="mrf-current-status" id="mrf-status-none" value="none" ${formData.current_status === 'none' ? 'checked' : ''}>
-                <label for="mrf-status-none">該当なし</label>
-              </div>
-              <div>
-                <div class="mrf-radio-item">
-                  <input type="radio" name="mrf-current-status" id="mrf-status-outpatient" value="outpatient" ${formData.current_status === 'outpatient' ? 'checked' : ''}>
-                  <label for="mrf-status-outpatient">外来通院中</label>
-                </div>
-                <div class="mrf-current-status-detail ${formData.current_status === 'outpatient' ? '' : 'mrf-hidden'}" id="mrf-outpatient-detail">
-                  <select id="mrf-outpatient-type">
-                    <option value="insurance" ${formData.current_status_detail === 'insurance' ? 'selected' : ''}>保険診療</option>
-                    <option value="accident" ${formData.current_status_detail === 'accident' ? 'selected' : ''}>事故</option>
-                    <option value="workers" ${formData.current_status_detail === 'workers' ? 'selected' : ''}>労災</option>
-                    <option value="other" ${formData.current_status_detail === 'other' ? 'selected' : ''}>その他</option>
-                  </select>
-                </div>
-              </div>
-              <div>
-                <div class="mrf-radio-item">
-                  <input type="radio" name="mrf-current-status" id="mrf-status-inpatient" value="inpatient" ${formData.current_status === 'inpatient' ? 'checked' : ''}>
-                  <label for="mrf-status-inpatient">入院中</label>
-                </div>
-                <div class="mrf-current-status-detail ${formData.current_status === 'inpatient' ? '' : 'mrf-hidden'}" id="mrf-inpatient-detail">
-                  <select id="mrf-inpatient-type">
-                    <option value="dpc" ${formData.current_status_detail === 'dpc' ? 'selected' : ''}>DPC対象</option>
-                    <option value="non-dpc" ${formData.current_status_detail === 'non-dpc' ? 'selected' : ''}>DPC対象外</option>
-                  </select>
-                </div>
-              </div>
-              <div>
-                <div class="mrf-radio-item">
-                  <input type="radio" name="mrf-current-status" id="mrf-status-facility" value="facility" ${formData.current_status === 'facility' ? 'checked' : ''}>
-                  <label for="mrf-status-facility">介護施設入所中</label>
-                </div>
-                <div class="mrf-conditional-field ${formData.current_status === 'facility' ? 'visible' : ''}" id="mrf-facility-field">
-                  <div class="mrf-field">
-                    <label>施設名</label>
-                    <input type="text" id="mrf-facility-name" value="${escapeHtml(formData.facility_name)}" placeholder="施設名を入力">
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <!-- 医師への事前連絡 -->
-          <div class="mrf-section">
-            <div class="mrf-section-title">医師への事前連絡</div>
-            <div class="mrf-radio-group">
-              <div class="mrf-radio-item">
-                <input type="radio" name="mrf-prior-contact" id="mrf-prior-contact-yes" value="yes" ${formData.prior_contact === 'yes' ? 'checked' : ''}>
-                <label for="mrf-prior-contact-yes">有</label>
-              </div>
-              <div class="mrf-radio-item">
-                <input type="radio" name="mrf-prior-contact" id="mrf-prior-contact-no" value="no" ${formData.prior_contact === 'no' ? 'checked' : ''}>
-                <label for="mrf-prior-contact-no">無</label>
-              </div>
-            </div>
-          </div>
-
-          <!-- 紹介目的・傷病名 -->
-          <div class="mrf-section">
-            <div class="mrf-section-title">紹介目的（傷病名）</div>
-            <p style="font-size: 13px; color: #666; margin: 0 0 12px 0;">※紹介状（診療情報提供書）を添付の場合は、ご記入不要です。</p>
-            ${formData.diseases.length > 0 ? `
-              <div style="margin-bottom: 12px;">
-                <label style="display: block; font-size: 13px; font-weight: 500; color: #666; margin-bottom: 8px;">登録済み病名から選択</label>
-                <div id="mrf-diseases-list" class="mrf-checkbox-group">
-                  ${formData.diseases.map(d => `
-                    <div class="mrf-checkbox-item ${d.isMain ? 'main-disease' : ''}">
-                      <input type="checkbox" id="mrf-disease-${d.uuid}" value="${d.uuid}"
-                        ${formData.selected_diseases?.includes(d.uuid) ? 'checked' : ''}>
-                      <label for="mrf-disease-${d.uuid}">${escapeHtml(d.name)}${d.isMain ? ' (主病名)' : ''}${d.isSuspected ? ' (疑い)' : ''}</label>
-                    </div>
-                  `).join('')}
-                </div>
-              </div>
-            ` : ''}
-            <div class="mrf-field">
-              <label>自由記述</label>
-              <textarea id="mrf-diagnosis-text" placeholder="紹介目的や追加の傷病名を入力">${escapeHtml(formData.diagnosis_text)}</textarea>
-            </div>
-          </div>
-
-        </div>
-        <div class="mrf-footer">
-          <div class="mrf-footer-left">
-            ${lastSavedAt ? `<span>下書き: ${new Date(lastSavedAt).toLocaleString('ja-JP')}</span>` : ''}
-          </div>
-          <div class="mrf-footer-right">
-            <button class="mrf-btn mrf-btn-secondary" id="mrf-clear" style="color:#d32f2f;">クリア</button>
-            <button class="mrf-btn mrf-btn-secondary" id="mrf-save-draft">下書き保存</button>
-            <button class="mrf-btn mrf-btn-primary" id="mrf-generate">Google Docsに出力</button>
           </div>
         </div>
       </div>
+
+      <!-- 受診希望日 -->
+      <div class="mrf-section">
+        <div class="mrf-section-title">希望来院日</div>
+        <div class="mrf-radio-group">
+          <div class="mrf-radio-item">
+            <input type="radio" name="mrf-hope-date-type" id="mrf-hope-date-type-date" value="date" ${formData.hope_date_type === 'date' ? 'checked' : ''}>
+            <label for="mrf-hope-date-type-date">日時を指定</label>
+          </div>
+          <div class="mrf-radio-item">
+            <input type="radio" name="mrf-hope-date-type" id="mrf-hope-date-type-today" value="today" ${formData.hope_date_type === 'today' ? 'checked' : ''}>
+            <label for="mrf-hope-date-type-today">当日</label>
+          </div>
+          <div class="mrf-radio-item">
+            <input type="radio" name="mrf-hope-date-type" id="mrf-hope-date-type-anytime" value="anytime" ${formData.hope_date_type === 'anytime' ? 'checked' : ''}>
+            <label for="mrf-hope-date-type-anytime">いつでもよい</label>
+          </div>
+        </div>
+        <div class="mrf-conditional-field ${formData.hope_date_type === 'date' ? 'visible' : ''}" id="mrf-hope-date-field">
+          <div class="mrf-row">
+            <div class="mrf-field">
+              <label>第1希望日</label>
+              <input type="date" id="mrf-hope-date-1" value="${escapeHtml(formData.hope_date_1)}">
+            </div>
+            <div class="mrf-field" style="flex: 0.5;">
+              <label>時間（任意）</label>
+              <input type="time" id="mrf-hope-time-1" value="${escapeHtml(formData.hope_time_1 || '')}">
+            </div>
+          </div>
+          <div class="mrf-row">
+            <div class="mrf-field">
+              <label>第2希望日（任意）</label>
+              <input type="date" id="mrf-hope-date-2" value="${escapeHtml(formData.hope_date_2 || '')}">
+            </div>
+            <div class="mrf-field" style="flex: 0.5;">
+              <label>時間（任意）</label>
+              <input type="time" id="mrf-hope-time-2" value="${escapeHtml(formData.hope_time_2 || '')}">
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 画像の有無 -->
+      <div class="mrf-section">
+        <div class="mrf-section-title">画像の有無</div>
+        <div class="mrf-radio-group">
+          <div class="mrf-radio-item">
+            <input type="radio" name="mrf-has-image" id="mrf-has-image-yes" value="yes" ${formData.has_image ? 'checked' : ''}>
+            <label for="mrf-has-image-yes">有</label>
+          </div>
+          <div class="mrf-radio-item">
+            <input type="radio" name="mrf-has-image" id="mrf-has-image-no" value="no" ${!formData.has_image ? 'checked' : ''}>
+            <label for="mrf-has-image-no">無</label>
+          </div>
+        </div>
+        <div class="mrf-conditional-field ${formData.has_image ? 'visible' : ''}" id="mrf-image-detail-field">
+          <div class="mrf-image-checkboxes">
+            <div class="mrf-image-checkbox">
+              <input type="checkbox" id="mrf-image-ct" ${formData.image_ct ? 'checked' : ''}>
+              <label for="mrf-image-ct">CT</label>
+            </div>
+            <div class="mrf-image-checkbox">
+              <input type="checkbox" id="mrf-image-mri" ${formData.image_mri ? 'checked' : ''}>
+              <label for="mrf-image-mri">MRI</label>
+            </div>
+            <div class="mrf-image-checkbox">
+              <input type="checkbox" id="mrf-image-xp" ${formData.image_xp ? 'checked' : ''}>
+              <label for="mrf-image-xp">XP</label>
+            </div>
+            <div class="mrf-image-checkbox">
+              <input type="checkbox" id="mrf-image-pet" ${formData.image_pet ? 'checked' : ''}>
+              <label for="mrf-image-pet">PET-CT</label>
+            </div>
+          </div>
+          <div class="mrf-row" style="margin-top: 12px;">
+            <div class="mrf-field" style="flex: 0.5;">
+              <label>撮影時期</label>
+              <input type="text" id="mrf-image-date" value="${escapeHtml(formData.image_date)}" placeholder="例: 令和7年1月">
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 当院受診歴 -->
+      <div class="mrf-section">
+        <div class="mrf-section-title">高松市立みんなの病院 受診歴</div>
+        <div class="mrf-radio-group">
+          <div class="mrf-radio-item">
+            <input type="radio" name="mrf-visit-history" id="mrf-visit-yes" value="yes" ${formData.visit_history === 'yes' ? 'checked' : ''}>
+            <label for="mrf-visit-yes">有</label>
+          </div>
+          <div class="mrf-radio-item">
+            <input type="radio" name="mrf-visit-history" id="mrf-visit-no" value="no" ${formData.visit_history === 'no' ? 'checked' : ''}>
+            <label for="mrf-visit-no">無</label>
+          </div>
+          <div class="mrf-radio-item">
+            <input type="radio" name="mrf-visit-history" id="mrf-visit-unknown" value="unknown" ${formData.visit_history === 'unknown' ? 'checked' : ''}>
+            <label for="mrf-visit-unknown">不明</label>
+          </div>
+        </div>
+      </div>
+
+      <!-- 現在の状況 -->
+      <div class="mrf-section">
+        <div class="mrf-section-title">現在貴院に</div>
+        <div class="mrf-radio-group vertical">
+          <div class="mrf-radio-item">
+            <input type="radio" name="mrf-current-status" id="mrf-status-none" value="none" ${formData.current_status === 'none' ? 'checked' : ''}>
+            <label for="mrf-status-none">該当なし</label>
+          </div>
+          <div>
+            <div class="mrf-radio-item">
+              <input type="radio" name="mrf-current-status" id="mrf-status-outpatient" value="outpatient" ${formData.current_status === 'outpatient' ? 'checked' : ''}>
+              <label for="mrf-status-outpatient">外来通院中</label>
+            </div>
+            <div class="mrf-current-status-detail ${formData.current_status === 'outpatient' ? '' : 'mrf-hidden'}" id="mrf-outpatient-detail">
+              <select id="mrf-outpatient-type">
+                <option value="insurance" ${formData.current_status_detail === 'insurance' ? 'selected' : ''}>保険診療</option>
+                <option value="accident" ${formData.current_status_detail === 'accident' ? 'selected' : ''}>事故</option>
+                <option value="workers" ${formData.current_status_detail === 'workers' ? 'selected' : ''}>労災</option>
+                <option value="other" ${formData.current_status_detail === 'other' ? 'selected' : ''}>その他</option>
+              </select>
+            </div>
+          </div>
+          <div>
+            <div class="mrf-radio-item">
+              <input type="radio" name="mrf-current-status" id="mrf-status-inpatient" value="inpatient" ${formData.current_status === 'inpatient' ? 'checked' : ''}>
+              <label for="mrf-status-inpatient">入院中</label>
+            </div>
+            <div class="mrf-current-status-detail ${formData.current_status === 'inpatient' ? '' : 'mrf-hidden'}" id="mrf-inpatient-detail">
+              <select id="mrf-inpatient-type">
+                <option value="dpc" ${formData.current_status_detail === 'dpc' ? 'selected' : ''}>DPC対象</option>
+                <option value="non-dpc" ${formData.current_status_detail === 'non-dpc' ? 'selected' : ''}>DPC対象外</option>
+              </select>
+            </div>
+          </div>
+          <div>
+            <div class="mrf-radio-item">
+              <input type="radio" name="mrf-current-status" id="mrf-status-facility" value="facility" ${formData.current_status === 'facility' ? 'checked' : ''}>
+              <label for="mrf-status-facility">介護施設入所中</label>
+            </div>
+            <div class="mrf-conditional-field ${formData.current_status === 'facility' ? 'visible' : ''}" id="mrf-facility-field">
+              <div class="mrf-field">
+                <label>施設名</label>
+                <input type="text" id="mrf-facility-name" value="${escapeHtml(formData.facility_name)}" placeholder="施設名を入力">
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 医師への事前連絡 -->
+      <div class="mrf-section">
+        <div class="mrf-section-title">医師への事前連絡</div>
+        <div class="mrf-radio-group">
+          <div class="mrf-radio-item">
+            <input type="radio" name="mrf-prior-contact" id="mrf-prior-contact-yes" value="yes" ${formData.prior_contact === 'yes' ? 'checked' : ''}>
+            <label for="mrf-prior-contact-yes">有</label>
+          </div>
+          <div class="mrf-radio-item">
+            <input type="radio" name="mrf-prior-contact" id="mrf-prior-contact-no" value="no" ${formData.prior_contact === 'no' ? 'checked' : ''}>
+            <label for="mrf-prior-contact-no">無</label>
+          </div>
+        </div>
+      </div>
+
+      <!-- 紹介目的・傷病名 -->
+      <div class="mrf-section">
+        <div class="mrf-section-title">紹介目的（傷病名）</div>
+        <p style="font-size: 13px; color: #666; margin: 0 0 12px 0;">※紹介状（診療情報提供書）を添付の場合は、ご記入不要です。</p>
+        ${formData.diseases.length > 0 ? `
+          <div style="margin-bottom: 12px;">
+            <label style="display: block; font-size: 13px; font-weight: 500; color: #666; margin-bottom: 8px;">登録済み病名から選択</label>
+            <div id="mrf-diseases-list" class="mrf-checkbox-group">
+              ${formData.diseases.map(d => `
+                <div class="mrf-checkbox-item ${d.isMain ? 'main-disease' : ''}">
+                  <input type="checkbox" id="mrf-disease-${d.uuid}" value="${d.uuid}"
+                    ${formData.selected_diseases?.includes(d.uuid) ? 'checked' : ''}>
+                  <label for="mrf-disease-${d.uuid}">${escapeHtml(d.name)}${d.isMain ? ' (主病名)' : ''}${d.isSuspected ? ' (疑い)' : ''}</label>
+                </div>
+              `).join('')}
+            </div>
+          </div>
+        ` : ''}
+        <div class="mrf-field">
+          <label>自由記述</label>
+          <textarea id="mrf-diagnosis-text" placeholder="紹介目的や追加の傷病名を入力">${escapeHtml(formData.diagnosis_text)}</textarea>
+        </div>
+      </div>
     `;
+  }
 
-    document.body.appendChild(modal);
-
-    // 変更追跡フラグ
-    let isDirty = false;
-    const formBody = modal.querySelector('.mrf-body');
-    if (formBody) {
-      formBody.addEventListener('input', () => { isDirty = true; });
-      formBody.addEventListener('change', () => { isDirty = true; });
-    }
-
-    // モーダルクローズ時の保存確認
-    async function confirmClose() {
-      if (!isDirty) { modal.remove(); return; }
-      const save = await pageWindow.HenryCore?.ui?.showConfirm?.({
-        title: '未保存の変更',
-        message: '変更内容を下書き保存しますか？',
-        confirmLabel: '保存して閉じる',
-        cancelLabel: '保存せず閉じる'
-      });
-      if (save) {
-        const data = collectFormData(modal, formData);
-        const ds = pageWindow.HenryCore?.modules?.DraftStorage;
-        if (ds) {
-          const payload = { schemaVersion: DRAFT_SCHEMA_VERSION, data };
-          await ds.save(DRAFT_TYPE, formData.patient_uuid, payload, data.patient_name || '');
-        }
-      }
-      modal.remove();
-    }
-
-    // イベントリスナー
-    modal.querySelector('.mrf-close').addEventListener('click', () => confirmClose());
-    modal.addEventListener('click', (e) => {
-      if (e.target === modal) confirmClose();
+  function clearFormFields(bodyEl) {
+    // テキスト入力をリセット
+    ['#mrf-maiden-name', '#mrf-facility-name'].forEach(sel => {
+      const el = bodyEl.querySelector(sel);
+      if (el) el.value = '';
     });
 
+    // select・コンボボックスをリセット
+    bodyEl.querySelector('#mrf-dest-department').value = '';
+    bodyEl.querySelector('#mrf-dest-doctor').value = '';
+    bodyEl.querySelector('#mrf-dest-doctor').disabled = true;
+    bodyEl.querySelector('.mrf-combobox-toggle').disabled = true;
+
+    // 日付・時間入力をリセット
+    ['#mrf-hope-date-1', '#mrf-hope-time-1', '#mrf-hope-date-2', '#mrf-hope-time-2', '#mrf-image-date'].forEach(sel => {
+      const el = bodyEl.querySelector(sel);
+      if (el) el.value = '';
+    });
+
+    // ラジオボタンをデフォルトにリセット
+    const dateRadio = bodyEl.querySelector('#mrf-hope-date-type-date');
+    if (dateRadio) dateRadio.checked = true;
+    bodyEl.querySelector('#mrf-hope-date-field')?.classList.add('visible');
+
+    const noImageRadio = bodyEl.querySelector('#mrf-has-image-no');
+    if (noImageRadio) noImageRadio.checked = true;
+    bodyEl.querySelector('#mrf-image-detail-field')?.classList.remove('visible');
+
+    const unknownRadio = bodyEl.querySelector('#mrf-visit-unknown');
+    if (unknownRadio) unknownRadio.checked = true;
+
+    const noneStatusRadio = bodyEl.querySelector('#mrf-status-none');
+    if (noneStatusRadio) noneStatusRadio.checked = true;
+    bodyEl.querySelector('#mrf-facility-field')?.classList.remove('visible');
+    bodyEl.querySelector('#mrf-outpatient-detail')?.classList.add('mrf-hidden');
+    bodyEl.querySelector('#mrf-inpatient-detail')?.classList.add('mrf-hidden');
+
+    const noContactRadio = bodyEl.querySelector('#mrf-prior-contact-no');
+    if (noContactRadio) noContactRadio.checked = true;
+
+    // 画像チェックボックスをリセット
+    ['#mrf-image-ct', '#mrf-image-mri', '#mrf-image-xp', '#mrf-image-pet'].forEach(sel => {
+      const el = bodyEl.querySelector(sel);
+      if (el) el.checked = false;
+    });
+
+    // テキストエリアをリセット
+    bodyEl.querySelectorAll('textarea').forEach(ta => { ta.value = ''; });
+
+    // 病名チェックボックスをリセット
+    bodyEl.querySelectorAll('.mrf-checkbox-group input[type="checkbox"]').forEach(cb => { cb.checked = false; });
+  }
+
+  function setupFormEvents(bodyEl) {
+    const escapeHtml = FC().utils.escapeHtml;
+
     // 外来担当表ボタン
-    modal.querySelector('#mrf-open-schedule').addEventListener('click', () => {
+    bodyEl.querySelector('#mrf-open-schedule')?.addEventListener('click', () => {
       window.open('https://www.takamatsu-municipal-hospital.jp/archives/60', '_blank');
     });
 
     // 診療科・医師コンボボックスの連携
-    const deptSelect = modal.querySelector('#mrf-dest-department');
-    const doctorInput = modal.querySelector('#mrf-dest-doctor');
-    const doctorDropdown = modal.querySelector('#mrf-doctor-dropdown');
-    const doctorCombobox = modal.querySelector('.mrf-combobox[data-field="doctor"]');
+    const deptSelect = bodyEl.querySelector('#mrf-dest-department');
+    const doctorInput = bodyEl.querySelector('#mrf-dest-doctor');
+    const doctorDropdown = bodyEl.querySelector('#mrf-doctor-dropdown');
+    const doctorCombobox = bodyEl.querySelector('.mrf-combobox[data-field="doctor"]');
 
     // ドロップダウンを閉じる
     function closeAllDropdowns() {
-      modal.querySelectorAll('.mrf-combobox-dropdown').forEach(d => d.classList.remove('open'));
+      bodyEl.querySelectorAll('.mrf-combobox-dropdown').forEach(d => d.classList.remove('open'));
     }
 
     // ドロップダウンの選択肢を生成
@@ -744,16 +690,16 @@
       }
     });
 
-    // モーダル内クリックでドロップダウンを閉じる
-    modal.addEventListener('click', (e) => {
+    // bodyEl内クリックでドロップダウンを閉じる
+    bodyEl.addEventListener('click', (e) => {
       if (!e.target.closest('.mrf-combobox')) {
         closeAllDropdowns();
       }
     });
 
     // 希望日タイプ変更時
-    const hopeDateTypeRadios = modal.querySelectorAll('input[name="mrf-hope-date-type"]');
-    const hopeDateField = modal.querySelector('#mrf-hope-date-field');
+    const hopeDateTypeRadios = bodyEl.querySelectorAll('input[name="mrf-hope-date-type"]');
+    const hopeDateField = bodyEl.querySelector('#mrf-hope-date-field');
     hopeDateTypeRadios.forEach(radio => {
       radio.addEventListener('change', () => {
         if (radio.value === 'date') {
@@ -765,8 +711,8 @@
     });
 
     // 画像有無変更時
-    const hasImageRadios = modal.querySelectorAll('input[name="mrf-has-image"]');
-    const imageDetailField = modal.querySelector('#mrf-image-detail-field');
+    const hasImageRadios = bodyEl.querySelectorAll('input[name="mrf-has-image"]');
+    const imageDetailField = bodyEl.querySelector('#mrf-image-detail-field');
     hasImageRadios.forEach(radio => {
       radio.addEventListener('change', () => {
         if (radio.value === 'yes') {
@@ -778,10 +724,10 @@
     });
 
     // 現在の状況ラジオボタン変更時
-    const currentStatusRadios = modal.querySelectorAll('input[name="mrf-current-status"]');
-    const facilityField = modal.querySelector('#mrf-facility-field');
-    const outpatientDetail = modal.querySelector('#mrf-outpatient-detail');
-    const inpatientDetail = modal.querySelector('#mrf-inpatient-detail');
+    const currentStatusRadios = bodyEl.querySelectorAll('input[name="mrf-current-status"]');
+    const facilityField = bodyEl.querySelector('#mrf-facility-field');
+    const outpatientDetail = bodyEl.querySelector('#mrf-outpatient-detail');
+    const inpatientDetail = bodyEl.querySelector('#mrf-inpatient-detail');
     currentStatusRadios.forEach(radio => {
       radio.addEventListener('change', () => {
         // 全て非表示にしてから該当するものを表示
@@ -798,137 +744,124 @@
         }
       });
     });
+  }
 
-    // クリアボタン
-    modal.querySelector('#mrf-clear').addEventListener('click', async () => {
-      const confirmed = await pageWindow.HenryCore?.ui?.showConfirm?.({
-        title: '入力内容のクリア',
-        message: '手入力した内容をすべてクリアしますか？\n（患者情報などの自動入力項目はクリアされません）',
-        confirmLabel: 'クリア',
-        cancelLabel: 'キャンセル'
-      });
-      if (!confirmed) return;
-
-      // テキスト入力をリセット
-      ['#mrf-maiden-name', '#mrf-facility-name'].forEach(sel => {
-        const el = modal.querySelector(sel);
-        if (el) el.value = '';
-      });
-
-      // select・コンボボックスをリセット
-      modal.querySelector('#mrf-dest-department').value = '';
-      modal.querySelector('#mrf-dest-doctor').value = '';
-      modal.querySelector('#mrf-dest-doctor').disabled = true;
-      modal.querySelector('.mrf-combobox-toggle').disabled = true;
-
-      // 日付入力をリセット
-      ['#mrf-hope-date-1', '#mrf-hope-date-2', '#mrf-image-date'].forEach(sel => {
-        const el = modal.querySelector(sel);
-        if (el) el.value = '';
-      });
-
-      // ラジオボタンをリセット
-      const unknownRadio = modal.querySelector('#mrf-visit-unknown');
-      if (unknownRadio) unknownRadio.checked = true;
-
-      // テキストエリアをリセット
-      modal.querySelectorAll('textarea').forEach(ta => { ta.value = ''; });
-
-      // チェックボックスをリセット
-      modal.querySelectorAll('.mrf-checkbox-group input[type="checkbox"]').forEach(cb => { cb.checked = false; });
-
-      isDirty = false;
-    });
-
-    // 下書き保存
-    modal.querySelector('#mrf-save-draft').addEventListener('click', async () => {
-      const data = collectFormData(modal, formData);
-      const ds = pageWindow.HenryCore?.modules?.DraftStorage;
-      if (ds) {
-        const payload = { schemaVersion: DRAFT_SCHEMA_VERSION, data };
-        const saved = await ds.save(DRAFT_TYPE, formData.patient_uuid, payload, data.patient_name || '');
-        if (saved) {
-          isDirty = false;
-          modal.querySelector('.mrf-footer-left').textContent = `下書き: ${new Date().toLocaleString('ja-JP')}`;
-          pageWindow.HenryCore?.ui?.showToast?.('下書きを保存しました', 'success');
-        }
+  function showFormModal(formData, lastSavedAt) {
+    const EXTRA_CSS = `
+      .mrf-radio-group.vertical {
+        flex-direction: column;
+        gap: 8px;
       }
-    });
-
-    // Google Docs出力
-    modal.querySelector('#mrf-generate').addEventListener('click', async () => {
-      const btn = modal.querySelector('#mrf-generate');
-      btn.disabled = true;
-      btn.textContent = '生成中...';
-
-      try {
-        const data = collectFormData(modal, formData);
-        await generateGoogleDoc(data);
-        const ds = pageWindow.HenryCore?.modules?.DraftStorage;
-        if (ds) await ds.delete(DRAFT_TYPE, formData.patient_uuid);
-        modal.remove();
-      } catch (e) {
-        console.error(`[${SCRIPT_NAME}] 出力エラー:`, e);
-        alert(`エラーが発生しました: ${e.message}`);
-        btn.disabled = false;
-        btn.textContent = 'Google Docsに出力';
+      .mrf-conditional-field {
+        margin-top: 8px;
+        padding: 12px;
+        background: #fafafa;
+        border-radius: 6px;
+        display: none;
       }
+      .mrf-conditional-field.visible { display: block; }
+      .mrf-image-checkboxes {
+        display: flex;
+        gap: 16px;
+        margin-top: 8px;
+        flex-wrap: wrap;
+      }
+      .mrf-image-checkbox {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+      }
+      .mrf-image-checkbox input[type="checkbox"] {
+        width: 16px;
+        height: 16px;
+      }
+      .mrf-image-checkbox label {
+        font-size: 14px;
+        color: #333;
+      }
+      .mrf-current-status-detail {
+        margin-top: 8px;
+        padding-left: 24px;
+      }
+      .mrf-current-status-detail select {
+        width: auto;
+        min-width: 150px;
+      }
+      .mrf-hidden { display: none !important; }
+    `;
+
+    FC().showFormModal({
+      id: 'mrf-form-modal',
+      title: '高松市立みんなの病院 FAX診療申込書',
+      prefix: 'mrf',
+      bodyHTML: buildFormBody(formData),
+      extraCSS: EXTRA_CSS,
+      width: '90%',
+      draftType: DRAFT_TYPE,
+      draftSchemaVersion: DRAFT_SCHEMA_VERSION,
+      patientUuid: formData.patient_uuid,
+      patientName: formData.patient_name,
+      lastSavedAt,
+      collectFormData: (bodyEl) => collectFormData(bodyEl, formData),
+      onClear: (bodyEl) => clearFormFields(bodyEl),
+      onGenerate: async (data) => { await generateGoogleDoc(data); },
+      onSetup: (bodyEl) => { setupFormEvents(bodyEl); },
     });
   }
 
-  function collectFormData(modal, originalData) {
+  function collectFormData(bodyEl, originalData) {
     const data = { ...originalData };
 
     // 患者追加情報
-    data.maiden_name = modal.querySelector('#mrf-maiden-name')?.value || '';
+    data.maiden_name = bodyEl.querySelector('#mrf-maiden-name')?.value || '';
 
     // 高松市立みんなの病院固有
-    data.destination_department = modal.querySelector('#mrf-dest-department')?.value || '';
-    data.destination_doctor = modal.querySelector('#mrf-dest-doctor')?.value || '';
+    data.destination_department = bodyEl.querySelector('#mrf-dest-department')?.value || '';
+    data.destination_doctor = bodyEl.querySelector('#mrf-dest-doctor')?.value || '';
 
     // 希望日
-    data.hope_date_type = modal.querySelector('input[name="mrf-hope-date-type"]:checked')?.value || 'date';
-    data.hope_date_1 = modal.querySelector('#mrf-hope-date-1')?.value || '';
-    data.hope_time_1 = modal.querySelector('#mrf-hope-time-1')?.value || '';
-    data.hope_date_2 = modal.querySelector('#mrf-hope-date-2')?.value || '';
-    data.hope_time_2 = modal.querySelector('#mrf-hope-time-2')?.value || '';
+    data.hope_date_type = bodyEl.querySelector('input[name="mrf-hope-date-type"]:checked')?.value || 'date';
+    data.hope_date_1 = bodyEl.querySelector('#mrf-hope-date-1')?.value || '';
+    data.hope_time_1 = bodyEl.querySelector('#mrf-hope-time-1')?.value || '';
+    data.hope_date_2 = bodyEl.querySelector('#mrf-hope-date-2')?.value || '';
+    data.hope_time_2 = bodyEl.querySelector('#mrf-hope-time-2')?.value || '';
 
     // 画像の有無
-    data.has_image = modal.querySelector('input[name="mrf-has-image"]:checked')?.value === 'yes';
-    data.image_ct = modal.querySelector('#mrf-image-ct')?.checked || false;
-    data.image_mri = modal.querySelector('#mrf-image-mri')?.checked || false;
-    data.image_xp = modal.querySelector('#mrf-image-xp')?.checked || false;
-    data.image_pet = modal.querySelector('#mrf-image-pet')?.checked || false;
-    data.image_date = modal.querySelector('#mrf-image-date')?.value || '';
+    data.has_image = bodyEl.querySelector('input[name="mrf-has-image"]:checked')?.value === 'yes';
+    data.image_ct = bodyEl.querySelector('#mrf-image-ct')?.checked || false;
+    data.image_mri = bodyEl.querySelector('#mrf-image-mri')?.checked || false;
+    data.image_xp = bodyEl.querySelector('#mrf-image-xp')?.checked || false;
+    data.image_pet = bodyEl.querySelector('#mrf-image-pet')?.checked || false;
+    data.image_date = bodyEl.querySelector('#mrf-image-date')?.value || '';
 
     // 事前連絡
-    data.prior_contact = modal.querySelector('input[name="mrf-prior-contact"]:checked')?.value || 'no';
+    data.prior_contact = bodyEl.querySelector('input[name="mrf-prior-contact"]:checked')?.value || 'no';
 
     // 受診歴
-    data.visit_history = modal.querySelector('input[name="mrf-visit-history"]:checked')?.value || 'unknown';
+    data.visit_history = bodyEl.querySelector('input[name="mrf-visit-history"]:checked')?.value || 'unknown';
 
     // 現在の状況
-    data.current_status = modal.querySelector('input[name="mrf-current-status"]:checked')?.value || 'none';
+    data.current_status = bodyEl.querySelector('input[name="mrf-current-status"]:checked')?.value || 'none';
     if (data.current_status === 'outpatient') {
-      data.current_status_detail = modal.querySelector('#mrf-outpatient-type')?.value || 'insurance';
+      data.current_status_detail = bodyEl.querySelector('#mrf-outpatient-type')?.value || 'insurance';
     } else if (data.current_status === 'inpatient') {
-      data.current_status_detail = modal.querySelector('#mrf-inpatient-type')?.value || 'dpc';
+      data.current_status_detail = bodyEl.querySelector('#mrf-inpatient-type')?.value || 'dpc';
     } else {
       data.current_status_detail = '';
     }
-    data.facility_name = modal.querySelector('#mrf-facility-name')?.value || '';
+    data.facility_name = bodyEl.querySelector('#mrf-facility-name')?.value || '';
 
     // 病名（選択と自由記述の両方を取得）
     data.selected_diseases = [];
     if (data.diseases.length > 0) {
       data.diseases.forEach(d => {
-        const cb = modal.querySelector(`#mrf-disease-${d.uuid}`);
+        const cb = bodyEl.querySelector(`#mrf-disease-${d.uuid}`);
         if (cb?.checked) {
           data.selected_diseases.push(d.uuid);
         }
       });
     }
-    data.diagnosis_text = modal.querySelector('#mrf-diagnosis-text')?.value || '';
+    data.diagnosis_text = bodyEl.querySelector('#mrf-diagnosis-text')?.value || '';
 
     return data;
   }

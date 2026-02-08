@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry Core
 // @namespace    https://henry-app.jp/
-// @version      2.36.0
+// @version      2.37.0
 // @description  Henry スクリプト実行基盤 (GoogleAuth統合 / Google Docs対応)
 // @author       sk powered by Claude & Gemini
 // @match        https://henry-app.jp/*
@@ -40,7 +40,7 @@
 
 /**
  * ============================================
- * Henry Core API 目次 (v2.36.0)
+ * Henry Core API 目次 (v2.37.0)
  * ============================================
  *
  * ■ Config (config.*)
@@ -92,7 +92,7 @@
  *   createTable({ columns, data, renderCell?, onRowClick? }) - テーブル → { table, refresh }
  *   createCard({ title, description?, checkbox?, content, selected? }) - カード → { card, setSelected, checkbox? }
  *   createAccordion({ items, allowMultiple? }) - アコーディオン → { wrapper, toggle, expand, collapse, updateBadge }
- *   showModal({ title, content, actions?, width?, closeOnOverlayClick? })
+ *   showModal({ title, content, actions?, width?, closeOnOverlayClick?, showCloseButton?, onBeforeClose?, closeOnEsc?, variant?, headerColor?, footerLeft?, className? })
  *   showConfirm({ title, message, confirmLabel?, cancelLabel? }) - 確認ダイアログ → Promise<boolean>
  *   showToast(message, type?, duration?)            - トースト通知
  *   showSpinner(message?)                           - ローディング表示 → { close }
@@ -649,6 +649,74 @@
           font-weight: var(--henry-font-weight-medium);
           color: var(--henry-text-high);
           margin-bottom: 16px;
+        }
+        /* variant: 'form' 用スタイル */
+        .henry-modal-form {
+          max-width: 800px;
+          max-height: 90vh;
+          display: flex;
+          flex-direction: column;
+          padding: 0;
+          border-radius: 12px;
+          box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+          min-width: auto;
+        }
+        .henry-modal-header {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          padding: 16px 24px;
+          border-radius: 12px 12px 0 0;
+          flex-shrink: 0;
+        }
+        .henry-modal-header h2 {
+          margin: 0;
+          font-size: 18px;
+          font-weight: 600;
+          color: #fff;
+        }
+        .henry-modal-close {
+          background: rgba(255,255,255,0.2);
+          border: none;
+          color: #fff;
+          width: 32px;
+          height: 32px;
+          border-radius: 50%;
+          font-size: 20px;
+          cursor: pointer;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          transition: background 0.2s;
+          flex-shrink: 0;
+        }
+        .henry-modal-close:hover {
+          background: rgba(255,255,255,0.35);
+        }
+        .henry-modal-body {
+          flex: 1;
+          overflow-y: auto;
+          padding: 24px;
+        }
+        .henry-modal-footer {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          padding: 16px 24px;
+          border-top: 1px solid var(--henry-border);
+          flex-shrink: 0;
+          gap: 8px;
+        }
+        .henry-modal-footer-left {
+          font-size: 12px;
+          color: var(--henry-text-med);
+          flex-shrink: 1;
+          min-width: 0;
+        }
+        .henry-modal-footer-right {
+          display: flex;
+          gap: 8px;
+          flex-shrink: 0;
         }
         .henry-input,
         .henry-textarea {
@@ -1644,7 +1712,12 @@
       return { wrapper, toggle, expand, collapse, updateBadge };
     },
 
-    showModal: ({ title, content, actions = [], width, closeOnOverlayClick = true }) => {
+    showModal: ({
+      title, content, actions = [], width, closeOnOverlayClick = true,
+      // 新規オプション
+      showCloseButton = false, onBeforeClose = null, closeOnEsc = false,
+      variant = 'dialog', headerColor = null, footerLeft = null, className = null,
+    }) => {
       UI.init();
 
       if (!document.body) {
@@ -1652,15 +1725,125 @@
           UI._waitingForBody = true;
           window.addEventListener('DOMContentLoaded', () => {
             UI._waitingForBody = false;
-            UI.showModal({ title, content, actions, width, closeOnOverlayClick });
+            UI.showModal({
+              title, content, actions, width, closeOnOverlayClick,
+              showCloseButton, onBeforeClose, closeOnEsc,
+              variant, headerColor, footerLeft, className,
+            });
           });
         }
-        return { close: () => {} };
+        return { close: () => {}, body: null, setFooterLeft: () => {} };
       }
 
       const overlay = document.createElement('div');
       overlay.className = 'henry-modal-overlay';
 
+      const close = () => {
+        if (escHandler) document.removeEventListener('keydown', escHandler);
+        if (overlay.parentNode) document.body.removeChild(overlay);
+      };
+
+      const tryClose = async () => {
+        if (onBeforeClose) {
+          const result = await onBeforeClose();
+          if (result === false) return;
+        }
+        close();
+      };
+
+      // ESCキー処理
+      let escHandler = null;
+      if (closeOnEsc) {
+        escHandler = (e) => {
+          if (e.key === 'Escape') tryClose();
+        };
+        document.addEventListener('keydown', escHandler);
+      }
+
+      // --- variant: 'form' ---
+      if (variant === 'form') {
+        const modal = document.createElement('div');
+        modal.className = 'henry-modal-content henry-modal-form' + (className ? ' ' + className : '');
+        if (width) modal.style.width = width;
+
+        // ヘッダー
+        const header = document.createElement('div');
+        header.className = 'henry-modal-header';
+        if (headerColor) header.style.background = headerColor;
+        const h2 = document.createElement('h2');
+        h2.textContent = title;
+        header.appendChild(h2);
+        if (showCloseButton) {
+          const closeBtn = document.createElement('button');
+          closeBtn.className = 'henry-modal-close';
+          closeBtn.innerHTML = '&times;';
+          closeBtn.addEventListener('click', () => tryClose());
+          header.appendChild(closeBtn);
+        }
+        modal.appendChild(header);
+
+        // ボディ
+        const body = document.createElement('div');
+        body.className = 'henry-modal-body';
+        if (typeof content === 'string') {
+          body.innerHTML = content;
+        } else if (content) {
+          body.appendChild(content);
+        }
+        modal.appendChild(body);
+
+        // フッター
+        const footer = document.createElement('div');
+        footer.className = 'henry-modal-footer';
+        const footerLeftEl = document.createElement('div');
+        footerLeftEl.className = 'henry-modal-footer-left';
+        if (typeof footerLeft === 'string') {
+          footerLeftEl.textContent = footerLeft;
+        } else if (footerLeft) {
+          footerLeftEl.appendChild(footerLeft);
+        }
+        footer.appendChild(footerLeftEl);
+
+        const footerRightEl = document.createElement('div');
+        footerRightEl.className = 'henry-modal-footer-right';
+        actions.forEach(action => {
+          const btn = UI.createButton({
+            label: action.label,
+            variant: action.variant || 'primary',
+            onClick: async (e) => {
+              if (action.onClick) await action.onClick(e, btn);
+              if (action.autoClose !== false) close();
+            }
+          });
+          if (action.id) btn.id = action.id;
+          if (action.className) btn.classList.add(action.className);
+          footerRightEl.appendChild(btn);
+        });
+        footer.appendChild(footerRightEl);
+        modal.appendChild(footer);
+
+        overlay.appendChild(modal);
+        document.body.appendChild(overlay);
+
+        if (closeOnOverlayClick) {
+          overlay.addEventListener('click', (e) => {
+            if (e.target === overlay) tryClose();
+          });
+        }
+
+        const setFooterLeft = (content) => {
+          footerLeftEl.textContent = '';
+          if (typeof content === 'string') {
+            footerLeftEl.textContent = content;
+          } else if (content) {
+            footerLeftEl.appendChild(content);
+          }
+        };
+
+        return { close, element: overlay, body, setFooterLeft };
+      }
+
+      // --- variant: 'dialog' (既存動作) ---
       const modal = document.createElement('div');
       modal.className = 'henry-modal-content';
       if (width) {
@@ -1687,10 +1870,6 @@
       footer.style.justifyContent = 'flex-end';
       footer.style.gap = '8px';
 
-      const close = () => {
-        if (overlay.parentNode) document.body.removeChild(overlay);
-      };
-
       if (actions.length === 0) {
         actions.push({ label: '閉じる', variant: 'secondary' });
       }
@@ -1701,7 +1880,6 @@
           variant: action.variant || 'primary',
           onClick: (e) => {
             if (action.onClick) action.onClick(e, btn);
-            // autoClose: false の場合は自動で閉じない
             if (action.autoClose !== false) close();
           }
         });
@@ -1712,14 +1890,13 @@
       overlay.appendChild(modal);
       document.body.appendChild(overlay);
 
-      // closeOnOverlayClick: false の場合はオーバーレイクリックで閉じない
       if (closeOnOverlayClick) {
         overlay.addEventListener('click', (e) => {
-          if (e.target === overlay) close();
+          if (e.target === overlay) tryClose();
         });
       }
 
-      return { close, element: overlay };
+      return { close, element: overlay, body, setFooterLeft: () => {} };
     },
 
     /**

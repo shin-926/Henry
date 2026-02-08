@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         高松平和病院 診療申込書
 // @namespace    https://henry-app.jp/
-// @version      1.5.0
+// @version      1.6.0
 // @description  高松平和病院への診療申込書を作成
 // @author       sk powered by Claude
 // @match        https://henry-app.jp/*
@@ -267,601 +267,468 @@
     }
   }
 
-  function showFormModal(formData, lastSavedAt) {
-    // 既存モーダルを削除
-    const existingModal = document.getElementById('hrf-form-modal');
-    if (existingModal) existingModal.remove();
+  function buildFormBody(formData) {
+    const escapeHtml = FC().utils.escapeHtml;
 
-    const { utils } = FC();
-    const escapeHtml = utils.escapeHtml;
-
-    const modal = document.createElement('div');
-    modal.id = 'hrf-form-modal';
-    modal.innerHTML = `
-      <style>
-        ${FC().generateBaseCSS('hrf')}
-        /* 高松平和病院固有のスタイルオーバーライド */
-        .hrf-container {
-          max-width: 900px;
-        }
-        .hrf-header {
-          background: linear-gradient(135deg, ${THEME.primary} 0%, ${THEME.primaryDark} 100%);
-        }
-        .hrf-section-title.collapsible {
-          cursor: pointer;
-          display: flex;
-          align-items: center;
-          gap: 8px;
-        }
-        .hrf-section-title.collapsible::before {
-          content: '\\25BC';
-          font-size: 12px;
-          transition: transform 0.2s;
-        }
-        .hrf-section-title.collapsible.collapsed::before {
-          transform: rotate(-90deg);
-        }
-        .hrf-section-content {
-          overflow: hidden;
-          transition: max-height 0.3s ease;
-        }
-        .hrf-section-content.collapsed {
-          max-height: 0;
-          padding: 0;
-        }
-        .hrf-checkbox-group {
-          max-height: 200px;
-          overflow-y: auto;
-        }
-        .hrf-radio-group.vertical {
-          flex-direction: column;
-          gap: 8px;
-        }
-        .hrf-inline-checkbox {
-          display: flex;
-          align-items: center;
-          gap: 8px;
-          padding: 10px 14px;
-          background: #f8f9fa;
-          border-radius: 6px;
-          margin-bottom: 12px;
-        }
-        .hrf-inline-checkbox input[type="checkbox"] {
-          width: 18px;
-          height: 18px;
-        }
-        .hrf-inline-checkbox label {
-          font-size: 14px;
-          font-weight: 500;
-          color: #333;
-          margin: 0;
-        }
-        .hrf-conditional-field {
-          margin-top: 8px;
-          padding: 12px;
-          background: #fafafa;
-          border-radius: 6px;
-          display: none;
-        }
-        .hrf-conditional-field.visible {
-          display: block;
-        }
-        .hrf-subsection {
-          margin-top: 12px;
-          padding: 16px;
-          background: #f8f9fa;
-          border-radius: 8px;
-          border-left: 3px solid ${THEME.primaryLight};
-        }
-        .hrf-subsection-title {
-          font-size: 14px;
-          font-weight: 600;
-          color: #555;
-          margin-bottom: 12px;
-        }
-        .hrf-multi-checkbox {
-          display: flex;
-          flex-wrap: wrap;
-          gap: 12px;
-          margin-top: 8px;
-        }
-        .hrf-multi-checkbox .hrf-checkbox-item {
-          flex: 0 0 auto;
-          margin-bottom: 0;
-        }
-        .hrf-note {
-          background: #fff3e0;
-          border: 1px solid #ffb74d;
-          border-radius: 6px;
-          padding: 10px 14px;
-          margin-bottom: 12px;
-          font-size: 13px;
-          color: #e65100;
-        }
-      </style>
-      <div class="hrf-container">
-        <div class="hrf-header">
-          <h2>高松平和病院 診療申込書</h2>
-          <button class="hrf-close" title="閉じる">&times;</button>
+    return `
+      <!-- 診察・検査 -->
+      <div class="hrf-section">
+        <div class="hrf-section-title">診察・検査</div>
+        <div class="hrf-note">
+          <strong>緩和ケア紹介について：</strong>緩和ケアへの紹介をご希望の場合は、代表番号（087-833-8113）へご連絡ください。
         </div>
-        <div class="hrf-body">
-          <!-- 診察・検査 -->
-          <div class="hrf-section">
-            <div class="hrf-section-title">診察・検査</div>
-            <div class="hrf-note">
-              <strong>緩和ケア紹介について：</strong>緩和ケアへの紹介をご希望の場合は、代表番号（087-833-8113）へご連絡ください。
-            </div>
-            <div class="hrf-row">
-              <div class="hrf-field">
-                <label>診察・検査</label>
-                <div class="hrf-radio-group">
-                  <div class="hrf-radio-item">
-                    <input type="radio" name="hrf-purpose-type" id="hrf-purpose-consultation" value="consultation"
-                      ${formData.purpose_type !== 'test' ? 'checked' : ''}>
-                    <label for="hrf-purpose-consultation">診察</label>
-                  </div>
-                  <div class="hrf-radio-item">
-                    <input type="radio" name="hrf-purpose-type" id="hrf-purpose-test" value="test"
-                      ${formData.purpose_type === 'test' ? 'checked' : ''}>
-                    <label for="hrf-purpose-test">検査</label>
-                  </div>
-                </div>
+        <div class="hrf-row">
+          <div class="hrf-field">
+            <label>診察・検査</label>
+            <div class="hrf-radio-group">
+              <div class="hrf-radio-item">
+                <input type="radio" name="hrf-purpose-type" id="hrf-purpose-consultation" value="consultation"
+                  ${formData.purpose_type !== 'test' ? 'checked' : ''}>
+                <label for="hrf-purpose-consultation">診察</label>
+              </div>
+              <div class="hrf-radio-item">
+                <input type="radio" name="hrf-purpose-type" id="hrf-purpose-test" value="test"
+                  ${formData.purpose_type === 'test' ? 'checked' : ''}>
+                <label for="hrf-purpose-test">検査</label>
               </div>
             </div>
-            <div id="hrf-consultation-fields" style="${formData.purpose_type === 'test' ? 'display: none;' : ''}">
+          </div>
+        </div>
+        <div id="hrf-consultation-fields" style="${formData.purpose_type === 'test' ? 'display: none;' : ''}">
+          <div class="hrf-row">
+            <div class="hrf-field">
+              <label>診療科</label>
+              <select id="hrf-dest-department">
+                <option value="">選択してください</option>
+                ${DEPARTMENTS.map(dept => `
+                  <option value="${escapeHtml(dept)}" ${formData.destination_department === dept ? 'selected' : ''}>
+                    ${escapeHtml(dept)}
+                  </option>
+                `).join('')}
+              </select>
+            </div>
+            <div class="hrf-field" id="hrf-doctor-field">
+              <label>希望医師名</label>
+              <div style="display: flex; gap: 8px; align-items: flex-start;">
+                <div class="hrf-combobox" data-field="doctor" style="flex: 1;">
+                  <input type="text" class="hrf-combobox-input" id="hrf-dest-doctor" value="${escapeHtml(formData.destination_doctor)}" placeholder="医師名を入力">
+                  <button type="button" class="hrf-combobox-toggle" title="リストから選択">▼</button>
+                  <div class="hrf-combobox-dropdown" id="hrf-doctor-dropdown"></div>
+                </div>
+                <button type="button" class="hrf-btn hrf-btn-link" id="hrf-open-schedule" title="外来担当表を見る">外来表</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 希望日 -->
+      <div class="hrf-section">
+        <div class="hrf-section-title">受診希望日</div>
+        <div class="hrf-row">
+          <div class="hrf-field">
+            <label>第1希望日</label>
+            <input type="date" id="hrf-hope-date-1" value="${escapeHtml(formData.hope_date_1)}">
+          </div>
+          <div class="hrf-field">
+            <label>第2希望日</label>
+            <input type="date" id="hrf-hope-date-2" value="${escapeHtml(formData.hope_date_2)}">
+          </div>
+          <div class="hrf-field">
+            <label>第3希望日</label>
+            <input type="date" id="hrf-hope-date-3" value="${escapeHtml(formData.hope_date_3)}">
+          </div>
+        </div>
+      </div>
+
+      <!-- 主訴または傷病名 -->
+      <div class="hrf-section">
+        <div class="hrf-section-title">主訴または傷病名</div>
+        ${formData.diseases.length > 0 ? `
+          <div style="margin-bottom: 12px;">
+            <label style="display: block; font-size: 13px; font-weight: 500; color: #666; margin-bottom: 8px;">登録済み病名から選択</label>
+            <div id="hrf-diseases-list" class="hrf-checkbox-group">
+              ${formData.diseases.map(d => `
+                <div class="hrf-checkbox-item ${d.isMain ? 'main-disease' : ''}">
+                  <input type="checkbox" id="hrf-disease-${d.uuid}" value="${d.uuid}"
+                    ${formData.selected_diseases?.includes(d.uuid) ? 'checked' : ''}>
+                  <label for="hrf-disease-${d.uuid}">${escapeHtml(d.name)}${d.isMain ? ' (主病名)' : ''}${d.isSuspected ? ' (疑い)' : ''}</label>
+                </div>
+              `).join('')}
+            </div>
+          </div>
+        ` : ''}
+        <div class="hrf-field">
+          <label>自由記述</label>
+          <textarea id="hrf-diagnosis-text" placeholder="主訴や追加の傷病名を入力">${escapeHtml(formData.diagnosis_text)}</textarea>
+        </div>
+      </div>
+
+      <!-- 検査項目（検査選択時のみ表示） -->
+      <div id="hrf-test-sections" style="${formData.purpose_type !== 'test' ? 'display: none;' : ''}">
+      <!-- 内視鏡検査 -->
+      <div class="hrf-section">
+        <div class="hrf-section-title collapsible" data-target="hrf-endoscopy-content">内視鏡検査</div>
+        <div class="hrf-section-content" id="hrf-endoscopy-content">
+          <!-- 上部内視鏡検査 -->
+          <div class="hrf-subsection">
+            <div class="hrf-inline-checkbox">
+              <input type="checkbox" id="hrf-upper-endoscopy" ${formData.upper_endoscopy ? 'checked' : ''}>
+              <label for="hrf-upper-endoscopy">上部内視鏡検査</label>
+            </div>
+            <div class="hrf-conditional-field ${formData.upper_endoscopy ? 'visible' : ''}" id="hrf-upper-endoscopy-detail">
               <div class="hrf-row">
                 <div class="hrf-field">
-                  <label>診療科</label>
-                  <select id="hrf-dest-department">
-                    <option value="">選択してください</option>
-                    ${DEPARTMENTS.map(dept => `
-                      <option value="${escapeHtml(dept)}" ${formData.destination_department === dept ? 'selected' : ''}>
-                        ${escapeHtml(dept)}
-                      </option>
-                    `).join('')}
-                  </select>
-                </div>
-                <div class="hrf-field" id="hrf-doctor-field">
-                  <label>希望医師名</label>
-                  <div style="display: flex; gap: 8px; align-items: flex-start;">
-                    <div class="hrf-combobox" data-field="doctor" style="flex: 1;">
-                      <input type="text" class="hrf-combobox-input" id="hrf-dest-doctor" value="${escapeHtml(formData.destination_doctor)}" placeholder="医師名を入力">
-                      <button type="button" class="hrf-combobox-toggle" title="リストから選択">▼</button>
-                      <div class="hrf-combobox-dropdown" id="hrf-doctor-dropdown"></div>
+                  <label>実施方法</label>
+                  <div class="hrf-radio-group">
+                    <div class="hrf-radio-item">
+                      <input type="radio" name="hrf-upper-method" id="hrf-upper-nasal" value="nasal"
+                        ${formData.upper_endoscopy_method !== 'oral' ? 'checked' : ''}>
+                      <label for="hrf-upper-nasal">経鼻</label>
                     </div>
-                    <button type="button" class="hrf-btn hrf-btn-link" id="hrf-open-schedule" title="外来担当表を見る">外来表</button>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <!-- 希望日 -->
-          <div class="hrf-section">
-            <div class="hrf-section-title">受診希望日</div>
-            <div class="hrf-row">
-              <div class="hrf-field">
-                <label>第1希望日</label>
-                <input type="date" id="hrf-hope-date-1" value="${escapeHtml(formData.hope_date_1)}">
-              </div>
-              <div class="hrf-field">
-                <label>第2希望日</label>
-                <input type="date" id="hrf-hope-date-2" value="${escapeHtml(formData.hope_date_2)}">
-              </div>
-              <div class="hrf-field">
-                <label>第3希望日</label>
-                <input type="date" id="hrf-hope-date-3" value="${escapeHtml(formData.hope_date_3)}">
-              </div>
-            </div>
-          </div>
-
-          <!-- 主訴または傷病名 -->
-          <div class="hrf-section">
-            <div class="hrf-section-title">主訴または傷病名</div>
-            ${formData.diseases.length > 0 ? `
-              <div style="margin-bottom: 12px;">
-                <label style="display: block; font-size: 13px; font-weight: 500; color: #666; margin-bottom: 8px;">登録済み病名から選択</label>
-                <div id="hrf-diseases-list" class="hrf-checkbox-group">
-                  ${formData.diseases.map(d => `
-                    <div class="hrf-checkbox-item ${d.isMain ? 'main-disease' : ''}">
-                      <input type="checkbox" id="hrf-disease-${d.uuid}" value="${d.uuid}"
-                        ${formData.selected_diseases?.includes(d.uuid) ? 'checked' : ''}>
-                      <label for="hrf-disease-${d.uuid}">${escapeHtml(d.name)}${d.isMain ? ' (主病名)' : ''}${d.isSuspected ? ' (疑い)' : ''}</label>
-                    </div>
-                  `).join('')}
-                </div>
-              </div>
-            ` : ''}
-            <div class="hrf-field">
-              <label>自由記述</label>
-              <textarea id="hrf-diagnosis-text" placeholder="主訴や追加の傷病名を入力">${escapeHtml(formData.diagnosis_text)}</textarea>
-            </div>
-          </div>
-
-          <!-- 検査項目（検査選択時のみ表示） -->
-          <div id="hrf-test-sections" style="${formData.purpose_type !== 'test' ? 'display: none;' : ''}">
-          <!-- 内視鏡検査 -->
-          <div class="hrf-section">
-            <div class="hrf-section-title collapsible" data-target="hrf-endoscopy-content">内視鏡検査</div>
-            <div class="hrf-section-content" id="hrf-endoscopy-content">
-              <!-- 上部内視鏡検査 -->
-              <div class="hrf-subsection">
-                <div class="hrf-inline-checkbox">
-                  <input type="checkbox" id="hrf-upper-endoscopy" ${formData.upper_endoscopy ? 'checked' : ''}>
-                  <label for="hrf-upper-endoscopy">上部内視鏡検査</label>
-                </div>
-                <div class="hrf-conditional-field ${formData.upper_endoscopy ? 'visible' : ''}" id="hrf-upper-endoscopy-detail">
-                  <div class="hrf-row">
-                    <div class="hrf-field">
-                      <label>実施方法</label>
-                      <div class="hrf-radio-group">
-                        <div class="hrf-radio-item">
-                          <input type="radio" name="hrf-upper-method" id="hrf-upper-nasal" value="nasal"
-                            ${formData.upper_endoscopy_method !== 'oral' ? 'checked' : ''}>
-                          <label for="hrf-upper-nasal">経鼻</label>
-                        </div>
-                        <div class="hrf-radio-item">
-                          <input type="radio" name="hrf-upper-method" id="hrf-upper-oral" value="oral"
-                            ${formData.upper_endoscopy_method === 'oral' ? 'checked' : ''}>
-                          <label for="hrf-upper-oral">経口</label>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                  <div class="hrf-conditional-field ${formData.upper_endoscopy_method === 'oral' ? 'visible' : ''}" id="hrf-sedation-field">
-                    <div class="hrf-field">
-                      <label>鎮静剤使用</label>
-                      <div class="hrf-radio-group">
-                        <div class="hrf-radio-item">
-                          <input type="radio" name="hrf-sedation" id="hrf-sedation-no" value="no"
-                            ${formData.upper_endoscopy_sedation !== 'yes' ? 'checked' : ''}>
-                          <label for="hrf-sedation-no">なし</label>
-                        </div>
-                        <div class="hrf-radio-item">
-                          <input type="radio" name="hrf-sedation" id="hrf-sedation-yes" value="yes"
-                            ${formData.upper_endoscopy_sedation === 'yes' ? 'checked' : ''}>
-                          <label for="hrf-sedation-yes">あり</label>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                  <div class="hrf-row" style="margin-top: 12px;">
-                    <div class="hrf-field">
-                      <label>抗血栓剤投薬</label>
-                      <div class="hrf-radio-group">
-                        <div class="hrf-radio-item">
-                          <input type="radio" name="hrf-anticoagulant" id="hrf-anticoagulant-no" value="no"
-                            ${formData.upper_endoscopy_anticoagulant !== 'yes' ? 'checked' : ''}>
-                          <label for="hrf-anticoagulant-no">なし</label>
-                        </div>
-                        <div class="hrf-radio-item">
-                          <input type="radio" name="hrf-anticoagulant" id="hrf-anticoagulant-yes" value="yes"
-                            ${formData.upper_endoscopy_anticoagulant === 'yes' ? 'checked' : ''}>
-                          <label for="hrf-anticoagulant-yes">あり</label>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                  <div class="hrf-conditional-field ${formData.upper_endoscopy_anticoagulant === 'yes' ? 'visible' : ''}" id="hrf-anticoagulant-name-field">
-                    <div class="hrf-field">
-                      <label>薬剤名</label>
-                      <input type="text" id="hrf-anticoagulant-name" value="${escapeHtml(formData.upper_endoscopy_anticoagulant_name)}" placeholder="例: ワーファリン">
+                    <div class="hrf-radio-item">
+                      <input type="radio" name="hrf-upper-method" id="hrf-upper-oral" value="oral"
+                        ${formData.upper_endoscopy_method === 'oral' ? 'checked' : ''}>
+                      <label for="hrf-upper-oral">経口</label>
                     </div>
                   </div>
                 </div>
               </div>
-
-              <!-- 大腸内視鏡検査 -->
-              <div class="hrf-subsection" style="margin-top: 16px;">
-                <div class="hrf-inline-checkbox">
-                  <input type="checkbox" id="hrf-lower-endoscopy" ${formData.lower_endoscopy ? 'checked' : ''}>
-                  <label for="hrf-lower-endoscopy">大腸内視鏡検査</label>
-                </div>
-                <div class="hrf-note" style="margin-top: 8px; margin-bottom: 0;">
-                  ※大腸内視鏡検査は内科診察後に予約となります
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <!-- 放射線検査 -->
-          <div class="hrf-section">
-            <div class="hrf-section-title collapsible" data-target="hrf-radiology-content">放射線検査</div>
-            <div class="hrf-section-content" id="hrf-radiology-content">
-              <div class="hrf-inline-checkbox">
-                <input type="checkbox" id="hrf-radiology-exam" ${formData.radiology_exam ? 'checked' : ''}>
-                <label for="hrf-radiology-exam">放射線検査を希望</label>
-              </div>
-              <div class="hrf-conditional-field ${formData.radiology_exam ? 'visible' : ''}" id="hrf-radiology-detail">
-                <div class="hrf-row">
-                  <div class="hrf-field">
-                    <label>検査種類</label>
-                    <div class="hrf-radio-group">
-                      <div class="hrf-radio-item">
-                        <input type="radio" name="hrf-radiology-type" id="hrf-radiology-ct" value="ct"
-                          ${formData.radiology_type !== 'mri' ? 'checked' : ''}>
-                        <label for="hrf-radiology-ct">CT</label>
-                      </div>
-                      <div class="hrf-radio-item">
-                        <input type="radio" name="hrf-radiology-type" id="hrf-radiology-mri" value="mri"
-                          ${formData.radiology_type === 'mri' ? 'checked' : ''}>
-                        <label for="hrf-radiology-mri">MRI（1.5テスラ）</label>
-                      </div>
+              <div class="hrf-conditional-field ${formData.upper_endoscopy_method === 'oral' ? 'visible' : ''}" id="hrf-sedation-field">
+                <div class="hrf-field">
+                  <label>鎮静剤使用</label>
+                  <div class="hrf-radio-group">
+                    <div class="hrf-radio-item">
+                      <input type="radio" name="hrf-sedation" id="hrf-sedation-no" value="no"
+                        ${formData.upper_endoscopy_sedation !== 'yes' ? 'checked' : ''}>
+                      <label for="hrf-sedation-no">なし</label>
+                    </div>
+                    <div class="hrf-radio-item">
+                      <input type="radio" name="hrf-sedation" id="hrf-sedation-yes" value="yes"
+                        ${formData.upper_endoscopy_sedation === 'yes' ? 'checked' : ''}>
+                      <label for="hrf-sedation-yes">あり</label>
                     </div>
                   </div>
-                </div>
-                <div class="hrf-row">
-                  <div class="hrf-field">
-                    <label>部位</label>
-                    <input type="text" id="hrf-radiology-site" value="${escapeHtml(formData.radiology_site)}" placeholder="例: 胸部、腹部、頭部">
-                  </div>
-                </div>
-                <div class="hrf-row">
-                  <div class="hrf-field">
-                    <label>造影剤</label>
-                    <div class="hrf-radio-group">
-                      <div class="hrf-radio-item">
-                        <input type="radio" name="hrf-contrast" id="hrf-contrast-no" value="no"
-                          ${formData.radiology_contrast !== 'yes' ? 'checked' : ''}>
-                        <label for="hrf-contrast-no">なし</label>
-                      </div>
-                      <div class="hrf-radio-item">
-                        <input type="radio" name="hrf-contrast" id="hrf-contrast-yes" value="yes"
-                          ${formData.radiology_contrast === 'yes' ? 'checked' : ''}>
-                        <label for="hrf-contrast-yes">あり</label>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-                <div class="hrf-conditional-field ${formData.radiology_contrast === 'yes' ? 'visible' : ''}" id="hrf-contrast-detail">
-                  <div class="hrf-row">
-                    <div class="hrf-field" style="flex: 0.5;">
-                      <label>Cr（クレアチニン値）</label>
-                      <input type="text" id="hrf-radiology-cr" value="${escapeHtml(formData.radiology_cr)}" placeholder="例: 0.8">
-                    </div>
-                    <div class="hrf-field" style="flex: 0.5;">
-                      <label>検査日</label>
-                      <input type="date" id="hrf-radiology-exam-date" value="${escapeHtml(formData.radiology_exam_date)}">
-                    </div>
-                  </div>
-                </div>
-                <div class="hrf-row" style="margin-top: 12px;">
-                  <div class="hrf-field">
-                    <label>糖尿病薬服用</label>
-                    <div class="hrf-radio-group">
-                      <div class="hrf-radio-item">
-                        <input type="radio" name="hrf-diabetes-med" id="hrf-diabetes-med-no" value="no"
-                          ${formData.radiology_diabetes_med !== 'yes' ? 'checked' : ''}>
-                        <label for="hrf-diabetes-med-no">なし</label>
-                      </div>
-                      <div class="hrf-radio-item">
-                        <input type="radio" name="hrf-diabetes-med" id="hrf-diabetes-med-yes" value="yes"
-                          ${formData.radiology_diabetes_med === 'yes' ? 'checked' : ''}>
-                        <label for="hrf-diabetes-med-yes">あり</label>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-                <div class="hrf-conditional-field ${formData.radiology_diabetes_med === 'yes' ? 'visible' : ''}" id="hrf-diabetes-med-name-field">
-                  <div class="hrf-field">
-                    <label>薬剤名</label>
-                    <input type="text" id="hrf-diabetes-med-name" value="${escapeHtml(formData.radiology_diabetes_med_name)}" placeholder="例: メトホルミン">
-                  </div>
-                </div>
-                <div class="hrf-row" style="margin-top: 12px;">
-                  <div class="hrf-field">
-                    <label>結果の媒体</label>
-                    <div class="hrf-radio-group">
-                      <div class="hrf-radio-item">
-                        <input type="radio" name="hrf-media" id="hrf-media-cd" value="cd"
-                          ${formData.radiology_media !== 'film' ? 'checked' : ''}>
-                        <label for="hrf-media-cd">CD-R</label>
-                      </div>
-                      <div class="hrf-radio-item">
-                        <input type="radio" name="hrf-media" id="hrf-media-film" value="film"
-                          ${formData.radiology_media === 'film' ? 'checked' : ''}>
-                        <label for="hrf-media-film">フィルム</label>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-                <div class="hrf-row" style="margin-top: 12px;">
-                  <div class="hrf-field">
-                    <label>放射線所見の伝達</label>
-                    <div class="hrf-radio-group">
-                      <div class="hrf-radio-item">
-                        <input type="radio" name="hrf-radiology-delivery" id="hrf-radiology-patient" value="patient"
-                          ${formData.radiology_result_delivery !== 'mail' ? 'checked' : ''}>
-                        <label for="hrf-radiology-patient">患者様持ち帰り</label>
-                      </div>
-                      <div class="hrf-radio-item">
-                        <input type="radio" name="hrf-radiology-delivery" id="hrf-radiology-mail" value="mail"
-                          ${formData.radiology_result_delivery === 'mail' ? 'checked' : ''}>
-                        <label for="hrf-radiology-mail">郵送</label>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <!-- 超音波検査 -->
-          <div class="hrf-section">
-            <div class="hrf-section-title collapsible" data-target="hrf-ultrasound-content">超音波検査</div>
-            <div class="hrf-section-content" id="hrf-ultrasound-content">
-              <div class="hrf-field">
-                <label>検査種類（複数選択可）</label>
-                <div class="hrf-multi-checkbox">
-                  ${ULTRASOUND_TYPES.map(type => `
-                    <div class="hrf-checkbox-item">
-                      <input type="checkbox" id="hrf-us-${type}" value="${type}"
-                        ${formData.ultrasound_types?.includes(type) ? 'checked' : ''}>
-                      <label for="hrf-us-${type}">${type}エコー</label>
-                    </div>
-                  `).join('')}
                 </div>
               </div>
               <div class="hrf-row" style="margin-top: 12px;">
                 <div class="hrf-field">
-                  <label>所見の伝達</label>
+                  <label>抗血栓剤投薬</label>
                   <div class="hrf-radio-group">
                     <div class="hrf-radio-item">
-                      <input type="radio" name="hrf-us-delivery" id="hrf-us-patient" value="patient"
-                        ${formData.ultrasound_result_delivery !== 'mail' ? 'checked' : ''}>
-                      <label for="hrf-us-patient">患者様持ち帰り</label>
+                      <input type="radio" name="hrf-anticoagulant" id="hrf-anticoagulant-no" value="no"
+                        ${formData.upper_endoscopy_anticoagulant !== 'yes' ? 'checked' : ''}>
+                      <label for="hrf-anticoagulant-no">なし</label>
                     </div>
                     <div class="hrf-radio-item">
-                      <input type="radio" name="hrf-us-delivery" id="hrf-us-mail" value="mail"
-                        ${formData.ultrasound_result_delivery === 'mail' ? 'checked' : ''}>
-                      <label for="hrf-us-mail">郵送</label>
+                      <input type="radio" name="hrf-anticoagulant" id="hrf-anticoagulant-yes" value="yes"
+                        ${formData.upper_endoscopy_anticoagulant === 'yes' ? 'checked' : ''}>
+                      <label for="hrf-anticoagulant-yes">あり</label>
                     </div>
                   </div>
                 </div>
               </div>
-            </div>
-          </div>
-          </div><!-- /hrf-test-sections -->
-
-          <!-- コロナウイルス対策 -->
-          <div class="hrf-section">
-            <div class="hrf-section-title collapsible" data-target="hrf-covid-content">コロナウイルス対策</div>
-            <div class="hrf-section-content" id="hrf-covid-content">
-              <div class="hrf-row">
+              <div class="hrf-conditional-field ${formData.upper_endoscopy_anticoagulant === 'yes' ? 'visible' : ''}" id="hrf-anticoagulant-name-field">
                 <div class="hrf-field">
-                  <label>2週間以内の海外渡航歴、県外訪問歴</label>
-                  <div class="hrf-radio-group">
-                    <div class="hrf-radio-item">
-                      <input type="radio" name="hrf-covid-travel" id="hrf-covid-travel-no" value="no"
-                        ${formData.covid_travel !== 'yes' ? 'checked' : ''}>
-                      <label for="hrf-covid-travel-no">なし</label>
-                    </div>
-                    <div class="hrf-radio-item">
-                      <input type="radio" name="hrf-covid-travel" id="hrf-covid-travel-yes" value="yes"
-                        ${formData.covid_travel === 'yes' ? 'checked' : ''}>
-                      <label for="hrf-covid-travel-yes">あり</label>
-                    </div>
-                  </div>
-                </div>
-              </div>
-              <div class="hrf-row">
-                <div class="hrf-field">
-                  <label>2週間以内の感染者との接触歴</label>
-                  <div class="hrf-radio-group">
-                    <div class="hrf-radio-item">
-                      <input type="radio" name="hrf-covid-contact" id="hrf-covid-contact-no" value="no"
-                        ${formData.covid_contact !== 'yes' ? 'checked' : ''}>
-                      <label for="hrf-covid-contact-no">なし</label>
-                    </div>
-                    <div class="hrf-radio-item">
-                      <input type="radio" name="hrf-covid-contact" id="hrf-covid-contact-yes" value="yes"
-                        ${formData.covid_contact === 'yes' ? 'checked' : ''}>
-                      <label for="hrf-covid-contact-yes">あり</label>
-                    </div>
-                  </div>
-                </div>
-              </div>
-              <div class="hrf-row">
-                <div class="hrf-field">
-                  <label>発熱、咳、息切れなどの症状</label>
-                  <div class="hrf-radio-group">
-                    <div class="hrf-radio-item">
-                      <input type="radio" name="hrf-covid-symptoms" id="hrf-covid-symptoms-no" value="no"
-                        ${formData.covid_symptoms !== 'yes' ? 'checked' : ''}>
-                      <label for="hrf-covid-symptoms-no">なし</label>
-                    </div>
-                    <div class="hrf-radio-item">
-                      <input type="radio" name="hrf-covid-symptoms" id="hrf-covid-symptoms-yes" value="yes"
-                        ${formData.covid_symptoms === 'yes' ? 'checked' : ''}>
-                      <label for="hrf-covid-symptoms-yes">あり</label>
-                    </div>
-                  </div>
+                  <label>薬剤名</label>
+                  <input type="text" id="hrf-anticoagulant-name" value="${escapeHtml(formData.upper_endoscopy_anticoagulant_name)}" placeholder="例: ワーファリン">
                 </div>
               </div>
             </div>
           </div>
 
-          <!-- その他 -->
-          <div class="hrf-section">
-            <div class="hrf-section-title">その他</div>
-            <div class="hrf-field">
-              <textarea id="hrf-other-notes" placeholder="その他の連絡事項があれば入力">${escapeHtml(formData.other_notes)}</textarea>
+          <!-- 大腸内視鏡検査 -->
+          <div class="hrf-subsection" style="margin-top: 16px;">
+            <div class="hrf-inline-checkbox">
+              <input type="checkbox" id="hrf-lower-endoscopy" ${formData.lower_endoscopy ? 'checked' : ''}>
+              <label for="hrf-lower-endoscopy">大腸内視鏡検査</label>
             </div>
-          </div>
-        </div>
-        <div class="hrf-footer">
-          <div class="hrf-footer-left">
-            ${lastSavedAt ? `下書き: ${new Date(lastSavedAt).toLocaleString('ja-JP')}` : ''}
-          </div>
-          <div class="hrf-footer-right">
-            <button class="hrf-btn hrf-btn-secondary" id="hrf-clear" style="color:#d32f2f;">クリア</button>
-            <button class="hrf-btn hrf-btn-secondary" id="hrf-save-draft">下書き保存</button>
-            <button class="hrf-btn hrf-btn-primary" id="hrf-generate">Google Docsに出力</button>
+            <div class="hrf-note" style="margin-top: 8px; margin-bottom: 0;">
+              ※大腸内視鏡検査は内科診察後に予約となります
+            </div>
           </div>
         </div>
       </div>
+
+      <!-- 放射線検査 -->
+      <div class="hrf-section">
+        <div class="hrf-section-title collapsible" data-target="hrf-radiology-content">放射線検査</div>
+        <div class="hrf-section-content" id="hrf-radiology-content">
+          <div class="hrf-inline-checkbox">
+            <input type="checkbox" id="hrf-radiology-exam" ${formData.radiology_exam ? 'checked' : ''}>
+            <label for="hrf-radiology-exam">放射線検査を希望</label>
+          </div>
+          <div class="hrf-conditional-field ${formData.radiology_exam ? 'visible' : ''}" id="hrf-radiology-detail">
+            <div class="hrf-row">
+              <div class="hrf-field">
+                <label>検査種類</label>
+                <div class="hrf-radio-group">
+                  <div class="hrf-radio-item">
+                    <input type="radio" name="hrf-radiology-type" id="hrf-radiology-ct" value="ct"
+                      ${formData.radiology_type !== 'mri' ? 'checked' : ''}>
+                    <label for="hrf-radiology-ct">CT</label>
+                  </div>
+                  <div class="hrf-radio-item">
+                    <input type="radio" name="hrf-radiology-type" id="hrf-radiology-mri" value="mri"
+                      ${formData.radiology_type === 'mri' ? 'checked' : ''}>
+                    <label for="hrf-radiology-mri">MRI（1.5テスラ）</label>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div class="hrf-row">
+              <div class="hrf-field">
+                <label>部位</label>
+                <input type="text" id="hrf-radiology-site" value="${escapeHtml(formData.radiology_site)}" placeholder="例: 胸部、腹部、頭部">
+              </div>
+            </div>
+            <div class="hrf-row">
+              <div class="hrf-field">
+                <label>造影剤</label>
+                <div class="hrf-radio-group">
+                  <div class="hrf-radio-item">
+                    <input type="radio" name="hrf-contrast" id="hrf-contrast-no" value="no"
+                      ${formData.radiology_contrast !== 'yes' ? 'checked' : ''}>
+                    <label for="hrf-contrast-no">なし</label>
+                  </div>
+                  <div class="hrf-radio-item">
+                    <input type="radio" name="hrf-contrast" id="hrf-contrast-yes" value="yes"
+                      ${formData.radiology_contrast === 'yes' ? 'checked' : ''}>
+                    <label for="hrf-contrast-yes">あり</label>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div class="hrf-conditional-field ${formData.radiology_contrast === 'yes' ? 'visible' : ''}" id="hrf-contrast-detail">
+              <div class="hrf-row">
+                <div class="hrf-field" style="flex: 0.5;">
+                  <label>Cr（クレアチニン値）</label>
+                  <input type="text" id="hrf-radiology-cr" value="${escapeHtml(formData.radiology_cr)}" placeholder="例: 0.8">
+                </div>
+                <div class="hrf-field" style="flex: 0.5;">
+                  <label>検査日</label>
+                  <input type="date" id="hrf-radiology-exam-date" value="${escapeHtml(formData.radiology_exam_date)}">
+                </div>
+              </div>
+            </div>
+            <div class="hrf-row" style="margin-top: 12px;">
+              <div class="hrf-field">
+                <label>糖尿病薬服用</label>
+                <div class="hrf-radio-group">
+                  <div class="hrf-radio-item">
+                    <input type="radio" name="hrf-diabetes-med" id="hrf-diabetes-med-no" value="no"
+                      ${formData.radiology_diabetes_med !== 'yes' ? 'checked' : ''}>
+                    <label for="hrf-diabetes-med-no">なし</label>
+                  </div>
+                  <div class="hrf-radio-item">
+                    <input type="radio" name="hrf-diabetes-med" id="hrf-diabetes-med-yes" value="yes"
+                      ${formData.radiology_diabetes_med === 'yes' ? 'checked' : ''}>
+                    <label for="hrf-diabetes-med-yes">あり</label>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div class="hrf-conditional-field ${formData.radiology_diabetes_med === 'yes' ? 'visible' : ''}" id="hrf-diabetes-med-name-field">
+              <div class="hrf-field">
+                <label>薬剤名</label>
+                <input type="text" id="hrf-diabetes-med-name" value="${escapeHtml(formData.radiology_diabetes_med_name)}" placeholder="例: メトホルミン">
+              </div>
+            </div>
+            <div class="hrf-row" style="margin-top: 12px;">
+              <div class="hrf-field">
+                <label>結果の媒体</label>
+                <div class="hrf-radio-group">
+                  <div class="hrf-radio-item">
+                    <input type="radio" name="hrf-media" id="hrf-media-cd" value="cd"
+                      ${formData.radiology_media !== 'film' ? 'checked' : ''}>
+                    <label for="hrf-media-cd">CD-R</label>
+                  </div>
+                  <div class="hrf-radio-item">
+                    <input type="radio" name="hrf-media" id="hrf-media-film" value="film"
+                      ${formData.radiology_media === 'film' ? 'checked' : ''}>
+                    <label for="hrf-media-film">フィルム</label>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div class="hrf-row" style="margin-top: 12px;">
+              <div class="hrf-field">
+                <label>放射線所見の伝達</label>
+                <div class="hrf-radio-group">
+                  <div class="hrf-radio-item">
+                    <input type="radio" name="hrf-radiology-delivery" id="hrf-radiology-patient" value="patient"
+                      ${formData.radiology_result_delivery !== 'mail' ? 'checked' : ''}>
+                    <label for="hrf-radiology-patient">患者様持ち帰り</label>
+                  </div>
+                  <div class="hrf-radio-item">
+                    <input type="radio" name="hrf-radiology-delivery" id="hrf-radiology-mail" value="mail"
+                      ${formData.radiology_result_delivery === 'mail' ? 'checked' : ''}>
+                    <label for="hrf-radiology-mail">郵送</label>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 超音波検査 -->
+      <div class="hrf-section">
+        <div class="hrf-section-title collapsible" data-target="hrf-ultrasound-content">超音波検査</div>
+        <div class="hrf-section-content" id="hrf-ultrasound-content">
+          <div class="hrf-field">
+            <label>検査種類（複数選択可）</label>
+            <div class="hrf-multi-checkbox">
+              ${ULTRASOUND_TYPES.map(type => `
+                <div class="hrf-checkbox-item">
+                  <input type="checkbox" id="hrf-us-${type}" value="${type}"
+                    ${formData.ultrasound_types?.includes(type) ? 'checked' : ''}>
+                  <label for="hrf-us-${type}">${type}エコー</label>
+                </div>
+              `).join('')}
+            </div>
+          </div>
+          <div class="hrf-row" style="margin-top: 12px;">
+            <div class="hrf-field">
+              <label>所見の伝達</label>
+              <div class="hrf-radio-group">
+                <div class="hrf-radio-item">
+                  <input type="radio" name="hrf-us-delivery" id="hrf-us-patient" value="patient"
+                    ${formData.ultrasound_result_delivery !== 'mail' ? 'checked' : ''}>
+                  <label for="hrf-us-patient">患者様持ち帰り</label>
+                </div>
+                <div class="hrf-radio-item">
+                  <input type="radio" name="hrf-us-delivery" id="hrf-us-mail" value="mail"
+                    ${formData.ultrasound_result_delivery === 'mail' ? 'checked' : ''}>
+                  <label for="hrf-us-mail">郵送</label>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      </div><!-- /hrf-test-sections -->
+
+      <!-- コロナウイルス対策 -->
+      <div class="hrf-section">
+        <div class="hrf-section-title collapsible" data-target="hrf-covid-content">コロナウイルス対策</div>
+        <div class="hrf-section-content" id="hrf-covid-content">
+          <div class="hrf-row">
+            <div class="hrf-field">
+              <label>2週間以内の海外渡航歴、県外訪問歴</label>
+              <div class="hrf-radio-group">
+                <div class="hrf-radio-item">
+                  <input type="radio" name="hrf-covid-travel" id="hrf-covid-travel-no" value="no"
+                    ${formData.covid_travel !== 'yes' ? 'checked' : ''}>
+                  <label for="hrf-covid-travel-no">なし</label>
+                </div>
+                <div class="hrf-radio-item">
+                  <input type="radio" name="hrf-covid-travel" id="hrf-covid-travel-yes" value="yes"
+                    ${formData.covid_travel === 'yes' ? 'checked' : ''}>
+                  <label for="hrf-covid-travel-yes">あり</label>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="hrf-row">
+            <div class="hrf-field">
+              <label>2週間以内の感染者との接触歴</label>
+              <div class="hrf-radio-group">
+                <div class="hrf-radio-item">
+                  <input type="radio" name="hrf-covid-contact" id="hrf-covid-contact-no" value="no"
+                    ${formData.covid_contact !== 'yes' ? 'checked' : ''}>
+                  <label for="hrf-covid-contact-no">なし</label>
+                </div>
+                <div class="hrf-radio-item">
+                  <input type="radio" name="hrf-covid-contact" id="hrf-covid-contact-yes" value="yes"
+                    ${formData.covid_contact === 'yes' ? 'checked' : ''}>
+                  <label for="hrf-covid-contact-yes">あり</label>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="hrf-row">
+            <div class="hrf-field">
+              <label>発熱、咳、息切れなどの症状</label>
+              <div class="hrf-radio-group">
+                <div class="hrf-radio-item">
+                  <input type="radio" name="hrf-covid-symptoms" id="hrf-covid-symptoms-no" value="no"
+                    ${formData.covid_symptoms !== 'yes' ? 'checked' : ''}>
+                  <label for="hrf-covid-symptoms-no">なし</label>
+                </div>
+                <div class="hrf-radio-item">
+                  <input type="radio" name="hrf-covid-symptoms" id="hrf-covid-symptoms-yes" value="yes"
+                    ${formData.covid_symptoms === 'yes' ? 'checked' : ''}>
+                  <label for="hrf-covid-symptoms-yes">あり</label>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- その他 -->
+      <div class="hrf-section">
+        <div class="hrf-section-title">その他</div>
+        <div class="hrf-field">
+          <textarea id="hrf-other-notes" placeholder="その他の連絡事項があれば入力">${escapeHtml(formData.other_notes)}</textarea>
+        </div>
+      </div>
     `;
-
-    document.body.appendChild(modal);
-
-    // イベントリスナー
-    setupEventListeners(modal, formData);
   }
 
-  function setupEventListeners(modal, formData) {
-    // 変更追跡フラグ
-    let isDirty = false;
-    const formBody = modal.querySelector('.hrf-body');
-    if (formBody) {
-      formBody.addEventListener('input', () => { isDirty = true; });
-      formBody.addEventListener('change', () => { isDirty = true; });
-    }
+  function clearFormFields(bodyEl) {
+    // select・コンボボックスをリセット
+    bodyEl.querySelector('#hrf-dest-department').value = '';
+    bodyEl.querySelector('#hrf-dest-doctor').value = '';
+    bodyEl.querySelector('#hrf-dest-doctor').disabled = true;
+    bodyEl.querySelector('.hrf-combobox-toggle').disabled = true;
 
-    // モーダルクローズ時の保存確認
-    async function confirmClose() {
-      if (!isDirty) { modal.remove(); return; }
-      const save = await pageWindow.HenryCore?.ui?.showConfirm?.({
-        title: '未保存の変更',
-        message: '変更内容を下書き保存しますか？',
-        confirmLabel: '保存して閉じる',
-        cancelLabel: '保存せず閉じる'
-      });
-      if (save) {
-        const data = collectFormData(modal, formData);
-        const ds = pageWindow.HenryCore?.modules?.DraftStorage;
-        if (ds) {
-          const payload = { schemaVersion: DRAFT_SCHEMA_VERSION, data };
-          await ds.save(DRAFT_TYPE, formData.patient_uuid, payload, data.patient_name || '');
-        }
-      }
-      modal.remove();
-    }
-
-    // 閉じるボタン
-    modal.querySelector('.hrf-close').addEventListener('click', () => confirmClose());
-    modal.addEventListener('click', (e) => {
-      if (e.target === modal) confirmClose();
+    // 日付入力をリセット
+    ['#hrf-hope-date-1', '#hrf-hope-date-2', '#hrf-hope-date-3', '#hrf-radiology-exam-date'].forEach(sel => {
+      const el = bodyEl.querySelector(sel);
+      if (el) el.value = '';
     });
 
+    // テキスト入力をリセット
+    ['#hrf-anticoagulant-name', '#hrf-radiology-site', '#hrf-radiology-cr', '#hrf-diabetes-med-name'].forEach(sel => {
+      const el = bodyEl.querySelector(sel);
+      if (el) el.value = '';
+    });
+
+    // テキストエリアをリセット
+    bodyEl.querySelectorAll('textarea').forEach(ta => { ta.value = ''; });
+
+    // チェックボックスをリセット
+    bodyEl.querySelectorAll('.hrf-checkbox-group input[type="checkbox"]').forEach(cb => { cb.checked = false; });
+    ['#hrf-upper-endoscopy', '#hrf-lower-endoscopy', '#hrf-radiology-exam'].forEach(sel => {
+      const el = bodyEl.querySelector(sel);
+      if (el) el.checked = false;
+    });
+  }
+
+  function setupFormEvents(bodyEl) {
+    const escapeHtml = FC().utils.escapeHtml;
+
     // 折りたたみセクション
-    modal.querySelectorAll('.hrf-section-title.collapsible').forEach(title => {
+    bodyEl.querySelectorAll('.hrf-section-title.collapsible').forEach(title => {
       title.addEventListener('click', () => {
         const targetId = title.dataset.target;
-        const content = modal.querySelector(`#${targetId}`);
+        const content = bodyEl.querySelector(`#${targetId}`);
         title.classList.toggle('collapsed');
         content.classList.toggle('collapsed');
       });
     });
 
     // 外来担当表リンク
-    modal.querySelector('#hrf-open-schedule').addEventListener('click', () => {
+    bodyEl.querySelector('#hrf-open-schedule')?.addEventListener('click', () => {
       window.open(SCHEDULE_URL, '_blank');
     });
 
     // 診察・検査ラジオボタン
-    const consultationFields = modal.querySelector('#hrf-consultation-fields');
-    const testSections = modal.querySelector('#hrf-test-sections');
-    modal.querySelectorAll('input[name="hrf-purpose-type"]').forEach(radio => {
+    const consultationFields = bodyEl.querySelector('#hrf-consultation-fields');
+    const testSections = bodyEl.querySelector('#hrf-test-sections');
+    bodyEl.querySelectorAll('input[name="hrf-purpose-type"]').forEach(radio => {
       radio.addEventListener('change', () => {
         if (radio.value === 'test') {
           consultationFields.style.display = 'none';
@@ -874,16 +741,14 @@
     });
 
     // 診療科・医師コンボボックスの連携
-    const deptSelect = modal.querySelector('#hrf-dest-department');
-    const doctorInput = modal.querySelector('#hrf-dest-doctor');
-    const doctorDropdown = modal.querySelector('#hrf-doctor-dropdown');
-    const doctorCombobox = modal.querySelector('.hrf-combobox[data-field="doctor"]');
-    const { utils } = FC();
-    const escapeHtml = utils.escapeHtml;
+    const deptSelect = bodyEl.querySelector('#hrf-dest-department');
+    const doctorInput = bodyEl.querySelector('#hrf-dest-doctor');
+    const doctorDropdown = bodyEl.querySelector('#hrf-doctor-dropdown');
+    const doctorCombobox = bodyEl.querySelector('.hrf-combobox[data-field="doctor"]');
 
     // ドロップダウンを閉じる
     function closeAllDropdowns() {
-      modal.querySelectorAll('.hrf-combobox-dropdown').forEach(d => d.classList.remove('open'));
+      bodyEl.querySelectorAll('.hrf-combobox-dropdown').forEach(d => d.classList.remove('open'));
     }
 
     // ドロップダウンの選択肢を生成
@@ -938,149 +803,188 @@
       }
     });
 
-    // モーダル内クリックでドロップダウンを閉じる
-    modal.addEventListener('click', (e) => {
+    // bodyEl内クリックでドロップダウンを閉じる
+    bodyEl.addEventListener('click', (e) => {
       if (!e.target.closest('.hrf-combobox')) {
         closeAllDropdowns();
       }
     });
 
     // 上部内視鏡検査チェックボックス
-    const upperEndoscopy = modal.querySelector('#hrf-upper-endoscopy');
-    const upperDetail = modal.querySelector('#hrf-upper-endoscopy-detail');
+    const upperEndoscopy = bodyEl.querySelector('#hrf-upper-endoscopy');
+    const upperDetail = bodyEl.querySelector('#hrf-upper-endoscopy-detail');
     upperEndoscopy.addEventListener('change', () => {
       upperDetail.classList.toggle('visible', upperEndoscopy.checked);
     });
 
     // 上部内視鏡実施方法
-    modal.querySelectorAll('input[name="hrf-upper-method"]').forEach(radio => {
+    bodyEl.querySelectorAll('input[name="hrf-upper-method"]').forEach(radio => {
       radio.addEventListener('change', () => {
-        const sedationField = modal.querySelector('#hrf-sedation-field');
+        const sedationField = bodyEl.querySelector('#hrf-sedation-field');
         sedationField.classList.toggle('visible', radio.value === 'oral');
       });
     });
 
     // 抗血栓剤
-    modal.querySelectorAll('input[name="hrf-anticoagulant"]').forEach(radio => {
+    bodyEl.querySelectorAll('input[name="hrf-anticoagulant"]').forEach(radio => {
       radio.addEventListener('change', () => {
-        const nameField = modal.querySelector('#hrf-anticoagulant-name-field');
+        const nameField = bodyEl.querySelector('#hrf-anticoagulant-name-field');
         nameField.classList.toggle('visible', radio.value === 'yes');
       });
     });
 
     // 放射線検査チェックボックス
-    const radiologyExam = modal.querySelector('#hrf-radiology-exam');
-    const radiologyDetail = modal.querySelector('#hrf-radiology-detail');
+    const radiologyExam = bodyEl.querySelector('#hrf-radiology-exam');
+    const radiologyDetail = bodyEl.querySelector('#hrf-radiology-detail');
     radiologyExam.addEventListener('change', () => {
       radiologyDetail.classList.toggle('visible', radiologyExam.checked);
     });
 
     // 造影剤
-    modal.querySelectorAll('input[name="hrf-contrast"]').forEach(radio => {
+    bodyEl.querySelectorAll('input[name="hrf-contrast"]').forEach(radio => {
       radio.addEventListener('change', () => {
-        const contrastDetail = modal.querySelector('#hrf-contrast-detail');
+        const contrastDetail = bodyEl.querySelector('#hrf-contrast-detail');
         contrastDetail.classList.toggle('visible', radio.value === 'yes');
       });
     });
 
     // 糖尿病薬
-    modal.querySelectorAll('input[name="hrf-diabetes-med"]').forEach(radio => {
+    bodyEl.querySelectorAll('input[name="hrf-diabetes-med"]').forEach(radio => {
       radio.addEventListener('change', () => {
-        const nameField = modal.querySelector('#hrf-diabetes-med-name-field');
+        const nameField = bodyEl.querySelector('#hrf-diabetes-med-name-field');
         nameField.classList.toggle('visible', radio.value === 'yes');
       });
     });
+  }
 
-    // クリアボタン
-    modal.querySelector('#hrf-clear').addEventListener('click', async () => {
-      const confirmed = await pageWindow.HenryCore?.ui?.showConfirm?.({
-        title: '入力内容のクリア',
-        message: '手入力した内容をすべてクリアしますか？\n（患者情報などの自動入力項目はクリアされません）',
-        confirmLabel: 'クリア',
-        cancelLabel: 'キャンセル'
-      });
-      if (!confirmed) return;
-
-      // select・コンボボックスをリセット
-      modal.querySelector('#hrf-dest-department').value = '';
-      modal.querySelector('#hrf-dest-doctor').value = '';
-      modal.querySelector('#hrf-dest-doctor').disabled = true;
-      modal.querySelector('.hrf-combobox-toggle').disabled = true;
-
-      // 日付入力をリセット
-      ['#hrf-hope-date-1', '#hrf-hope-date-2', '#hrf-hope-date-3', '#hrf-radiology-exam-date'].forEach(sel => {
-        const el = modal.querySelector(sel);
-        if (el) el.value = '';
-      });
-
-      // テキスト入力をリセット
-      ['#hrf-anticoagulant-name', '#hrf-radiology-site', '#hrf-radiology-cr', '#hrf-diabetes-med-name'].forEach(sel => {
-        const el = modal.querySelector(sel);
-        if (el) el.value = '';
-      });
-
-      // テキストエリアをリセット
-      modal.querySelectorAll('textarea').forEach(ta => { ta.value = ''; });
-
-      // チェックボックスをリセット
-      modal.querySelectorAll('.hrf-checkbox-group input[type="checkbox"]').forEach(cb => { cb.checked = false; });
-      ['#hrf-upper-endoscopy', '#hrf-lower-endoscopy', '#hrf-radiology-exam'].forEach(sel => {
-        const el = modal.querySelector(sel);
-        if (el) el.checked = false;
-      });
-
-      isDirty = false;
-    });
-
-    // 下書き保存
-    modal.querySelector('#hrf-save-draft').addEventListener('click', async () => {
-      const data = collectFormData(modal, formData);
-      const ds = pageWindow.HenryCore?.modules?.DraftStorage;
-      if (ds) {
-        const payload = { schemaVersion: DRAFT_SCHEMA_VERSION, data };
-        const saved = await ds.save(DRAFT_TYPE, formData.patient_uuid, payload, data.patient_name || '');
-        if (saved) {
-          isDirty = false;
-          modal.querySelector('.hrf-footer-left').textContent = `下書き: ${new Date().toLocaleString('ja-JP')}`;
-          pageWindow.HenryCore?.ui?.showToast?.('下書きを保存しました', 'success');
-        }
+  function showFormModal(formData, lastSavedAt) {
+    const EXTRA_CSS = `
+      .hrf-section-title.collapsible {
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        gap: 8px;
       }
-    });
-
-    // Google Docs出力
-    modal.querySelector('#hrf-generate').addEventListener('click', async () => {
-      const btn = modal.querySelector('#hrf-generate');
-      btn.disabled = true;
-      btn.textContent = '生成中...';
-
-      try {
-        const data = collectFormData(modal, formData);
-        await generateGoogleDoc(data);
-        const ds = pageWindow.HenryCore?.modules?.DraftStorage;
-        if (ds) await ds.delete(DRAFT_TYPE, formData.patient_uuid);
-        modal.remove();
-      } catch (e) {
-        console.error(`[${SCRIPT_NAME}] 出力エラー:`, e);
-        alert(`エラーが発生しました: ${e.message}`);
-        btn.disabled = false;
-        btn.textContent = 'Google Docsに出力';
+      .hrf-section-title.collapsible::before {
+        content: '\\25BC';
+        font-size: 12px;
+        transition: transform 0.2s;
       }
+      .hrf-section-title.collapsible.collapsed::before {
+        transform: rotate(-90deg);
+      }
+      .hrf-section-content {
+        overflow: hidden;
+        transition: max-height 0.3s ease;
+      }
+      .hrf-section-content.collapsed {
+        max-height: 0;
+        padding: 0;
+      }
+      .hrf-checkbox-group {
+        max-height: 200px;
+        overflow-y: auto;
+      }
+      .hrf-radio-group.vertical {
+        flex-direction: column;
+        gap: 8px;
+      }
+      .hrf-inline-checkbox {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 10px 14px;
+        background: #f8f9fa;
+        border-radius: 6px;
+        margin-bottom: 12px;
+      }
+      .hrf-inline-checkbox input[type="checkbox"] {
+        width: 18px;
+        height: 18px;
+      }
+      .hrf-inline-checkbox label {
+        font-size: 14px;
+        font-weight: 500;
+        color: #333;
+        margin: 0;
+      }
+      .hrf-conditional-field {
+        margin-top: 8px;
+        padding: 12px;
+        background: #fafafa;
+        border-radius: 6px;
+        display: none;
+      }
+      .hrf-conditional-field.visible {
+        display: block;
+      }
+      .hrf-subsection {
+        margin-top: 12px;
+        padding: 16px;
+        background: #f8f9fa;
+        border-radius: 8px;
+        border-left: 3px solid ${THEME.primaryLight};
+      }
+      .hrf-subsection-title {
+        font-size: 14px;
+        font-weight: 600;
+        color: #555;
+        margin-bottom: 12px;
+      }
+      .hrf-multi-checkbox {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 12px;
+        margin-top: 8px;
+      }
+      .hrf-multi-checkbox .hrf-checkbox-item {
+        flex: 0 0 auto;
+        margin-bottom: 0;
+      }
+      .hrf-note {
+        background: #fff3e0;
+        border: 1px solid #ffb74d;
+        border-radius: 6px;
+        padding: 10px 14px;
+        margin-bottom: 12px;
+        font-size: 13px;
+        color: #e65100;
+      }
+    `;
+
+    FC().showFormModal({
+      id: 'hrf-form-modal',
+      title: '高松平和病院 診療申込書',
+      prefix: 'hrf',
+      bodyHTML: buildFormBody(formData),
+      extraCSS: EXTRA_CSS,
+      width: '90%',
+      headerColor: 'linear-gradient(135deg, #3F51B5, #303F9F)',
+      draftType: DRAFT_TYPE,
+      draftSchemaVersion: DRAFT_SCHEMA_VERSION,
+      patientUuid: formData.patient_uuid,
+      patientName: formData.patient_name,
+      lastSavedAt,
+      collectFormData: (bodyEl) => collectFormData(bodyEl, formData),
+      onClear: (bodyEl) => clearFormFields(bodyEl),
+      onGenerate: async (data) => { await generateGoogleDoc(data); },
+      onSetup: (bodyEl) => { setupFormEvents(bodyEl); },
     });
   }
 
-  function collectFormData(modal, originalData) {
+  function collectFormData(bodyEl, originalData) {
     const data = { ...originalData };
 
     // 診察・検査タイプ
-    data.purpose_type = modal.querySelector('input[name="hrf-purpose-type"]:checked')?.value || 'consultation';
+    data.purpose_type = bodyEl.querySelector('input[name="hrf-purpose-type"]:checked')?.value || 'consultation';
 
     // 診療科・医師（検査の場合は空）
     if (data.purpose_type === 'test') {
       data.destination_department = '';
       data.destination_doctor = '';
     } else {
-      data.destination_department = modal.querySelector('#hrf-dest-department')?.value || '';
-      data.destination_doctor = modal.querySelector('#hrf-dest-doctor')?.value || '';
+      data.destination_department = bodyEl.querySelector('#hrf-dest-department')?.value || '';
+      data.destination_doctor = bodyEl.querySelector('#hrf-dest-doctor')?.value || '';
       // 診察の場合は検査項目をリセット
       data.upper_endoscopy = false;
       data.lower_endoscopy = false;
@@ -1089,59 +993,59 @@
     }
 
     // 希望日
-    data.hope_date_1 = modal.querySelector('#hrf-hope-date-1')?.value || '';
-    data.hope_date_2 = modal.querySelector('#hrf-hope-date-2')?.value || '';
-    data.hope_date_3 = modal.querySelector('#hrf-hope-date-3')?.value || '';
+    data.hope_date_1 = bodyEl.querySelector('#hrf-hope-date-1')?.value || '';
+    data.hope_date_2 = bodyEl.querySelector('#hrf-hope-date-2')?.value || '';
+    data.hope_date_3 = bodyEl.querySelector('#hrf-hope-date-3')?.value || '';
 
     // 病名
     data.selected_diseases = [];
     if (data.diseases.length > 0) {
       data.diseases.forEach(d => {
-        const cb = modal.querySelector(`#hrf-disease-${d.uuid}`);
+        const cb = bodyEl.querySelector(`#hrf-disease-${d.uuid}`);
         if (cb?.checked) {
           data.selected_diseases.push(d.uuid);
         }
       });
     }
-    data.diagnosis_text = modal.querySelector('#hrf-diagnosis-text')?.value || '';
+    data.diagnosis_text = bodyEl.querySelector('#hrf-diagnosis-text')?.value || '';
 
     // 内視鏡検査
-    data.upper_endoscopy = modal.querySelector('#hrf-upper-endoscopy')?.checked || false;
-    data.upper_endoscopy_method = modal.querySelector('input[name="hrf-upper-method"]:checked')?.value || 'nasal';
-    data.upper_endoscopy_sedation = modal.querySelector('input[name="hrf-sedation"]:checked')?.value || 'no';
-    data.upper_endoscopy_anticoagulant = modal.querySelector('input[name="hrf-anticoagulant"]:checked')?.value || 'no';
-    data.upper_endoscopy_anticoagulant_name = modal.querySelector('#hrf-anticoagulant-name')?.value || '';
-    data.lower_endoscopy = modal.querySelector('#hrf-lower-endoscopy')?.checked || false;
+    data.upper_endoscopy = bodyEl.querySelector('#hrf-upper-endoscopy')?.checked || false;
+    data.upper_endoscopy_method = bodyEl.querySelector('input[name="hrf-upper-method"]:checked')?.value || 'nasal';
+    data.upper_endoscopy_sedation = bodyEl.querySelector('input[name="hrf-sedation"]:checked')?.value || 'no';
+    data.upper_endoscopy_anticoagulant = bodyEl.querySelector('input[name="hrf-anticoagulant"]:checked')?.value || 'no';
+    data.upper_endoscopy_anticoagulant_name = bodyEl.querySelector('#hrf-anticoagulant-name')?.value || '';
+    data.lower_endoscopy = bodyEl.querySelector('#hrf-lower-endoscopy')?.checked || false;
 
     // 放射線検査
-    data.radiology_exam = modal.querySelector('#hrf-radiology-exam')?.checked || false;
-    data.radiology_type = modal.querySelector('input[name="hrf-radiology-type"]:checked')?.value || 'ct';
-    data.radiology_site = modal.querySelector('#hrf-radiology-site')?.value || '';
-    data.radiology_contrast = modal.querySelector('input[name="hrf-contrast"]:checked')?.value || 'no';
-    data.radiology_cr = modal.querySelector('#hrf-radiology-cr')?.value || '';
-    data.radiology_exam_date = modal.querySelector('#hrf-radiology-exam-date')?.value || '';
-    data.radiology_diabetes_med = modal.querySelector('input[name="hrf-diabetes-med"]:checked')?.value || 'no';
-    data.radiology_diabetes_med_name = modal.querySelector('#hrf-diabetes-med-name')?.value || '';
-    data.radiology_media = modal.querySelector('input[name="hrf-media"]:checked')?.value || 'cd';
-    data.radiology_result_delivery = modal.querySelector('input[name="hrf-radiology-delivery"]:checked')?.value || 'patient';
+    data.radiology_exam = bodyEl.querySelector('#hrf-radiology-exam')?.checked || false;
+    data.radiology_type = bodyEl.querySelector('input[name="hrf-radiology-type"]:checked')?.value || 'ct';
+    data.radiology_site = bodyEl.querySelector('#hrf-radiology-site')?.value || '';
+    data.radiology_contrast = bodyEl.querySelector('input[name="hrf-contrast"]:checked')?.value || 'no';
+    data.radiology_cr = bodyEl.querySelector('#hrf-radiology-cr')?.value || '';
+    data.radiology_exam_date = bodyEl.querySelector('#hrf-radiology-exam-date')?.value || '';
+    data.radiology_diabetes_med = bodyEl.querySelector('input[name="hrf-diabetes-med"]:checked')?.value || 'no';
+    data.radiology_diabetes_med_name = bodyEl.querySelector('#hrf-diabetes-med-name')?.value || '';
+    data.radiology_media = bodyEl.querySelector('input[name="hrf-media"]:checked')?.value || 'cd';
+    data.radiology_result_delivery = bodyEl.querySelector('input[name="hrf-radiology-delivery"]:checked')?.value || 'patient';
 
     // 超音波検査
     data.ultrasound_types = [];
     ULTRASOUND_TYPES.forEach(type => {
-      const cb = modal.querySelector(`#hrf-us-${type}`);
+      const cb = bodyEl.querySelector(`#hrf-us-${type}`);
       if (cb?.checked) {
         data.ultrasound_types.push(type);
       }
     });
-    data.ultrasound_result_delivery = modal.querySelector('input[name="hrf-us-delivery"]:checked')?.value || 'patient';
+    data.ultrasound_result_delivery = bodyEl.querySelector('input[name="hrf-us-delivery"]:checked')?.value || 'patient';
 
     // コロナ対策
-    data.covid_travel = modal.querySelector('input[name="hrf-covid-travel"]:checked')?.value || 'no';
-    data.covid_contact = modal.querySelector('input[name="hrf-covid-contact"]:checked')?.value || 'no';
-    data.covid_symptoms = modal.querySelector('input[name="hrf-covid-symptoms"]:checked')?.value || 'no';
+    data.covid_travel = bodyEl.querySelector('input[name="hrf-covid-travel"]:checked')?.value || 'no';
+    data.covid_contact = bodyEl.querySelector('input[name="hrf-covid-contact"]:checked')?.value || 'no';
+    data.covid_symptoms = bodyEl.querySelector('input[name="hrf-covid-symptoms"]:checked')?.value || 'no';
 
     // その他
-    data.other_notes = modal.querySelector('#hrf-other-notes')?.value || '';
+    data.other_notes = bodyEl.querySelector('#hrf-other-notes')?.value || '';
 
     return data;
   }

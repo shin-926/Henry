@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         香川大学医学部附属病院 FAX診療予約申込書
 // @namespace    https://henry-app.jp/
-// @version      1.4.0
+// @version      1.5.0
 // @description  香川大学医学部附属病院へのFAX診療予約申込書を作成
 // @author       sk powered by Claude
 // @match        https://henry-app.jp/*
@@ -301,478 +301,346 @@
     }
   }
 
-  function showFormModal(formData, lastSavedAt) {
-    // 既存モーダルを削除
-    const existingModal = document.getElementById('urf-form-modal');
-    if (existingModal) existingModal.remove();
+  function buildFormBody(formData) {
+    const escapeHtml = FC().utils.escapeHtml;
 
-    const { utils } = FC();
-    const escapeHtml = utils.escapeHtml;
-
-    const modal = document.createElement('div');
-    modal.id = 'urf-form-modal';
-    modal.innerHTML = `
-      <style>
-        ${FC().generateBaseCSS('urf')}
-        /* 香川大学病院固有のCSS */
-        .urf-container {
-          max-width: 1100px;
-          width: 95%;
-        }
-        .urf-header {
-          background: linear-gradient(135deg, ${THEME.primary} 0%, ${THEME.primaryDark} 100%);
-        }
-        .urf-conditional-field {
-          margin-top: 8px;
-          padding: 12px;
-          background: #fafafa;
-          border-radius: 6px;
-          display: none;
-        }
-        .urf-conditional-field.visible {
-          display: block;
-        }
-        .urf-departments-grid {
-          display: grid;
-          grid-template-columns: repeat(4, 1fr);
-          gap: 8px;
-          margin-top: 8px;
-        }
-        @media (max-width: 900px) {
-          .urf-departments-grid {
-            grid-template-columns: repeat(3, 1fr);
-          }
-        }
-        @media (max-width: 600px) {
-          .urf-departments-grid {
-            grid-template-columns: repeat(2, 1fr);
-          }
-        }
-        .urf-dept-item {
-          display: flex;
-          align-items: center;
-          gap: 6px;
-          padding: 8px 10px;
-          background: #f8f9fa;
-          border-radius: 6px;
-          font-size: 12px;
-          border: 1px solid transparent;
-          transition: all 0.2s;
-        }
-        .urf-dept-item:has(input:checked) {
-          background: ${THEME.accent};
-          border-color: ${THEME.primary};
-        }
-        .urf-dept-item input[type="radio"] {
-          width: 16px;
-          height: 16px;
-          margin: 0;
-        }
-        .urf-dept-item input[type="checkbox"] {
-          width: 16px;
-          height: 16px;
-          margin: 0;
-        }
-        .urf-dept-item label {
-          margin: 0;
-          font-size: 12px;
-          color: #333;
-          cursor: pointer;
-          line-height: 1.3;
-        }
-        .urf-hope-date-row {
-          display: flex;
-          gap: 12px;
-          align-items: flex-end;
-        }
-        .urf-hope-date-row .urf-field {
-          flex: 2;
-        }
-        .urf-hope-date-row .urf-time-field {
-          flex: 1;
-        }
-        .urf-time-select-wrapper {
-          display: flex;
-          align-items: center;
-          gap: 8px;
-        }
-        .urf-time-select-wrapper select {
-          flex: 1;
-          padding: 10px 12px;
-          border: 1px solid #ddd;
-          border-radius: 6px;
-          font-size: 14px;
-          background: #fff;
-          cursor: pointer;
-        }
-        .urf-time-select-wrapper select:focus {
-          outline: none;
-          border-color: ${THEME.primary};
-          box-shadow: 0 0 0 3px rgba(79, 195, 247, 0.2);
-        }
-        .urf-time-suffix {
-          font-size: 14px;
-          color: #333;
-          white-space: nowrap;
-        }
-        .urf-checkbox-inline {
-          display: flex;
-          gap: 16px;
-          flex-wrap: wrap;
-        }
-        .urf-checkbox-inline label {
-          display: flex;
-          align-items: center;
-          gap: 6px;
-          font-size: 14px;
-          color: #333;
-          cursor: pointer;
-        }
-        .urf-checkbox-inline input[type="checkbox"] {
-          width: 16px;
-          height: 16px;
-        }
-        .urf-external-link {
-          font-size: 13px;
-          color: ${THEME.primary};
-          text-decoration: none;
-          margin-left: 8px;
-        }
-        .urf-external-link:hover {
-          text-decoration: underline;
-        }
-      </style>
-      <div class="urf-container">
-        <div class="urf-header">
-          <h2>香川大学医学部附属病院 FAX診療予約申込書</h2>
-          <button class="urf-close" title="閉じる">&times;</button>
+    return `
+      <!-- 受診希望科（ラジオボタン） -->
+      <div class="urf-section">
+        <div class="urf-section-title">受診希望科</div>
+        <div class="urf-row" style="margin-bottom: 16px;">
+          <div class="urf-field">
+            <label>旧姓（任意）</label>
+            <input type="text" id="urf-maiden-name" value="${escapeHtml(formData.maiden_name)}" placeholder="旧姓があれば入力">
+          </div>
         </div>
-        <div class="urf-body">
-          <!-- 受診希望科（ラジオボタン） -->
-          <div class="urf-section">
-            <div class="urf-section-title">受診希望科</div>
-            <div class="urf-row" style="margin-bottom: 16px;">
-              <div class="urf-field">
-                <label>旧姓（任意）</label>
-                <input type="text" id="urf-maiden-name" value="${escapeHtml(formData.maiden_name)}" placeholder="旧姓があれば入力">
+        <div class="urf-departments-grid">
+          ${DEPARTMENTS.map((dept, idx) => `
+            <div class="urf-dept-item">
+              <input type="radio" name="urf-dest-dept" id="urf-dept-${idx}" value="${escapeHtml(dept)}"
+                ${formData.selected_department === dept ? 'checked' : ''}>
+              <label for="urf-dept-${idx}">${escapeHtml(dept)}</label>
+            </div>
+          `).join('')}
+        </div>
+      </div>
+
+      <!-- 希望医師・連絡 -->
+      <div class="urf-section">
+        <div class="urf-section-title">希望医師・連絡</div>
+        <div class="urf-row">
+          <div class="urf-field">
+            <label>希望医師名</label>
+            <div class="urf-combobox" data-field="dest-doctor">
+              <input type="text" class="urf-combobox-input" id="urf-dest-doctor" value="${escapeHtml(formData.destination_doctor)}" placeholder="医師名を入力">
+              <button type="button" class="urf-combobox-toggle" title="リストから選択">▼</button>
+              <div class="urf-combobox-dropdown" id="urf-dest-doctor-dropdown"></div>
+            </div>
+          </div>
+          <div class="urf-field">
+            <label>希望医師への連絡</label>
+            <div class="urf-radio-group">
+              <div class="urf-radio-item">
+                <input type="radio" name="urf-contacted" id="urf-contacted-done" value="done"
+                  ${formData.doctor_contacted === 'done' ? 'checked' : ''}>
+                <label for="urf-contacted-done">済</label>
+              </div>
+              <div class="urf-radio-item">
+                <input type="radio" name="urf-contacted" id="urf-contacted-no" value="no"
+                  ${formData.doctor_contacted !== 'done' ? 'checked' : ''}>
+                <label for="urf-contacted-no">未</label>
+              </div>
+              <a href="https://www.med.kagawa-u.ac.jp/hosp/archives/002/202601/sinyoui_20260101.pdf" target="_blank" class="urf-external-link">外来表</a>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 受診希望日 -->
+      <div class="urf-section">
+        <div class="urf-section-title">受診希望日</div>
+        <div class="urf-hope-date-row">
+          <div class="urf-field">
+            <label>第1希望日</label>
+            <input type="date" id="urf-hope-date-1" value="${escapeHtml(formData.hope_date_1)}">
+          </div>
+          <div class="urf-field urf-time-field">
+            <label>時間</label>
+            <div class="urf-time-select-wrapper">
+              <select id="urf-hope-date-1-time">
+                <option value="">--</option>
+                ${[...Array(24)].map((_, i) => `<option value="${i}" ${formData.hope_date_1_time === String(i) ? 'selected' : ''}>${i}</option>`).join('')}
+              </select>
+              <span class="urf-time-suffix">時頃</span>
+            </div>
+          </div>
+        </div>
+        <div class="urf-hope-date-row" style="margin-top: 12px;">
+          <div class="urf-field">
+            <label>第2希望日</label>
+            <input type="date" id="urf-hope-date-2" value="${escapeHtml(formData.hope_date_2)}">
+          </div>
+          <div class="urf-field urf-time-field">
+            <label>時間</label>
+            <div class="urf-time-select-wrapper">
+              <select id="urf-hope-date-2-time">
+                <option value="">--</option>
+                ${[...Array(24)].map((_, i) => `<option value="${i}" ${formData.hope_date_2_time === String(i) ? 'selected' : ''}>${i}</option>`).join('')}
+              </select>
+              <span class="urf-time-suffix">時頃</span>
+            </div>
+          </div>
+        </div>
+        <div class="urf-row" style="margin-top: 12px;">
+          <div class="urf-field">
+            <label>いつまでの受診希望か</label>
+            <input type="text" id="urf-hope-date-until" value="${escapeHtml(formData.hope_date_until)}" placeholder="例: 今月中、2週間以内">
+          </div>
+          <div class="urf-field">
+            <label>その他希望</label>
+            <input type="text" id="urf-hope-date-other" value="${escapeHtml(formData.hope_date_other)}" placeholder="曜日・期間指定、予約不可の日など">
+          </div>
+        </div>
+      </div>
+
+      <!-- 当院受診歴 -->
+      <div class="urf-section">
+        <div class="urf-section-title">香川大学医学部附属病院 受診歴</div>
+        <div class="urf-radio-group">
+          <div class="urf-radio-item">
+            <input type="radio" name="urf-visit-history" id="urf-visit-no" value="no"
+              ${formData.visit_history === 'no' ? 'checked' : ''}>
+            <label for="urf-visit-no">無</label>
+          </div>
+          <div class="urf-radio-item">
+            <input type="radio" name="urf-visit-history" id="urf-visit-unknown" value="unknown"
+              ${formData.visit_history === 'unknown' ? 'checked' : ''}>
+            <label for="urf-visit-unknown">不明</label>
+          </div>
+          <div class="urf-radio-item">
+            <input type="radio" name="urf-visit-history" id="urf-visit-yes" value="yes"
+              ${formData.visit_history === 'yes' ? 'checked' : ''}>
+            <label for="urf-visit-yes">有</label>
+          </div>
+        </div>
+        <div class="urf-conditional-field ${formData.visit_history === 'yes' ? 'visible' : ''}" id="urf-visit-id-field">
+          <div class="urf-field">
+            <label>患者ID（わかれば）</label>
+            <input type="text" id="urf-visit-history-id" value="${escapeHtml(formData.visit_history_id)}" placeholder="例: 123456">
+          </div>
+        </div>
+      </div>
+
+      <!-- 受診の緊急性・現在の状況 -->
+      <div class="urf-section">
+        <div class="urf-section-title">受診の緊急性・現在の状況</div>
+        <div class="urf-row">
+          <div class="urf-field">
+            <label>受診の緊急性</label>
+            <div class="urf-radio-group">
+              <div class="urf-radio-item">
+                <input type="radio" name="urf-urgency" id="urf-urgency-yes" value="yes"
+                  ${formData.urgency === 'yes' ? 'checked' : ''}>
+                <label for="urf-urgency-yes">有</label>
+              </div>
+              <div class="urf-radio-item">
+                <input type="radio" name="urf-urgency" id="urf-urgency-no" value="no"
+                  ${formData.urgency !== 'yes' ? 'checked' : ''}>
+                <label for="urf-urgency-no">無</label>
               </div>
             </div>
-            <div class="urf-departments-grid">
-              ${DEPARTMENTS.map((dept, idx) => `
-                <div class="urf-dept-item">
-                  <input type="radio" name="urf-dest-dept" id="urf-dept-${idx}" value="${escapeHtml(dept)}"
-                    ${formData.selected_department === dept ? 'checked' : ''}>
-                  <label for="urf-dept-${idx}">${escapeHtml(dept)}</label>
+          </div>
+          <div class="urf-field">
+            <label>現在の状況</label>
+            <div class="urf-radio-group">
+              <div class="urf-radio-item">
+                <input type="radio" name="urf-status" id="urf-status-hospitalized" value="hospitalized"
+                  ${formData.current_status === 'hospitalized' ? 'checked' : ''}>
+                <label for="urf-status-hospitalized">入院中</label>
+              </div>
+              <div class="urf-radio-item">
+                <input type="radio" name="urf-status" id="urf-status-not" value="not_hospitalized"
+                  ${formData.current_status !== 'hospitalized' ? 'checked' : ''}>
+                <label for="urf-status-not">入院中でない</label>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 傷病名・紹介目的 -->
+      <div class="urf-section">
+        <div class="urf-section-title">傷病名（疑い病名）</div>
+        ${formData.diseases.length > 0 ? `
+          <div style="margin-bottom: 12px;">
+            <label style="display: block; font-size: 13px; font-weight: 500; color: #666; margin-bottom: 8px;">登録済み病名から選択</label>
+            <div id="urf-diseases-list" class="urf-checkbox-group">
+              ${formData.diseases.map(d => `
+                <div class="urf-checkbox-item ${d.isMain ? 'main-disease' : ''}">
+                  <input type="checkbox" id="urf-disease-${d.uuid}" value="${d.uuid}"
+                    ${formData.selected_diseases?.includes(d.uuid) ? 'checked' : ''}>
+                  <label for="urf-disease-${d.uuid}">${escapeHtml(d.name)}${d.isMain ? ' (主病名)' : ''}${d.isSuspected ? ' (疑い)' : ''}</label>
                 </div>
               `).join('')}
             </div>
           </div>
+        ` : ''}
+        <div class="urf-field">
+          <label>自由記述（傷病名）</label>
+          <textarea id="urf-diagnosis-text" placeholder="傷病名を入力">${escapeHtml(formData.diagnosis_text)}</textarea>
+        </div>
+      </div>
 
-          <!-- 希望医師・連絡 -->
-          <div class="urf-section">
-            <div class="urf-section-title">希望医師・連絡</div>
-            <div class="urf-row">
-              <div class="urf-field">
-                <label>希望医師名</label>
-                <div class="urf-combobox" data-field="dest-doctor">
-                  <input type="text" class="urf-combobox-input" id="urf-dest-doctor" value="${escapeHtml(formData.destination_doctor)}" placeholder="医師名を入力">
-                  <button type="button" class="urf-combobox-toggle" title="リストから選択">▼</button>
-                  <div class="urf-combobox-dropdown" id="urf-dest-doctor-dropdown"></div>
-                </div>
-              </div>
-              <div class="urf-field">
-                <label>希望医師への連絡</label>
-                <div class="urf-radio-group">
-                  <div class="urf-radio-item">
-                    <input type="radio" name="urf-contacted" id="urf-contacted-done" value="done"
-                      ${formData.doctor_contacted === 'done' ? 'checked' : ''}>
-                    <label for="urf-contacted-done">済</label>
-                  </div>
-                  <div class="urf-radio-item">
-                    <input type="radio" name="urf-contacted" id="urf-contacted-no" value="no"
-                      ${formData.doctor_contacted !== 'done' ? 'checked' : ''}>
-                    <label for="urf-contacted-no">未</label>
-                  </div>
-                  <a href="https://www.med.kagawa-u.ac.jp/hosp/archives/002/202601/sinyoui_20260101.pdf" target="_blank" class="urf-external-link">外来表</a>
-                </div>
-              </div>
-            </div>
-          </div>
+      <!-- 紹介目的と症状経過 -->
+      <div class="urf-section">
+        <div class="urf-section-title">紹介目的と症状経過</div>
+        <div class="urf-field">
+          <textarea id="urf-referral-purpose" placeholder="紹介目的と症状経過を入力">${escapeHtml(formData.referral_purpose)}</textarea>
+        </div>
+      </div>
 
-          <!-- 受診希望日 -->
-          <div class="urf-section">
-            <div class="urf-section-title">受診希望日</div>
-            <div class="urf-hope-date-row">
-              <div class="urf-field">
-                <label>第1希望日</label>
-                <input type="date" id="urf-hope-date-1" value="${escapeHtml(formData.hope_date_1)}">
-              </div>
-              <div class="urf-field urf-time-field">
-                <label>時間</label>
-                <div class="urf-time-select-wrapper">
-                  <select id="urf-hope-date-1-time">
-                    <option value="">--</option>
-                    ${[...Array(24)].map((_, i) => `<option value="${i}" ${formData.hope_date_1_time === String(i) ? 'selected' : ''}>${i}</option>`).join('')}
-                  </select>
-                  <span class="urf-time-suffix">時頃</span>
-                </div>
-              </div>
-            </div>
-            <div class="urf-hope-date-row" style="margin-top: 12px;">
-              <div class="urf-field">
-                <label>第2希望日</label>
-                <input type="date" id="urf-hope-date-2" value="${escapeHtml(formData.hope_date_2)}">
-              </div>
-              <div class="urf-field urf-time-field">
-                <label>時間</label>
-                <div class="urf-time-select-wrapper">
-                  <select id="urf-hope-date-2-time">
-                    <option value="">--</option>
-                    ${[...Array(24)].map((_, i) => `<option value="${i}" ${formData.hope_date_2_time === String(i) ? 'selected' : ''}>${i}</option>`).join('')}
-                  </select>
-                  <span class="urf-time-suffix">時頃</span>
-                </div>
-              </div>
-            </div>
-            <div class="urf-row" style="margin-top: 12px;">
-              <div class="urf-field">
-                <label>いつまでの受診希望か</label>
-                <input type="text" id="urf-hope-date-until" value="${escapeHtml(formData.hope_date_until)}" placeholder="例: 今月中、2週間以内">
-              </div>
-              <div class="urf-field">
-                <label>その他希望</label>
-                <input type="text" id="urf-hope-date-other" value="${escapeHtml(formData.hope_date_other)}" placeholder="曜日・期間指定、予約不可の日など">
-              </div>
-            </div>
-          </div>
-
-          <!-- 当院受診歴 -->
-          <div class="urf-section">
-            <div class="urf-section-title">香川大学医学部附属病院 受診歴</div>
+      <!-- 検査データ等・K-MIX R同意書 -->
+      <div class="urf-section">
+        <div class="urf-section-title">検査データ等・K-MIX R同意書</div>
+        <div class="urf-row">
+          <div class="urf-field">
+            <label>検査データ等の有無</label>
             <div class="urf-radio-group">
               <div class="urf-radio-item">
-                <input type="radio" name="urf-visit-history" id="urf-visit-no" value="no"
-                  ${formData.visit_history === 'no' ? 'checked' : ''}>
-                <label for="urf-visit-no">無</label>
+                <input type="radio" name="urf-test-data" id="urf-test-data-no" value="no"
+                  ${formData.test_data_status !== 'yes' ? 'checked' : ''}>
+                <label for="urf-test-data-no">無</label>
               </div>
               <div class="urf-radio-item">
-                <input type="radio" name="urf-visit-history" id="urf-visit-unknown" value="unknown"
-                  ${formData.visit_history === 'unknown' ? 'checked' : ''}>
-                <label for="urf-visit-unknown">不明</label>
-              </div>
-              <div class="urf-radio-item">
-                <input type="radio" name="urf-visit-history" id="urf-visit-yes" value="yes"
-                  ${formData.visit_history === 'yes' ? 'checked' : ''}>
-                <label for="urf-visit-yes">有</label>
+                <input type="radio" name="urf-test-data" id="urf-test-data-yes" value="yes"
+                  ${formData.test_data_status === 'yes' ? 'checked' : ''}>
+                <label for="urf-test-data-yes">有</label>
               </div>
             </div>
-            <div class="urf-conditional-field ${formData.visit_history === 'yes' ? 'visible' : ''}" id="urf-visit-id-field">
-              <div class="urf-field">
-                <label>患者ID（わかれば）</label>
-                <input type="text" id="urf-visit-history-id" value="${escapeHtml(formData.visit_history_id)}" placeholder="例: 123456">
+            <div class="urf-conditional-field ${formData.test_data_status === 'yes' ? 'visible' : ''}" id="urf-test-data-types-field">
+              <div class="urf-checkbox-inline">
+                <label><input type="checkbox" id="urf-test-xray" ${formData.test_data_xray ? 'checked' : ''}> X線</label>
+                <label><input type="checkbox" id="urf-test-ct" ${formData.test_data_ct ? 'checked' : ''}> CT</label>
+                <label><input type="checkbox" id="urf-test-mr" ${formData.test_data_mr ? 'checked' : ''}> MR</label>
+                <label><input type="checkbox" id="urf-test-other" ${formData.test_data_other ? 'checked' : ''}> その他</label>
               </div>
             </div>
           </div>
-
-          <!-- 受診の緊急性・現在の状況 -->
-          <div class="urf-section">
-            <div class="urf-section-title">受診の緊急性・現在の状況</div>
-            <div class="urf-row">
-              <div class="urf-field">
-                <label>受診の緊急性</label>
-                <div class="urf-radio-group">
-                  <div class="urf-radio-item">
-                    <input type="radio" name="urf-urgency" id="urf-urgency-yes" value="yes"
-                      ${formData.urgency === 'yes' ? 'checked' : ''}>
-                    <label for="urf-urgency-yes">有</label>
-                  </div>
-                  <div class="urf-radio-item">
-                    <input type="radio" name="urf-urgency" id="urf-urgency-no" value="no"
-                      ${formData.urgency !== 'yes' ? 'checked' : ''}>
-                    <label for="urf-urgency-no">無</label>
-                  </div>
-                </div>
-              </div>
-              <div class="urf-field">
-                <label>現在の状況</label>
-                <div class="urf-radio-group">
-                  <div class="urf-radio-item">
-                    <input type="radio" name="urf-status" id="urf-status-hospitalized" value="hospitalized"
-                      ${formData.current_status === 'hospitalized' ? 'checked' : ''}>
-                    <label for="urf-status-hospitalized">入院中</label>
-                  </div>
-                  <div class="urf-radio-item">
-                    <input type="radio" name="urf-status" id="urf-status-not" value="not_hospitalized"
-                      ${formData.current_status !== 'hospitalized' ? 'checked' : ''}>
-                    <label for="urf-status-not">入院中でない</label>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <!-- 傷病名・紹介目的 -->
-          <div class="urf-section">
-            <div class="urf-section-title">傷病名（疑い病名）</div>
-            ${formData.diseases.length > 0 ? `
-              <div style="margin-bottom: 12px;">
-                <label style="display: block; font-size: 13px; font-weight: 500; color: #666; margin-bottom: 8px;">登録済み病名から選択</label>
-                <div id="urf-diseases-list" class="urf-checkbox-group">
-                  ${formData.diseases.map(d => `
-                    <div class="urf-checkbox-item ${d.isMain ? 'main-disease' : ''}">
-                      <input type="checkbox" id="urf-disease-${d.uuid}" value="${d.uuid}"
-                        ${formData.selected_diseases?.includes(d.uuid) ? 'checked' : ''}>
-                      <label for="urf-disease-${d.uuid}">${escapeHtml(d.name)}${d.isMain ? ' (主病名)' : ''}${d.isSuspected ? ' (疑い)' : ''}</label>
-                    </div>
-                  `).join('')}
-                </div>
-              </div>
-            ` : ''}
-            <div class="urf-field">
-              <label>自由記述（傷病名）</label>
-              <textarea id="urf-diagnosis-text" placeholder="傷病名を入力">${escapeHtml(formData.diagnosis_text)}</textarea>
-            </div>
-          </div>
-
-          <!-- 紹介目的と症状経過 -->
-          <div class="urf-section">
-            <div class="urf-section-title">紹介目的と症状経過</div>
-            <div class="urf-field">
-              <textarea id="urf-referral-purpose" placeholder="紹介目的と症状経過を入力">${escapeHtml(formData.referral_purpose)}</textarea>
-            </div>
-          </div>
-
-          <!-- 検査データ等・K-MIX R同意書 -->
-          <div class="urf-section">
-            <div class="urf-section-title">検査データ等・K-MIX R同意書</div>
-            <div class="urf-row">
-              <div class="urf-field">
-                <label>検査データ等の有無</label>
-                <div class="urf-radio-group">
-                  <div class="urf-radio-item">
-                    <input type="radio" name="urf-test-data" id="urf-test-data-no" value="no"
-                      ${formData.test_data_status !== 'yes' ? 'checked' : ''}>
-                    <label for="urf-test-data-no">無</label>
-                  </div>
-                  <div class="urf-radio-item">
-                    <input type="radio" name="urf-test-data" id="urf-test-data-yes" value="yes"
-                      ${formData.test_data_status === 'yes' ? 'checked' : ''}>
-                    <label for="urf-test-data-yes">有</label>
-                  </div>
-                </div>
-                <div class="urf-conditional-field ${formData.test_data_status === 'yes' ? 'visible' : ''}" id="urf-test-data-types-field">
-                  <div class="urf-checkbox-inline">
-                    <label><input type="checkbox" id="urf-test-xray" ${formData.test_data_xray ? 'checked' : ''}> X線</label>
-                    <label><input type="checkbox" id="urf-test-ct" ${formData.test_data_ct ? 'checked' : ''}> CT</label>
-                    <label><input type="checkbox" id="urf-test-mr" ${formData.test_data_mr ? 'checked' : ''}> MR</label>
-                    <label><input type="checkbox" id="urf-test-other" ${formData.test_data_other ? 'checked' : ''}> その他</label>
-                  </div>
-                </div>
-              </div>
-              <div class="urf-field">
-                <label>K-MIX R 利用に係る同意書の有無</label>
-                <div class="urf-radio-group">
-                  <div class="urf-radio-item">
-                    <input type="radio" name="urf-kmix" id="urf-kmix-no" value="no"
-                      ${formData.kmix_consent !== 'yes' ? 'checked' : ''}>
-                    <label for="urf-kmix-no">無</label>
-                  </div>
-                  <div class="urf-radio-item">
-                    <input type="radio" name="urf-kmix" id="urf-kmix-yes" value="yes"
-                      ${formData.kmix_consent === 'yes' ? 'checked' : ''}>
-                    <label for="urf-kmix-yes">有</label>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <!-- COVID-19 -->
-          <div class="urf-section">
-            <div class="urf-section-title">COVID-19</div>
+          <div class="urf-field">
+            <label>K-MIX R 利用に係る同意書の有無</label>
             <div class="urf-radio-group">
               <div class="urf-radio-item">
-                <input type="radio" name="urf-covid" id="urf-covid-positive" value="positive"
-                  ${formData.covid_status === 'positive' ? 'checked' : ''}>
-                <label for="urf-covid-positive">陽性者</label>
+                <input type="radio" name="urf-kmix" id="urf-kmix-no" value="no"
+                  ${formData.kmix_consent !== 'yes' ? 'checked' : ''}>
+                <label for="urf-kmix-no">無</label>
               </div>
               <div class="urf-radio-item">
-                <input type="radio" name="urf-covid" id="urf-covid-suspected" value="suspected"
-                  ${formData.covid_status === 'suspected' ? 'checked' : ''}>
-                <label for="urf-covid-suspected">疑い（症状あり）</label>
-              </div>
-              <div class="urf-radio-item">
-                <input type="radio" name="urf-covid" id="urf-covid-none" value="no_symptoms"
-                  ${formData.covid_status === 'no_symptoms' || !formData.covid_status ? 'checked' : ''}>
-                <label for="urf-covid-none">症状なし</label>
+                <input type="radio" name="urf-kmix" id="urf-kmix-yes" value="yes"
+                  ${formData.kmix_consent === 'yes' ? 'checked' : ''}>
+                <label for="urf-kmix-yes">有</label>
               </div>
             </div>
           </div>
         </div>
-        <div class="urf-footer">
-          <div class="urf-footer-left">
-            ${lastSavedAt ? `下書き: ${new Date(lastSavedAt).toLocaleString('ja-JP')}` : ''}
+      </div>
+
+      <!-- COVID-19 -->
+      <div class="urf-section">
+        <div class="urf-section-title">COVID-19</div>
+        <div class="urf-radio-group">
+          <div class="urf-radio-item">
+            <input type="radio" name="urf-covid" id="urf-covid-positive" value="positive"
+              ${formData.covid_status === 'positive' ? 'checked' : ''}>
+            <label for="urf-covid-positive">陽性者</label>
           </div>
-          <div class="urf-footer-right">
-            <button class="urf-btn urf-btn-secondary" id="urf-clear" style="color:#d32f2f;">クリア</button>
-            <button class="urf-btn urf-btn-secondary" id="urf-save-draft">下書き保存</button>
-            <button class="urf-btn urf-btn-primary" id="urf-generate">Google Docsに出力</button>
+          <div class="urf-radio-item">
+            <input type="radio" name="urf-covid" id="urf-covid-suspected" value="suspected"
+              ${formData.covid_status === 'suspected' ? 'checked' : ''}>
+            <label for="urf-covid-suspected">疑い（症状あり）</label>
+          </div>
+          <div class="urf-radio-item">
+            <input type="radio" name="urf-covid" id="urf-covid-none" value="no_symptoms"
+              ${formData.covid_status === 'no_symptoms' || !formData.covid_status ? 'checked' : ''}>
+            <label for="urf-covid-none">症状なし</label>
           </div>
         </div>
       </div>
     `;
-
-    document.body.appendChild(modal);
-
-    // イベントリスナー
-    setupEventListeners(modal, formData);
   }
 
-  function setupEventListeners(modal, formData) {
-    // 変更追跡フラグ
-    let isDirty = false;
-    const formBody = modal.querySelector('.urf-body');
-    if (formBody) {
-      formBody.addEventListener('input', () => { isDirty = true; });
-      formBody.addEventListener('change', () => { isDirty = true; });
-    }
-
-    const { utils } = FC();
-    const escapeHtml = utils.escapeHtml;
-
-    // モーダルクローズ時の保存確認
-    async function confirmClose() {
-      if (!isDirty) { modal.remove(); return; }
-      const save = await pageWindow.HenryCore?.ui?.showConfirm?.({
-        title: '未保存の変更',
-        message: '変更内容を下書き保存しますか？',
-        confirmLabel: '保存して閉じる',
-        cancelLabel: '保存せず閉じる'
-      });
-      if (save) {
-        const data = collectFormData(modal, formData);
-        const ds = pageWindow.HenryCore?.modules?.DraftStorage;
-        if (ds) {
-          const payload = { schemaVersion: DRAFT_SCHEMA_VERSION, data };
-          await ds.save(DRAFT_TYPE, formData.patient_uuid, payload, data.patient_name || '');
-        }
-      }
-      modal.remove();
-    }
-
-    modal.querySelector('.urf-close').addEventListener('click', () => confirmClose());
-    modal.addEventListener('click', (e) => {
-      if (e.target === modal) confirmClose();
+  function clearFormFields(bodyEl) {
+    // テキスト入力をリセット
+    ['#urf-maiden-name', '#urf-dest-doctor', '#urf-visit-history-id', '#urf-hope-date-other'].forEach(sel => {
+      const el = bodyEl.querySelector(sel);
+      if (el) el.value = '';
     });
 
+    // 日付入力をリセット
+    bodyEl.querySelector('#urf-hope-date-1').value = '';
+    bodyEl.querySelector('#urf-hope-date-2').value = '';
+    const hopeDateUntil = bodyEl.querySelector('#urf-hope-date-until');
+    if (hopeDateUntil) hopeDateUntil.value = '';
+
+    // 時間セレクトをリセット
+    const time1 = bodyEl.querySelector('#urf-hope-date-1-time');
+    if (time1) time1.value = '';
+    const time2 = bodyEl.querySelector('#urf-hope-date-2-time');
+    if (time2) time2.value = '';
+
+    // ラジオボタンをリセット（受診希望科）
+    bodyEl.querySelectorAll('input[name="urf-dest-dept"]').forEach(r => { r.checked = false; });
+
+    // ラジオボタンをリセット（連絡）
+    const contactedNo = bodyEl.querySelector('#urf-contacted-no');
+    if (contactedNo) contactedNo.checked = true;
+
+    // ラジオボタンをリセット（受診歴）
+    const visitNo = bodyEl.querySelector('#urf-visit-no');
+    if (visitNo) visitNo.checked = true;
+    bodyEl.querySelector('#urf-visit-id-field')?.classList.remove('visible');
+
+    // ラジオボタンをリセット（緊急性）
+    const urgencyNo = bodyEl.querySelector('#urf-urgency-no');
+    if (urgencyNo) urgencyNo.checked = true;
+
+    // ラジオボタンをリセット（現在の状況）
+    const statusNot = bodyEl.querySelector('#urf-status-not');
+    if (statusNot) statusNot.checked = true;
+
+    // ラジオボタンをリセット（検査データ）
+    const testDataNo = bodyEl.querySelector('#urf-test-data-no');
+    if (testDataNo) testDataNo.checked = true;
+    bodyEl.querySelector('#urf-test-data-types-field')?.classList.remove('visible');
+
+    // ラジオボタンをリセット（K-MIX）
+    const kmixNo = bodyEl.querySelector('#urf-kmix-no');
+    if (kmixNo) kmixNo.checked = true;
+
+    // ラジオボタンをリセット（COVID-19）
+    const covidNone = bodyEl.querySelector('#urf-covid-none');
+    if (covidNone) covidNone.checked = true;
+
+    // テキストエリアをリセット
+    bodyEl.querySelectorAll('textarea').forEach(ta => { ta.value = ''; });
+
+    // チェックボックスをリセット（病名選択）
+    bodyEl.querySelectorAll('.urf-checkbox-group input[type="checkbox"]').forEach(cb => { cb.checked = false; });
+
+    // チェックボックスをリセット（検査データ種別）
+    bodyEl.querySelectorAll('.urf-checkbox-inline input[type="checkbox"]').forEach(cb => { cb.checked = false; });
+  }
+
+  function setupFormEvents(bodyEl) {
+    const escapeHtml = FC().utils.escapeHtml;
+
     // 希望医師コンボボックス
-    const destDoctorInput = modal.querySelector('#urf-dest-doctor');
-    const destDoctorDropdown = modal.querySelector('#urf-dest-doctor-dropdown');
-    const destDoctorCombobox = modal.querySelector('.urf-combobox[data-field="dest-doctor"]');
+    const destDoctorInput = bodyEl.querySelector('#urf-dest-doctor');
+    const destDoctorDropdown = bodyEl.querySelector('#urf-dest-doctor-dropdown');
+    const destDoctorCombobox = bodyEl.querySelector('.urf-combobox[data-field="dest-doctor"]');
 
     // ドロップダウンを閉じる
     function closeAllDropdowns() {
-      modal.querySelectorAll('.urf-combobox-dropdown').forEach(d => d.classList.remove('open'));
+      bodyEl.querySelectorAll('.urf-combobox-dropdown').forEach(d => d.classList.remove('open'));
     }
 
     // ドロップダウンの選択肢を生成
@@ -791,7 +659,7 @@
       closeAllDropdowns();
       // HenryHospitalsから香川大学病院の医師リストを取得
       const api = pageWindow.HenryHospitals;
-      const selectedDept = modal.querySelector('input[name="urf-dest-dept"]:checked')?.value || '';
+      const selectedDept = bodyEl.querySelector('input[name="urf-dest-dept"]:checked')?.value || '';
       let doctors = [];
 
       if (api && selectedDept) {
@@ -835,16 +703,16 @@
       }
     });
 
-    // モーダル内クリックでドロップダウンを閉じる
-    modal.addEventListener('click', (e) => {
+    // bodyEl内クリックでドロップダウンを閉じる
+    bodyEl.addEventListener('click', (e) => {
       if (!e.target.closest('.urf-combobox')) {
         closeAllDropdowns();
       }
     });
 
     // 受診歴ラジオボタン変更時
-    const visitHistoryRadios = modal.querySelectorAll('input[name="urf-visit-history"]');
-    const visitIdField = modal.querySelector('#urf-visit-id-field');
+    const visitHistoryRadios = bodyEl.querySelectorAll('input[name="urf-visit-history"]');
+    const visitIdField = bodyEl.querySelector('#urf-visit-id-field');
     visitHistoryRadios.forEach(radio => {
       radio.addEventListener('change', () => {
         if (radio.value === 'yes') {
@@ -856,8 +724,8 @@
     });
 
     // 検査データ有無ラジオボタン変更時
-    const testDataRadios = modal.querySelectorAll('input[name="urf-test-data"]');
-    const testDataTypesField = modal.querySelector('#urf-test-data-types-field');
+    const testDataRadios = bodyEl.querySelectorAll('input[name="urf-test-data"]');
+    const testDataTypesField = bodyEl.querySelector('#urf-test-data-types-field');
     testDataRadios.forEach(radio => {
       radio.addEventListener('change', () => {
         if (radio.value === 'yes') {
@@ -867,139 +735,201 @@
         }
       });
     });
+  }
 
-    // クリアボタン
-    modal.querySelector('#urf-clear').addEventListener('click', async () => {
-      const confirmed = await pageWindow.HenryCore?.ui?.showConfirm?.({
-        title: '入力内容のクリア',
-        message: '手入力した内容をすべてクリアしますか？\n（患者情報などの自動入力項目はクリアされません）',
-        confirmLabel: 'クリア',
-        cancelLabel: 'キャンセル'
-      });
-      if (!confirmed) return;
-
-      // テキスト入力をリセット
-      ['#urf-maiden-name', '#urf-dest-doctor', '#urf-visit-history-id', '#urf-hope-date-other'].forEach(sel => {
-        const el = modal.querySelector(sel);
-        if (el) el.value = '';
-      });
-
-      // select をリセット
-      modal.querySelector('#urf-dest-department').value = '';
-      modal.querySelector('#urf-dest-doctor').disabled = true;
-      modal.querySelector('.urf-combobox-toggle').disabled = true;
-
-      // 日付入力をリセット
-      const hopeDateUntil = modal.querySelector('#urf-hope-date-until');
-      if (hopeDateUntil) hopeDateUntil.value = '';
-
-      // ラジオボタンをリセット
-      const unknownRadio = modal.querySelector('#urf-visit-unknown');
-      if (unknownRadio) unknownRadio.checked = true;
-
-      // テキストエリアをリセット
-      modal.querySelectorAll('textarea').forEach(ta => { ta.value = ''; });
-
-      // チェックボックスをリセット
-      modal.querySelectorAll('.urf-checkbox-group input[type="checkbox"]').forEach(cb => { cb.checked = false; });
-
-      isDirty = false;
-    });
-
-    // 下書き保存
-    modal.querySelector('#urf-save-draft').addEventListener('click', async () => {
-      const data = collectFormData(modal, formData);
-      const ds = pageWindow.HenryCore?.modules?.DraftStorage;
-      if (ds) {
-        const payload = { schemaVersion: DRAFT_SCHEMA_VERSION, data };
-        const saved = await ds.save(DRAFT_TYPE, formData.patient_uuid, payload, data.patient_name || '');
-        if (saved) {
-          isDirty = false;
-          modal.querySelector('.urf-footer-left').textContent = `下書き: ${new Date().toLocaleString('ja-JP')}`;
-          pageWindow.HenryCore?.ui?.showToast?.('下書きを保存しました', 'success');
+  function showFormModal(formData, lastSavedAt) {
+    const EXTRA_CSS = `
+      .urf-conditional-field {
+        margin-top: 8px;
+        padding: 12px;
+        background: #fafafa;
+        border-radius: 6px;
+        display: none;
+      }
+      .urf-conditional-field.visible { display: block; }
+      .urf-departments-grid {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 8px;
+        margin-top: 8px;
+      }
+      @media (max-width: 900px) {
+        .urf-departments-grid {
+          grid-template-columns: repeat(3, 1fr);
         }
       }
-    });
-
-    // Google Docs出力
-    modal.querySelector('#urf-generate').addEventListener('click', async () => {
-      const btn = modal.querySelector('#urf-generate');
-      btn.disabled = true;
-      btn.textContent = '生成中...';
-
-      try {
-        const data = collectFormData(modal, formData);
-        await generateGoogleDoc(data);
-        const ds = pageWindow.HenryCore?.modules?.DraftStorage;
-        if (ds) await ds.delete(DRAFT_TYPE, formData.patient_uuid);
-        modal.remove();
-      } catch (e) {
-        console.error(`[${SCRIPT_NAME}] 出力エラー:`, e);
-        alert(`エラーが発生しました: ${e.message}`);
-        btn.disabled = false;
-        btn.textContent = 'Google Docsに出力';
+      @media (max-width: 600px) {
+        .urf-departments-grid {
+          grid-template-columns: repeat(2, 1fr);
+        }
       }
+      .urf-dept-item {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        padding: 8px 10px;
+        background: #f8f9fa;
+        border-radius: 6px;
+        font-size: 12px;
+        border: 1px solid transparent;
+        transition: all 0.2s;
+      }
+      .urf-dept-item:has(input:checked) {
+        background: ${THEME.accent};
+        border-color: ${THEME.primary};
+      }
+      .urf-dept-item input[type="radio"] {
+        width: 16px;
+        height: 16px;
+        margin: 0;
+      }
+      .urf-dept-item input[type="checkbox"] {
+        width: 16px;
+        height: 16px;
+        margin: 0;
+      }
+      .urf-dept-item label {
+        margin: 0;
+        font-size: 12px;
+        color: #333;
+        cursor: pointer;
+        line-height: 1.3;
+      }
+      .urf-hope-date-row {
+        display: flex;
+        gap: 12px;
+        align-items: flex-end;
+      }
+      .urf-hope-date-row .urf-field { flex: 2; }
+      .urf-hope-date-row .urf-time-field { flex: 1; }
+      .urf-time-select-wrapper {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+      .urf-time-select-wrapper select {
+        flex: 1;
+        padding: 10px 12px;
+        border: 1px solid #ddd;
+        border-radius: 6px;
+        font-size: 14px;
+        background: #fff;
+        cursor: pointer;
+      }
+      .urf-time-select-wrapper select:focus {
+        outline: none;
+        border-color: ${THEME.primary};
+        box-shadow: 0 0 0 3px rgba(79, 195, 247, 0.2);
+      }
+      .urf-time-suffix {
+        font-size: 14px;
+        color: #333;
+        white-space: nowrap;
+      }
+      .urf-checkbox-inline {
+        display: flex;
+        gap: 16px;
+        flex-wrap: wrap;
+      }
+      .urf-checkbox-inline label {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        font-size: 14px;
+        color: #333;
+        cursor: pointer;
+      }
+      .urf-checkbox-inline input[type="checkbox"] {
+        width: 16px;
+        height: 16px;
+      }
+      .urf-external-link {
+        font-size: 13px;
+        color: ${THEME.primary};
+        text-decoration: none;
+        margin-left: 8px;
+      }
+      .urf-external-link:hover { text-decoration: underline; }
+    `;
+
+    FC().showFormModal({
+      id: 'urf-form-modal',
+      title: '香川大学医学部附属病院 FAX診療予約申込書',
+      prefix: 'urf',
+      bodyHTML: buildFormBody(formData),
+      extraCSS: EXTRA_CSS,
+      width: '90%',
+      headerColor: 'linear-gradient(135deg, #3F51B5, #303F9F)',
+      draftType: DRAFT_TYPE,
+      draftSchemaVersion: DRAFT_SCHEMA_VERSION,
+      patientUuid: formData.patient_uuid,
+      patientName: formData.patient_name,
+      lastSavedAt,
+      collectFormData: (bodyEl) => collectFormData(bodyEl, formData),
+      onClear: (bodyEl) => clearFormFields(bodyEl),
+      onGenerate: async (data) => { await generateGoogleDoc(data); },
+      onSetup: (bodyEl) => { setupFormEvents(bodyEl); },
     });
   }
 
-  function collectFormData(modal, originalData) {
+  function collectFormData(bodyEl, originalData) {
     const data = { ...originalData };
 
     // 患者追加情報
-    data.mobile_phone = modal.querySelector('#urf-mobile-phone')?.value || '';
-    data.maiden_name = modal.querySelector('#urf-maiden-name')?.value || '';
+    data.mobile_phone = bodyEl.querySelector('#urf-mobile-phone')?.value || '';
+    data.maiden_name = bodyEl.querySelector('#urf-maiden-name')?.value || '';
 
     // 受診希望科（単一選択）
-    data.selected_department = modal.querySelector('input[name="urf-dest-dept"]:checked')?.value || '';
+    data.selected_department = bodyEl.querySelector('input[name="urf-dest-dept"]:checked')?.value || '';
 
     // 希望医師・連絡
-    data.destination_doctor = modal.querySelector('#urf-dest-doctor')?.value || '';
-    data.doctor_contacted = modal.querySelector('input[name="urf-contacted"]:checked')?.value || 'no';
-    data.contact_person = modal.querySelector('#urf-contact-person')?.value || '';
+    data.destination_doctor = bodyEl.querySelector('#urf-dest-doctor')?.value || '';
+    data.doctor_contacted = bodyEl.querySelector('input[name="urf-contacted"]:checked')?.value || 'no';
+    data.contact_person = bodyEl.querySelector('#urf-contact-person')?.value || '';
 
     // 希望日
-    data.hope_date_1 = modal.querySelector('#urf-hope-date-1')?.value || '';
-    data.hope_date_1_time = modal.querySelector('#urf-hope-date-1-time')?.value || '';
-    data.hope_date_2 = modal.querySelector('#urf-hope-date-2')?.value || '';
-    data.hope_date_2_time = modal.querySelector('#urf-hope-date-2-time')?.value || '';
-    data.hope_date_until = modal.querySelector('#urf-hope-date-until')?.value || '';
-    data.hope_date_other = modal.querySelector('#urf-hope-date-other')?.value || '';
+    data.hope_date_1 = bodyEl.querySelector('#urf-hope-date-1')?.value || '';
+    data.hope_date_1_time = bodyEl.querySelector('#urf-hope-date-1-time')?.value || '';
+    data.hope_date_2 = bodyEl.querySelector('#urf-hope-date-2')?.value || '';
+    data.hope_date_2_time = bodyEl.querySelector('#urf-hope-date-2-time')?.value || '';
+    data.hope_date_until = bodyEl.querySelector('#urf-hope-date-until')?.value || '';
+    data.hope_date_other = bodyEl.querySelector('#urf-hope-date-other')?.value || '';
 
     // 受診歴
-    data.visit_history = modal.querySelector('input[name="urf-visit-history"]:checked')?.value || 'no';
-    data.visit_history_id = modal.querySelector('#urf-visit-history-id')?.value || '';
+    data.visit_history = bodyEl.querySelector('input[name="urf-visit-history"]:checked')?.value || 'no';
+    data.visit_history_id = bodyEl.querySelector('#urf-visit-history-id')?.value || '';
 
     // 緊急性・状況
-    data.urgency = modal.querySelector('input[name="urf-urgency"]:checked')?.value || 'no';
-    data.current_status = modal.querySelector('input[name="urf-status"]:checked')?.value || 'not_hospitalized';
+    data.urgency = bodyEl.querySelector('input[name="urf-urgency"]:checked')?.value || 'no';
+    data.current_status = bodyEl.querySelector('input[name="urf-status"]:checked')?.value || 'not_hospitalized';
 
     // 病名（選択と自由記述の両方を取得）
     data.selected_diseases = [];
     if (data.diseases.length > 0) {
       data.diseases.forEach(d => {
-        const cb = modal.querySelector(`#urf-disease-${d.uuid}`);
+        const cb = bodyEl.querySelector(`#urf-disease-${d.uuid}`);
         if (cb?.checked) {
           data.selected_diseases.push(d.uuid);
         }
       });
     }
-    data.diagnosis_text = modal.querySelector('#urf-diagnosis-text')?.value || '';
+    data.diagnosis_text = bodyEl.querySelector('#urf-diagnosis-text')?.value || '';
 
     // 紹介目的
-    data.referral_purpose = modal.querySelector('#urf-referral-purpose')?.value || '';
+    data.referral_purpose = bodyEl.querySelector('#urf-referral-purpose')?.value || '';
 
     // 検査データ等
-    data.test_data_status = modal.querySelector('input[name="urf-test-data"]:checked')?.value || 'no';
-    data.test_data_xray = modal.querySelector('#urf-test-xray')?.checked || false;
-    data.test_data_ct = modal.querySelector('#urf-test-ct')?.checked || false;
-    data.test_data_mr = modal.querySelector('#urf-test-mr')?.checked || false;
-    data.test_data_other = modal.querySelector('#urf-test-other')?.checked || false;
+    data.test_data_status = bodyEl.querySelector('input[name="urf-test-data"]:checked')?.value || 'no';
+    data.test_data_xray = bodyEl.querySelector('#urf-test-xray')?.checked || false;
+    data.test_data_ct = bodyEl.querySelector('#urf-test-ct')?.checked || false;
+    data.test_data_mr = bodyEl.querySelector('#urf-test-mr')?.checked || false;
+    data.test_data_other = bodyEl.querySelector('#urf-test-other')?.checked || false;
 
     // K-MIX R同意書
-    data.kmix_consent = modal.querySelector('input[name="urf-kmix"]:checked')?.value || 'no';
+    data.kmix_consent = bodyEl.querySelector('input[name="urf-kmix"]:checked')?.value || 'no';
 
     // COVID-19
-    data.covid_status = modal.querySelector('input[name="urf-covid"]:checked')?.value || 'no_symptoms';
+    data.covid_status = bodyEl.querySelector('input[name="urf-covid"]:checked')?.value || 'no_symptoms';
 
     return data;
   }

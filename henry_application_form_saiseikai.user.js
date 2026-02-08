@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         香川県済生会病院 診療申込書
 // @namespace    https://henry-app.jp/
-// @version      1.3.0
+// @version      1.4.0
 // @description  香川県済生会病院への診療申込書を作成
 // @author       sk powered by Claude
 // @match        https://henry-app.jp/*
@@ -246,258 +246,181 @@
     }
   }
 
-  function showFormModal(formData, lastSavedAt) {
-    // 既存モーダルを削除
-    const existingModal = document.getElementById('ssf-form-modal');
-    if (existingModal) existingModal.remove();
-
+  function buildFormBody(formData) {
     const departments = getSaiseikaiDepartments();
-    const { utils } = FC();
-    const escapeHtml = utils.escapeHtml;
+    const escapeHtml = FC().utils.escapeHtml;
 
-    const modal = document.createElement('div');
-    modal.id = 'ssf-form-modal';
-    modal.innerHTML = `
-      <style>
-        ${FC().generateBaseCSS('ssf')}
-        /* 済生会病院固有CSS */
-        .ssf-container {
-          max-width: 900px;
-        }
-        .ssf-conditional-field {
-          margin-top: 8px;
-          padding: 12px;
-          background: #fafafa;
-          border-radius: 6px;
-          display: none;
-        }
-        .ssf-conditional-field.visible {
-          display: block;
-        }
-        .ssf-hope-date-row {
-          display: flex;
-          gap: 12px;
-          align-items: flex-end;
-        }
-        .ssf-hope-date-row .ssf-field {
-          flex: 2;
-        }
-        .ssf-hope-date-row .ssf-ampm-group {
-          flex: 1;
-          display: flex;
-          gap: 8px;
-          padding-bottom: 4px;
-        }
-        .ssf-ampm-group .ssf-radio-item {
-          padding: 8px 12px;
-          background: #f5f5f5;
-          border-radius: 6px;
-          border: 1px solid #ddd;
-        }
-        .ssf-ampm-group .ssf-radio-item:has(input:checked) {
-          background: #E8EAF6;
-          border-color: #3F51B5;
-        }
-        .ssf-checkbox-group {
-          max-height: 200px;
-          overflow-y: auto;
-        }
-      </style>
-      <div class="ssf-container">
-        <div class="ssf-header">
-          <h2>香川県済生会病院 診療申込書</h2>
-          <button class="ssf-close" title="閉じる">&times;</button>
+    return `
+      <!-- 香川県済生会病院 受診希望 -->
+      <div class="ssf-section">
+        <div class="ssf-section-title">香川県済生会病院 受診希望</div>
+        <div class="ssf-notice" style="background: #fff3e0; border: 1px solid #ffb74d; border-radius: 6px; padding: 10px 14px; margin-bottom: 16px; font-size: 13px; color: #e65100;">
+          <strong>整形外科について：</strong>地域連携室では予約をお取りすることができません。担当医の診療時間内（8:30〜11:00）に直接お越しください。
         </div>
-        <div class="ssf-body">
-          <!-- 香川県済生会病院 受診希望 -->
-          <div class="ssf-section">
-            <div class="ssf-section-title">香川県済生会病院 受診希望</div>
-            <div class="ssf-notice" style="background: #fff3e0; border: 1px solid #ffb74d; border-radius: 6px; padding: 10px 14px; margin-bottom: 16px; font-size: 13px; color: #e65100;">
-              <strong>整形外科について：</strong>地域連携室では予約をお取りすることができません。担当医の診療時間内（8:30〜11:00）に直接お越しください。
-            </div>
-            <div class="ssf-row">
-              <div class="ssf-field">
-                <label>旧姓（任意）</label>
-                <input type="text" id="ssf-maiden-name" value="${escapeHtml(formData.maiden_name)}" placeholder="旧姓があれば入力">
-              </div>
-            </div>
-            <div class="ssf-row">
-              <div class="ssf-field">
-                <label>受診希望科</label>
-                <select id="ssf-dest-department">
-                  <option value="">選択してください</option>
-                  ${departments.map(dept => `
-                    <option value="${escapeHtml(dept)}" ${formData.destination_department === dept ? 'selected' : ''}>
-                      ${escapeHtml(dept)}
-                    </option>
-                  `).join('')}
-                </select>
-              </div>
-              <div class="ssf-field">
-                <label>希望医師名</label>
-                <div style="display: flex; gap: 8px; align-items: flex-start;">
-                  <div class="ssf-combobox" data-field="doctor" style="flex: 1;">
-                    <input type="text" class="ssf-combobox-input" id="ssf-dest-doctor" value="${escapeHtml(formData.destination_doctor)}" placeholder="医師名を入力" ${!formData.destination_department ? 'disabled' : ''}>
-                    <button type="button" class="ssf-combobox-toggle" ${!formData.destination_department ? 'disabled' : ''} title="リストから選択">▼</button>
-                    <div class="ssf-combobox-dropdown" id="ssf-doctor-dropdown"></div>
-                  </div>
-                  <button type="button" class="ssf-btn ssf-btn-link" id="ssf-open-schedule" title="外来診療担当表を見る">外来表</button>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <!-- 受診希望日 -->
-          <div class="ssf-section">
-            <div class="ssf-section-title">受診希望日</div>
-            <div class="ssf-hope-date-row">
-              <div class="ssf-field">
-                <label>第1希望日</label>
-                <input type="date" id="ssf-hope-date-1" value="${escapeHtml(formData.hope_date_1)}">
-              </div>
-              <div class="ssf-ampm-group">
-                <div class="ssf-radio-item">
-                  <input type="radio" name="ssf-hope-date-1-ampm" id="ssf-hope-date-1-am" value="am" ${formData.hope_date_1_ampm !== 'pm' ? 'checked' : ''}>
-                  <label for="ssf-hope-date-1-am">AM</label>
-                </div>
-                <div class="ssf-radio-item">
-                  <input type="radio" name="ssf-hope-date-1-ampm" id="ssf-hope-date-1-pm" value="pm" ${formData.hope_date_1_ampm === 'pm' ? 'checked' : ''}>
-                  <label for="ssf-hope-date-1-pm">PM</label>
-                </div>
-              </div>
-            </div>
-            <div class="ssf-hope-date-row" style="margin-top: 12px;">
-              <div class="ssf-field">
-                <label>第2希望日</label>
-                <input type="date" id="ssf-hope-date-2" value="${escapeHtml(formData.hope_date_2)}">
-              </div>
-              <div class="ssf-ampm-group">
-                <div class="ssf-radio-item">
-                  <input type="radio" name="ssf-hope-date-2-ampm" id="ssf-hope-date-2-am" value="am" ${formData.hope_date_2_ampm !== 'pm' ? 'checked' : ''}>
-                  <label for="ssf-hope-date-2-am">AM</label>
-                </div>
-                <div class="ssf-radio-item">
-                  <input type="radio" name="ssf-hope-date-2-ampm" id="ssf-hope-date-2-pm" value="pm" ${formData.hope_date_2_ampm === 'pm' ? 'checked' : ''}>
-                  <label for="ssf-hope-date-2-pm">PM</label>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <!-- 受診歴 -->
-          <div class="ssf-section">
-            <div class="ssf-section-title">香川県済生会病院 受診歴</div>
-            <div class="ssf-radio-group">
-              <div class="ssf-radio-item">
-                <input type="radio" name="ssf-visit-history" id="ssf-visit-yes" value="yes" ${formData.visit_history === 'yes' ? 'checked' : ''}>
-                <label for="ssf-visit-yes">有</label>
-              </div>
-              <div class="ssf-radio-item">
-                <input type="radio" name="ssf-visit-history" id="ssf-visit-no" value="no" ${formData.visit_history === 'no' ? 'checked' : ''}>
-                <label for="ssf-visit-no">無</label>
-              </div>
-              <div class="ssf-radio-item">
-                <input type="radio" name="ssf-visit-history" id="ssf-visit-unknown" value="unknown" ${formData.visit_history === 'unknown' ? 'checked' : ''}>
-                <label for="ssf-visit-unknown">不明</label>
-              </div>
-            </div>
-            <div class="ssf-conditional-field ${formData.visit_history === 'yes' ? 'visible' : ''}" id="ssf-visit-id-field">
-              <div class="ssf-field">
-                <label>患者ID（わかれば）</label>
-                <input type="text" id="ssf-visit-history-id" value="${escapeHtml(formData.visit_history_id)}" placeholder="例: 123456">
-              </div>
-            </div>
-          </div>
-
-          <!-- 紹介目的・傷病名 -->
-          <div class="ssf-section">
-            <div class="ssf-section-title">紹介目的（傷病名）</div>
-            ${formData.diseases.length > 0 ? `
-              <div style="margin-bottom: 12px;">
-                <label style="display: block; font-size: 13px; font-weight: 500; color: #666; margin-bottom: 8px;">登録済み病名から選択</label>
-                <div id="ssf-diseases-list" class="ssf-checkbox-group">
-                  ${formData.diseases.map(d => `
-                    <div class="ssf-checkbox-item ${d.isMain ? 'main-disease' : ''}">
-                      <input type="checkbox" id="ssf-disease-${d.uuid}" value="${d.uuid}"
-                        ${formData.selected_diseases?.includes(d.uuid) ? 'checked' : ''}>
-                      <label for="ssf-disease-${d.uuid}">${escapeHtml(d.name)}${d.isMain ? ' (主病名)' : ''}${d.isSuspected ? ' (疑い)' : ''}</label>
-                    </div>
-                  `).join('')}
-                </div>
-              </div>
-            ` : ''}
-            <div class="ssf-field">
-              <label>自由記述</label>
-              <textarea id="ssf-diagnosis-text" placeholder="紹介目的や追加の傷病名を入力">${escapeHtml(formData.diagnosis_text)}</textarea>
-            </div>
+        <div class="ssf-row">
+          <div class="ssf-field">
+            <label>旧姓（任意）</label>
+            <input type="text" id="ssf-maiden-name" value="${escapeHtml(formData.maiden_name)}" placeholder="旧姓があれば入力">
           </div>
         </div>
-        <div class="ssf-footer">
-          <div class="ssf-footer-left">
-            ${lastSavedAt ? `下書き: ${new Date(lastSavedAt).toLocaleString('ja-JP')}` : ''}
+        <div class="ssf-row">
+          <div class="ssf-field">
+            <label>受診希望科</label>
+            <select id="ssf-dest-department">
+              <option value="">選択してください</option>
+              ${departments.map(dept => `
+                <option value="${escapeHtml(dept)}" ${formData.destination_department === dept ? 'selected' : ''}>
+                  ${escapeHtml(dept)}
+                </option>
+              `).join('')}
+            </select>
           </div>
-          <div class="ssf-footer-right">
-            <button class="ssf-btn ssf-btn-secondary" id="ssf-clear" style="color:#d32f2f;">クリア</button>
-            <button class="ssf-btn ssf-btn-secondary" id="ssf-save-draft">下書き保存</button>
-            <button class="ssf-btn ssf-btn-primary" id="ssf-generate">Google Docsに出力</button>
+          <div class="ssf-field">
+            <label>希望医師名</label>
+            <div style="display: flex; gap: 8px; align-items: flex-start;">
+              <div class="ssf-combobox" data-field="doctor" style="flex: 1;">
+                <input type="text" class="ssf-combobox-input" id="ssf-dest-doctor" value="${escapeHtml(formData.destination_doctor)}" placeholder="医師名を入力" ${!formData.destination_department ? 'disabled' : ''}>
+                <button type="button" class="ssf-combobox-toggle" ${!formData.destination_department ? 'disabled' : ''} title="リストから選択">▼</button>
+                <div class="ssf-combobox-dropdown" id="ssf-doctor-dropdown"></div>
+              </div>
+              <button type="button" class="ssf-btn ssf-btn-link" id="ssf-open-schedule" title="外来診療担当表を見る">外来表</button>
+            </div>
           </div>
         </div>
       </div>
+
+      <!-- 受診希望日 -->
+      <div class="ssf-section">
+        <div class="ssf-section-title">受診希望日</div>
+        <div class="ssf-hope-date-row">
+          <div class="ssf-field">
+            <label>第1希望日</label>
+            <input type="date" id="ssf-hope-date-1" value="${escapeHtml(formData.hope_date_1)}">
+          </div>
+          <div class="ssf-ampm-group">
+            <div class="ssf-radio-item">
+              <input type="radio" name="ssf-hope-date-1-ampm" id="ssf-hope-date-1-am" value="am" ${formData.hope_date_1_ampm !== 'pm' ? 'checked' : ''}>
+              <label for="ssf-hope-date-1-am">AM</label>
+            </div>
+            <div class="ssf-radio-item">
+              <input type="radio" name="ssf-hope-date-1-ampm" id="ssf-hope-date-1-pm" value="pm" ${formData.hope_date_1_ampm === 'pm' ? 'checked' : ''}>
+              <label for="ssf-hope-date-1-pm">PM</label>
+            </div>
+          </div>
+        </div>
+        <div class="ssf-hope-date-row" style="margin-top: 12px;">
+          <div class="ssf-field">
+            <label>第2希望日</label>
+            <input type="date" id="ssf-hope-date-2" value="${escapeHtml(formData.hope_date_2)}">
+          </div>
+          <div class="ssf-ampm-group">
+            <div class="ssf-radio-item">
+              <input type="radio" name="ssf-hope-date-2-ampm" id="ssf-hope-date-2-am" value="am" ${formData.hope_date_2_ampm !== 'pm' ? 'checked' : ''}>
+              <label for="ssf-hope-date-2-am">AM</label>
+            </div>
+            <div class="ssf-radio-item">
+              <input type="radio" name="ssf-hope-date-2-ampm" id="ssf-hope-date-2-pm" value="pm" ${formData.hope_date_2_ampm === 'pm' ? 'checked' : ''}>
+              <label for="ssf-hope-date-2-pm">PM</label>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 受診歴 -->
+      <div class="ssf-section">
+        <div class="ssf-section-title">香川県済生会病院 受診歴</div>
+        <div class="ssf-radio-group">
+          <div class="ssf-radio-item">
+            <input type="radio" name="ssf-visit-history" id="ssf-visit-yes" value="yes" ${formData.visit_history === 'yes' ? 'checked' : ''}>
+            <label for="ssf-visit-yes">有</label>
+          </div>
+          <div class="ssf-radio-item">
+            <input type="radio" name="ssf-visit-history" id="ssf-visit-no" value="no" ${formData.visit_history === 'no' ? 'checked' : ''}>
+            <label for="ssf-visit-no">無</label>
+          </div>
+          <div class="ssf-radio-item">
+            <input type="radio" name="ssf-visit-history" id="ssf-visit-unknown" value="unknown" ${formData.visit_history === 'unknown' ? 'checked' : ''}>
+            <label for="ssf-visit-unknown">不明</label>
+          </div>
+        </div>
+        <div class="ssf-conditional-field ${formData.visit_history === 'yes' ? 'visible' : ''}" id="ssf-visit-id-field">
+          <div class="ssf-field">
+            <label>患者ID（わかれば）</label>
+            <input type="text" id="ssf-visit-history-id" value="${escapeHtml(formData.visit_history_id)}" placeholder="例: 123456">
+          </div>
+        </div>
+      </div>
+
+      <!-- 紹介目的・傷病名 -->
+      <div class="ssf-section">
+        <div class="ssf-section-title">紹介目的（傷病名）</div>
+        ${formData.diseases.length > 0 ? `
+          <div style="margin-bottom: 12px;">
+            <label style="display: block; font-size: 13px; font-weight: 500; color: #666; margin-bottom: 8px;">登録済み病名から選択</label>
+            <div id="ssf-diseases-list" class="ssf-checkbox-group">
+              ${formData.diseases.map(d => `
+                <div class="ssf-checkbox-item ${d.isMain ? 'main-disease' : ''}">
+                  <input type="checkbox" id="ssf-disease-${d.uuid}" value="${d.uuid}"
+                    ${formData.selected_diseases?.includes(d.uuid) ? 'checked' : ''}>
+                  <label for="ssf-disease-${d.uuid}">${escapeHtml(d.name)}${d.isMain ? ' (主病名)' : ''}${d.isSuspected ? ' (疑い)' : ''}</label>
+                </div>
+              `).join('')}
+            </div>
+          </div>
+        ` : ''}
+        <div class="ssf-field">
+          <label>自由記述</label>
+          <textarea id="ssf-diagnosis-text" placeholder="紹介目的や追加の傷病名を入力">${escapeHtml(formData.diagnosis_text)}</textarea>
+        </div>
+      </div>
     `;
+  }
 
-    document.body.appendChild(modal);
+  function clearFormFields(bodyEl) {
+    // テキスト入力をリセット
+    bodyEl.querySelector('#ssf-maiden-name').value = '';
+    bodyEl.querySelector('#ssf-visit-history-id').value = '';
 
-    // 変更追跡フラグ
-    let isDirty = false;
-    const formBody = modal.querySelector('.ssf-body');
-    if (formBody) {
-      formBody.addEventListener('input', () => { isDirty = true; });
-      formBody.addEventListener('change', () => { isDirty = true; });
-    }
+    // select・コンボボックスをリセット
+    bodyEl.querySelector('#ssf-dest-department').value = '';
+    bodyEl.querySelector('#ssf-dest-doctor').value = '';
+    bodyEl.querySelector('#ssf-dest-doctor').disabled = true;
+    bodyEl.querySelector('.ssf-combobox-toggle').disabled = true;
 
-    // モーダルクローズ時の保存確認
-    async function confirmClose() {
-      if (!isDirty) { modal.remove(); return; }
-      const save = await pageWindow.HenryCore?.ui?.showConfirm?.({
-        title: '未保存の変更',
-        message: '変更内容を下書き保存しますか？',
-        confirmLabel: '保存して閉じる',
-        cancelLabel: '保存せず閉じる'
-      });
-      if (save) {
-        const data = collectFormData(modal, formData);
-        const ds = pageWindow.HenryCore?.modules?.DraftStorage;
-        if (ds) {
-          const payload = { schemaVersion: DRAFT_SCHEMA_VERSION, data };
-          await ds.save(DRAFT_TYPE, formData.patient_uuid, payload, data.patient_name || '');
-        }
-      }
-      modal.remove();
-    }
+    // 日付入力をリセット
+    bodyEl.querySelector('#ssf-hope-date-1').value = '';
+    bodyEl.querySelector('#ssf-hope-date-2').value = '';
 
-    // イベントリスナー
-    modal.querySelector('.ssf-close').addEventListener('click', () => confirmClose());
-    modal.addEventListener('click', (e) => {
-      if (e.target === modal) confirmClose();
-    });
+    // ラジオボタンをリセット
+    const unknownRadio = bodyEl.querySelector('#ssf-visit-unknown');
+    if (unknownRadio) unknownRadio.checked = true;
+    bodyEl.querySelector('#ssf-visit-id-field')?.classList.remove('visible');
+
+    // テキストエリアをリセット
+    bodyEl.querySelectorAll('textarea').forEach(ta => { ta.value = ''; });
+
+    // チェックボックスをリセット
+    bodyEl.querySelectorAll('.ssf-checkbox-group input[type="checkbox"]').forEach(cb => { cb.checked = false; });
+  }
+
+  function setupFormEvents(bodyEl) {
+    const escapeHtml = FC().utils.escapeHtml;
 
     // 外来診察予定表ボタン
-    modal.querySelector('#ssf-open-schedule').addEventListener('click', () => {
+    bodyEl.querySelector('#ssf-open-schedule')?.addEventListener('click', () => {
       window.open('https://www.saiseikai-kagawa.jp/about/plan.html', '_blank');
     });
 
     // 診療科・医師コンボボックスの連携
-    const deptSelect = modal.querySelector('#ssf-dest-department');
-    const doctorInput = modal.querySelector('#ssf-dest-doctor');
-    const doctorDropdown = modal.querySelector('#ssf-doctor-dropdown');
-    const doctorCombobox = modal.querySelector('.ssf-combobox[data-field="doctor"]');
+    const deptSelect = bodyEl.querySelector('#ssf-dest-department');
+    const doctorInput = bodyEl.querySelector('#ssf-dest-doctor');
+    const doctorDropdown = bodyEl.querySelector('#ssf-doctor-dropdown');
+    const doctorCombobox = bodyEl.querySelector('.ssf-combobox[data-field="doctor"]');
 
-    // ドロップダウンを閉じる
     function closeAllDropdowns() {
-      modal.querySelectorAll('.ssf-combobox-dropdown').forEach(d => d.classList.remove('open'));
+      bodyEl.querySelectorAll('.ssf-combobox-dropdown').forEach(d => d.classList.remove('open'));
     }
 
-    // ドロップダウンの選択肢を生成
     function renderDropdownOptions(dropdown, options, currentValue) {
       if (options.length === 0) {
         dropdown.innerHTML = '<div class="ssf-combobox-empty">選択肢がありません</div>';
@@ -508,12 +431,10 @@
       }
     }
 
-    // 医師ドロップダウンを開く
     function openDoctorDropdown() {
       closeAllDropdowns();
       const deptName = deptSelect.value;
       let doctors = getSaiseikaiDoctors(deptName);
-      // 「担当医」を常に追加
       if (!doctors.includes('担当医')) {
         doctors = [...doctors, '担当医'];
       }
@@ -521,7 +442,6 @@
       doctorDropdown.classList.add('open');
     }
 
-    // 診療科変更時
     deptSelect.addEventListener('change', () => {
       const hasValue = !!deptSelect.value;
       doctorInput.disabled = !hasValue;
@@ -531,7 +451,6 @@
       }
     });
 
-    // 医師▼ボタン
     doctorCombobox.querySelector('.ssf-combobox-toggle').addEventListener('click', (e) => {
       e.stopPropagation();
       if (doctorDropdown.classList.contains('open')) {
@@ -541,7 +460,6 @@
       }
     });
 
-    // 医師選択肢クリック
     doctorDropdown.addEventListener('click', (e) => {
       const option = e.target.closest('.ssf-combobox-option');
       if (option) {
@@ -550,16 +468,15 @@
       }
     });
 
-    // モーダル内クリックでドロップダウンを閉じる
-    modal.addEventListener('click', (e) => {
+    bodyEl.addEventListener('click', (e) => {
       if (!e.target.closest('.ssf-combobox')) {
         closeAllDropdowns();
       }
     });
 
     // 受診歴ラジオボタン変更時
-    const visitHistoryRadios = modal.querySelectorAll('input[name="ssf-visit-history"]');
-    const visitIdField = modal.querySelector('#ssf-visit-id-field');
+    const visitHistoryRadios = bodyEl.querySelectorAll('input[name="ssf-visit-history"]');
+    const visitIdField = bodyEl.querySelector('#ssf-visit-id-field');
     visitHistoryRadios.forEach(radio => {
       radio.addEventListener('change', () => {
         if (radio.value === 'yes') {
@@ -569,112 +486,96 @@
         }
       });
     });
+  }
 
-    // クリアボタン
-    modal.querySelector('#ssf-clear').addEventListener('click', async () => {
-      const confirmed = await pageWindow.HenryCore?.ui?.showConfirm?.({
-        title: '入力内容のクリア',
-        message: '手入力した内容をすべてクリアしますか？\n（患者情報などの自動入力項目はクリアされません）',
-        confirmLabel: 'クリア',
-        cancelLabel: 'キャンセル'
-      });
-      if (!confirmed) return;
-
-      // テキスト入力をリセット
-      modal.querySelector('#ssf-maiden-name').value = '';
-      modal.querySelector('#ssf-visit-history-id').value = '';
-
-      // select・コンボボックスをリセット
-      modal.querySelector('#ssf-dest-department').value = '';
-      modal.querySelector('#ssf-dest-doctor').value = '';
-      modal.querySelector('#ssf-dest-doctor').disabled = true;
-      modal.querySelector('.ssf-combobox-toggle').disabled = true;
-
-      // 日付入力をリセット
-      modal.querySelector('#ssf-hope-date-1').value = '';
-      modal.querySelector('#ssf-hope-date-2').value = '';
-
-      // ラジオボタンをリセット
-      const unknownRadio = modal.querySelector('#ssf-visit-unknown');
-      if (unknownRadio) unknownRadio.checked = true;
-      modal.querySelector('#ssf-visit-id-field')?.classList.remove('visible');
-
-      // テキストエリアをリセット
-      modal.querySelectorAll('textarea').forEach(ta => { ta.value = ''; });
-
-      // チェックボックスをリセット
-      modal.querySelectorAll('.ssf-checkbox-group input[type="checkbox"]').forEach(cb => { cb.checked = false; });
-
-      isDirty = false;
-    });
-
-    // 下書き保存
-    modal.querySelector('#ssf-save-draft').addEventListener('click', async () => {
-      const data = collectFormData(modal, formData);
-      const ds = pageWindow.HenryCore?.modules?.DraftStorage;
-      if (ds) {
-        const payload = { schemaVersion: DRAFT_SCHEMA_VERSION, data };
-        const saved = await ds.save(DRAFT_TYPE, formData.patient_uuid, payload, data.patient_name || '');
-        if (saved) {
-          isDirty = false;
-          modal.querySelector('.ssf-footer-left').textContent = `下書き: ${new Date().toLocaleString('ja-JP')}`;
-          pageWindow.HenryCore?.ui?.showToast?.('下書きを保存しました', 'success');
-        }
+  function showFormModal(formData, lastSavedAt) {
+    const EXTRA_CSS = `
+      .ssf-conditional-field {
+        margin-top: 8px;
+        padding: 12px;
+        background: #fafafa;
+        border-radius: 6px;
+        display: none;
       }
-    });
-
-    // Google Docs出力
-    modal.querySelector('#ssf-generate').addEventListener('click', async () => {
-      const btn = modal.querySelector('#ssf-generate');
-      btn.disabled = true;
-      btn.textContent = '生成中...';
-
-      try {
-        const data = collectFormData(modal, formData);
-        await generateGoogleDoc(data);
-        const ds = pageWindow.HenryCore?.modules?.DraftStorage;
-        if (ds) await ds.delete(DRAFT_TYPE, formData.patient_uuid);
-        modal.remove();
-      } catch (e) {
-        console.error(`[${SCRIPT_NAME}] 出力エラー:`, e);
-        alert(`エラーが発生しました: ${e.message}`);
-        btn.disabled = false;
-        btn.textContent = 'Google Docsに出力';
+      .ssf-conditional-field.visible { display: block; }
+      .ssf-hope-date-row {
+        display: flex;
+        gap: 12px;
+        align-items: flex-end;
       }
+      .ssf-hope-date-row .ssf-field { flex: 2; }
+      .ssf-hope-date-row .ssf-ampm-group {
+        flex: 1;
+        display: flex;
+        gap: 8px;
+        padding-bottom: 4px;
+      }
+      .ssf-ampm-group .ssf-radio-item {
+        padding: 8px 12px;
+        background: #f5f5f5;
+        border-radius: 6px;
+        border: 1px solid #ddd;
+      }
+      .ssf-ampm-group .ssf-radio-item:has(input:checked) {
+        background: #E8EAF6;
+        border-color: #3F51B5;
+      }
+      .ssf-checkbox-group {
+        max-height: 200px;
+        overflow-y: auto;
+      }
+    `;
+
+    FC().showFormModal({
+      id: 'ssf-form-modal',
+      title: '香川県済生会病院 診療申込書',
+      prefix: 'ssf',
+      bodyHTML: buildFormBody(formData),
+      extraCSS: EXTRA_CSS,
+      width: '90%',
+      draftType: DRAFT_TYPE,
+      draftSchemaVersion: DRAFT_SCHEMA_VERSION,
+      patientUuid: formData.patient_uuid,
+      patientName: formData.patient_name,
+      lastSavedAt,
+      collectFormData: (bodyEl) => collectFormData(bodyEl, formData),
+      onClear: (bodyEl) => clearFormFields(bodyEl),
+      onGenerate: async (data) => { await generateGoogleDoc(data); },
+      onSetup: (bodyEl) => { setupFormEvents(bodyEl); },
     });
   }
 
-  function collectFormData(modal, originalData) {
+  function collectFormData(bodyEl, originalData) {
     const data = { ...originalData };
 
     // 患者追加情報
-    data.maiden_name = modal.querySelector('#ssf-maiden-name')?.value || '';
+    data.maiden_name = bodyEl.querySelector('#ssf-maiden-name')?.value || '';
 
     // 香川県済生会病院固有
-    data.destination_department = modal.querySelector('#ssf-dest-department')?.value || '';
-    data.destination_doctor = modal.querySelector('#ssf-dest-doctor')?.value || '';
+    data.destination_department = bodyEl.querySelector('#ssf-dest-department')?.value || '';
+    data.destination_doctor = bodyEl.querySelector('#ssf-dest-doctor')?.value || '';
 
     // 希望日
-    data.hope_date_1 = modal.querySelector('#ssf-hope-date-1')?.value || '';
-    data.hope_date_1_ampm = modal.querySelector('input[name="ssf-hope-date-1-ampm"]:checked')?.value || 'am';
-    data.hope_date_2 = modal.querySelector('#ssf-hope-date-2')?.value || '';
-    data.hope_date_2_ampm = modal.querySelector('input[name="ssf-hope-date-2-ampm"]:checked')?.value || 'am';
+    data.hope_date_1 = bodyEl.querySelector('#ssf-hope-date-1')?.value || '';
+    data.hope_date_1_ampm = bodyEl.querySelector('input[name="ssf-hope-date-1-ampm"]:checked')?.value || 'am';
+    data.hope_date_2 = bodyEl.querySelector('#ssf-hope-date-2')?.value || '';
+    data.hope_date_2_ampm = bodyEl.querySelector('input[name="ssf-hope-date-2-ampm"]:checked')?.value || 'am';
 
     // 受診歴
-    data.visit_history = modal.querySelector('input[name="ssf-visit-history"]:checked')?.value || 'unknown';
-    data.visit_history_id = modal.querySelector('#ssf-visit-history-id')?.value || '';
+    data.visit_history = bodyEl.querySelector('input[name="ssf-visit-history"]:checked')?.value || 'unknown';
+    data.visit_history_id = bodyEl.querySelector('#ssf-visit-history-id')?.value || '';
 
     // 病名（選択と自由記述の両方を取得）
     data.selected_diseases = [];
     if (data.diseases.length > 0) {
       data.diseases.forEach(d => {
-        const cb = modal.querySelector(`#ssf-disease-${d.uuid}`);
+        const cb = bodyEl.querySelector(`#ssf-disease-${d.uuid}`);
         if (cb?.checked) {
           data.selected_diseases.push(d.uuid);
         }
       });
     }
-    data.diagnosis_text = modal.querySelector('#ssf-diagnosis-text')?.value || '';
+    data.diagnosis_text = bodyEl.querySelector('#ssf-diagnosis-text')?.value || '';
 
     return data;
   }

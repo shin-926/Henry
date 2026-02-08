@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         りつりん病院 診療申込書
 // @namespace    https://henry-app.jp/
-// @version      1.3.0
+// @version      1.4.0
 // @description  りつりん病院への診療FAX予約申込書を作成
 // @author       sk powered by Claude
 // @match        https://henry-app.jp/*
@@ -218,211 +218,173 @@
     }
   }
 
-  function showFormModal(formData, lastSavedAt) {
-    // 既存モーダルを削除
-    const existingModal = document.getElementById('rrf-form-modal');
-    if (existingModal) existingModal.remove();
-
+  function buildFormBody(formData) {
     const departments = getRitsurinDepartments();
-    const { utils } = FC();
-    const escapeHtml = utils.escapeHtml;
+    const escapeHtml = FC().utils.escapeHtml;
 
-    const modal = document.createElement('div');
-    modal.id = 'rrf-form-modal';
-    modal.innerHTML = `
-      <style>
-        ${FC().generateBaseCSS('rrf')}
-      </style>
-      <div class="rrf-container">
-        <div class="rrf-header">
-          <h2>りつりん病院 診療申込書</h2>
-          <button class="rrf-close" title="閉じる">&times;</button>
-        </div>
-        <div class="rrf-body">
-          <!-- りつりん病院 受診希望 -->
-          <div class="rrf-section">
-            <div class="rrf-section-title">りつりん病院 受診希望</div>
-            <div class="rrf-row">
-              <div class="rrf-field">
-                <label>受診希望科</label>
-                <select id="rrf-dest-department">
-                  <option value="">選択してください</option>
-                  ${departments.map(dept => `
-                    <option value="${escapeHtml(dept)}" ${formData.destination_department === dept ? 'selected' : ''}>
-                      ${escapeHtml(dept)}
-                    </option>
-                  `).join('')}
-                </select>
-              </div>
-              <div class="rrf-field">
-                <label>希望医師名</label>
-                <div style="display: flex; gap: 8px; align-items: flex-start;">
-                  <div class="rrf-combobox" data-field="doctor" style="flex: 1;">
-                    <input type="text" class="rrf-combobox-input" id="rrf-dest-doctor" value="${escapeHtml(formData.destination_doctor)}" placeholder="医師名を入力" ${!formData.destination_department ? 'disabled' : ''}>
-                    <button type="button" class="rrf-combobox-toggle" ${!formData.destination_department ? 'disabled' : ''} title="リストから選択">▼</button>
-                    <div class="rrf-combobox-dropdown" id="rrf-doctor-dropdown"></div>
-                  </div>
-                  <button type="button" class="rrf-btn rrf-btn-link" id="rrf-open-schedule" title="外来診療担当表を見る">外来表</button>
-                </div>
-              </div>
-            </div>
+    return `
+      <!-- りつりん病院 受診希望 -->
+      <div class="rrf-section">
+        <div class="rrf-section-title">りつりん病院 受診希望</div>
+        <div class="rrf-row">
+          <div class="rrf-field">
+            <label>受診希望科</label>
+            <select id="rrf-dest-department">
+              <option value="">選択してください</option>
+              ${departments.map(dept => `
+                <option value="${escapeHtml(dept)}" ${formData.destination_department === dept ? 'selected' : ''}>
+                  ${escapeHtml(dept)}
+                </option>
+              `).join('')}
+            </select>
           </div>
-
-          <!-- 受診希望日 -->
-          <div class="rrf-section">
-            <div class="rrf-section-title">受診希望日</div>
-            <div class="rrf-row">
-              <div class="rrf-field">
-                <label>第1希望日</label>
-                <div class="rrf-date-row">
-                  <input type="date" id="rrf-hope-date-1" value="${escapeHtml(formData.hope_date_1)}">
-                  <div class="rrf-period-group">
-                    <label>
-                      <input type="radio" name="rrf-hope-date-1-period" value="am" ${formData.hope_date_1_period === 'am' ? 'checked' : ''}>
-                      午前
-                    </label>
-                    <label>
-                      <input type="radio" name="rrf-hope-date-1-period" value="pm" ${formData.hope_date_1_period === 'pm' ? 'checked' : ''}>
-                      午後
-                    </label>
-                  </div>
-                </div>
+          <div class="rrf-field">
+            <label>希望医師名</label>
+            <div style="display: flex; gap: 8px; align-items: flex-start;">
+              <div class="rrf-combobox" data-field="doctor" style="flex: 1;">
+                <input type="text" class="rrf-combobox-input" id="rrf-dest-doctor" value="${escapeHtml(formData.destination_doctor)}" placeholder="医師名を入力" ${!formData.destination_department ? 'disabled' : ''}>
+                <button type="button" class="rrf-combobox-toggle" ${!formData.destination_department ? 'disabled' : ''} title="リストから選択">▼</button>
+                <div class="rrf-combobox-dropdown" id="rrf-doctor-dropdown"></div>
               </div>
+              <button type="button" class="rrf-btn rrf-btn-link" id="rrf-open-schedule" title="外来診療担当表を見る">外来表</button>
             </div>
-            <div class="rrf-row">
-              <div class="rrf-field">
-                <label>第2希望日</label>
-                <div class="rrf-date-row">
-                  <input type="date" id="rrf-hope-date-2" value="${escapeHtml(formData.hope_date_2)}">
-                  <div class="rrf-period-group">
-                    <label>
-                      <input type="radio" name="rrf-hope-date-2-period" value="am" ${formData.hope_date_2_period === 'am' ? 'checked' : ''}>
-                      午前
-                    </label>
-                    <label>
-                      <input type="radio" name="rrf-hope-date-2-period" value="pm" ${formData.hope_date_2_period === 'pm' ? 'checked' : ''}>
-                      午後
-                    </label>
-                  </div>
-                </div>
-              </div>
-            </div>
-            <div class="rrf-row">
-              <div class="rrf-field">
-                <label>その他希望日</label>
-                <textarea id="rrf-hope-date-other" rows="2" placeholder="その他の希望日があれば入力">${escapeHtml(formData.hope_date_other)}</textarea>
-              </div>
-            </div>
-          </div>
-
-          <!-- 当院受診歴 -->
-          <div class="rrf-section">
-            <div class="rrf-section-title">りつりん病院 受診歴</div>
-            <div class="rrf-radio-group">
-              <div class="rrf-radio-item">
-                <input type="radio" name="rrf-visit-history" id="rrf-visit-yes" value="yes" ${formData.visit_history === 'yes' ? 'checked' : ''}>
-                <label for="rrf-visit-yes">有</label>
-              </div>
-              <div class="rrf-radio-item">
-                <input type="radio" name="rrf-visit-history" id="rrf-visit-no" value="no" ${formData.visit_history === 'no' ? 'checked' : ''}>
-                <label for="rrf-visit-no">無</label>
-              </div>
-              <div class="rrf-radio-item">
-                <input type="radio" name="rrf-visit-history" id="rrf-visit-unknown" value="unknown" ${formData.visit_history === 'unknown' ? 'checked' : ''}>
-                <label for="rrf-visit-unknown">不明</label>
-              </div>
-            </div>
-          </div>
-
-          <!-- 診療依頼目的・病名 -->
-          <div class="rrf-section">
-            <div class="rrf-section-title">診療依頼目的・病名</div>
-            ${formData.diseases.length > 0 ? `
-              <div style="margin-bottom: 12px;">
-                <label style="display: block; font-size: 13px; font-weight: 500; color: #666; margin-bottom: 8px;">登録済み病名から選択</label>
-                <div id="rrf-diseases-list" class="rrf-checkbox-group">
-                  ${formData.diseases.map(d => `
-                    <div class="rrf-checkbox-item ${d.isMain ? 'main-disease' : ''}">
-                      <input type="checkbox" id="rrf-disease-${d.uuid}" value="${d.uuid}"
-                        ${formData.selected_diseases?.includes(d.uuid) ? 'checked' : ''}>
-                      <label for="rrf-disease-${d.uuid}">${escapeHtml(d.name)}${d.isMain ? ' (主病名)' : ''}${d.isSuspected ? ' (疑い)' : ''}</label>
-                    </div>
-                  `).join('')}
-                </div>
-              </div>
-            ` : ''}
-            <div class="rrf-field">
-              <label>自由記述（診療依頼目的など）</label>
-              <textarea id="rrf-diagnosis-text" placeholder="診療依頼目的や追加の病名を入力">${escapeHtml(formData.diagnosis_text)}</textarea>
-            </div>
-          </div>
-        </div>
-        <div class="rrf-footer">
-          <div class="rrf-footer-left">
-            ${lastSavedAt ? `下書き: ${new Date(lastSavedAt).toLocaleString('ja-JP')}` : ''}
-          </div>
-          <div class="rrf-footer-right">
-            <button class="rrf-btn rrf-btn-secondary" id="rrf-clear" style="color:#d32f2f;">クリア</button>
-            <button class="rrf-btn rrf-btn-secondary" id="rrf-save-draft">下書き保存</button>
-            <button class="rrf-btn rrf-btn-primary" id="rrf-generate">Google Docsに出力</button>
           </div>
         </div>
       </div>
+
+      <!-- 受診希望日 -->
+      <div class="rrf-section">
+        <div class="rrf-section-title">受診希望日</div>
+        <div class="rrf-row">
+          <div class="rrf-field">
+            <label>第1希望日</label>
+            <div class="rrf-date-row">
+              <input type="date" id="rrf-hope-date-1" value="${escapeHtml(formData.hope_date_1)}">
+              <div class="rrf-period-group">
+                <label>
+                  <input type="radio" name="rrf-hope-date-1-period" value="am" ${formData.hope_date_1_period === 'am' ? 'checked' : ''}>
+                  午前
+                </label>
+                <label>
+                  <input type="radio" name="rrf-hope-date-1-period" value="pm" ${formData.hope_date_1_period === 'pm' ? 'checked' : ''}>
+                  午後
+                </label>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="rrf-row">
+          <div class="rrf-field">
+            <label>第2希望日</label>
+            <div class="rrf-date-row">
+              <input type="date" id="rrf-hope-date-2" value="${escapeHtml(formData.hope_date_2)}">
+              <div class="rrf-period-group">
+                <label>
+                  <input type="radio" name="rrf-hope-date-2-period" value="am" ${formData.hope_date_2_period === 'am' ? 'checked' : ''}>
+                  午前
+                </label>
+                <label>
+                  <input type="radio" name="rrf-hope-date-2-period" value="pm" ${formData.hope_date_2_period === 'pm' ? 'checked' : ''}>
+                  午後
+                </label>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="rrf-row">
+          <div class="rrf-field">
+            <label>その他希望日</label>
+            <textarea id="rrf-hope-date-other" rows="2" placeholder="その他の希望日があれば入力">${escapeHtml(formData.hope_date_other)}</textarea>
+          </div>
+        </div>
+      </div>
+
+      <!-- 当院受診歴 -->
+      <div class="rrf-section">
+        <div class="rrf-section-title">りつりん病院 受診歴</div>
+        <div class="rrf-radio-group">
+          <div class="rrf-radio-item">
+            <input type="radio" name="rrf-visit-history" id="rrf-visit-yes" value="yes" ${formData.visit_history === 'yes' ? 'checked' : ''}>
+            <label for="rrf-visit-yes">有</label>
+          </div>
+          <div class="rrf-radio-item">
+            <input type="radio" name="rrf-visit-history" id="rrf-visit-no" value="no" ${formData.visit_history === 'no' ? 'checked' : ''}>
+            <label for="rrf-visit-no">無</label>
+          </div>
+          <div class="rrf-radio-item">
+            <input type="radio" name="rrf-visit-history" id="rrf-visit-unknown" value="unknown" ${formData.visit_history === 'unknown' ? 'checked' : ''}>
+            <label for="rrf-visit-unknown">不明</label>
+          </div>
+        </div>
+      </div>
+
+      <!-- 診療依頼目的・病名 -->
+      <div class="rrf-section">
+        <div class="rrf-section-title">診療依頼目的・病名</div>
+        ${formData.diseases.length > 0 ? `
+          <div style="margin-bottom: 12px;">
+            <label style="display: block; font-size: 13px; font-weight: 500; color: #666; margin-bottom: 8px;">登録済み病名から選択</label>
+            <div id="rrf-diseases-list" class="rrf-checkbox-group">
+              ${formData.diseases.map(d => `
+                <div class="rrf-checkbox-item ${d.isMain ? 'main-disease' : ''}">
+                  <input type="checkbox" id="rrf-disease-${d.uuid}" value="${d.uuid}"
+                    ${formData.selected_diseases?.includes(d.uuid) ? 'checked' : ''}>
+                  <label for="rrf-disease-${d.uuid}">${escapeHtml(d.name)}${d.isMain ? ' (主病名)' : ''}${d.isSuspected ? ' (疑い)' : ''}</label>
+                </div>
+              `).join('')}
+            </div>
+          </div>
+        ` : ''}
+        <div class="rrf-field">
+          <label>自由記述（診療依頼目的など）</label>
+          <textarea id="rrf-diagnosis-text" placeholder="診療依頼目的や追加の病名を入力">${escapeHtml(formData.diagnosis_text)}</textarea>
+        </div>
+      </div>
     `;
+  }
 
-    document.body.appendChild(modal);
+  function clearFormFields(bodyEl) {
+    // select・コンボボックスをリセット
+    bodyEl.querySelector('#rrf-dest-department').value = '';
+    bodyEl.querySelector('#rrf-dest-doctor').value = '';
+    bodyEl.querySelector('#rrf-dest-doctor').disabled = true;
+    bodyEl.querySelector('.rrf-combobox-toggle').disabled = true;
 
-    // 変更追跡フラグ
-    let isDirty = false;
-    const formBody = modal.querySelector('.rrf-body');
-    if (formBody) {
-      formBody.addEventListener('input', () => { isDirty = true; });
-      formBody.addEventListener('change', () => { isDirty = true; });
-    }
+    // 日付入力をリセット
+    bodyEl.querySelector('#rrf-hope-date-1').value = '';
+    bodyEl.querySelector('#rrf-hope-date-2').value = '';
 
-    // モーダルクローズ時の保存確認
-    async function confirmClose() {
-      if (!isDirty) { modal.remove(); return; }
-      const save = await pageWindow.HenryCore?.ui?.showConfirm?.({
-        title: '未保存の変更',
-        message: '変更内容を下書き保存しますか？',
-        confirmLabel: '保存して閉じる',
-        cancelLabel: '保存せず閉じる'
-      });
-      if (save) {
-        const data = collectFormData(modal, formData);
-        const ds = pageWindow.HenryCore?.modules?.DraftStorage;
-        if (ds) {
-          const payload = { schemaVersion: DRAFT_SCHEMA_VERSION, data };
-          await ds.save(DRAFT_TYPE, formData.patient_uuid, payload, data.patient_name || '');
-        }
-      }
-      modal.remove();
-    }
+    // ラジオボタンをリセット
+    bodyEl.querySelectorAll('input[name="rrf-hope-date-1-period"]').forEach(r => { r.checked = false; });
+    bodyEl.querySelectorAll('input[name="rrf-hope-date-2-period"]').forEach(r => { r.checked = false; });
+    const unknownRadio = bodyEl.querySelector('#rrf-visit-unknown');
+    if (unknownRadio) unknownRadio.checked = true;
 
-    // イベントリスナー
-    modal.querySelector('.rrf-close').addEventListener('click', () => confirmClose());
-    modal.addEventListener('click', (e) => {
-      if (e.target === modal) confirmClose();
-    });
+    // テキストエリアをリセット
+    bodyEl.querySelectorAll('textarea').forEach(ta => { ta.value = ''; });
+
+    // チェックボックスをリセット
+    bodyEl.querySelectorAll('.rrf-checkbox-group input[type="checkbox"]').forEach(cb => { cb.checked = false; });
+  }
+
+  function setupFormEvents(bodyEl) {
+    const escapeHtml = FC().utils.escapeHtml;
 
     // 外来診療担当表ボタン
-    modal.querySelector('#rrf-open-schedule').addEventListener('click', () => {
+    bodyEl.querySelector('#rrf-open-schedule')?.addEventListener('click', () => {
       window.open('https://ritsurin.jcho.go.jp/patient/outpatient/%E5%A4%96%E6%9D%A5%E8%A8%BA%E7%99%82%E6%8B%85%E5%BD%93%E8%A1%A8-7/', '_blank');
     });
 
     // 診療科・医師コンボボックスの連携
-    const deptSelect = modal.querySelector('#rrf-dest-department');
-    const doctorInput = modal.querySelector('#rrf-dest-doctor');
-    const doctorDropdown = modal.querySelector('#rrf-doctor-dropdown');
-    const doctorCombobox = modal.querySelector('.rrf-combobox[data-field="doctor"]');
+    const deptSelect = bodyEl.querySelector('#rrf-dest-department');
+    const doctorInput = bodyEl.querySelector('#rrf-dest-doctor');
+    const doctorDropdown = bodyEl.querySelector('#rrf-doctor-dropdown');
+    const doctorCombobox = bodyEl.querySelector('.rrf-combobox[data-field="doctor"]');
 
-    // ドロップダウンを閉じる
     function closeAllDropdowns() {
-      modal.querySelectorAll('.rrf-combobox-dropdown').forEach(d => d.classList.remove('open'));
+      bodyEl.querySelectorAll('.rrf-combobox-dropdown').forEach(d => d.classList.remove('open'));
     }
 
-    // ドロップダウンの選択肢を生成
     function renderDropdownOptions(dropdown, options, currentValue) {
       if (options.length === 0) {
         dropdown.innerHTML = '<div class="rrf-combobox-empty">選択肢がありません</div>';
@@ -433,12 +395,10 @@
       }
     }
 
-    // 医師ドロップダウンを開く
     function openDoctorDropdown() {
       closeAllDropdowns();
       const deptName = deptSelect.value;
       let doctors = getRitsurinDoctors(deptName);
-      // 「担当医」を常に追加
       if (!doctors.includes('担当医')) {
         doctors = [...doctors, '担当医'];
       }
@@ -475,112 +435,80 @@
       }
     });
 
-    // モーダル内クリックでドロップダウンを閉じる
-    modal.addEventListener('click', (e) => {
+    // bodyEl内クリックでドロップダウンを閉じる
+    bodyEl.addEventListener('click', (e) => {
       if (!e.target.closest('.rrf-combobox')) {
         closeAllDropdowns();
       }
     });
+  }
 
-    // クリアボタン
-    modal.querySelector('#rrf-clear').addEventListener('click', async () => {
-      const confirmed = await pageWindow.HenryCore?.ui?.showConfirm?.({
-        title: '入力内容のクリア',
-        message: '手入力した内容をすべてクリアしますか？\n（患者情報などの自動入力項目はクリアされません）',
-        confirmLabel: 'クリア',
-        cancelLabel: 'キャンセル'
-      });
-      if (!confirmed) return;
-
-      // select・コンボボックスをリセット
-      modal.querySelector('#rrf-dest-department').value = '';
-      modal.querySelector('#rrf-dest-doctor').value = '';
-      modal.querySelector('#rrf-dest-doctor').disabled = true;
-      modal.querySelector('.rrf-combobox-toggle').disabled = true;
-
-      // 日付入力をリセット
-      modal.querySelector('#rrf-hope-date-1').value = '';
-      modal.querySelector('#rrf-hope-date-2').value = '';
-
-      // ラジオボタンをリセット
-      modal.querySelectorAll('input[name="rrf-hope-date-1-period"]').forEach(r => { r.checked = false; });
-      modal.querySelectorAll('input[name="rrf-hope-date-2-period"]').forEach(r => { r.checked = false; });
-      const unknownRadio = modal.querySelector('#rrf-visit-unknown');
-      if (unknownRadio) unknownRadio.checked = true;
-
-      // テキストエリアをリセット
-      modal.querySelectorAll('textarea').forEach(ta => { ta.value = ''; });
-
-      // チェックボックスをリセット
-      modal.querySelectorAll('.rrf-checkbox-group input[type="checkbox"]').forEach(cb => { cb.checked = false; });
-
-      isDirty = false;
-    });
-
-    // 下書き保存
-    modal.querySelector('#rrf-save-draft').addEventListener('click', async () => {
-      const data = collectFormData(modal, formData);
-      const ds = pageWindow.HenryCore?.modules?.DraftStorage;
-      if (ds) {
-        const payload = { schemaVersion: DRAFT_SCHEMA_VERSION, data };
-        const saved = await ds.save(DRAFT_TYPE, formData.patient_uuid, payload, data.patient_name || '');
-        if (saved) {
-          isDirty = false;
-          modal.querySelector('.rrf-footer-left').textContent = `下書き: ${new Date().toLocaleString('ja-JP')}`;
-          pageWindow.HenryCore?.ui?.showToast?.('下書きを保存しました', 'success');
-        }
+  function showFormModal(formData, lastSavedAt) {
+    const EXTRA_CSS = `
+      .rrf-date-row {
+        display: flex;
+        gap: 12px;
+        align-items: center;
       }
-    });
-
-    // Google Docs出力
-    modal.querySelector('#rrf-generate').addEventListener('click', async () => {
-      const btn = modal.querySelector('#rrf-generate');
-      btn.disabled = true;
-      btn.textContent = '生成中...';
-
-      try {
-        const data = collectFormData(modal, formData);
-        await generateGoogleDoc(data);
-        const ds = pageWindow.HenryCore?.modules?.DraftStorage;
-        if (ds) await ds.delete(DRAFT_TYPE, formData.patient_uuid);
-        modal.remove();
-      } catch (e) {
-        console.error(`[${SCRIPT_NAME}] 出力エラー:`, e);
-        alert(`エラーが発生しました: ${e.message}`);
-        btn.disabled = false;
-        btn.textContent = 'Google Docsに出力';
+      .rrf-date-row input[type="date"] { flex: 1; }
+      .rrf-period-group {
+        display: flex;
+        gap: 8px;
       }
+      .rrf-period-group label {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        cursor: pointer;
+      }
+    `;
+
+    FC().showFormModal({
+      id: 'rrf-form-modal',
+      title: 'りつりん病院 診療申込書',
+      prefix: 'rrf',
+      bodyHTML: buildFormBody(formData),
+      extraCSS: EXTRA_CSS,
+      draftType: DRAFT_TYPE,
+      draftSchemaVersion: DRAFT_SCHEMA_VERSION,
+      patientUuid: formData.patient_uuid,
+      patientName: formData.patient_name,
+      lastSavedAt,
+      collectFormData: (bodyEl) => collectFormData(bodyEl, formData),
+      onClear: (bodyEl) => clearFormFields(bodyEl),
+      onGenerate: async (data) => { await generateGoogleDoc(data); },
+      onSetup: (bodyEl) => { setupFormEvents(bodyEl); },
     });
   }
 
-  function collectFormData(modal, originalData) {
+  function collectFormData(bodyEl, originalData) {
     const data = { ...originalData };
 
     // りつりん病院固有
-    data.destination_department = modal.querySelector('#rrf-dest-department')?.value || '';
-    data.destination_doctor = modal.querySelector('#rrf-dest-doctor')?.value || '';
+    data.destination_department = bodyEl.querySelector('#rrf-dest-department')?.value || '';
+    data.destination_doctor = bodyEl.querySelector('#rrf-dest-doctor')?.value || '';
 
     // 希望日
-    data.hope_date_1 = modal.querySelector('#rrf-hope-date-1')?.value || '';
-    data.hope_date_1_period = modal.querySelector('input[name="rrf-hope-date-1-period"]:checked')?.value || '';
-    data.hope_date_2 = modal.querySelector('#rrf-hope-date-2')?.value || '';
-    data.hope_date_2_period = modal.querySelector('input[name="rrf-hope-date-2-period"]:checked')?.value || '';
-    data.hope_date_other = modal.querySelector('#rrf-hope-date-other')?.value || '';
+    data.hope_date_1 = bodyEl.querySelector('#rrf-hope-date-1')?.value || '';
+    data.hope_date_1_period = bodyEl.querySelector('input[name="rrf-hope-date-1-period"]:checked')?.value || '';
+    data.hope_date_2 = bodyEl.querySelector('#rrf-hope-date-2')?.value || '';
+    data.hope_date_2_period = bodyEl.querySelector('input[name="rrf-hope-date-2-period"]:checked')?.value || '';
+    data.hope_date_other = bodyEl.querySelector('#rrf-hope-date-other')?.value || '';
 
     // 受診歴
-    data.visit_history = modal.querySelector('input[name="rrf-visit-history"]:checked')?.value || 'unknown';
+    data.visit_history = bodyEl.querySelector('input[name="rrf-visit-history"]:checked')?.value || 'unknown';
 
     // 病名（選択と自由記述の両方を取得）
     data.selected_diseases = [];
     if (data.diseases.length > 0) {
       data.diseases.forEach(d => {
-        const cb = modal.querySelector(`#rrf-disease-${d.uuid}`);
+        const cb = bodyEl.querySelector(`#rrf-disease-${d.uuid}`);
         if (cb?.checked) {
           data.selected_diseases.push(d.uuid);
         }
       });
     }
-    data.diagnosis_text = modal.querySelector('#rrf-diagnosis-text')?.value || '';
+    data.diagnosis_text = bodyEl.querySelector('#rrf-diagnosis-text')?.value || '';
 
     return data;
   }

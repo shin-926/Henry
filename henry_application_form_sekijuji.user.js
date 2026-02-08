@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         高松赤十字病院 診療申込書
 // @namespace    https://henry-app.jp/
-// @version      1.5.0
+// @version      1.6.0
 // @description  高松赤十字病院への診療情報提供書兼FAX診療申込書を作成
 // @author       sk powered by Claude
 // @match        https://henry-app.jp/*
@@ -326,387 +326,268 @@
     }
   }
 
-  function showFormModal(formData, lastSavedAt) {
-    // 既存モーダルを削除
-    const existingModal = document.getElementById('srf-form-modal');
-    if (existingModal) existingModal.remove();
-
+  function buildFormBody(formData) {
     const departments = getSekijujiDepartments();
-    const { utils } = FC();
-    const escapeHtml = utils.escapeHtml;
+    const escapeHtml = FC().utils.escapeHtml;
 
-    const modal = document.createElement('div');
-    modal.id = 'srf-form-modal';
-    modal.innerHTML = `
-      <style>
-        ${FC().generateBaseCSS('srf')}
-        /* 高松赤十字病院固有のCSS */
-        .srf-container {
-          max-width: 900px;
-        }
-        .srf-radio-group.vertical {
-          flex-direction: column;
-          gap: 8px;
-        }
-        .srf-conditional-field {
-          margin-top: 8px;
-          padding: 12px;
-          background: #fafafa;
-          border-radius: 6px;
-          display: none;
-        }
-        .srf-conditional-field.visible {
-          display: block;
-        }
-        .srf-checkbox-group {
-          display: flex;
-          flex-direction: column;
-          gap: 8px;
-          margin-bottom: 12px;
-        }
-        .srf-checkbox-item {
-          display: flex;
-          align-items: flex-start;
-          gap: 8px;
-          padding: 10px 12px;
-          background: #fafafa;
-          border: 1px solid #e0e0e0;
-          border-radius: 6px;
-          cursor: pointer;
-          transition: all 0.2s;
-        }
-        .srf-checkbox-item:hover {
-          background: #f5f5f5;
-          border-color: #ccc;
-        }
-        .srf-checkbox-item input[type="checkbox"] {
-          width: 16px;
-          height: 16px;
-          margin-top: 2px;
-          cursor: pointer;
-          flex-shrink: 0;
-        }
-        .srf-prescription-content {
-          flex: 1;
-          min-width: 0;
-        }
-        .srf-prescription-header {
-          display: flex;
-          align-items: center;
-          gap: 8px;
-          margin-bottom: 4px;
-        }
-        .srf-prescription-date {
-          font-size: 13px;
-          font-weight: 600;
-          color: #333;
-        }
-        .srf-prescription-category {
-          font-size: 11px;
-          padding: 2px 6px;
-          border-radius: 4px;
-          font-weight: 500;
-        }
-        .srf-prescription-meds {
-          font-size: 13px;
-          color: #666;
-          line-height: 1.5;
-        }
-        .srf-use-toggle {
-          display: flex;
-          align-items: center;
-          gap: 8px;
-          margin-bottom: 12px;
-        }
-        .srf-use-toggle input[type="checkbox"] {
-          width: 16px;
-          height: 16px;
-          cursor: pointer;
-        }
-        .srf-use-toggle label {
-          font-size: 14px;
-          color: #333;
-          cursor: pointer;
-        }
-      </style>
-      <div class="srf-container">
-        <div class="srf-header">
-          <h2>高松赤十字病院 診療申込書</h2>
-          <button class="srf-close" title="閉じる">&times;</button>
-        </div>
-        <div class="srf-body">
-          <!-- 高松赤十字病院 受診希望 -->
-          <div class="srf-section">
-            <div class="srf-section-title">高松赤十字病院 受診希望</div>
-            <div class="srf-row">
-              <div class="srf-field">
-                <label>旧姓（任意）</label>
-                <input type="text" id="srf-maiden-name" value="${escapeHtml(formData.maiden_name)}" placeholder="旧姓があれば入力">
-              </div>
-            </div>
-            <div class="srf-row">
-              <div class="srf-field">
-                <label>受診希望科</label>
-                <select id="srf-dest-department">
-                  <option value="">選択してください</option>
-                  ${departments.map(dept => `
-                    <option value="${escapeHtml(dept)}" ${formData.destination_department === dept ? 'selected' : ''}>
-                      ${escapeHtml(dept)}
-                    </option>
-                  `).join('')}
-                </select>
-              </div>
-              <div class="srf-field">
-                <label>希望医師名</label>
-                <div style="display: flex; gap: 8px; align-items: flex-start;">
-                  <div class="srf-combobox" data-field="doctor" style="flex: 1;">
-                    <input type="text" class="srf-combobox-input" id="srf-dest-doctor" value="${escapeHtml(formData.destination_doctor)}" placeholder="医師名を入力" ${!formData.destination_department ? 'disabled' : ''}>
-                    <button type="button" class="srf-combobox-toggle" ${!formData.destination_department ? 'disabled' : ''} title="リストから選択">▼</button>
-                    <div class="srf-combobox-dropdown" id="srf-doctor-dropdown"></div>
-                  </div>
-                  <button type="button" class="srf-btn srf-btn-link" id="srf-open-schedule" title="外来担当医師表を見る">外来表</button>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <!-- 受診希望日 -->
-          <div class="srf-section">
-            <div class="srf-section-title">受診希望日</div>
-            <div class="srf-row">
-              <div class="srf-field">
-                <label>第1希望日</label>
-                <input type="date" id="srf-hope-date-1" value="${escapeHtml(formData.hope_date_1)}">
-              </div>
-              <div class="srf-field">
-                <label>第2希望日</label>
-                <input type="date" id="srf-hope-date-2" value="${escapeHtml(formData.hope_date_2)}">
-              </div>
-            </div>
-          </div>
-
-          <!-- 当院受診歴 -->
-          <div class="srf-section">
-            <div class="srf-section-title">高松赤十字病院 受診歴</div>
-            <div class="srf-radio-group">
-              <div class="srf-radio-item">
-                <input type="radio" name="srf-visit-history" id="srf-visit-yes" value="yes" ${formData.visit_history === 'yes' ? 'checked' : ''}>
-                <label for="srf-visit-yes">有</label>
-              </div>
-              <div class="srf-radio-item">
-                <input type="radio" name="srf-visit-history" id="srf-visit-no" value="no" ${formData.visit_history === 'no' ? 'checked' : ''}>
-                <label for="srf-visit-no">無</label>
-              </div>
-              <div class="srf-radio-item">
-                <input type="radio" name="srf-visit-history" id="srf-visit-unknown" value="unknown" ${formData.visit_history === 'unknown' ? 'checked' : ''}>
-                <label for="srf-visit-unknown">不明</label>
-              </div>
-            </div>
-            <div class="srf-conditional-field ${formData.visit_history === 'yes' ? 'visible' : ''}" id="srf-visit-id-field">
-              <div class="srf-field">
-                <label>患者ID（わかれば）</label>
-                <input type="text" id="srf-visit-history-id" value="${escapeHtml(formData.visit_history_id)}" placeholder="例: 123-456-789">
-              </div>
-            </div>
-          </div>
-
-          <!-- 現在の状況 -->
-          <div class="srf-section">
-            <div class="srf-section-title">現在貴院に</div>
-            <div class="srf-radio-group vertical">
-              <div class="srf-radio-item">
-                <input type="radio" name="srf-current-status" id="srf-status-none" value="none" ${formData.current_status === 'none' ? 'checked' : ''}>
-                <label for="srf-status-none">該当なし</label>
-              </div>
-              <div class="srf-radio-item">
-                <input type="radio" name="srf-current-status" id="srf-status-outpatient" value="outpatient" ${formData.current_status === 'outpatient' ? 'checked' : ''}>
-                <label for="srf-status-outpatient">外来通院中</label>
-              </div>
-              <div class="srf-radio-item">
-                <input type="radio" name="srf-current-status" id="srf-status-inpatient-dpc" value="inpatient-dpc" ${formData.current_status === 'inpatient-dpc' ? 'checked' : ''}>
-                <label for="srf-status-inpatient-dpc">入院中（DPC対象）</label>
-              </div>
-              <div class="srf-radio-item">
-                <input type="radio" name="srf-current-status" id="srf-status-inpatient-non-dpc" value="inpatient-non-dpc" ${formData.current_status === 'inpatient-non-dpc' ? 'checked' : ''}>
-                <label for="srf-status-inpatient-non-dpc">入院中（DPC対象外）</label>
-              </div>
-              <div class="srf-radio-item">
-                <input type="radio" name="srf-current-status" id="srf-status-facility" value="facility" ${formData.current_status === 'facility' ? 'checked' : ''}>
-                <label for="srf-status-facility">介護施設入所中</label>
-              </div>
-            </div>
-            <div class="srf-conditional-field ${formData.current_status === 'facility' ? 'visible' : ''}" id="srf-facility-field">
-              <div class="srf-field">
-                <label>施設名</label>
-                <input type="text" id="srf-facility-name" value="${escapeHtml(formData.facility_name)}" placeholder="施設名を入力">
-              </div>
-            </div>
-          </div>
-
-          <!-- 紹介目的・傷病名 -->
-          <div class="srf-section">
-            <div class="srf-section-title">紹介目的（傷病名）</div>
-            ${formData.diseases.length > 0 ? `
-              <div style="margin-bottom: 12px;">
-                <label style="display: block; font-size: 13px; font-weight: 500; color: #666; margin-bottom: 8px;">登録済み病名から選択</label>
-                <div id="srf-diseases-list" class="srf-checkbox-group">
-                  ${formData.diseases.map(d => `
-                    <div class="srf-checkbox-item ${d.isMain ? 'main-disease' : ''}">
-                      <input type="checkbox" id="srf-disease-${d.uuid}" value="${d.uuid}"
-                        ${formData.selected_diseases?.includes(d.uuid) ? 'checked' : ''}>
-                      <label for="srf-disease-${d.uuid}">${escapeHtml(d.name)}${d.isMain ? ' (主病名)' : ''}${d.isSuspected ? ' (疑い)' : ''}</label>
-                    </div>
-                  `).join('')}
-                </div>
-              </div>
-            ` : ''}
-            <div class="srf-field">
-              <label>自由記述</label>
-              <textarea id="srf-diagnosis-text" placeholder="紹介目的や追加の傷病名を入力">${escapeHtml(formData.diagnosis_text)}</textarea>
-            </div>
-          </div>
-
-          <!-- 治療経過 -->
-          <div class="srf-section">
-            <div class="srf-section-title">治療経過</div>
-            <div class="srf-field">
-              <textarea id="srf-treatment-history" rows="4" placeholder="これまでの治療経過を入力">${escapeHtml(formData.treatment_history)}</textarea>
-            </div>
-          </div>
-
-          <!-- 既往歴・アレルギー -->
-          <div class="srf-section">
-            <div class="srf-section-title">既往歴・アレルギー</div>
-            <div class="srf-field">
-              <textarea id="srf-past-history-allergy" rows="3" placeholder="既往歴、アレルギー情報を入力">${escapeHtml(formData.past_history_allergy)}</textarea>
-            </div>
-          </div>
-
-          <!-- 現在の処方 -->
-          <div class="srf-section">
-            <div class="srf-section-title">現在の処方</div>
-            ${formData.prescriptions.length > 0 ? `
-              <div class="srf-use-toggle">
-                <input type="checkbox" id="srf-use-prescriptions" ${formData.use_prescriptions ? 'checked' : ''}>
-                <label for="srf-use-prescriptions">処方履歴から選択する</label>
-              </div>
-              <div id="srf-prescriptions-list" class="srf-checkbox-group" ${formData.use_prescriptions ? '' : 'style="display:none;"'}>
-                ${formData.prescriptions.map(rx => {
-                  const dateStr = formatDateShort(rx.startDate || rx.date);
-                  const category = categoryToLabel(rx.category);
-                  const categoryStyle = rx.category === 'MEDICATION_CATEGORY_OUT_OF_HOSPITAL'
-                    ? 'background: #e3f2fd; color: #1565c0; border: 1px solid #90caf9;'
-                    : rx.category === 'MEDICATION_CATEGORY_IN_HOSPITAL'
-                      ? 'background: #fff3e0; color: #e65100; border: 1px solid #ffcc80;'
-                      : 'background: #f5f5f5; color: #666;';
-                  const medsPreview = rx.medicines.map(m => {
-                    let text = m.name.replace(/「[^」]*」/g, '').trim();
-                    if (m.quantity) text += ' ' + m.quantity + m.unit;
-                    if (m.days) text += ' ' + m.days + '日分';
-                    else if (m.asNeeded) text += ' 頓用';
-                    return text;
-                  }).join('、');
-                  const isSelected = formData.selected_prescriptions?.includes(rx.recordId);
-                  return '<div class="srf-checkbox-item srf-prescription-item">' +
-                    '<input type="checkbox" id="srf-prescription-' + rx.recordId + '" value="' + rx.recordId + '" ' + (isSelected ? 'checked' : '') + '>' +
-                    '<div class="srf-prescription-content">' +
-                      '<div class="srf-prescription-header">' +
-                        '<span class="srf-prescription-date">' + dateStr + '</span>' +
-                        (category ? '<span class="srf-prescription-category" style="' + categoryStyle + '">' + category + '</span>' : '') +
-                      '</div>' +
-                      '<div class="srf-prescription-meds">' + escapeHtml(medsPreview) + '</div>' +
-                    '</div>' +
-                  '</div>';
-                }).join('')}
-              </div>
-              <div id="srf-prescription-manual" style="${formData.use_prescriptions ? 'display:none;' : ''}">
-                <div class="srf-field">
-                  <label>処方内容（手入力）</label>
-                  <textarea id="srf-prescription-text" rows="3" placeholder="処方内容を入力">${escapeHtml(formData.prescription_text)}</textarea>
-                </div>
-              </div>
-            ` : `
-              <div class="srf-field">
-                <label>処方内容</label>
-                <textarea id="srf-prescription-text" rows="3" placeholder="処方内容を入力">${escapeHtml(formData.prescription_text)}</textarea>
-              </div>
-            `}
-          </div>
-
-          <!-- 備考 -->
-          <div class="srf-section">
-            <div class="srf-section-title">備考</div>
-            <div class="srf-field">
-              <textarea id="srf-remarks" rows="2" placeholder="その他連絡事項があれば入力">${escapeHtml(formData.remarks)}</textarea>
-            </div>
+    return `
+      <!-- 高松赤十字病院 受診希望 -->
+      <div class="srf-section">
+        <div class="srf-section-title">高松赤十字病院 受診希望</div>
+        <div class="srf-row">
+          <div class="srf-field">
+            <label>旧姓（任意）</label>
+            <input type="text" id="srf-maiden-name" value="${escapeHtml(formData.maiden_name)}" placeholder="旧姓があれば入力">
           </div>
         </div>
-        <div class="srf-footer">
-          <div class="srf-footer-left">
-            ${lastSavedAt ? `下書き: ${new Date(lastSavedAt).toLocaleString('ja-JP')}` : ''}
+        <div class="srf-row">
+          <div class="srf-field">
+            <label>受診希望科</label>
+            <select id="srf-dest-department">
+              <option value="">選択してください</option>
+              ${departments.map(dept => `
+                <option value="${escapeHtml(dept)}" ${formData.destination_department === dept ? 'selected' : ''}>
+                  ${escapeHtml(dept)}
+                </option>
+              `).join('')}
+            </select>
           </div>
-          <div class="srf-footer-right">
-            <button class="srf-btn srf-btn-secondary" id="srf-clear" style="color:#d32f2f;">クリア</button>
-            <button class="srf-btn srf-btn-secondary" id="srf-save-draft">下書き保存</button>
-            <button class="srf-btn srf-btn-primary" id="srf-generate">Google Docsに出力</button>
+          <div class="srf-field">
+            <label>希望医師名</label>
+            <div style="display: flex; gap: 8px; align-items: flex-start;">
+              <div class="srf-combobox" data-field="doctor" style="flex: 1;">
+                <input type="text" class="srf-combobox-input" id="srf-dest-doctor" value="${escapeHtml(formData.destination_doctor)}" placeholder="医師名を入力" ${!formData.destination_department ? 'disabled' : ''}>
+                <button type="button" class="srf-combobox-toggle" ${!formData.destination_department ? 'disabled' : ''} title="リストから選択">▼</button>
+                <div class="srf-combobox-dropdown" id="srf-doctor-dropdown"></div>
+              </div>
+              <button type="button" class="srf-btn srf-btn-link" id="srf-open-schedule" title="外来担当医師表を見る">外来表</button>
+            </div>
           </div>
         </div>
       </div>
+
+      <!-- 受診希望日 -->
+      <div class="srf-section">
+        <div class="srf-section-title">受診希望日</div>
+        <div class="srf-row">
+          <div class="srf-field">
+            <label>第1希望日</label>
+            <input type="date" id="srf-hope-date-1" value="${escapeHtml(formData.hope_date_1)}">
+          </div>
+          <div class="srf-field">
+            <label>第2希望日</label>
+            <input type="date" id="srf-hope-date-2" value="${escapeHtml(formData.hope_date_2)}">
+          </div>
+        </div>
+      </div>
+
+      <!-- 当院受診歴 -->
+      <div class="srf-section">
+        <div class="srf-section-title">高松赤十字病院 受診歴</div>
+        <div class="srf-radio-group">
+          <div class="srf-radio-item">
+            <input type="radio" name="srf-visit-history" id="srf-visit-yes" value="yes" ${formData.visit_history === 'yes' ? 'checked' : ''}>
+            <label for="srf-visit-yes">有</label>
+          </div>
+          <div class="srf-radio-item">
+            <input type="radio" name="srf-visit-history" id="srf-visit-no" value="no" ${formData.visit_history === 'no' ? 'checked' : ''}>
+            <label for="srf-visit-no">無</label>
+          </div>
+          <div class="srf-radio-item">
+            <input type="radio" name="srf-visit-history" id="srf-visit-unknown" value="unknown" ${formData.visit_history === 'unknown' ? 'checked' : ''}>
+            <label for="srf-visit-unknown">不明</label>
+          </div>
+        </div>
+        <div class="srf-conditional-field ${formData.visit_history === 'yes' ? 'visible' : ''}" id="srf-visit-id-field">
+          <div class="srf-field">
+            <label>患者ID（わかれば）</label>
+            <input type="text" id="srf-visit-history-id" value="${escapeHtml(formData.visit_history_id)}" placeholder="例: 123-456-789">
+          </div>
+        </div>
+      </div>
+
+      <!-- 現在の状況 -->
+      <div class="srf-section">
+        <div class="srf-section-title">現在貴院に</div>
+        <div class="srf-radio-group vertical">
+          <div class="srf-radio-item">
+            <input type="radio" name="srf-current-status" id="srf-status-none" value="none" ${formData.current_status === 'none' ? 'checked' : ''}>
+            <label for="srf-status-none">該当なし</label>
+          </div>
+          <div class="srf-radio-item">
+            <input type="radio" name="srf-current-status" id="srf-status-outpatient" value="outpatient" ${formData.current_status === 'outpatient' ? 'checked' : ''}>
+            <label for="srf-status-outpatient">外来通院中</label>
+          </div>
+          <div class="srf-radio-item">
+            <input type="radio" name="srf-current-status" id="srf-status-inpatient-dpc" value="inpatient-dpc" ${formData.current_status === 'inpatient-dpc' ? 'checked' : ''}>
+            <label for="srf-status-inpatient-dpc">入院中（DPC対象）</label>
+          </div>
+          <div class="srf-radio-item">
+            <input type="radio" name="srf-current-status" id="srf-status-inpatient-non-dpc" value="inpatient-non-dpc" ${formData.current_status === 'inpatient-non-dpc' ? 'checked' : ''}>
+            <label for="srf-status-inpatient-non-dpc">入院中（DPC対象外）</label>
+          </div>
+          <div class="srf-radio-item">
+            <input type="radio" name="srf-current-status" id="srf-status-facility" value="facility" ${formData.current_status === 'facility' ? 'checked' : ''}>
+            <label for="srf-status-facility">介護施設入所中</label>
+          </div>
+        </div>
+        <div class="srf-conditional-field ${formData.current_status === 'facility' ? 'visible' : ''}" id="srf-facility-field">
+          <div class="srf-field">
+            <label>施設名</label>
+            <input type="text" id="srf-facility-name" value="${escapeHtml(formData.facility_name)}" placeholder="施設名を入力">
+          </div>
+        </div>
+      </div>
+
+      <!-- 紹介目的・傷病名 -->
+      <div class="srf-section">
+        <div class="srf-section-title">紹介目的（傷病名）</div>
+        ${formData.diseases.length > 0 ? `
+          <div style="margin-bottom: 12px;">
+            <label style="display: block; font-size: 13px; font-weight: 500; color: #666; margin-bottom: 8px;">登録済み病名から選択</label>
+            <div id="srf-diseases-list" class="srf-checkbox-group">
+              ${formData.diseases.map(d => `
+                <div class="srf-checkbox-item ${d.isMain ? 'main-disease' : ''}">
+                  <input type="checkbox" id="srf-disease-${d.uuid}" value="${d.uuid}"
+                    ${formData.selected_diseases?.includes(d.uuid) ? 'checked' : ''}>
+                  <label for="srf-disease-${d.uuid}">${escapeHtml(d.name)}${d.isMain ? ' (主病名)' : ''}${d.isSuspected ? ' (疑い)' : ''}</label>
+                </div>
+              `).join('')}
+            </div>
+          </div>
+        ` : ''}
+        <div class="srf-field">
+          <label>自由記述</label>
+          <textarea id="srf-diagnosis-text" placeholder="紹介目的や追加の傷病名を入力">${escapeHtml(formData.diagnosis_text)}</textarea>
+        </div>
+      </div>
+
+      <!-- 治療経過 -->
+      <div class="srf-section">
+        <div class="srf-section-title">治療経過</div>
+        <div class="srf-field">
+          <textarea id="srf-treatment-history" rows="4" placeholder="これまでの治療経過を入力">${escapeHtml(formData.treatment_history)}</textarea>
+        </div>
+      </div>
+
+      <!-- 既往歴・アレルギー -->
+      <div class="srf-section">
+        <div class="srf-section-title">既往歴・アレルギー</div>
+        <div class="srf-field">
+          <textarea id="srf-past-history-allergy" rows="3" placeholder="既往歴、アレルギー情報を入力">${escapeHtml(formData.past_history_allergy)}</textarea>
+        </div>
+      </div>
+
+      <!-- 現在の処方 -->
+      <div class="srf-section">
+        <div class="srf-section-title">現在の処方</div>
+        ${formData.prescriptions.length > 0 ? `
+          <div class="srf-use-toggle">
+            <input type="checkbox" id="srf-use-prescriptions" ${formData.use_prescriptions ? 'checked' : ''}>
+            <label for="srf-use-prescriptions">処方履歴から選択する</label>
+          </div>
+          <div id="srf-prescriptions-list" class="srf-checkbox-group" ${formData.use_prescriptions ? '' : 'style="display:none;"'}>
+            ${formData.prescriptions.map(rx => {
+              const dateStr = formatDateShort(rx.startDate || rx.date);
+              const category = categoryToLabel(rx.category);
+              const categoryStyle = rx.category === 'MEDICATION_CATEGORY_OUT_OF_HOSPITAL'
+                ? 'background: #e3f2fd; color: #1565c0; border: 1px solid #90caf9;'
+                : rx.category === 'MEDICATION_CATEGORY_IN_HOSPITAL'
+                  ? 'background: #fff3e0; color: #e65100; border: 1px solid #ffcc80;'
+                  : 'background: #f5f5f5; color: #666;';
+              const medsPreview = rx.medicines.map(m => {
+                let text = m.name.replace(/「[^」]*」/g, '').trim();
+                if (m.quantity) text += ' ' + m.quantity + m.unit;
+                if (m.days) text += ' ' + m.days + '日分';
+                else if (m.asNeeded) text += ' 頓用';
+                return text;
+              }).join('、');
+              const isSelected = formData.selected_prescriptions?.includes(rx.recordId);
+              return '<div class="srf-checkbox-item srf-prescription-item">' +
+                '<input type="checkbox" id="srf-prescription-' + rx.recordId + '" value="' + rx.recordId + '" ' + (isSelected ? 'checked' : '') + '>' +
+                '<div class="srf-prescription-content">' +
+                  '<div class="srf-prescription-header">' +
+                    '<span class="srf-prescription-date">' + dateStr + '</span>' +
+                    (category ? '<span class="srf-prescription-category" style="' + categoryStyle + '">' + category + '</span>' : '') +
+                  '</div>' +
+                  '<div class="srf-prescription-meds">' + escapeHtml(medsPreview) + '</div>' +
+                '</div>' +
+              '</div>';
+            }).join('')}
+          </div>
+          <div id="srf-prescription-manual" style="${formData.use_prescriptions ? 'display:none;' : ''}">
+            <div class="srf-field">
+              <label>処方内容（手入力）</label>
+              <textarea id="srf-prescription-text" rows="3" placeholder="処方内容を入力">${escapeHtml(formData.prescription_text)}</textarea>
+            </div>
+          </div>
+        ` : `
+          <div class="srf-field">
+            <label>処方内容</label>
+            <textarea id="srf-prescription-text" rows="3" placeholder="処方内容を入力">${escapeHtml(formData.prescription_text)}</textarea>
+          </div>
+        `}
+      </div>
+
+      <!-- 備考 -->
+      <div class="srf-section">
+        <div class="srf-section-title">備考</div>
+        <div class="srf-field">
+          <textarea id="srf-remarks" rows="2" placeholder="その他連絡事項があれば入力">${escapeHtml(formData.remarks)}</textarea>
+        </div>
+      </div>
     `;
+  }
 
-    document.body.appendChild(modal);
+  function clearFormFields(bodyEl) {
+    // テキスト入力をリセット
+    bodyEl.querySelector('#srf-maiden-name').value = '';
+    bodyEl.querySelector('#srf-facility-name').value = '';
+    bodyEl.querySelector('#srf-visit-history-id').value = '';
 
-    // 変更追跡フラグ
-    let isDirty = false;
-    const formBody = modal.querySelector('.srf-body');
-    if (formBody) {
-      formBody.addEventListener('input', () => { isDirty = true; });
-      formBody.addEventListener('change', () => { isDirty = true; });
-    }
+    // select・コンボボックスをリセット
+    bodyEl.querySelector('#srf-dest-department').value = '';
+    bodyEl.querySelector('#srf-dest-doctor').value = '';
+    bodyEl.querySelector('#srf-dest-doctor').disabled = true;
+    bodyEl.querySelector('.srf-combobox-toggle').disabled = true;
 
-    // モーダルクローズ時の保存確認
-    async function confirmClose() {
-      if (!isDirty) { modal.remove(); return; }
-      const save = await pageWindow.HenryCore?.ui?.showConfirm?.({
-        title: '未保存の変更',
-        message: '変更内容を下書き保存しますか？',
-        confirmLabel: '保存して閉じる',
-        cancelLabel: '保存せず閉じる'
-      });
-      if (save) {
-        const data = collectFormData(modal, formData);
-        const ds = pageWindow.HenryCore?.modules?.DraftStorage;
-        if (ds) {
-          const payload = { schemaVersion: DRAFT_SCHEMA_VERSION, data };
-          await ds.save(DRAFT_TYPE, formData.patient_uuid, payload, data.patient_name || '');
-        }
-      }
-      modal.remove();
-    }
+    // 日付入力をリセット
+    bodyEl.querySelector('#srf-hope-date-1').value = '';
+    bodyEl.querySelector('#srf-hope-date-2').value = '';
 
-    // イベントリスナー
-    modal.querySelector('.srf-close').addEventListener('click', () => confirmClose());
-    modal.addEventListener('click', (e) => {
-      if (e.target === modal) confirmClose();
-    });
+    // ラジオボタンをリセット
+    const unknownRadio = bodyEl.querySelector('#srf-visit-unknown');
+    if (unknownRadio) unknownRadio.checked = true;
+    bodyEl.querySelector('#srf-visit-id-field')?.classList.remove('visible');
+    const noneRadio = bodyEl.querySelector('#srf-status-none');
+    if (noneRadio) noneRadio.checked = true;
+    bodyEl.querySelector('#srf-facility-field')?.classList.remove('visible');
+
+    // テキストエリアをリセット
+    bodyEl.querySelectorAll('textarea').forEach(ta => { ta.value = ''; });
+
+    // チェックボックスをリセット
+    bodyEl.querySelectorAll('.srf-checkbox-group input[type="checkbox"]').forEach(cb => { cb.checked = false; });
+  }
+
+  function setupFormEvents(bodyEl) {
+    const escapeHtml = FC().utils.escapeHtml;
 
     // 外来担当医師表ボタン
-    modal.querySelector('#srf-open-schedule').addEventListener('click', () => {
+    bodyEl.querySelector('#srf-open-schedule')?.addEventListener('click', () => {
       window.open('https://www.takamatsu.jrc.or.jp/outpatient/doctor/', '_blank');
     });
 
     // 診療科・医師コンボボックスの連携
-    const deptSelect = modal.querySelector('#srf-dest-department');
-    const doctorInput = modal.querySelector('#srf-dest-doctor');
-    const doctorDropdown = modal.querySelector('#srf-doctor-dropdown');
-    const doctorCombobox = modal.querySelector('.srf-combobox[data-field="doctor"]');
+    const deptSelect = bodyEl.querySelector('#srf-dest-department');
+    const doctorInput = bodyEl.querySelector('#srf-dest-doctor');
+    const doctorDropdown = bodyEl.querySelector('#srf-doctor-dropdown');
+    const doctorCombobox = bodyEl.querySelector('.srf-combobox[data-field="doctor"]');
 
-    // ドロップダウンを閉じる
     function closeAllDropdowns() {
-      modal.querySelectorAll('.srf-combobox-dropdown').forEach(d => d.classList.remove('open'));
+      bodyEl.querySelectorAll('.srf-combobox-dropdown').forEach(d => d.classList.remove('open'));
     }
 
-    // ドロップダウンの選択肢を生成
     function renderDropdownOptions(dropdown, options, currentValue) {
       if (options.length === 0) {
         dropdown.innerHTML = '<div class="srf-combobox-empty">選択肢がありません</div>';
@@ -717,7 +598,6 @@
       }
     }
 
-    // 医師ドロップダウンを開く
     function openDoctorDropdown() {
       closeAllDropdowns();
       const deptName = deptSelect.value;
@@ -759,16 +639,16 @@
       }
     });
 
-    // モーダル内クリックでドロップダウンを閉じる
-    modal.addEventListener('click', (e) => {
+    // bodyEl内クリックでドロップダウンを閉じる
+    bodyEl.addEventListener('click', (e) => {
       if (!e.target.closest('.srf-combobox')) {
         closeAllDropdowns();
       }
     });
 
     // 受診歴ラジオボタン変更時
-    const visitHistoryRadios = modal.querySelectorAll('input[name="srf-visit-history"]');
-    const visitIdField = modal.querySelector('#srf-visit-id-field');
+    const visitHistoryRadios = bodyEl.querySelectorAll('input[name="srf-visit-history"]');
+    const visitIdField = bodyEl.querySelector('#srf-visit-id-field');
     visitHistoryRadios.forEach(radio => {
       radio.addEventListener('change', () => {
         if (radio.value === 'yes') {
@@ -780,8 +660,8 @@
     });
 
     // 現在の状況ラジオボタン変更時
-    const currentStatusRadios = modal.querySelectorAll('input[name="srf-current-status"]');
-    const facilityField = modal.querySelector('#srf-facility-field');
+    const currentStatusRadios = bodyEl.querySelectorAll('input[name="srf-current-status"]');
+    const facilityField = bodyEl.querySelector('#srf-facility-field');
     currentStatusRadios.forEach(radio => {
       radio.addEventListener('change', () => {
         if (radio.value === 'facility') {
@@ -792,69 +672,12 @@
       });
     });
 
-    // クリアボタン
-    modal.querySelector('#srf-clear').addEventListener('click', async () => {
-      const confirmed = await pageWindow.HenryCore?.ui?.showConfirm?.({
-        title: '入力内容のクリア',
-        message: '手入力した内容をすべてクリアしますか？\n（患者情報などの自動入力項目はクリアされません）',
-        confirmLabel: 'クリア',
-        cancelLabel: 'キャンセル'
-      });
-      if (!confirmed) return;
-
-      // テキスト入力をリセット
-      modal.querySelector('#srf-maiden-name').value = '';
-      modal.querySelector('#srf-facility-name').value = '';
-      modal.querySelector('#srf-visit-history-id').value = '';
-
-      // select・コンボボックスをリセット
-      modal.querySelector('#srf-dest-department').value = '';
-      modal.querySelector('#srf-dest-doctor').value = '';
-      modal.querySelector('#srf-dest-doctor').disabled = true;
-      modal.querySelector('.srf-combobox-toggle').disabled = true;
-
-      // 日付入力をリセット
-      modal.querySelector('#srf-hope-date-1').value = '';
-      modal.querySelector('#srf-hope-date-2').value = '';
-
-      // ラジオボタンをリセット
-      const unknownRadio = modal.querySelector('#srf-visit-unknown');
-      if (unknownRadio) unknownRadio.checked = true;
-      modal.querySelector('#srf-visit-id-field')?.classList.remove('visible');
-      const noneRadio = modal.querySelector('#srf-status-none');
-      if (noneRadio) noneRadio.checked = true;
-      modal.querySelector('#srf-facility-field')?.classList.remove('visible');
-
-      // テキストエリアをリセット
-      modal.querySelectorAll('textarea').forEach(ta => { ta.value = ''; });
-
-      // チェックボックスをリセット
-      modal.querySelectorAll('.srf-checkbox-group input[type="checkbox"]').forEach(cb => { cb.checked = false; });
-
-      isDirty = false;
-    });
-
-    // 下書き保存
-    modal.querySelector('#srf-save-draft').addEventListener('click', async () => {
-      const data = collectFormData(modal, formData);
-      const ds = pageWindow.HenryCore?.modules?.DraftStorage;
-      if (ds) {
-        const payload = { schemaVersion: DRAFT_SCHEMA_VERSION, data };
-        const saved = await ds.save(DRAFT_TYPE, formData.patient_uuid, payload, data.patient_name || '');
-        if (saved) {
-          isDirty = false;
-          modal.querySelector('.srf-footer-left').textContent = `下書き: ${new Date().toLocaleString('ja-JP')}`;
-          pageWindow.HenryCore?.ui?.showToast?.('下書きを保存しました', 'success');
-        }
-      }
-    });
-
     // 処方選択トグル
-    const usePrescriptionsToggle = modal.querySelector('#srf-use-prescriptions');
+    const usePrescriptionsToggle = bodyEl.querySelector('#srf-use-prescriptions');
     if (usePrescriptionsToggle) {
       usePrescriptionsToggle.addEventListener('change', () => {
-        const prescriptionsList = modal.querySelector('#srf-prescriptions-list');
-        const prescriptionManual = modal.querySelector('#srf-prescription-manual');
+        const prescriptionsList = bodyEl.querySelector('#srf-prescriptions-list');
+        const prescriptionManual = bodyEl.querySelector('#srf-prescription-manual');
         if (usePrescriptionsToggle.checked) {
           if (prescriptionsList) prescriptionsList.style.display = '';
           if (prescriptionManual) prescriptionManual.style.display = 'none';
@@ -864,80 +687,165 @@
         }
       });
     }
+  }
 
-    // Google Docs出力
-    modal.querySelector('#srf-generate').addEventListener('click', async () => {
-      const btn = modal.querySelector('#srf-generate');
-      btn.disabled = true;
-      btn.textContent = '生成中...';
-
-      try {
-        const data = collectFormData(modal, formData);
-        await generateGoogleDoc(data);
-        const ds = pageWindow.HenryCore?.modules?.DraftStorage;
-        if (ds) await ds.delete(DRAFT_TYPE, formData.patient_uuid);
-        modal.remove();
-      } catch (e) {
-        console.error(`[${SCRIPT_NAME}] 出力エラー:`, e);
-        alert(`エラーが発生しました: ${e.message}`);
-        btn.disabled = false;
-        btn.textContent = 'Google Docsに出力';
+  function showFormModal(formData, lastSavedAt) {
+    const EXTRA_CSS = `
+      .srf-radio-group.vertical {
+        flex-direction: column;
+        gap: 8px;
       }
+      .srf-conditional-field {
+        margin-top: 8px;
+        padding: 12px;
+        background: #fafafa;
+        border-radius: 6px;
+        display: none;
+      }
+      .srf-conditional-field.visible { display: block; }
+      .srf-checkbox-group {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        margin-bottom: 12px;
+      }
+      .srf-checkbox-item {
+        display: flex;
+        align-items: flex-start;
+        gap: 8px;
+        padding: 10px 12px;
+        background: #fafafa;
+        border: 1px solid #e0e0e0;
+        border-radius: 6px;
+        cursor: pointer;
+        transition: all 0.2s;
+      }
+      .srf-checkbox-item:hover {
+        background: #f5f5f5;
+        border-color: #ccc;
+      }
+      .srf-checkbox-item input[type="checkbox"] {
+        width: 16px;
+        height: 16px;
+        margin-top: 2px;
+        cursor: pointer;
+        flex-shrink: 0;
+      }
+      .srf-prescription-content {
+        flex: 1;
+        min-width: 0;
+      }
+      .srf-prescription-header {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-bottom: 4px;
+      }
+      .srf-prescription-date {
+        font-size: 13px;
+        font-weight: 600;
+        color: #333;
+      }
+      .srf-prescription-category {
+        font-size: 11px;
+        padding: 2px 6px;
+        border-radius: 4px;
+        font-weight: 500;
+      }
+      .srf-prescription-meds {
+        font-size: 13px;
+        color: #666;
+        line-height: 1.5;
+      }
+      .srf-use-toggle {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-bottom: 12px;
+      }
+      .srf-use-toggle input[type="checkbox"] {
+        width: 16px;
+        height: 16px;
+        cursor: pointer;
+      }
+      .srf-use-toggle label {
+        font-size: 14px;
+        color: #333;
+        cursor: pointer;
+      }
+    `;
+
+    FC().showFormModal({
+      id: 'srf-form-modal',
+      title: '高松赤十字病院 診療申込書',
+      prefix: 'srf',
+      bodyHTML: buildFormBody(formData),
+      extraCSS: EXTRA_CSS,
+      width: '90%',
+      draftType: DRAFT_TYPE,
+      draftSchemaVersion: DRAFT_SCHEMA_VERSION,
+      patientUuid: formData.patient_uuid,
+      patientName: formData.patient_name,
+      lastSavedAt,
+      collectFormData: (bodyEl) => collectFormData(bodyEl, formData),
+      onClear: (bodyEl) => clearFormFields(bodyEl),
+      onGenerate: async (data) => { await generateGoogleDoc(data); },
+      onSetup: (bodyEl) => { setupFormEvents(bodyEl); },
     });
   }
 
-  function collectFormData(modal, originalData) {
+  function collectFormData(bodyEl, originalData) {
     const data = { ...originalData };
 
     // 患者追加情報
-    data.maiden_name = modal.querySelector('#srf-maiden-name')?.value || '';
-    data.mobile_phone = modal.querySelector('#srf-mobile-phone')?.value || '';
+    data.maiden_name = bodyEl.querySelector('#srf-maiden-name')?.value || '';
+    data.mobile_phone = bodyEl.querySelector('#srf-mobile-phone')?.value || '';
 
     // 高松赤十字病院固有
-    data.destination_department = modal.querySelector('#srf-dest-department')?.value || '';
-    data.destination_doctor = modal.querySelector('#srf-dest-doctor')?.value || '';
+    data.destination_department = bodyEl.querySelector('#srf-dest-department')?.value || '';
+    data.destination_doctor = bodyEl.querySelector('#srf-dest-doctor')?.value || '';
 
     // 希望日
-    data.hope_date_1 = modal.querySelector('#srf-hope-date-1')?.value || '';
-    data.hope_date_2 = modal.querySelector('#srf-hope-date-2')?.value || '';
+    data.hope_date_1 = bodyEl.querySelector('#srf-hope-date-1')?.value || '';
+    data.hope_date_2 = bodyEl.querySelector('#srf-hope-date-2')?.value || '';
 
     // 受診歴
-    data.visit_history = modal.querySelector('input[name="srf-visit-history"]:checked')?.value || 'unknown';
-    data.visit_history_id = modal.querySelector('#srf-visit-history-id')?.value || '';
+    data.visit_history = bodyEl.querySelector('input[name="srf-visit-history"]:checked')?.value || 'unknown';
+    data.visit_history_id = bodyEl.querySelector('#srf-visit-history-id')?.value || '';
 
     // 現在の状況
-    data.current_status = modal.querySelector('input[name="srf-current-status"]:checked')?.value || 'none';
-    data.facility_name = modal.querySelector('#srf-facility-name')?.value || '';
+    data.current_status = bodyEl.querySelector('input[name="srf-current-status"]:checked')?.value || 'none';
+    data.facility_name = bodyEl.querySelector('#srf-facility-name')?.value || '';
 
     // 病名（選択と自由記述の両方を取得）
     data.selected_diseases = [];
     if (data.diseases.length > 0) {
       data.diseases.forEach(d => {
-        const cb = modal.querySelector(`#srf-disease-${d.uuid}`);
+        const cb = bodyEl.querySelector(`#srf-disease-${d.uuid}`);
         if (cb?.checked) {
           data.selected_diseases.push(d.uuid);
         }
       });
     }
-    data.diagnosis_text = modal.querySelector('#srf-diagnosis-text')?.value || '';
+    data.diagnosis_text = bodyEl.querySelector('#srf-diagnosis-text')?.value || '';
 
     // 詳細記入欄
-    data.treatment_history = modal.querySelector('#srf-treatment-history')?.value || '';
-    data.past_history_allergy = modal.querySelector('#srf-past-history-allergy')?.value || '';
-    data.remarks = modal.querySelector('#srf-remarks')?.value || '';
+    data.treatment_history = bodyEl.querySelector('#srf-treatment-history')?.value || '';
+    data.past_history_allergy = bodyEl.querySelector('#srf-past-history-allergy')?.value || '';
+    data.remarks = bodyEl.querySelector('#srf-remarks')?.value || '';
 
     // 処方
-    data.use_prescriptions = modal.querySelector('#srf-use-prescriptions')?.checked ?? false;
+    data.use_prescriptions = bodyEl.querySelector('#srf-use-prescriptions')?.checked ?? false;
     data.selected_prescriptions = [];
     if (data.prescriptions && data.prescriptions.length > 0) {
       data.prescriptions.forEach(rx => {
-        const cb = modal.querySelector(`#srf-prescription-${rx.recordId}`);
+        const cb = bodyEl.querySelector(`#srf-prescription-${rx.recordId}`);
         if (cb?.checked) {
           data.selected_prescriptions.push(rx.recordId);
         }
       });
     }
-    data.prescription_text = modal.querySelector('#srf-prescription-text')?.value || '';
+    data.prescription_text = bodyEl.querySelector('#srf-prescription-text')?.value || '';
 
     return data;
   }
