@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry Summary Export
 // @namespace    https://github.com/shin-926/Henry
-// @version      1.7.6
+// @version      1.7.7
 // @description  入院患者のサマリー用データをマークダウン形式でダウンロード
 // @author       sk powered by Claude
 // @match        https://henry-app.jp/*
@@ -44,9 +44,6 @@
   const NURSING_RECORD_CUSTOM_TYPE_UUID = 'e4ac1e1c-40e2-4c19-9df4-aa57adae7d4f';
   const PATIENT_PROFILE_CUSTOM_TYPE_UUID = 'f639619a-6fdb-452a-a803-8d42cd50830d';
   const PRESSURE_ULCER_CUSTOM_TYPE_UUID = '2d3b6bbf-3b3e-4a82-8f7f-e29a32352f52';
-
-  // 組織UUID
-  const ORG_UUID = 'ce6b556b-2a8d-4fce-b8dd-89ba638fc825';
 
   // カレンダービューリソース
   const CALENDAR_RESOURCES = [

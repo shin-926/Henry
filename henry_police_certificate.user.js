@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         警察診断書フォーム
 // @namespace    https://henry-app.jp/
-// @version      1.0.5
+// @version      1.0.6
 // @description  警察提出用診断書の入力フォームとGoogle Docs出力
 // @author       sk powered by Claude
 // @match        https://henry-app.jp/*
@@ -58,15 +58,6 @@
   const TEMPLATE_CONFIG = {
     TEMPLATE_ID: '1OreF4-c5DTm_sqKwm_fKtRlA3EkG_p2XB62JxoIq6g4',
     OUTPUT_FOLDER_NAME: 'Henry一時ファイル'
-  };
-
-  // 医療機関情報
-  const INSTITUTION_INFO = {
-    name: 'マオカ病院',
-    postal_code: '〒760-0052',
-    address: '香川県高松市瓦町１丁目12-45',
-    phone: '087-862-8888',
-    fax: '087-863-0880'
   };
 
   // localStorage設定

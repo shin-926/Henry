@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry Core
 // @namespace    https://henry-app.jp/
-// @version      2.34.3
+// @version      2.35.0
 // @description  Henry スクリプト実行基盤 (GoogleAuth統合 / Google Docs対応)
 // @author       sk powered by Claude & Gemini
 // @match        https://henry-app.jp/*
@@ -38,8 +38,16 @@
 
 /**
  * ============================================
- * Henry Core API 目次 (v2.16.0)
+ * Henry Core API 目次 (v2.35.0)
  * ============================================
+ *
+ * ■ Config (config.*)
+ *   orgUuid                                      - 組織UUID（マオカ病院）
+ *   hospital.name                                - 病院名
+ *   hospital.postalCode                          - 郵便番号
+ *   hospital.address                             - 住所
+ *   hospital.phone                               - 電話番号
+ *   hospital.fax                                 - FAX番号
  *
  * ■ Core API
  *   query(queryString, variables?, options?)     - GraphQL API呼び出し（エンドポイント自動学習）
@@ -2211,6 +2219,18 @@
   // 9. Public API
   // ==========================================
   pageWindow.HenryCore = {
+    // 施設設定（ハードコード値の一元管理）
+    config: {
+      orgUuid: CONFIG.ORG_UUID,
+      hospital: {
+        name: 'マオカ病院',
+        postalCode: '〒760-0052',
+        address: '香川県高松市瓦町１丁目12-45',
+        phone: '087-862-8888',
+        fax: '087-863-0880'
+      }
+    },
+
     // モジュール（GoogleAuth等）
     modules: {
       GoogleAuth: GoogleAuth

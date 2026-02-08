@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         主治医意見書作成フォーム
 // @namespace    https://henry-app.jp/
-// @version      2.7.1
+// @version      2.7.2
 // @description  主治医意見書の入力フォームとGoogle Docs出力（GAS不要版・API直接呼び出し）
 // @author       sk powered by Claude & Gemini
 // @match        https://henry-app.jp/*
@@ -74,14 +74,17 @@
     OUTPUT_FOLDER_NAME: 'Henry一時ファイル'
   };
 
-  // 医療機関情報（ハードコード）
-  const INSTITUTION_INFO = {
-    name: 'マオカ病院',
-    postal_code: '〒760-0052',
-    address: '香川県高松市瓦町１丁目12-45',
-    phone: '087-862-8888',
-    fax: '087-863-0880'
-  };
+  // 医療機関情報（HenryCore.config.hospitalから取得）
+  const INSTITUTION_INFO = (() => {
+    const h = pageWindow.HenryCore?.config?.hospital || {};
+    return {
+      name: h.name || '',
+      postal_code: h.postalCode || '',
+      address: h.address || '',
+      phone: h.phone || '',
+      fax: h.fax || ''
+    };
+  })();
 
   // GraphQL クエリ定義（フルクエリ方式）
   const QUERIES = {

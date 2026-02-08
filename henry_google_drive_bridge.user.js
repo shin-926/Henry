@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Google Drive連携
 // @namespace    https://henry-app.jp/
-// @version      2.6.2
+// @version      2.6.3
 // @description  HenryのファイルをGoogle Drive APIで直接変換・編集。GAS不要版。
 // @author       sk powered by Claude & Gemini
 // @match        https://henry-app.jp/*
@@ -60,7 +60,6 @@
 
     // Henry設定
     HENRYCORE_TIMEOUT: 5000,
-    ORG_UUID: 'ce6b556b-2a8d-4fce-b8dd-89ba638fc825',
     GRAPHQL_ENDPOINT: '/graphql'
   };
 
@@ -444,7 +443,7 @@
         { operationName, variables, query },
         {
           'Authorization': `Bearer ${token}`,
-          'x-auth-organization-uuid': CONFIG.ORG_UUID
+          'x-auth-organization-uuid': pageWindow.HenryCore.config.orgUuid
         }
       );
 

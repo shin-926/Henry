@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         予約システム連携
 // @namespace    https://github.com/shin-926/Henry
-// @version      4.7.23
+// @version      4.7.24
 // @description  Henryカルテと予約システム間の双方向連携（再診予約・照射オーダー自動予約・自動印刷・患者プレビュー）
 // @author       sk powered by Claude & Gemini
 // @match        https://henry-app.jp/*
@@ -73,7 +73,6 @@
   const SCRIPT_NAME = 'HenryReserveIntegration';
   const CONFIG = {
     // API
-    ORG_UUID: 'ce6b556b-2a8d-4fce-b8dd-89ba638fc825',
     HENRY_GRAPHQL: 'https://henry-app.jp/graphql',
     HENRY_GRAPHQL_V2: 'https://henry-app.jp/graphql-v2',
     HENRY_PATIENT_URL: 'https://henry-app.jp/patients/',
@@ -1252,7 +1251,7 @@ html, body { margin: 0; padding: 0; }
         headers: {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${token}`,
-          'x-auth-organization-uuid': CONFIG.ORG_UUID
+          'x-auth-organization-uuid': unsafeWindow.HenryCore.config.orgUuid
         },
         data: JSON.stringify({
           operationName,

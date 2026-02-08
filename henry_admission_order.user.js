@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry 入院時オーダー
 // @namespace    https://github.com/shin-926/Henry
-// @version      1.4.2
+// @version      1.4.3
 // @description  入院予定患者に対して入院時オーダー（CT検査等）を一括作成
 // @author       sk powered by Claude
 // @match        https://henry-app.jp/*
@@ -106,8 +106,7 @@
   // ===========================================
   const API_CONFIG = {
     DRIVE_API_BASE: 'https://www.googleapis.com/drive/v3',
-    DOCS_API_BASE: 'https://docs.googleapis.com/v1',
-    ORG_UUID: 'ce6b556b-2a8d-4fce-b8dd-89ba638fc825'
+    DOCS_API_BASE: 'https://docs.googleapis.com/v1'
   };
 
   // 入院診療計画書テンプレート設定

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry Patient Timeline
 // @namespace    https://github.com/shin-926/Henry
-// @version      2.134.10
+// @version      2.134.11
 // @description  入院患者の各種記録・オーダーをガントチャート風タイムラインで表示
 // @author       sk powered by Claude
 // @match        https://henry-app.jp/*
@@ -69,10 +69,6 @@
   const PRESSURE_ULCER_CUSTOM_TYPE_UUID = '2d3b6bbf-3b3e-4a82-8f7f-e29a32352f52';
   const PHARMACY_RECORD_CUSTOM_TYPE_UUID = '2de23e84-0e84-4861-8763-77c8d45f94bb';
   const INSPECTION_FINDINGS_CUSTOM_TYPE_UUID = 'f83d4392-7a68-4c6c-9eef-8947097fb29d';
-
-  // 組織UUID
-  // ※マオカ病院専用スクリプトのためハードコード（他病院展開予定なし）
-  const ORG_UUID = 'ce6b556b-2a8d-4fce-b8dd-89ba638fc825';
 
   // 担当医ごとの色パレット
   const DOCTOR_COLORS = [
