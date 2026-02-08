@@ -1432,6 +1432,8 @@ html, body { margin: 0; padding: 0; }
           return;
         }
 
+        // NOTE: 患者名をGM_setValueで一時保存（クロスタブ通信用、完了後にクリア）
+        // PII永続保存禁止ルールの例外: 一時的な受け渡しで即クリアされるため許容 (Issue #37)
         GM_setValue('pendingPatient', { id: patientId, name: patientData.name || '' });
 
         // オーバーレイ付きで予約システムを開く
@@ -1592,6 +1594,7 @@ html, body { margin: 0; padding: 0; }
           timestamp: Date.now()
         };
         GM_setValue('imagingOrderContext', context);
+        // NOTE: PII一時保存（クロスタブ通信用、完了/タイムアウト時にクリア）Issue #37
         GM_setValue('pendingPatient', { id: patientInfo.id, name: patientInfo.name });
         log.info('照射オーダーコンテキストを保存: ' + JSON.stringify(context));
 
