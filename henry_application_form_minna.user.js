@@ -1580,7 +1580,7 @@
       // 選択された病名
       if (formData.diseases.length > 0 && formData.selected_diseases?.length > 0) {
         const selectedDiseases = formData.diseases.filter(d => formData.selected_diseases.includes(d.uuid));
-        const diseaseText = selectedDiseases.map(d => d.name + (d.isSuspected ? '（疑い）' : '')).join('，');
+        const diseaseText = selectedDiseases.map(d => d.name).join('，');
         if (diseaseText) {
           diagnosisParts.push(diseaseText);
         }

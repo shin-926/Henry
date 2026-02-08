@@ -496,11 +496,7 @@
   // 病名を文字列にフォーマット
   function formatDiseases(diseases) {
     if (!diseases || diseases.length === 0) return '';
-    return diseases.map(d => {
-      let name = d.name;
-      if (d.isSuspected) name += '（疑い）';
-      return name;
-    }).join('，');
+    return diseases.map(d => d.name).join('，');
   }
 
   // ==========================================
@@ -981,7 +977,7 @@
     let diagnosisText = '';
     if (formData.use_diseases && formData.diseases.length > 0 && formData.selected_diseases?.length > 0) {
       const selectedDiseases = formData.diseases.filter(d => formData.selected_diseases.includes(d.uuid));
-      diagnosisText = selectedDiseases.map(d => d.name + (d.isSuspected ? '（疑い）' : '')).join('，');
+      diagnosisText = selectedDiseases.map(d => d.name).join('，');
     } else {
       diagnosisText = formData.diagnosis_text || '';
     }
