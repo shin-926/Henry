@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         診療情報提供書フォーム
 // @namespace    https://henry-app.jp/
-// @version      1.5.1
+// @version      1.5.2
 // @description  診療情報提供書の入力フォームとGoogle Docs出力
 // @author       sk powered by Claude
 // @match        https://henry-app.jp/*
@@ -709,7 +709,7 @@
       }) : null;
 
       // フォームデータ作成
-      const formData = savedDraft?.data || {
+      const formData = savedDraft?.data?.data || {
         // 自動入力項目
         patient_uuid: patientUuid,
         patient_name: patientInfo.patient_name,
