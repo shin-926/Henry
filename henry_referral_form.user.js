@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         診療情報提供書フォーム
 // @namespace    https://henry-app.jp/
-// @version      1.5.2
+// @version      1.5.3
 // @description  診療情報提供書の入力フォームとGoogle Docs出力
 // @author       sk powered by Claude
 // @match        https://henry-app.jp/*
@@ -686,6 +686,7 @@
       return;
     }
 
+    const spinner = pageWindow.HenryCore?.ui?.showSpinner?.('診療情報提供書を準備中...');
     try {
       // データ取得（並列実行）
       const [patientInfo, physicianName, departmentName, diseases, prescriptions] = await Promise.all([
@@ -758,9 +759,11 @@
       formData.prescriptions = prescriptions;
 
       // モーダル表示
+      spinner?.close();
       showFormModal(formData, savedDraft?.savedAt);
 
     } catch (e) {
+      spinner?.close();
       console.error(`[${SCRIPT_NAME}] フォーム表示エラー:`, e);
       alert(`エラーが発生しました: ${e.message}`);
     }
