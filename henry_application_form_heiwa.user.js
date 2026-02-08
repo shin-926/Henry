@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         高松平和病院 診療申込書
 // @namespace    https://henry-app.jp/
-// @version      1.3.1
+// @version      1.4.0
 // @description  高松平和病院への診療申込書を作成
 // @author       sk powered by Claude
 // @match        https://henry-app.jp/*
@@ -76,8 +76,9 @@
   // 外来担当表URL
   const SCHEDULE_URL = 'https://t-heiwa.com/doctor/';
 
-  // localStorage設定
-  const STORAGE_KEY_PREFIX = 'henry_heiwa_draft_';
+  // DraftStorage設定
+  const DRAFT_TYPE = 'heiwa';
+  const DRAFT_LS_PREFIX = 'henry_heiwa_draft_';
   const DRAFT_SCHEMA_VERSION = 1;
 
   // 診療科リスト（PDFの選択肢に従う）
@@ -442,54 +443,6 @@
   }
 
   // ==========================================
-  // localStorage管理
-  // ==========================================
-
-  function saveDraft(patientUuid, formData) {
-    try {
-      const key = `${STORAGE_KEY_PREFIX}${patientUuid}`;
-      const draft = {
-        schemaVersion: DRAFT_SCHEMA_VERSION,
-        data: formData,
-        savedAt: new Date().toISOString(),
-        patientName: formData.patient_name
-      };
-      localStorage.setItem(key, JSON.stringify(draft));
-      return true;
-    } catch (e) {
-      console.error(`[${SCRIPT_NAME}] 下書き保存失敗:`, e.message);
-      return false;
-    }
-  }
-
-  function loadDraft(patientUuid) {
-    try {
-      const key = `${STORAGE_KEY_PREFIX}${patientUuid}`;
-      const stored = localStorage.getItem(key);
-      if (!stored) return null;
-
-      const draft = JSON.parse(stored);
-      if (!draft.schemaVersion || draft.schemaVersion !== DRAFT_SCHEMA_VERSION) {
-        localStorage.removeItem(key);
-        return null;
-      }
-
-      return { data: draft.data, savedAt: draft.savedAt };
-    } catch (e) {
-      return null;
-    }
-  }
-
-  function deleteDraft(patientUuid) {
-    try {
-      const key = `${STORAGE_KEY_PREFIX}${patientUuid}`;
-      localStorage.removeItem(key);
-    } catch (e) {
-      // ignore
-    }
-  }
-
-  // ==========================================
   // データ取得関数
   // ==========================================
 
@@ -633,11 +586,15 @@
         return;
       }
 
-      // 下書き読み込み
-      const savedDraft = loadDraft(patientUuid);
+      // 下書き読み込み（DraftStorage / localStorageマイグレーション対応）
+      const ds = pageWindow.HenryCore?.modules?.DraftStorage;
+      const savedDraft = ds ? await ds.load(DRAFT_TYPE, patientUuid, {
+        localStoragePrefix: DRAFT_LS_PREFIX,
+        validate: (p) => p.schemaVersion === DRAFT_SCHEMA_VERSION && p.data
+      }) : null;
 
       // フォームデータ作成
-      const formData = savedDraft?.data || {
+      const formData = savedDraft?.data?.data || {
         // 自動入力項目
         patient_uuid: patientUuid,
         patient_name: patientInfo.patient_name,
@@ -1523,6 +1480,7 @@
             ${lastSavedAt ? `下書き: ${new Date(lastSavedAt).toLocaleString('ja-JP')}` : ''}
           </div>
           <div class="hrf-footer-right">
+            <button class="hrf-btn hrf-btn-secondary" id="hrf-clear" style="color:#d32f2f;">クリア</button>
             <button class="hrf-btn hrf-btn-secondary" id="hrf-save-draft">下書き保存</button>
             <button class="hrf-btn hrf-btn-primary" id="hrf-generate">Google Docsに出力</button>
           </div>
@@ -1537,10 +1495,38 @@
   }
 
   function setupEventListeners(modal, formData) {
+    // 変更追跡フラグ
+    let isDirty = false;
+    const formBody = modal.querySelector('.hrf-body');
+    if (formBody) {
+      formBody.addEventListener('input', () => { isDirty = true; });
+      formBody.addEventListener('change', () => { isDirty = true; });
+    }
+
+    // モーダルクローズ時の保存確認
+    async function confirmClose() {
+      if (!isDirty) { modal.remove(); return; }
+      const save = await pageWindow.HenryCore?.ui?.showConfirm?.({
+        title: '未保存の変更',
+        message: '変更内容を下書き保存しますか？',
+        confirmLabel: '保存して閉じる',
+        cancelLabel: '保存せず閉じる'
+      });
+      if (save) {
+        const data = collectFormData(modal, formData);
+        const ds = pageWindow.HenryCore?.modules?.DraftStorage;
+        if (ds) {
+          const payload = { schemaVersion: DRAFT_SCHEMA_VERSION, data };
+          await ds.save(DRAFT_TYPE, formData.patient_uuid, payload, data.patient_name || '');
+        }
+      }
+      modal.remove();
+    }
+
     // 閉じるボタン
-    modal.querySelector('.hrf-close').addEventListener('click', () => modal.remove());
+    modal.querySelector('.hrf-close').addEventListener('click', () => confirmClose());
     modal.addEventListener('click', (e) => {
-      if (e.target === modal) modal.remove();
+      if (e.target === modal) confirmClose();
     });
 
     // 折りたたみセクション
@@ -1689,12 +1675,59 @@
       });
     });
 
+    // クリアボタン
+    modal.querySelector('#hrf-clear').addEventListener('click', async () => {
+      const confirmed = await pageWindow.HenryCore?.ui?.showConfirm?.({
+        title: '入力内容のクリア',
+        message: '手入力した内容をすべてクリアしますか？\n（患者情報などの自動入力項目はクリアされません）',
+        confirmLabel: 'クリア',
+        cancelLabel: 'キャンセル'
+      });
+      if (!confirmed) return;
+
+      // select・コンボボックスをリセット
+      modal.querySelector('#hrf-dest-department').value = '';
+      modal.querySelector('#hrf-dest-doctor').value = '';
+      modal.querySelector('#hrf-dest-doctor').disabled = true;
+      modal.querySelector('.hrf-combobox-toggle').disabled = true;
+
+      // 日付入力をリセット
+      ['#hrf-hope-date-1', '#hrf-hope-date-2', '#hrf-hope-date-3', '#hrf-radiology-exam-date'].forEach(sel => {
+        const el = modal.querySelector(sel);
+        if (el) el.value = '';
+      });
+
+      // テキスト入力をリセット
+      ['#hrf-anticoagulant-name', '#hrf-radiology-site', '#hrf-radiology-cr', '#hrf-diabetes-med-name'].forEach(sel => {
+        const el = modal.querySelector(sel);
+        if (el) el.value = '';
+      });
+
+      // テキストエリアをリセット
+      modal.querySelectorAll('textarea').forEach(ta => { ta.value = ''; });
+
+      // チェックボックスをリセット
+      modal.querySelectorAll('.hrf-checkbox-group input[type="checkbox"]').forEach(cb => { cb.checked = false; });
+      ['#hrf-upper-endoscopy', '#hrf-lower-endoscopy', '#hrf-radiology-exam'].forEach(sel => {
+        const el = modal.querySelector(sel);
+        if (el) el.checked = false;
+      });
+
+      isDirty = false;
+    });
+
     // 下書き保存
-    modal.querySelector('#hrf-save-draft').addEventListener('click', () => {
+    modal.querySelector('#hrf-save-draft').addEventListener('click', async () => {
       const data = collectFormData(modal, formData);
-      if (saveDraft(formData.patient_uuid, data)) {
-        const HenryCore = pageWindow.HenryCore;
-        HenryCore?.ui?.showToast?.('下書きを保存しました', 'success');
+      const ds = pageWindow.HenryCore?.modules?.DraftStorage;
+      if (ds) {
+        const payload = { schemaVersion: DRAFT_SCHEMA_VERSION, data };
+        const saved = await ds.save(DRAFT_TYPE, formData.patient_uuid, payload, data.patient_name || '');
+        if (saved) {
+          isDirty = false;
+          modal.querySelector('.hrf-footer-left').textContent = `下書き: ${new Date().toLocaleString('ja-JP')}`;
+          pageWindow.HenryCore?.ui?.showToast?.('下書きを保存しました', 'success');
+        }
       }
     });
 
@@ -1707,7 +1740,8 @@
       try {
         const data = collectFormData(modal, formData);
         await generateGoogleDoc(data);
-        deleteDraft(formData.patient_uuid);
+        const ds = pageWindow.HenryCore?.modules?.DraftStorage;
+        if (ds) await ds.delete(DRAFT_TYPE, formData.patient_uuid);
         modal.remove();
       } catch (e) {
         console.error(`[${SCRIPT_NAME}] 出力エラー:`, e);
