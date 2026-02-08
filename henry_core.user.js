@@ -652,7 +652,7 @@
         }
         /* variant: 'form' 用スタイル */
         .henry-modal-form {
-          max-width: 450px;
+          max-width: 900px;
           max-height: 90vh;
           display: flex;
           flex-direction: column;
