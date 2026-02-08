@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         主治医意見書作成フォーム
 // @namespace    https://henry-app.jp/
-// @version      2.7.3
+// @version      2.7.4
 // @description  主治医意見書の入力フォームとGoogle Docs出力（GAS不要版・API直接呼び出し）
 // @author       sk powered by Claude & Gemini
 // @match        https://henry-app.jp/*
@@ -1753,9 +1753,10 @@
     container.style.cssText = 'max-height: 70vh; overflow-y: auto; padding: 20px;';
 
     // 最終更新日表示
+    const lastUpdatedArea = document.createElement('div');
+    lastUpdatedArea.id = 'ikensho-last-saved';
+    lastUpdatedArea.style.cssText = 'padding: 10px 14px; margin-bottom: 16px; background-color: #f0f9ff; border: 1px solid #bae6fd; border-radius: 6px; font-size: 13px; color: #0369a1;' + (lastSavedAt ? '' : ' display: none;');
     if (lastSavedAt) {
-      const lastUpdatedArea = document.createElement('div');
-      lastUpdatedArea.style.cssText = 'padding: 10px 14px; margin-bottom: 16px; background-color: #f0f9ff; border: 1px solid #bae6fd; border-radius: 6px; font-size: 13px; color: #0369a1;';
       const savedDate = new Date(lastSavedAt);
       const formattedDate = savedDate.toLocaleString('ja-JP', {
         year: 'numeric',
@@ -1765,8 +1766,8 @@
         minute: '2-digit'
       });
       lastUpdatedArea.textContent = `📝 下書き最終更新: ${formattedDate}`;
-      container.appendChild(lastUpdatedArea);
     }
+    container.appendChild(lastUpdatedArea);
 
     // メッセージ表示領域
     const messageArea = document.createElement('div');
@@ -3685,6 +3686,16 @@
 
               await DraftStorage.save(formData.basic_info.patient_uuid, collected);
               isDirty = false;
+              // 最終更新日時を更新
+              const savedArea = formHTML.querySelector('#ikensho-last-saved');
+              if (savedArea) {
+                const now = new Date().toLocaleString('ja-JP', {
+                  year: 'numeric', month: '2-digit', day: '2-digit',
+                  hour: '2-digit', minute: '2-digit'
+                });
+                savedArea.textContent = `📝 下書き最終更新: ${now}`;
+                savedArea.style.display = '';
+              }
               // ボタンテキストを一時的に変更（目立たない通知）
               if (button) {
                 button.disabled = false;
