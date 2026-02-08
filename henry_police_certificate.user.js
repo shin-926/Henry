@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         警察診断書フォーム
 // @namespace    https://henry-app.jp/
-// @version      1.0.3
+// @version      1.0.4
 // @description  警察提出用診断書の入力フォームとGoogle Docs出力
 // @author       sk powered by Claude
 // @match        https://henry-app.jp/*
@@ -786,47 +786,10 @@
       </style>
       <div class="pc-container">
         <div class="pc-header">
-          <h2>警察診断書</h2>
+          <h2>警察診断書 - ${escapeHtml(formData.patient_name)}</h2>
           <button class="pc-close" title="閉じる">&times;</button>
         </div>
         <div class="pc-body">
-          <!-- 自動入力項目 -->
-          <div class="pc-section">
-            <div class="pc-section-title">患者情報（自動入力）</div>
-            <div class="pc-row">
-              <div class="pc-field readonly">
-                <label>患者氏名</label>
-                <input type="text" value="${escapeHtml(formData.patient_name)}" readonly>
-              </div>
-              <div class="pc-field readonly" style="flex: 0.3;">
-                <label>性別</label>
-                <input type="text" value="${escapeHtml(formData.patient_sex)}" readonly>
-              </div>
-            </div>
-            <div class="pc-row">
-              <div class="pc-field readonly">
-                <label>生年月日</label>
-                <input type="text" value="${escapeHtml(formData.patient_birth_date_wareki)}" readonly>
-              </div>
-            </div>
-            <div class="pc-row">
-              <div class="pc-field readonly">
-                <label>住所</label>
-                <input type="text" value="${escapeHtml(formData.patient_address)}" readonly>
-              </div>
-            </div>
-            <div class="pc-row">
-              <div class="pc-field readonly">
-                <label>作成者</label>
-                <input type="text" value="${escapeHtml(formData.physician_name)}" readonly>
-              </div>
-              <div class="pc-field readonly" style="flex: 0.5;">
-                <label>作成日</label>
-                <input type="text" value="${escapeHtml(formData.creation_date_wareki)}" readonly>
-              </div>
-            </div>
-          </div>
-
           <!-- 診断名 -->
           <div class="pc-section">
             <div class="pc-section-title">病名</div>
