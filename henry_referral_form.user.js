@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         診療情報提供書フォーム
 // @namespace    https://henry-app.jp/
-// @version      1.5.0
+// @version      1.5.1
 // @description  診療情報提供書の入力フォームとGoogle Docs出力
 // @author       sk powered by Claude
 // @match        https://henry-app.jp/*
@@ -1495,7 +1495,10 @@
       if (ds) {
         const payload = { schemaVersion: DRAFT_SCHEMA_VERSION, data };
         const saved = await ds.save(DRAFT_TYPE, formData.patient_uuid, payload, data.patient_name || '');
-        if (saved) alert('下書きを保存しました');
+        if (saved) {
+          modal.querySelector('.rf-footer-left').textContent = `下書き: ${new Date().toLocaleString('ja-JP')}`;
+          alert('下書きを保存しました');
+        }
       }
     });
 
