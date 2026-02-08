@@ -349,34 +349,29 @@
 
   async function fetchDoctorRecords(patientUuid) {
     const allDocuments = [];
-    let pageToken = '';
     try {
-      do {
-        const result = await window.HenryCore.query(QUERIES.LIST_CLINICAL_DOCUMENTS, {
-          input: {
-            patientUuid,
-            pageToken,
-            pageSize: 100,
-            clinicalDocumentTypes: [{ type: 'HOSPITALIZATION_CONSULTATION' }]
-          }
-        });
-        const data = result?.data?.listClinicalDocuments;
-        const documents = data?.documents || [];
-        for (const doc of documents) {
-          const text = parseEditorData(doc.editorData);
-          if (text) {
-            allDocuments.push({
-              id: doc.uuid,
-              category: 'doctor',
-              date: doc.performTime?.seconds ? new Date(doc.performTime.seconds * 1000) : null,
-              title: '入院診察',
-              text,
-              author: doc.creator?.name || '不明'
-            });
-          }
+      const result = await window.HenryCore.query(QUERIES.LIST_CLINICAL_DOCUMENTS, {
+        input: {
+          patientUuid,
+          pageToken: '',
+          pageSize: 50,
+          clinicalDocumentTypes: [{ type: 'HOSPITALIZATION_CONSULTATION' }]
         }
-        pageToken = data?.nextPageToken || '';
-      } while (pageToken);
+      });
+      const documents = result?.data?.listClinicalDocuments?.documents || [];
+      for (const doc of documents) {
+        const text = parseEditorData(doc.editorData);
+        if (text) {
+          allDocuments.push({
+            id: doc.uuid,
+            category: 'doctor',
+            date: doc.performTime?.seconds ? new Date(doc.performTime.seconds * 1000) : null,
+            title: '入院診察',
+            text,
+            author: doc.creator?.name || '不明'
+          });
+        }
+      }
       return allDocuments;
     } catch (e) {
       console.error(`[${SCRIPT_NAME}] 医師記録取得エラー:`, e);
@@ -386,37 +381,32 @@
 
   async function fetchNursingRecords(patientUuid) {
     const allDocuments = [];
-    let pageToken = '';
     try {
-      do {
-        const result = await window.HenryCore.query(QUERIES.LIST_CLINICAL_DOCUMENTS, {
-          input: {
-            patientUuid,
-            pageToken,
-            pageSize: 100,
-            clinicalDocumentTypes: [{
-              type: 'CUSTOM',
-              clinicalDocumentCustomTypeUuid: { value: NURSING_RECORD_CUSTOM_TYPE_UUID }
-            }]
-          }
-        });
-        const data = result?.data?.listClinicalDocuments;
-        const documents = data?.documents || [];
-        for (const doc of documents) {
-          const text = parseEditorData(doc.editorData);
-          if (text) {
-            allDocuments.push({
-              id: doc.uuid,
-              category: 'nursing',
-              date: doc.performTime?.seconds ? new Date(doc.performTime.seconds * 1000) : null,
-              title: '看護記録',
-              text,
-              author: doc.creator?.name || '不明'
-            });
-          }
+      const result = await window.HenryCore.query(QUERIES.LIST_CLINICAL_DOCUMENTS, {
+        input: {
+          patientUuid,
+          pageToken: '',
+          pageSize: 50,
+          clinicalDocumentTypes: [{
+            type: 'CUSTOM',
+            clinicalDocumentCustomTypeUuid: { value: NURSING_RECORD_CUSTOM_TYPE_UUID }
+          }]
         }
-        pageToken = data?.nextPageToken || '';
-      } while (pageToken);
+      });
+      const documents = result?.data?.listClinicalDocuments?.documents || [];
+      for (const doc of documents) {
+        const text = parseEditorData(doc.editorData);
+        if (text) {
+          allDocuments.push({
+            id: doc.uuid,
+            category: 'nursing',
+            date: doc.performTime?.seconds ? new Date(doc.performTime.seconds * 1000) : null,
+            title: '看護記録',
+            text,
+            author: doc.creator?.name || '不明'
+          });
+        }
+      }
       return allDocuments;
     } catch (e) {
       console.error(`[${SCRIPT_NAME}] 看護記録取得エラー:`, e);
@@ -437,7 +427,7 @@
               month: ${today.getMonth() + 1},
               day: ${today.getDate()}
             },
-            pageSize: 500,
+            pageSize: 50,
             pageToken: ""
           }) {
             documents {
@@ -504,38 +494,33 @@
 
   async function fetchPressureUlcerRecords(patientUuid) {
     const allDocuments = [];
-    let pageToken = '';
     try {
-      do {
-        const result = await window.HenryCore.query(QUERIES.LIST_CLINICAL_DOCUMENTS, {
-          input: {
-            patientUuid,
-            pageToken,
-            pageSize: 100,
-            clinicalDocumentTypes: [{
-              type: 'CUSTOM',
-              clinicalDocumentCustomTypeUuid: { value: PRESSURE_ULCER_CUSTOM_TYPE_UUID }
-            }]
-          }
-        });
-        const data = result?.data?.listClinicalDocuments;
-        const documents = data?.documents || [];
-        for (const doc of documents) {
-          const parsed = parsePressureUlcerEditorData(doc.editorData);
-          if (parsed) {
-            const date = doc.performTime?.seconds ? new Date(doc.performTime.seconds * 1000) : null;
-            allDocuments.push({
-              uuid: doc.uuid,
-              date,
-              recordDate: date ? { year: date.getFullYear(), month: date.getMonth() + 1, day: date.getDate() } : null,
-              author: doc.creator?.name || '不明',
-              editorData: doc.editorData,
-              ...parsed
-            });
-          }
+      const result = await window.HenryCore.query(QUERIES.LIST_CLINICAL_DOCUMENTS, {
+        input: {
+          patientUuid,
+          pageToken: '',
+          pageSize: 50,
+          clinicalDocumentTypes: [{
+            type: 'CUSTOM',
+            clinicalDocumentCustomTypeUuid: { value: PRESSURE_ULCER_CUSTOM_TYPE_UUID }
+          }]
         }
-        pageToken = data?.nextPageToken || '';
-      } while (pageToken);
+      });
+      const documents = result?.data?.listClinicalDocuments?.documents || [];
+      for (const doc of documents) {
+        const parsed = parsePressureUlcerEditorData(doc.editorData);
+        if (parsed) {
+          const date = doc.performTime?.seconds ? new Date(doc.performTime.seconds * 1000) : null;
+          allDocuments.push({
+            uuid: doc.uuid,
+            date,
+            recordDate: date ? { year: date.getFullYear(), month: date.getMonth() + 1, day: date.getDate() } : null,
+            author: doc.creator?.name || '不明',
+            editorData: doc.editorData,
+            ...parsed
+          });
+        }
+      }
       return allDocuments;
     } catch (e) {
       console.error(`[${SCRIPT_NAME}] 褥瘡評価取得エラー:`, e);
@@ -614,7 +599,7 @@
     }
   }
 
-  async function fetchCalendarData(patientUuid, hospitalizationStartDate, maxDays = 180) {
+  async function fetchCalendarData(patientUuid, hospitalizationStartDate, maxDays = 30) {
     try {
       const today = new Date();
       const startDate = new Date(hospitalizationStartDate);
@@ -780,7 +765,7 @@
           return summaryCache;
         }
         const response = await fetch(
-          `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/サマリー!A:F`,
+          `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/サマリー!A:E`,
           { headers: { 'Authorization': `Bearer ${tokens.access_token}` } }
         );
         if (!response.ok) {
@@ -795,11 +780,10 @@
           if (row[0]) {
             summaryCache[row[0]] = {
               rowIndex: i + 1,
-              patientName: row[1] || '',
-              summary: row[2] || '',
-              summaryUpdatedAt: row[3] || '',
-              profile: row[4] || '',
-              profileUpdatedAt: row[5] || ''
+              summary: row[1] || '',
+              summaryUpdatedAt: row[2] || '',
+              profile: row[3] || '',
+              profileUpdatedAt: row[4] || ''
             };
           }
         }
@@ -1658,6 +1642,18 @@
         padding: 8px 0;
       `;
 
+      const isTherapyWard = (wardName) => (wardName || '').includes('療養');
+      const selectedTherapyUuids = new Set();
+      const generalCount = patients.filter(p => !isTherapyWard(p.wardName)).length;
+      let downloadAllBtn = null;
+
+      function updateDownloadButton() {
+        if (!downloadAllBtn) return;
+        const therapyCount = selectedTherapyUuids.size;
+        const total = generalCount + therapyCount;
+        downloadAllBtn.textContent = `一括ダウンロード（${total}名）`;
+      }
+
       function renderPatientList(filterText = '') {
         const filtered = patients.filter(p => {
           const name = p.patient?.fullName || '';
@@ -1689,6 +1685,8 @@
             listContainer.appendChild(wardHeader);
           }
 
+          const isTherapy = isTherapyWard(p.wardName);
+
           // 患者行
           const row = document.createElement('div');
           row.style.cssText = `
@@ -1703,22 +1701,57 @@
           row.addEventListener('mouseover', () => row.style.background = '#f8f9fa');
           row.addEventListener('mouseout', () => row.style.background = 'transparent');
 
+          if (isTherapy) {
+            const checkbox = document.createElement('input');
+            checkbox.type = 'checkbox';
+            checkbox.checked = selectedTherapyUuids.has(p.patient?.uuid);
+            checkbox.style.cssText = 'width: 18px; height: 18px; cursor: pointer; flex-shrink: 0;';
+            checkbox.addEventListener('click', (e) => e.stopPropagation());
+            checkbox.addEventListener('change', (e) => {
+              if (e.target.checked) {
+                selectedTherapyUuids.add(p.patient?.uuid);
+              } else {
+                selectedTherapyUuids.delete(p.patient?.uuid);
+              }
+              updateDownloadButton();
+            });
+            row.appendChild(checkbox);
+          }
+
           const dayCount = p.hospitalizationDayCount?.value || '-';
           const roomName = p.roomName || '';
 
-          row.innerHTML = `
-            <div style="flex: 1;">
-              <div style="font-size: 15px; font-weight: 500; color: #333;">${p.patient?.fullName || '不明'}</div>
-              <div style="font-size: 12px; color: #666; margin-top: 2px;">${roomName} / ${dayCount}日目</div>
-            </div>
-            <div style="color: #1976d2; font-size: 13px;">選択</div>
+          const infoDiv = document.createElement('div');
+          infoDiv.style.cssText = 'flex: 1;';
+          infoDiv.innerHTML = `
+            <div style="font-size: 15px; font-weight: 500; color: #333;">${p.patient?.fullName || '不明'}</div>
+            <div style="font-size: 12px; color: #666; margin-top: 2px;">${roomName} / ${dayCount}日目</div>
           `;
+          row.appendChild(infoDiv);
 
-          row.addEventListener('click', async () => {
-            overlay.remove();
-            // 入院患者一覧から取得した患者データをそのまま渡す
-            await downloadSummaryDataForPatient(p);
-          });
+          if (isTherapy) {
+            row.addEventListener('click', () => {
+              const uuid = p.patient?.uuid;
+              if (selectedTherapyUuids.has(uuid)) {
+                selectedTherapyUuids.delete(uuid);
+              } else {
+                selectedTherapyUuids.add(uuid);
+              }
+              const cb = row.querySelector('input[type="checkbox"]');
+              if (cb) cb.checked = selectedTherapyUuids.has(uuid);
+              updateDownloadButton();
+            });
+          } else {
+            const actionDiv = document.createElement('div');
+            actionDiv.style.cssText = 'color: #1976d2; font-size: 13px;';
+            actionDiv.textContent = '選択';
+            row.appendChild(actionDiv);
+
+            row.addEventListener('click', async () => {
+              overlay.remove();
+              await downloadSummaryDataForPatient(p);
+            });
+          }
 
           listContainer.appendChild(row);
         }
@@ -1736,8 +1769,7 @@
         gap: 8px;
       `;
 
-      const downloadAllBtn = document.createElement('button');
-      downloadAllBtn.textContent = `全員ダウンロード（${patients.length}名）`;
+      downloadAllBtn = document.createElement('button');
       downloadAllBtn.style.cssText = `
         padding: 10px 20px;
         background: #1976d2;
@@ -1748,11 +1780,20 @@
         cursor: pointer;
         transition: background 0.15s;
       `;
+      updateDownloadButton();
       downloadAllBtn.addEventListener('mouseover', () => downloadAllBtn.style.background = '#1565c0');
       downloadAllBtn.addEventListener('mouseout', () => downloadAllBtn.style.background = '#1976d2');
       downloadAllBtn.addEventListener('click', async () => {
+        const targetPatients = patients.filter(p => {
+          if (!isTherapyWard(p.wardName)) return true;
+          return selectedTherapyUuids.has(p.patient?.uuid);
+        });
+        if (targetPatients.length === 0) {
+          window.HenryCore.ui.showToast('ダウンロード対象の患者がいません', 'info');
+          return;
+        }
         overlay.remove();
-        await downloadAllPatients(patients);
+        await downloadAllPatients(targetPatients);
       });
 
       footer.appendChild(downloadAllBtn);
@@ -1792,6 +1833,7 @@
     const total = patients.length;
     let completed = 0;
     let failed = 0;
+    let cancelled = false;
 
     // 進捗表示用オーバーレイを作成
     const overlay = document.createElement('div');
@@ -1820,15 +1862,34 @@
     progressText.textContent = `データ取得中... (0/${total})`;
 
     const patientText = document.createElement('div');
-    patientText.style.cssText = 'font-size: 14px; color: #666;';
+    patientText.style.cssText = 'font-size: 14px; color: #666; margin-bottom: 16px;';
     patientText.textContent = '';
+
+    const cancelBtn = document.createElement('button');
+    cancelBtn.textContent = '中止';
+    cancelBtn.style.cssText = `
+      padding: 8px 24px;
+      background: #e0e0e0;
+      color: #333;
+      border: none;
+      border-radius: 6px;
+      font-size: 14px;
+      cursor: pointer;
+      transition: background 0.15s;
+    `;
+    cancelBtn.addEventListener('mouseover', () => cancelBtn.style.background = '#d0d0d0');
+    cancelBtn.addEventListener('mouseout', () => cancelBtn.style.background = '#e0e0e0');
+    cancelBtn.addEventListener('click', () => { cancelled = true; });
 
     container.appendChild(progressText);
     container.appendChild(patientText);
+    container.appendChild(cancelBtn);
     overlay.appendChild(container);
     document.body.appendChild(overlay);
 
     for (const p of patients) {
+      if (cancelled) break;
+
       const name = p.patient?.fullName || '不明';
       progressText.textContent = `データ取得中... (${completed + 1}/${total})`;
       patientText.textContent = name;
@@ -1840,13 +1901,17 @@
         console.error(`[${SCRIPT_NAME}] ${name}のダウンロード失敗:`, e);
         failed++;
       }
+
+      if (cancelled) break;
       // レート制限対策として少し待機
-      await new Promise(resolve => setTimeout(resolve, 300));
+      await new Promise(resolve => setTimeout(resolve, 3000));
     }
 
     overlay.remove();
 
-    if (failed > 0) {
+    if (cancelled) {
+      window.HenryCore.ui.showToast(`中止しました（${completed}件ダウンロード済み）`, 'info');
+    } else if (failed > 0) {
       window.HenryCore.ui.showToast(`${completed}件ダウンロード完了（${failed}件失敗）`, 'warning');
     } else {
       window.HenryCore.ui.showToast(`${completed}件すべてダウンロード完了`, 'success');
@@ -1865,12 +1930,10 @@
     const spinner = silent ? null : window.HenryCore.ui.showSpinner(`${patientName || '患者'}のデータを取得中...`);
 
     try {
-      const [hospitalization, disease, profile, cachedSummary] = await Promise.all([
-        fetchHospitalization(patientUuid),
-        fetchHospitalizationDisease(patientUuid),
-        fetchPatientProfile(patientUuid),
-        loadAllSummaries().then(cache => cache[patientUuid] || null)
-      ]);
+      const hospitalization = await fetchHospitalization(patientUuid);
+      const disease = await fetchHospitalizationDisease(patientUuid);
+      const profile = await fetchPatientProfile(patientUuid);
+      const cachedSummary = (await loadAllSummaries())[patientUuid] || null;
 
       if (!hospitalization) {
         spinner?.close();
@@ -1893,13 +1956,11 @@
         hospitalization.startDate.day
       );
 
-      const [calendarData, doctorRecords, nursingRecords, rehabRecords, pressureUlcerRecords] = await Promise.all([
-        fetchCalendarData(patientUuid, hospStartDate),
-        fetchDoctorRecords(patientUuid),
-        fetchNursingRecords(patientUuid),
-        fetchRehabRecords(patientUuid),
-        fetchPressureUlcerRecords(patientUuid)
-      ]);
+      const calendarData = await fetchCalendarData(patientUuid, hospStartDate);
+      const doctorRecords = await fetchDoctorRecords(patientUuid);
+      const nursingRecords = await fetchNursingRecords(patientUuid);
+      const rehabRecords = await fetchRehabRecords(patientUuid);
+      const pressureUlcerRecords = await fetchPressureUlcerRecords(patientUuid);
 
       if (!calendarData) {
         spinner?.close();
@@ -1962,7 +2023,7 @@
 
       const today = new Date();
       const dateStr = `${today.getFullYear()}${String(today.getMonth() + 1).padStart(2, '0')}${String(today.getDate()).padStart(2, '0')}`;
-      const fileName = `${patientUuid}_${patientDetails.fullName?.replace(/\s+/g, '') || '患者'}_${dateStr}.md`;
+      const fileName = `${patientUuid}_${dateStr}.md`;
 
       const blob = new Blob([content], { type: 'text/markdown; charset=utf-8' });
       const url = URL.createObjectURL(blob);
