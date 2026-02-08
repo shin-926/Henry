@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry Prescription History
 // @namespace    https://henry-app.jp/
-// @version      2.0.6
+// @version      2.1.0
 // @description  患者の処方歴を可動式ウィンドウで表示（院内/院外区別）
 // @author       sk powered by Claude
 // @match        https://henry-app.jp/*
@@ -37,12 +37,6 @@
   const WINDOW_ID = 'prescription-history-window';
   const POSITION_KEY = 'rx-history-window-pos';
 
-  // EncounterEditorQuery の sha256Hash（院内/院外情報取得用）
-  const ENCOUNTER_EDITOR_HASH = 'c5ee288aa4f525b49a8bac7420000d3e2f2e4f0ae58ca026b03988443a327bf7';
-
-  // 組織UUID
-  let organizationUuid = null;
-
   // 処方一覧取得クエリ（graphql-v2 フルクエリ）
   const ENCOUNTERS_QUERY = `
     query EncountersInPatient($patientId: ID!, $startDate: IsoDate, $endDate: IsoDate, $pageSize: Int!, $pageToken: String) {
@@ -56,6 +50,7 @@
             ... on PrescriptionOrder {
               startDate
               orderStatus
+              prescriptionMedicationCategory
               rps {
                 uuid
                 dosageText
@@ -155,30 +150,8 @@
       startDate: record.startDate,
       status: record.orderStatus,
       medicines,
-      category: null
+      category: record.prescriptionMedicationCategory || null
     };
-  }
-
-  // 組織UUIDを取得
-  async function getOrganizationUuid() {
-    if (organizationUuid) return organizationUuid;
-
-    const core = window.HenryCore;
-    if (core?.getOrganizationUuid) {
-      organizationUuid = await core.getOrganizationUuid();
-      return organizationUuid;
-    }
-
-    try {
-      const stored = localStorage.getItem('henry-organization-uuid');
-      if (stored) {
-        organizationUuid = stored;
-        return organizationUuid;
-      }
-    } catch (e) {}
-
-    organizationUuid = 'ce6b556b-2a8d-4fce-b8dd-89ba638fc825';
-    return organizationUuid;
   }
 
   // 処方一覧を取得
@@ -217,54 +190,6 @@
       prescriptions,
       nextPageToken: result?.data?.encountersInPatient?.nextPageToken || null
     };
-  }
-
-  // 院内/院外情報を取得（persisted query）
-  async function fetchMedicationCategory(encounterId) {
-    const core = window.HenryCore;
-    if (!core) return null;
-
-    try {
-      const token = await core.getToken();
-      if (!token) return null;
-
-      const orgUuid = await getOrganizationUuid();
-
-      const response = await fetch('https://henry-app.jp/graphql-v2', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'authorization': `Bearer ${token}`,
-          'x-auth-organization-uuid': orgUuid
-        },
-        credentials: 'include',
-        body: JSON.stringify({
-          operationName: 'EncounterEditorQuery',
-          variables: { id: encounterId },
-          extensions: {
-            persistedQuery: {
-              version: 1,
-              sha256Hash: ENCOUNTER_EDITOR_HASH
-            }
-          }
-        })
-      });
-
-      const result = await response.json();
-      const records = result?.data?.encounter?.records || [];
-      const categories = {};
-
-      for (const rec of records) {
-        if (rec.__typename === 'PrescriptionOrder' && rec.prescriptionMedicationCategory) {
-          categories[rec.id] = rec.prescriptionMedicationCategory;
-        }
-      }
-
-      return categories;
-    } catch (e) {
-      console.error(`[${SCRIPT_NAME}] カテゴリ取得エラー:`, e);
-      return null;
-    }
   }
 
   // カテゴリを日本語に変換
@@ -763,19 +688,6 @@
       // 処方一覧を取得
       let { prescriptions, nextPageToken } = await fetchPrescriptions(patientUuid);
 
-      // 院内/院外情報を取得
-      const encounterIds = [...new Set(prescriptions.map(p => p.encounterId))];
-      for (const encId of encounterIds) {
-        const categories = await fetchMedicationCategory(encId);
-        if (categories) {
-          for (const rx of prescriptions) {
-            if (rx.encounterId === encId && categories[rx.recordId]) {
-              rx.category = categories[rx.recordId];
-            }
-          }
-        }
-      }
-
       // テーブルを表示
       body.innerHTML = renderTable(prescriptions, !!nextPageToken);
 
@@ -792,19 +704,6 @@
 
           try {
             const result = await fetchPrescriptions(patientUuid, nextPageToken);
-
-            // カテゴリ情報を追加取得
-            const newEncounterIds = [...new Set(result.prescriptions.map(p => p.encounterId))];
-            for (const encId of newEncounterIds) {
-              const categories = await fetchMedicationCategory(encId);
-              if (categories) {
-                for (const rx of result.prescriptions) {
-                  if (rx.encounterId === encId && categories[rx.recordId]) {
-                    rx.category = categories[rx.recordId];
-                  }
-                }
-              }
-            }
 
             prescriptions.push(...result.prescriptions);
             nextPageToken = result.nextPageToken;
