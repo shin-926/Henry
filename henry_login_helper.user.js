@@ -137,7 +137,7 @@
             from { opacity: 0; }
             to { opacity: 1; }
         }
-        .henry-modal-content {
+        #henry-config-modal .henry-modal-content {
             background: white;
             padding: 20px;
             border-radius: 8px;
