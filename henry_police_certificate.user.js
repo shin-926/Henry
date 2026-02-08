@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         警察診断書フォーム
 // @namespace    https://henry-app.jp/
-// @version      1.1.0
+// @version      1.2.0
 // @description  警察提出用診断書の入力フォームとGoogle Docs出力
 // @author       sk powered by Claude
 // @match        https://henry-app.jp/*
@@ -35,6 +35,7 @@
  *
  * ■ 依存関係
  * - henry_core.user.js: GoogleAuth API（OAuth認証）
+ * - henry_form_commons.user.js: 共通モジュール
  * - Google Docs API: 文書の作成・編集
  */
 
@@ -50,11 +51,6 @@
   // 設定
   // ==========================================
 
-  const API_CONFIG = {
-    DRIVE_API_BASE: 'https://www.googleapis.com/drive/v3',
-    DOCS_API_BASE: 'https://docs.googleapis.com/v1'
-  };
-
   const TEMPLATE_CONFIG = {
     TEMPLATE_ID: '1OreF4-c5DTm_sqKwm_fKtRlA3EkG_p2XB62JxoIq6g4',
     OUTPUT_FOLDER_NAME: 'Henry一時ファイル'
@@ -65,258 +61,12 @@
   const DRAFT_LS_PREFIX = 'henry_police_cert_draft_';
   const DRAFT_SCHEMA_VERSION = 1;
 
-  let log = null;
+  // 共通モジュール参照
+  const FC = () => pageWindow.HenryFormCommons;
 
   // ==========================================
-  // GraphQL クエリ
+  // 警察診断書固有ユーティリティ
   // ==========================================
-
-  const QUERIES = {
-    GetPatient: `
-      query GetPatient($input: GetPatientRequestInput!) {
-        getPatient(input: $input) {
-          serialNumber
-          fullName
-          fullNamePhonetic
-          detail {
-            birthDate { year month day }
-            sexType
-            postalCode
-            addressLine_1
-            phoneNumber
-          }
-        }
-      }
-    `,
-    ListUsers: `
-      query ListUsers($input: ListUsersRequestInput!) {
-        listUsers(input: $input) {
-          users {
-            uuid
-            name
-          }
-        }
-      }
-    `,
-    ListPatientReceiptDiseases: `
-      query ListPatientReceiptDiseases($input: ListPatientReceiptDiseasesRequestInput!) {
-        listPatientReceiptDiseases(input: $input) {
-          patientReceiptDiseases {
-            uuid
-            startDate { year month day }
-            endDate { year month day }
-            outcome
-            isMain
-            isSuspected
-            masterDisease { name code }
-            masterModifiers { name code position }
-            customDiseaseName { value }
-          }
-        }
-      }
-    `
-  };
-
-  // ==========================================
-  // GoogleAuth取得ヘルパー
-  // ==========================================
-
-  function getGoogleAuth() {
-    return pageWindow.HenryCore?.modules?.GoogleAuth;
-  }
-
-  // ==========================================
-  // Google Drive API モジュール
-  // ==========================================
-
-  const DriveAPI = {
-    async request(method, url, options = {}) {
-      const accessToken = await getGoogleAuth().getValidAccessToken();
-
-      return new Promise((resolve, reject) => {
-        const headers = {
-          'Authorization': `Bearer ${accessToken}`,
-          ...options.headers
-        };
-
-        GM_xmlhttpRequest({
-          method,
-          url,
-          headers,
-          data: options.body,
-          responseType: options.responseType || 'text',
-          onload: (response) => {
-            if (response.status >= 200 && response.status < 300) {
-              if (options.responseType === 'arraybuffer') {
-                resolve(response.response);
-              } else {
-                try {
-                  resolve(JSON.parse(response.responseText));
-                } catch {
-                  resolve(response.responseText);
-                }
-              }
-            } else if (response.status === 401) {
-              getGoogleAuth().refreshAccessToken()
-                .then(() => this.request(method, url, options))
-                .then(resolve)
-                .catch(reject);
-            } else {
-              console.error(`[${SCRIPT_NAME}] DriveAPI Error ${response.status}:`, response.responseText);
-              reject(new Error(`API Error: ${response.status}`));
-            }
-          },
-          onerror: (err) => {
-            console.error(`[${SCRIPT_NAME}] DriveAPI Network error:`, err);
-            reject(new Error('API通信エラー'));
-          }
-        });
-      });
-    },
-
-    async copyFile(fileId, newName, parentFolderId = null, properties = null) {
-      const url = `${API_CONFIG.DRIVE_API_BASE}/files/${fileId}/copy`;
-      const body = { name: newName };
-      if (parentFolderId) {
-        body.parents = [parentFolderId];
-      }
-      if (properties) {
-        body.properties = properties;
-      }
-      return await this.request('POST', url, {
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body)
-      });
-    },
-
-    async findFolder(folderName) {
-      const query = `name='${folderName}' and mimeType='application/vnd.google-apps.folder' and 'root' in parents and trashed=false`;
-      const url = `${API_CONFIG.DRIVE_API_BASE}/files?q=${encodeURIComponent(query)}&fields=files(id,name)`;
-      const result = await this.request('GET', url);
-      return result.files?.[0] || null;
-    },
-
-    async createFolder(folderName) {
-      const url = `${API_CONFIG.DRIVE_API_BASE}/files`;
-      return await this.request('POST', url, {
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          name: folderName,
-          mimeType: 'application/vnd.google-apps.folder',
-          parents: ['root']
-        })
-      });
-    },
-
-    async getOrCreateFolder(folderName) {
-      let folder = await this.findFolder(folderName);
-      if (!folder) {
-        folder = await this.createFolder(folderName);
-      }
-      return folder;
-    }
-  };
-
-  // ==========================================
-  // Google Docs API モジュール
-  // ==========================================
-
-  const DocsAPI = {
-    async getDocument(documentId) {
-      const accessToken = await getGoogleAuth().getValidAccessToken();
-      const url = `${API_CONFIG.DOCS_API_BASE}/documents/${documentId}`;
-
-      return new Promise((resolve, reject) => {
-        GM_xmlhttpRequest({
-          method: 'GET',
-          url,
-          headers: { 'Authorization': `Bearer ${accessToken}` },
-          onload: (response) => {
-            if (response.status === 200) {
-              resolve(JSON.parse(response.responseText));
-            } else {
-              reject(new Error(`Docs API Error: ${response.status}`));
-            }
-          },
-          onerror: () => reject(new Error('Docs API通信エラー'))
-        });
-      });
-    },
-
-    async batchUpdate(documentId, requests) {
-      const accessToken = await getGoogleAuth().getValidAccessToken();
-      const url = `${API_CONFIG.DOCS_API_BASE}/documents/${documentId}:batchUpdate`;
-
-      return new Promise((resolve, reject) => {
-        GM_xmlhttpRequest({
-          method: 'POST',
-          url,
-          headers: {
-            'Authorization': `Bearer ${accessToken}`,
-            'Content-Type': 'application/json'
-          },
-          data: JSON.stringify({ requests }),
-          onload: (response) => {
-            if (response.status === 200) {
-              resolve(JSON.parse(response.responseText));
-            } else {
-              console.error(`[${SCRIPT_NAME}] DocsAPI batchUpdate Error:`, response.responseText);
-              reject(new Error(`Docs API Error: ${response.status}`));
-            }
-          },
-          onerror: () => reject(new Error('Docs API通信エラー'))
-        });
-      });
-    },
-
-    createReplaceTextRequest(searchText, replaceText) {
-      return {
-        replaceAllText: {
-          containsText: {
-            text: searchText,
-            matchCase: true
-          },
-          replaceText: replaceText || ''
-        }
-      };
-    }
-  };
-
-  // ==========================================
-  // ユーティリティ関数
-  // ==========================================
-
-  function toWareki(year, month, day) {
-    if (!year) return '';
-
-    let eraName, eraYear;
-    const y = parseInt(year);
-    const m = parseInt(month) || 1;
-
-    if (y >= 2019 && (y > 2019 || m >= 5)) {
-      eraName = '令和';
-      eraYear = y - 2018;
-    } else if (y >= 1989) {
-      eraName = '平成';
-      eraYear = y - 1988;
-    } else if (y >= 1926) {
-      eraName = '昭和';
-      eraYear = y - 1925;
-    } else if (y >= 1912) {
-      eraName = '大正';
-      eraYear = y - 1911;
-    } else {
-      eraName = '明治';
-      eraYear = y - 1867;
-    }
-
-    return `${eraName}${eraYear}年${month}月${day}日`;
-  }
-
-  function getTodayWareki() {
-    const today = new Date();
-    return toWareki(today.getFullYear(), today.getMonth() + 1, today.getDate());
-  }
 
   function getTodayISO() {
     const today = new Date();
@@ -329,119 +79,7 @@
   function isoToWareki(isoDate) {
     if (!isoDate) return '';
     const [year, month, day] = isoDate.split('-').map(Number);
-    return toWareki(year, month, day);
-  }
-
-  function formatSex(sexType) {
-    if (sexType === 'SEX_TYPE_MALE') return '男';
-    if (sexType === 'SEX_TYPE_FEMALE') return '女';
-    return '';
-  }
-
-
-  // ==========================================
-  // データ取得関数
-  // ==========================================
-
-  async function fetchPatientInfo() {
-    const HenryCore = pageWindow.HenryCore;
-    if (!HenryCore) return null;
-
-    const patientUuid = HenryCore.getPatientUuid();
-    if (!patientUuid) return null;
-
-    try {
-      const result = await HenryCore.query(QUERIES.GetPatient, {
-        input: { uuid: patientUuid }
-      });
-
-      const p = result.data?.getPatient;
-      if (!p) return null;
-
-      const birthDate = p.detail?.birthDate;
-      const birthYear = birthDate?.year;
-      const birthMonth = birthDate?.month;
-      const birthDay = birthDate?.day;
-
-      return {
-        patient_uuid: patientUuid,
-        patient_name: (p.fullName || '').replace(/\u3000/g, ' '),
-        birth_date_wareki: birthYear ? toWareki(birthYear, birthMonth, birthDay) : '',
-        sex: formatSex(p.detail?.sexType),
-        address: p.detail?.addressLine_1 || ''
-      };
-    } catch (e) {
-      console.error(`[${SCRIPT_NAME}] 患者情報取得エラー:`, e.message);
-      return null;
-    }
-  }
-
-  async function fetchPhysicianName() {
-    const HenryCore = pageWindow.HenryCore;
-    if (!HenryCore) return '';
-
-    try {
-      const myUuid = await HenryCore.getMyUuid();
-      if (!myUuid) return '';
-
-      const result = await HenryCore.query(QUERIES.ListUsers, {
-        input: { role: 'DOCTOR', onlyNarcoticPractitioner: false }
-      });
-
-      const users = result.data?.listUsers?.users || [];
-      const me = users.find(u => u.uuid === myUuid);
-      return (me?.name || '').replace(/\u3000/g, ' ');
-    } catch (e) {
-      console.error(`[${SCRIPT_NAME}] 医師名取得エラー:`, e.message);
-      return '';
-    }
-  }
-
-  async function fetchDiseases(patientUuid) {
-    const HenryCore = pageWindow.HenryCore;
-    if (!HenryCore) return [];
-
-    try {
-      const result = await HenryCore.query(QUERIES.ListPatientReceiptDiseases, {
-        input: {
-          patientUuids: [patientUuid],
-          patientCareType: 'PATIENT_CARE_TYPE_ANY',
-          onlyMain: false
-        }
-      });
-
-      const diseases = result.data?.listPatientReceiptDiseases?.patientReceiptDiseases || [];
-
-      // 終了していない病名のみ、主病名優先でソート
-      return diseases
-        .filter(d => !d.endDate && d.outcome !== 'OUTCOME_CURED' && d.outcome !== 'OUTCOME_DIED')
-        .sort((a, b) => {
-          if (a.isMain && !b.isMain) return -1;
-          if (!a.isMain && b.isMain) return 1;
-          return 0;
-        })
-        .map(d => {
-          const mods = d.masterModifiers || [];
-          const prefixes = mods.filter(m => m.position === 'PREFIX').map(m => m.name.replace(/^・/, '')).join('');
-          const suffixes = mods.filter(m => m.position === 'SUFFIX').map(m => m.name.replace(/^・/, '')).join('');
-          const baseName = d.customDiseaseName?.value || d.masterDisease?.name || '';
-          return {
-            uuid: d.uuid,
-            name: prefixes + baseName + suffixes,
-            isMain: d.isMain,
-            isSuspected: d.isSuspected
-          };
-        });
-    } catch (e) {
-      console.error(`[${SCRIPT_NAME}] 病名取得エラー:`, e.message);
-      return [];
-    }
-  }
-
-  // 病名を文字列にフォーマット
-  function formatDiseases(diseases) {
-    if (!diseases || diseases.length === 0) return '';
-    return diseases.map(d => d.name).join('，');
+    return FC().utils.toWareki(year, month, day);
   }
 
   // ==========================================
@@ -462,24 +100,28 @@
     }
 
     // Google認証チェック
-    const googleAuth = getGoogleAuth();
+    const googleAuth = FC().getGoogleAuth();
     if (!googleAuth) {
       alert('Google認証が設定されていません。\nHenry Toolboxの設定からGoogle認証を行ってください。');
       return;
     }
 
     try {
+      const { data } = FC();
+
       // データ取得（並列実行）
       const [patientInfo, physicianName, diseases] = await Promise.all([
-        fetchPatientInfo(),
-        fetchPhysicianName(),
-        fetchDiseases(patientUuid)
+        data.fetchPatientInfo(SCRIPT_NAME),
+        data.fetchPhysicianName(SCRIPT_NAME),
+        data.fetchDiseases(patientUuid, SCRIPT_NAME)
       ]);
 
       if (!patientInfo) {
         alert('患者情報を取得できませんでした');
         return;
       }
+
+      const { utils } = FC();
 
       // 下書き読み込み
       const ds = pageWindow.HenryCore?.modules?.DraftStorage;
@@ -497,7 +139,7 @@
         patient_sex: patientInfo.sex,
         patient_address: patientInfo.address,
         physician_name: physicianName,
-        creation_date_wareki: getTodayWareki(),
+        creation_date_wareki: utils.getTodayWareki(),
 
         // 選択式自動取得
         diseases: diseases,
@@ -518,7 +160,7 @@
       formData.patient_sex = patientInfo.sex;
       formData.patient_address = patientInfo.address;
       formData.physician_name = physicianName;
-      formData.creation_date_wareki = getTodayWareki();
+      formData.creation_date_wareki = utils.getTodayWareki();
       formData.diseases = diseases;
 
       // モーダル表示
@@ -532,200 +174,42 @@
 
   function showFormModal(formData, lastSavedAt) {
     // 既存モーダルを削除
-    const existingModal = document.getElementById('police-cert-modal');
+    const existingModal = document.getElementById('pc-form-modal');
     if (existingModal) existingModal.remove();
 
+    const { utils } = FC();
+    const escapeHtml = utils.escapeHtml;
+
     const modal = document.createElement('div');
-    modal.id = 'police-cert-modal';
+    modal.id = 'pc-form-modal';
     modal.innerHTML = `
       <style>
-        #police-cert-modal {
-          position: fixed;
-          top: 0;
-          left: 0;
-          width: 100%;
-          height: 100%;
-          background: rgba(0,0,0,0.5);
-          z-index: 1500;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-        }
+        ${FC().generateBaseCSS('pc')}
+
+        /* 警察診断書固有: 赤テーマ + サイズ調整 */
         .pc-container {
-          background: #fff;
-          border-radius: 12px;
-          width: 90%;
           max-width: 700px;
-          max-height: 90vh;
-          display: flex;
-          flex-direction: column;
-          box-shadow: 0 20px 60px rgba(0,0,0,0.3);
         }
         .pc-header {
-          padding: 20px 24px;
           background: linear-gradient(135deg, #d32f2f 0%, #b71c1c 100%);
-          color: white;
-          border-radius: 12px 12px 0 0;
-          display: flex;
-          justify-content: space-between;
-          align-items: center;
-        }
-        .pc-header h2 {
-          margin: 0;
-          font-size: 20px;
-          font-weight: 600;
-        }
-        .pc-close {
-          background: rgba(255,255,255,0.2);
-          border: none;
-          color: white;
-          width: 32px;
-          height: 32px;
-          border-radius: 6px;
-          cursor: pointer;
-          font-size: 20px;
-        }
-        .pc-close:hover {
-          background: rgba(255,255,255,0.3);
-        }
-        .pc-body {
-          flex: 1;
-          overflow-y: auto;
-          padding: 24px;
-        }
-        .pc-section {
-          margin-bottom: 24px;
         }
         .pc-section-title {
-          font-size: 16px;
-          font-weight: 600;
           color: #d32f2f;
-          margin-bottom: 12px;
-          padding-bottom: 8px;
-          border-bottom: 2px solid #ffcdd2;
-        }
-        .pc-row {
-          display: flex;
-          gap: 16px;
-          margin-bottom: 12px;
-        }
-        .pc-field {
-          flex: 1;
-        }
-        .pc-field label {
-          display: block;
-          font-size: 13px;
-          font-weight: 500;
-          color: #666;
-          margin-bottom: 4px;
-        }
-        .pc-field input, .pc-field textarea {
-          width: 100%;
-          padding: 10px 12px;
-          border: 1px solid #ddd;
-          border-radius: 6px;
-          font-size: 14px;
-          box-sizing: border-box;
+          border-bottom-color: #ffcdd2;
         }
         .pc-field input:focus, .pc-field textarea:focus {
-          outline: none;
           border-color: #d32f2f;
           box-shadow: 0 0 0 3px rgba(211, 47, 47, 0.1);
-        }
-        .pc-field textarea {
-          resize: vertical;
-          min-height: 80px;
-        }
-        .pc-field.readonly input {
-          background: #f5f5f5;
-          color: #666;
-        }
-        .pc-checkbox-group {
-          margin-top: 8px;
-        }
-        .pc-checkbox-item {
-          display: flex;
-          align-items: center;
-          gap: 8px;
-          padding: 8px 12px;
-          background: #f8f9fa;
-          border-radius: 6px;
-          margin-bottom: 6px;
-        }
-        .pc-checkbox-item input[type="checkbox"] {
-          width: 18px;
-          height: 18px;
-        }
-        .pc-checkbox-item label {
-          margin: 0;
-          flex: 1;
-          font-size: 14px;
-          color: #333;
         }
         .pc-checkbox-item.main-disease {
           background: #ffebee;
           border: 1px solid #ef9a9a;
         }
-        .pc-use-toggle {
-          display: flex;
-          align-items: center;
-          gap: 12px;
-          padding: 12px;
-          background: #fff3e0;
-          border-radius: 8px;
-          margin-bottom: 12px;
-        }
-        .pc-use-toggle input[type="checkbox"] {
-          width: 20px;
-          height: 20px;
-        }
-        .pc-use-toggle label {
-          font-weight: 500;
-          color: #e65100;
-        }
-        .pc-footer {
-          padding: 16px 24px;
-          background: #f5f5f5;
-          border-radius: 0 0 12px 12px;
-          display: flex;
-          justify-content: space-between;
-          align-items: center;
-        }
-        .pc-footer-left {
-          font-size: 12px;
-          color: #888;
-        }
-        .pc-footer-right {
-          display: flex;
-          gap: 12px;
-        }
-        .pc-btn {
-          padding: 10px 24px;
-          border: none;
-          border-radius: 6px;
-          font-size: 14px;
-          font-weight: 500;
-          cursor: pointer;
-          transition: all 0.2s;
-        }
-        .pc-btn-secondary {
-          background: #e0e0e0;
-          color: #333;
-        }
-        .pc-btn-secondary:hover {
-          background: #d0d0d0;
-        }
         .pc-btn-primary {
           background: #d32f2f;
-          color: white;
         }
         .pc-btn-primary:hover {
           background: #b71c1c;
-        }
-        .pc-btn-primary:disabled {
-          background: #ccc;
-          cursor: not-allowed;
         }
       </style>
       <div class="pc-container">
@@ -918,16 +402,6 @@
     });
   }
 
-  function escapeHtml(str) {
-    if (!str) return '';
-    return str
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;')
-      .replace(/"/g, '&quot;')
-      .replace(/'/g, '&#039;');
-  }
-
   function collectFormData(modal, originalData) {
     const data = { ...originalData };
 
@@ -959,28 +433,6 @@
   // ==========================================
 
   async function generateGoogleDoc(formData) {
-    // スピナー表示
-    const HenryCore = pageWindow.HenryCore;
-    const spinner = HenryCore?.ui?.showSpinner?.('Google Docsを生成中...');
-
-    try {
-      // アクセストークン確認
-      const googleAuth = getGoogleAuth();
-      await googleAuth.getValidAccessToken();
-
-      // 出力フォルダ取得/作成
-      const folder = await DriveAPI.getOrCreateFolder(TEMPLATE_CONFIG.OUTPUT_FOLDER_NAME);
-
-    // テンプレートをコピー（メタデータ付き）
-    const fileName = `警察診断書_${formData.patient_name}_${new Date().toISOString().slice(0, 10)}`;
-    const properties = {
-      henryPatientUuid: formData.patient_uuid || '',
-      henryFileUuid: '',  // 新規作成なので空
-      henryFolderUuid: folder.id,
-      henrySource: 'police-certificate'
-    };
-    const newDoc = await DriveAPI.copyFile(TEMPLATE_CONFIG.TEMPLATE_ID, fileName, folder.id, properties);
-
     // 診断名テキスト作成
     let diagnosisText = '';
     if (formData.use_diseases && formData.diseases.length > 0 && formData.selected_diseases?.length > 0) {
@@ -993,55 +445,36 @@
     // 受診日を和暦に変換
     const visitDateWareki = isoToWareki(formData.visit_date);
 
-    // プレースホルダー置換リクエスト作成
-    const requests = [
-      DocsAPI.createReplaceTextRequest('{{作成日_和暦}}', formData.creation_date_wareki),
-      DocsAPI.createReplaceTextRequest('{{患者氏名}}', formData.patient_name),
-      DocsAPI.createReplaceTextRequest('{{性別}}', formData.patient_sex),
-      DocsAPI.createReplaceTextRequest('{{患者生年月日_和暦}}', formData.patient_birth_date_wareki),
-      DocsAPI.createReplaceTextRequest('{{患者住所}}', formData.patient_address),
-      DocsAPI.createReplaceTextRequest('{{医師名}}', formData.physician_name),
-      DocsAPI.createReplaceTextRequest('{{診断名}}', diagnosisText),
-      DocsAPI.createReplaceTextRequest('{{受診日}}', visitDateWareki),
-      DocsAPI.createReplaceTextRequest('{{治療見込み}}', formData.treatment_period),
-      DocsAPI.createReplaceTextRequest('{{特記事項}}', formData.remarks)
-    ];
-
-    // 置換実行
-    await DocsAPI.batchUpdate(newDoc.id, requests);
-
-    // 新しいドキュメントを開く
-    const docUrl = `https://docs.google.com/document/d/${newDoc.id}/edit`;
-    spinner?.close();
-    GM_openInTab(docUrl, { active: true });
-
-    console.log(`[${SCRIPT_NAME}] Google Docs生成完了: ${docUrl}`);
-    } catch (e) {
-      spinner?.close();
-      throw e;
-    }
+    // 共通フローで出力
+    await FC().generateDoc({
+      scriptName: SCRIPT_NAME,
+      templateId: TEMPLATE_CONFIG.TEMPLATE_ID,
+      fileName: `警察診断書_${formData.patient_name}_${new Date().toISOString().slice(0, 10)}`,
+      source: 'police-certificate',
+      patientUuid: formData.patient_uuid,
+      replacements: {
+        '{{作成日_和暦}}': formData.creation_date_wareki,
+        '{{患者氏名}}': formData.patient_name,
+        '{{性別}}': formData.patient_sex,
+        '{{患者生年月日_和暦}}': formData.patient_birth_date_wareki,
+        '{{患者住所}}': formData.patient_address,
+        '{{医師名}}': formData.physician_name,
+        '{{診断名}}': diagnosisText,
+        '{{受診日}}': visitDateWareki,
+        '{{治療見込み}}': formData.treatment_period,
+        '{{特記事項}}': formData.remarks
+      }
+    });
   }
 
   // ==========================================
   // 初期化
   // ==========================================
 
-  async function init() {
-    // HenryCore待機
-    let waited = 0;
-    while (!pageWindow.HenryCore) {
-      await new Promise(r => setTimeout(r, 100));
-      waited += 100;
-      if (waited > 10000) {
-        console.error(`[${SCRIPT_NAME}] HenryCore が見つかりません`);
-        return;
-      }
-    }
-
-    log = pageWindow.HenryCore.utils?.createLogger?.(SCRIPT_NAME);
-
-    // プラグイン登録
-    await pageWindow.HenryCore.registerPlugin({
+  FC().initPlugin({
+    scriptName: SCRIPT_NAME,
+    version: VERSION,
+    pluginConfig: {
       id: 'police-certificate',
       name: '警察診断書',
       icon: '🚔',
@@ -1051,10 +484,6 @@
       group: '文書作成',
       groupIcon: '📝',
       onClick: showPoliceCertificateForm
-    });
-
-    console.log(`[${SCRIPT_NAME}] Ready (v${VERSION})`);
-  }
-
-  init();
+    }
+  });
 })();

@@ -108,6 +108,16 @@
       "beta": true
     },
     {
+      "name": "henry_form_commons",
+      "label": "フォーム共通モジュール",
+      "file": "henry_form_commons.user.js",
+      "match": ["henry-app.jp"],
+      "category": "documents",
+      "order": 9,
+      "enabled": true,
+      "hidden": true
+    },
+    {
       "name": "henry_hospitals",
       "label": "近隣病院データ",
       "file": "henry_hospitals.user.js",

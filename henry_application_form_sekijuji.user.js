@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         高松赤十字病院 診療申込書
 // @namespace    https://henry-app.jp/
-// @version      1.4.0
+// @version      1.5.0
 // @description  高松赤十字病院への診療情報提供書兼FAX診療申込書を作成
 // @author       sk powered by Claude
 // @match        https://henry-app.jp/*
@@ -43,6 +43,7 @@
  *
  * ■ 依存関係
  * - henry_core.user.js: GoogleAuth API（OAuth認証）
+ * - henry_form_commons.user.js: 共通モジュール
  * - henry_hospitals.user.js: 高松赤十字病院の診療科・医師データ
  * - Google Docs API: 文書の作成・編集
  */
@@ -59,11 +60,6 @@
   // 設定
   // ==========================================
 
-  const API_CONFIG = {
-    DRIVE_API_BASE: 'https://www.googleapis.com/drive/v3',
-    DOCS_API_BASE: 'https://docs.googleapis.com/v1'
-  };
-
   const TEMPLATE_CONFIG = {
     TEMPLATE_ID: '1z4lABWynRs4E-uibUGmhrlHTiWVb3eVEm_IVUyEDeKQ',
     OUTPUT_FOLDER_NAME: 'Henry一時ファイル'
@@ -77,198 +73,56 @@
   const DRAFT_LS_PREFIX = 'henry_sekijuji_draft_';
   const DRAFT_SCHEMA_VERSION = 1;
 
-  let log = null;
+  // 共通モジュール参照
+  const FC = () => pageWindow.HenryFormCommons;
 
   // ==========================================
-  // GraphQL クエリ
+  // 高松赤十字病院固有ユーティリティ
   // ==========================================
 
-  const QUERIES = {
-    GetPatient: `
-      query GetPatient($input: GetPatientRequestInput!) {
-        getPatient(input: $input) {
-          serialNumber
-          fullName
-          fullNamePhonetic
-          detail {
-            birthDate { year month day }
-            sexType
-            postalCode
-            addressLine_1
-            phoneNumber
-          }
-        }
-      }
-    `,
-    ListUsers: `
-      query ListUsers($input: ListUsersRequestInput!) {
-        listUsers(input: $input) {
-          users {
-            uuid
-            name
-          }
-        }
-      }
-    `,
-    ListPatientReceiptDiseases: `
-      query ListPatientReceiptDiseases($input: ListPatientReceiptDiseasesRequestInput!) {
-        listPatientReceiptDiseases(input: $input) {
-          patientReceiptDiseases {
-            uuid
-            startDate { year month day }
-            endDate { year month day }
-            outcome
-            isMain
-            isSuspected
-            masterDisease { name code }
-            masterModifiers { name code position }
-            customDiseaseName { value }
-          }
-        }
-      }
-    `,
-    // 処方一覧取得クエリ（graphql-v2 フルクエリ）
-    EncountersInPatient: `
-      query EncountersInPatient($patientId: ID!, $startDate: IsoDate, $endDate: IsoDate, $pageSize: Int!, $pageToken: String) {
-        encountersInPatient(patientId: $patientId, startDate: $startDate, endDate: $endDate, pageSize: $pageSize, pageToken: $pageToken) {
-          encounters {
-            id
-            firstPublishTime
-            records(includeDraft: false) {
-              id
-              __typename
-              ... on PrescriptionOrder {
-                startDate
-                orderStatus
-                medicationCategory
-                rps {
-                  uuid
-                  dosageText
-                  boundsDurationDays { value }
-                  asNeeded
-                  expectedRepeatCount { value }
-                  instructions {
-                    instruction {
-                      medicationDosageInstruction {
-                        localMedicine { name }
-                        mhlwMedicine { name unitCode }
-                        quantity {
-                          doseQuantityPerDay { value }
-                        }
-                      }
-                    }
-                  }
-                  medicationTiming {
-                    medicationTiming {
-                      canonicalPrescriptionUsage { text }
-                    }
-                  }
-                }
-              }
-            }
-          }
-          nextPageToken
-        }
-      }
-    `
-  };
+  /**
+   * 生年月日の和暦フォーマット（元号略記 + 生まれ付き）
+   * 例: 昭60年5月10日生
+   */
+  function toBirthDateWareki(year, month, day) {
+    if (!year) return '';
 
-  // 単位コードのマッピング
-  const UNIT_CODES = {
-    1: 'mL', 2: 'g', 3: 'mg', 4: 'μg', 5: 'mEq',
-    6: '管', 7: '本', 8: '瓶', 9: '袋', 10: '包',
-    11: 'シート', 12: 'ブリスター', 13: 'パック', 14: 'キット', 15: 'カプセル',
-    16: '錠', 17: '丸', 18: '枚', 19: '個', 20: '滴',
-    21: 'mL', 22: 'mg', 23: 'μg'
-  };
+    let eraName, eraYear;
+    const y = parseInt(year);
+    const m = parseInt(month) || 1;
 
-  // ==========================================
-  // GoogleAuth取得ヘルパー
-  // ==========================================
+    if (y >= 2019 && (y > 2019 || m >= 5)) {
+      eraName = '令';
+      eraYear = y - 2018;
+    } else if (y >= 1989) {
+      eraName = '平';
+      eraYear = y - 1988;
+    } else if (y >= 1926) {
+      eraName = '昭';
+      eraYear = y - 1925;
+    } else if (y >= 1912) {
+      eraName = '大';
+      eraYear = y - 1911;
+    } else {
+      eraName = '明';
+      eraYear = y - 1867;
+    }
 
-  function getGoogleAuth() {
-    return pageWindow.HenryCore?.modules?.GoogleAuth;
+    return `${eraName}${eraYear}年${month}月${day}日生`;
   }
 
-  // ==========================================
-  // 処方履歴取得
-  // ==========================================
-
-  // 処方一覧を取得
-  async function fetchLatestPrescriptions(patientUuid) {
-    const HenryCore = pageWindow.HenryCore;
-    if (!HenryCore) return [];
-
-    try {
-      const threeMonthsAgo = new Date();
-      threeMonthsAgo.setMonth(threeMonthsAgo.getMonth() - 3);
-      const startDate = threeMonthsAgo.toISOString().split('T')[0];
-
-      const result = await HenryCore.query(QUERIES.EncountersInPatient, {
-        patientId: patientUuid,
-        startDate: startDate,
-        endDate: null,
-        pageSize: 30,
-        pageToken: null
-      }, { endpoint: '/graphql-v2' });
-
-      const encounters = result?.data?.encountersInPatient?.encounters || [];
-      const prescriptions = [];
-
-      for (const enc of encounters) {
-        const records = enc.records || [];
-        for (const rec of records) {
-          if (rec.__typename === 'PrescriptionOrder' && rec.orderStatus !== 'ORDER_STATUS_CANCELLED') {
-            const medicines = [];
-            for (const rp of (rec.rps || [])) {
-              const usage = rp.medicationTiming?.medicationTiming?.canonicalPrescriptionUsage?.text || '';
-              const days = rp.boundsDurationDays?.value;
-              const asNeeded = rp.asNeeded;
-
-              for (const inst of (rp.instructions || [])) {
-                const med = inst.instruction?.medicationDosageInstruction;
-                if (!med) continue;
-
-                const name = med.localMedicine?.name || med.mhlwMedicine?.name || '';
-                const unitCode = med.mhlwMedicine?.unitCode;
-                const unit = UNIT_CODES[unitCode] || '';
-                const qtyPerDay = med.quantity?.doseQuantityPerDay?.value;
-                const qty = qtyPerDay ? (parseInt(qtyPerDay) / 100000) : '';
-
-                medicines.push({
-                  name,
-                  quantity: qty,
-                  unit,
-                  usage,
-                  days,
-                  asNeeded
-                });
-              }
-            }
-
-            if (medicines.length > 0) {
-              prescriptions.push({
-                recordId: rec.id,
-                encounterId: enc.id,
-                date: enc.firstPublishTime,
-                startDate: rec.startDate,
-                medicines,
-                category: rec.medicationCategory || null
-              });
-            }
-          }
-        }
-      }
-
-      // 日付でソート（新しい順）
-      prescriptions.sort((a, b) => new Date(b.startDate || b.date) - new Date(a.startDate || a.date));
-
-      // 最新5件に絞る
-      return prescriptions.slice(0, 5);
-    } catch (e) {
-      console.error(`[${SCRIPT_NAME}] 処方取得エラー:`, e.message);
-      return [];
-    }
+  /**
+   * 希望日のフォーマット: "令和○年○月○日（曜日）"
+   */
+  function formatHopeDate(dateStr) {
+    if (!dateStr) return '';
+    const d = new Date(dateStr);
+    const weekdays = ['日', '月', '火', '水', '木', '金', '土'];
+    const year = d.getFullYear();
+    const month = d.getMonth() + 1;
+    const day = d.getDate();
+    const wareki = FC().utils.toWareki(year, month, day);
+    return `${wareki}（${weekdays[d.getDay()]}）`;
   }
 
   // カテゴリを日本語に変換
@@ -317,398 +171,6 @@
   }
 
   // ==========================================
-  // Google Drive API モジュール
-  // ==========================================
-
-  const DriveAPI = {
-    async request(method, url, options = {}) {
-      const accessToken = await getGoogleAuth().getValidAccessToken();
-
-      return new Promise((resolve, reject) => {
-        const headers = {
-          'Authorization': `Bearer ${accessToken}`,
-          ...options.headers
-        };
-
-        GM_xmlhttpRequest({
-          method,
-          url,
-          headers,
-          data: options.body,
-          responseType: options.responseType || 'text',
-          onload: (response) => {
-            if (response.status >= 200 && response.status < 300) {
-              if (options.responseType === 'arraybuffer') {
-                resolve(response.response);
-              } else {
-                try {
-                  resolve(JSON.parse(response.responseText));
-                } catch {
-                  resolve(response.responseText);
-                }
-              }
-            } else if (response.status === 401) {
-              getGoogleAuth().refreshAccessToken()
-                .then(() => this.request(method, url, options))
-                .then(resolve)
-                .catch(reject);
-            } else {
-              console.error(`[${SCRIPT_NAME}] DriveAPI Error ${response.status}:`, response.responseText);
-              reject(new Error(`API Error: ${response.status}`));
-            }
-          },
-          onerror: (err) => {
-            console.error(`[${SCRIPT_NAME}] DriveAPI Network error:`, err);
-            reject(new Error('API通信エラー'));
-          }
-        });
-      });
-    },
-
-    async copyFile(fileId, newName, parentFolderId = null, properties = null) {
-      const url = `${API_CONFIG.DRIVE_API_BASE}/files/${fileId}/copy`;
-      const body = { name: newName };
-      if (parentFolderId) {
-        body.parents = [parentFolderId];
-      }
-      if (properties) {
-        body.properties = properties;
-      }
-      return await this.request('POST', url, {
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body)
-      });
-    },
-
-    async findFolder(folderName) {
-      const query = `name='${folderName}' and mimeType='application/vnd.google-apps.folder' and 'root' in parents and trashed=false`;
-      const url = `${API_CONFIG.DRIVE_API_BASE}/files?q=${encodeURIComponent(query)}&fields=files(id,name)`;
-      const result = await this.request('GET', url);
-      return result.files?.[0] || null;
-    },
-
-    async createFolder(folderName) {
-      const url = `${API_CONFIG.DRIVE_API_BASE}/files`;
-      return await this.request('POST', url, {
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          name: folderName,
-          mimeType: 'application/vnd.google-apps.folder',
-          parents: ['root']
-        })
-      });
-    },
-
-    async getOrCreateFolder(folderName) {
-      let folder = await this.findFolder(folderName);
-      if (!folder) {
-        folder = await this.createFolder(folderName);
-      }
-      return folder;
-    }
-  };
-
-  // ==========================================
-  // Google Docs API モジュール
-  // ==========================================
-
-  const DocsAPI = {
-    async getDocument(documentId) {
-      const accessToken = await getGoogleAuth().getValidAccessToken();
-      const url = `${API_CONFIG.DOCS_API_BASE}/documents/${documentId}`;
-
-      return new Promise((resolve, reject) => {
-        GM_xmlhttpRequest({
-          method: 'GET',
-          url,
-          headers: { 'Authorization': `Bearer ${accessToken}` },
-          onload: (response) => {
-            if (response.status === 200) {
-              resolve(JSON.parse(response.responseText));
-            } else {
-              reject(new Error(`Docs API Error: ${response.status}`));
-            }
-          },
-          onerror: () => reject(new Error('Docs API通信エラー'))
-        });
-      });
-    },
-
-    async batchUpdate(documentId, requests) {
-      const accessToken = await getGoogleAuth().getValidAccessToken();
-      const url = `${API_CONFIG.DOCS_API_BASE}/documents/${documentId}:batchUpdate`;
-
-      return new Promise((resolve, reject) => {
-        GM_xmlhttpRequest({
-          method: 'POST',
-          url,
-          headers: {
-            'Authorization': `Bearer ${accessToken}`,
-            'Content-Type': 'application/json'
-          },
-          data: JSON.stringify({ requests }),
-          onload: (response) => {
-            if (response.status === 200) {
-              resolve(JSON.parse(response.responseText));
-            } else {
-              console.error(`[${SCRIPT_NAME}] DocsAPI batchUpdate Error:`, response.responseText);
-              reject(new Error(`Docs API Error: ${response.status}`));
-            }
-          },
-          onerror: () => reject(new Error('Docs API通信エラー'))
-        });
-      });
-    },
-
-    createReplaceTextRequest(searchText, replaceText) {
-      return {
-        replaceAllText: {
-          containsText: {
-            text: searchText,
-            matchCase: true
-          },
-          replaceText: replaceText || ''
-        }
-      };
-    }
-  };
-
-  // ==========================================
-  // ユーティリティ関数
-  // ==========================================
-
-  function katakanaToHiragana(str) {
-    if (!str) return '';
-    return str.replace(/[ァ-ヶ]/g, char =>
-      String.fromCharCode(char.charCodeAt(0) - 0x60)
-    );
-  }
-
-  function toWareki(year, month, day) {
-    if (!year) return '';
-
-    let eraName, eraYear;
-    const y = parseInt(year);
-    const m = parseInt(month) || 1;
-
-    if (y >= 2019 && (y > 2019 || m >= 5)) {
-      eraName = '令和';
-      eraYear = y - 2018;
-    } else if (y >= 1989) {
-      eraName = '平成';
-      eraYear = y - 1988;
-    } else if (y >= 1926) {
-      eraName = '昭和';
-      eraYear = y - 1925;
-    } else if (y >= 1912) {
-      eraName = '大正';
-      eraYear = y - 1911;
-    } else {
-      eraName = '明治';
-      eraYear = y - 1867;
-    }
-
-    return `${eraName}${eraYear}年${month}月${day}日`;
-  }
-
-  /**
-   * 生年月日の和暦フォーマット（元号略記 + 生まれ付き）
-   * 例: 昭60年5月10日生
-   */
-  function toBirthDateWareki(year, month, day) {
-    if (!year) return '';
-
-    let eraName, eraYear;
-    const y = parseInt(year);
-    const m = parseInt(month) || 1;
-
-    if (y >= 2019 && (y > 2019 || m >= 5)) {
-      eraName = '令';
-      eraYear = y - 2018;
-    } else if (y >= 1989) {
-      eraName = '平';
-      eraYear = y - 1988;
-    } else if (y >= 1926) {
-      eraName = '昭';
-      eraYear = y - 1925;
-    } else if (y >= 1912) {
-      eraName = '大';
-      eraYear = y - 1911;
-    } else {
-      eraName = '明';
-      eraYear = y - 1867;
-    }
-
-    return `${eraName}${eraYear}年${month}月${day}日生`;
-  }
-
-  function getTodayWareki() {
-    const today = new Date();
-    return toWareki(today.getFullYear(), today.getMonth() + 1, today.getDate());
-  }
-
-  function formatSex(sexType) {
-    if (sexType === 'SEX_TYPE_MALE') return '男';
-    if (sexType === 'SEX_TYPE_FEMALE') return '女';
-    return '';
-  }
-
-  function formatPhoneNumber(phone) {
-    if (!phone) return '';
-
-    // 全角数字を半角に変換
-    let normalized = phone.replace(/[０-９]/g, s => String.fromCharCode(s.charCodeAt(0) - 0xFEE0));
-    // 全角ハイフン等を半角に変換
-    normalized = normalized.replace(/[ー−‐―]/g, '-');
-    // 数字のみ抽出
-    const digitsOnly = normalized.replace(/[^0-9]/g, '');
-
-    // 携帯電話（11桁、090/080/070/060で始まる）
-    if (digitsOnly.length === 11 && /^0[6789]0/.test(digitsOnly)) {
-      return `${digitsOnly.slice(0, 3)}-${digitsOnly.slice(3, 7)}-${digitsOnly.slice(7)}`;
-    }
-
-    // 市外局番省略（7桁）→ XXX-XXXX
-    if (digitsOnly.length === 7) {
-      return `${digitsOnly.slice(0, 3)}-${digitsOnly.slice(3)}`;
-    }
-
-    // 市外局番省略（8桁）→ XXXX-XXXX
-    if (digitsOnly.length === 8) {
-      return `${digitsOnly.slice(0, 4)}-${digitsOnly.slice(4)}`;
-    }
-
-    // それ以外は全角→半角変換のみ
-    return normalized;
-  }
-
-  /**
-   * 希望日のフォーマット: "令和○年○月○日（曜日）"
-   */
-  function formatHopeDate(dateStr) {
-    if (!dateStr) return '';
-    const d = new Date(dateStr);
-    const weekdays = ['日', '月', '火', '水', '木', '金', '土'];
-    const year = d.getFullYear();
-    const month = d.getMonth() + 1;
-    const day = d.getDate();
-    const wareki = toWareki(year, month, day);
-    return `${wareki}（${weekdays[d.getDay()]}）`;
-  }
-
-  function escapeHtml(str) {
-    if (!str) return '';
-    return str
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;')
-      .replace(/"/g, '&quot;')
-      .replace(/'/g, '&#039;');
-  }
-
-  // ==========================================
-  // データ取得関数
-  // ==========================================
-
-  async function fetchPatientInfo() {
-    const HenryCore = pageWindow.HenryCore;
-    if (!HenryCore) return null;
-
-    const patientUuid = HenryCore.getPatientUuid();
-    if (!patientUuid) return null;
-
-    try {
-      const result = await HenryCore.query(QUERIES.GetPatient, {
-        input: { uuid: patientUuid }
-      });
-
-      const p = result.data?.getPatient;
-      if (!p) return null;
-
-      const birthDate = p.detail?.birthDate;
-      const birthYear = birthDate?.year;
-      const birthMonth = birthDate?.month;
-      const birthDay = birthDate?.day;
-
-      return {
-        patient_uuid: patientUuid,
-        patient_name: (p.fullName || '').replace(/\u3000/g, ' '),
-        patient_name_kana: katakanaToHiragana(p.fullNamePhonetic || ''),
-        birth_date_wareki: birthYear ? toBirthDateWareki(birthYear, birthMonth, birthDay) : '',
-        sex: formatSex(p.detail?.sexType),
-        postal_code: p.detail?.postalCode || '',
-        address: p.detail?.addressLine_1 || '',
-        phone: p.detail?.phoneNumber || ''
-      };
-    } catch (e) {
-      console.error(`[${SCRIPT_NAME}] 患者情報取得エラー:`, e.message);
-      return null;
-    }
-  }
-
-  async function fetchPhysicianName() {
-    const HenryCore = pageWindow.HenryCore;
-    if (!HenryCore) return '';
-
-    try {
-      const myUuid = await HenryCore.getMyUuid();
-      if (!myUuid) return '';
-
-      const result = await HenryCore.query(QUERIES.ListUsers, {
-        input: { role: 'DOCTOR', onlyNarcoticPractitioner: false }
-      });
-
-      const users = result.data?.listUsers?.users || [];
-      const me = users.find(u => u.uuid === myUuid);
-      return (me?.name || '').replace(/\u3000/g, ' ');
-    } catch (e) {
-      console.error(`[${SCRIPT_NAME}] 医師名取得エラー:`, e.message);
-      return '';
-    }
-  }
-
-  async function fetchDiseases(patientUuid) {
-    const HenryCore = pageWindow.HenryCore;
-    if (!HenryCore) return [];
-
-    try {
-      const result = await HenryCore.query(QUERIES.ListPatientReceiptDiseases, {
-        input: {
-          patientUuids: [patientUuid],
-          patientCareType: 'PATIENT_CARE_TYPE_ANY',
-          onlyMain: false
-        }
-      });
-
-      const diseases = result.data?.listPatientReceiptDiseases?.patientReceiptDiseases || [];
-
-      // 終了していない病名のみ、主病名優先でソート
-      return diseases
-        .filter(d => !d.endDate && d.outcome !== 'OUTCOME_CURED' && d.outcome !== 'OUTCOME_DIED')
-        .sort((a, b) => {
-          if (a.isMain && !b.isMain) return -1;
-          if (!a.isMain && b.isMain) return 1;
-          return 0;
-        })
-        .map(d => {
-          const mods = d.masterModifiers || [];
-          const prefixes = mods.filter(m => m.position === 'PREFIX').map(m => m.name.replace(/^・/, '')).join('');
-          const suffixes = mods.filter(m => m.position === 'SUFFIX').map(m => m.name.replace(/^・/, '')).join('');
-          const baseName = d.customDiseaseName?.value || d.masterDisease?.name || '';
-          return {
-            uuid: d.uuid,
-            name: prefixes + baseName + suffixes,
-            isMain: d.isMain,
-            isSuspected: d.isSuspected
-          };
-        });
-    } catch (e) {
-      console.error(`[${SCRIPT_NAME}] 病名取得エラー:`, e.message);
-      return [];
-    }
-  }
-
-  // ==========================================
   // 病院データ連携（HenryHospitals）
   // ==========================================
 
@@ -746,7 +208,7 @@
     }
 
     // Google認証チェック
-    const googleAuth = getGoogleAuth();
+    const googleAuth = FC().getGoogleAuth();
     if (!googleAuth) {
       alert('Google認証が設定されていません。\nHenry Toolboxの設定からGoogle認証を行ってください。');
       return;
@@ -756,20 +218,37 @@
     const spinner = HenryCore.ui?.showSpinner?.('データを取得中...');
 
     try {
+      const { data, utils } = FC();
+
       // データ取得（並列実行）
-      const [patientInfo, physicianName, diseases, prescriptions] = await Promise.all([
-        fetchPatientInfo(),
-        fetchPhysicianName(),
-        fetchDiseases(patientUuid),
-        fetchLatestPrescriptions(patientUuid)
+      // 患者情報はtoBirthDateWareki（元号略記）を使うため、共通モジュールの
+      // fetchPatientInfoではなく直接取得して独自フォーマットを適用する
+      const [patientResult, physicianName, diseases, prescriptions] = await Promise.all([
+        HenryCore.query(FC().QUERIES.GetPatient, { input: { uuid: patientUuid } }),
+        data.fetchPhysicianName(SCRIPT_NAME),
+        data.fetchDiseases(patientUuid, SCRIPT_NAME),
+        data.fetchLatestPrescriptions(patientUuid, SCRIPT_NAME)
       ]);
 
       spinner?.close();
 
-      if (!patientInfo) {
+      const p = patientResult?.data?.getPatient;
+      if (!p) {
         alert('患者情報を取得できませんでした');
         return;
       }
+
+      const birthDate = p.detail?.birthDate;
+      const patientInfo = {
+        patient_uuid: patientUuid,
+        patient_name: (p.fullName || '').replace(/\u3000/g, ' '),
+        patient_name_kana: utils.katakanaToHiragana(p.fullNamePhonetic || ''),
+        birth_date_wareki: birthDate?.year ? toBirthDateWareki(birthDate.year, birthDate.month, birthDate.day) : '',
+        sex: utils.formatSex(p.detail?.sexType),
+        postal_code: p.detail?.postalCode || '',
+        address: p.detail?.addressLine_1 || '',
+        phone: p.detail?.phoneNumber || ''
+      };
 
       // 下書き読み込み（DraftStorage / localStorageマイグレーション対応）
       const ds = pageWindow.HenryCore?.modules?.DraftStorage;
@@ -788,9 +267,9 @@
         sex: patientInfo.sex,
         postal_code: patientInfo.postal_code,
         address: patientInfo.address,
-        phone: formatPhoneNumber(patientInfo.phone),
+        phone: utils.formatPhoneNumber(patientInfo.phone),
         physician_name: physicianName,
-        creation_date_wareki: getTodayWareki(),
+        creation_date_wareki: utils.getTodayWareki(),
 
         // 患者追加情報
         maiden_name: '',
@@ -831,9 +310,9 @@
       formData.sex = patientInfo.sex;
       formData.postal_code = patientInfo.postal_code;
       formData.address = patientInfo.address;
-      formData.phone = formatPhoneNumber(patientInfo.phone);
+      formData.phone = utils.formatPhoneNumber(patientInfo.phone);
       formData.physician_name = physicianName;
-      formData.creation_date_wareki = getTodayWareki();
+      formData.creation_date_wareki = utils.getTodayWareki();
       formData.diseases = diseases;
       formData.prescriptions = prescriptions;
 
@@ -849,256 +328,25 @@
 
   function showFormModal(formData, lastSavedAt) {
     // 既存モーダルを削除
-    const existingModal = document.getElementById('sekijuji-form-modal');
+    const existingModal = document.getElementById('srf-form-modal');
     if (existingModal) existingModal.remove();
 
     const departments = getSekijujiDepartments();
+    const { utils } = FC();
+    const escapeHtml = utils.escapeHtml;
 
     const modal = document.createElement('div');
-    modal.id = 'sekijuji-form-modal';
+    modal.id = 'srf-form-modal';
     modal.innerHTML = `
       <style>
-        #sekijuji-form-modal {
-          position: fixed;
-          top: 0;
-          left: 0;
-          width: 100%;
-          height: 100%;
-          background: rgba(0,0,0,0.5);
-          z-index: 1500;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-        }
+        ${FC().generateBaseCSS('srf')}
+        /* 高松赤十字病院固有のCSS */
         .srf-container {
-          background: #fff;
-          border-radius: 12px;
-          width: 90%;
           max-width: 900px;
-          max-height: 90vh;
-          display: flex;
-          flex-direction: column;
-          box-shadow: 0 20px 60px rgba(0,0,0,0.3);
-        }
-        .srf-header {
-          padding: 20px 24px;
-          background: #3F51B5;
-          color: white;
-          border-radius: 12px 12px 0 0;
-          display: flex;
-          justify-content: space-between;
-          align-items: center;
-        }
-        .srf-header h2 {
-          margin: 0;
-          font-size: 20px;
-          font-weight: 600;
-        }
-        .srf-close {
-          background: rgba(255,255,255,0.2);
-          border: none;
-          color: white;
-          width: 32px;
-          height: 32px;
-          border-radius: 6px;
-          cursor: pointer;
-          font-size: 20px;
-        }
-        .srf-close:hover {
-          background: rgba(255,255,255,0.3);
-        }
-        .srf-body {
-          flex: 1;
-          overflow-y: auto;
-          padding: 24px;
-        }
-        .srf-section {
-          margin-bottom: 24px;
-        }
-        .srf-section-title {
-          font-size: 16px;
-          font-weight: 600;
-          color: #3F51B5;
-          margin-bottom: 12px;
-          padding-bottom: 8px;
-          border-bottom: 2px solid #C5CAE9;
-        }
-        .srf-row {
-          display: flex;
-          gap: 16px;
-          margin-bottom: 12px;
-        }
-        .srf-field {
-          flex: 1;
-        }
-        .srf-field label {
-          display: block;
-          font-size: 13px;
-          font-weight: 500;
-          color: #666;
-          margin-bottom: 4px;
-        }
-        .srf-field input, .srf-field textarea, .srf-field select {
-          width: 100%;
-          padding: 10px 12px;
-          border: 1px solid #ddd;
-          border-radius: 6px;
-          font-size: 14px;
-          box-sizing: border-box;
-        }
-        .srf-field input:focus, .srf-field textarea:focus, .srf-field select:focus {
-          outline: none;
-          border-color: #3F51B5;
-          box-shadow: 0 0 0 3px rgba(63, 81, 181, 0.2);
-        }
-        .srf-field select {
-          background: #fff;
-          cursor: pointer;
-        }
-        .srf-field select:disabled {
-          background: #f5f5f5;
-          color: #999;
-          cursor: not-allowed;
-        }
-        .srf-field textarea {
-          resize: vertical;
-          min-height: 60px;
-        }
-        .srf-field.readonly input {
-          background: #f5f5f5;
-          color: #666;
-        }
-        .srf-combobox {
-          position: relative;
-        }
-        .srf-combobox-input {
-          width: 100%;
-          padding: 10px 36px 10px 12px;
-          border: 1px solid #ddd;
-          border-radius: 6px;
-          font-size: 14px;
-          box-sizing: border-box;
-        }
-        .srf-combobox-input:focus {
-          outline: none;
-          border-color: #3F51B5;
-          box-shadow: 0 0 0 3px rgba(63, 81, 181, 0.2);
-        }
-        .srf-combobox-input:disabled {
-          background: #f5f5f5;
-          color: #999;
-        }
-        .srf-combobox-toggle {
-          position: absolute;
-          right: 1px;
-          top: 1px;
-          bottom: 1px;
-          width: 32px;
-          background: #f5f5f5;
-          border: none;
-          border-left: 1px solid #ddd;
-          border-radius: 0 5px 5px 0;
-          cursor: pointer;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          color: #666;
-          font-size: 12px;
-        }
-        .srf-combobox-toggle:hover {
-          background: #e8e8e8;
-        }
-        .srf-combobox-toggle:disabled {
-          cursor: not-allowed;
-          color: #bbb;
-        }
-        .srf-combobox-dropdown {
-          display: none;
-          position: absolute;
-          top: 100%;
-          left: 0;
-          right: 0;
-          max-height: 200px;
-          overflow-y: auto;
-          background: #fff;
-          border: 1px solid #ddd;
-          border-top: none;
-          border-radius: 0 0 6px 6px;
-          box-shadow: 0 4px 12px rgba(0,0,0,0.15);
-          z-index: 1000;
-        }
-        .srf-combobox-dropdown.open {
-          display: block;
-        }
-        .srf-combobox-option {
-          padding: 10px 12px;
-          cursor: pointer;
-          font-size: 14px;
-        }
-        .srf-combobox-option:hover {
-          background: #E8EAF6;
-        }
-        .srf-combobox-option.selected {
-          background: #C5CAE9;
-          color: #303F9F;
-        }
-        .srf-combobox-empty {
-          padding: 10px 12px;
-          color: #999;
-          font-size: 14px;
-        }
-        .srf-checkbox-group {
-          margin-top: 8px;
-          max-height: 200px;
-          overflow-y: auto;
-        }
-        .srf-checkbox-item {
-          display: flex;
-          align-items: center;
-          gap: 8px;
-          padding: 8px 12px;
-          background: #f8f9fa;
-          border-radius: 6px;
-          margin-bottom: 6px;
-        }
-        .srf-checkbox-item input[type="checkbox"] {
-          width: 18px;
-          height: 18px;
-        }
-        .srf-checkbox-item label {
-          margin: 0;
-          flex: 1;
-          font-size: 14px;
-          color: #333;
-        }
-        .srf-checkbox-item.main-disease {
-          background: #E8EAF6;
-          border: 1px solid #C5CAE9;
-        }
-        .srf-radio-group {
-          display: flex;
-          gap: 16px;
-          margin-top: 8px;
-          flex-wrap: wrap;
         }
         .srf-radio-group.vertical {
           flex-direction: column;
           gap: 8px;
-        }
-        .srf-radio-item {
-          display: flex;
-          align-items: center;
-          gap: 6px;
-        }
-        .srf-radio-item input[type="radio"] {
-          width: 18px;
-          height: 18px;
-        }
-        .srf-radio-item label {
-          font-size: 14px;
-          color: #333;
-          margin: 0;
         }
         .srf-conditional-field {
           margin-top: 8px;
@@ -1109,77 +357,6 @@
         }
         .srf-conditional-field.visible {
           display: block;
-        }
-        .srf-footer {
-          padding: 16px 24px;
-          background: #f5f5f5;
-          border-radius: 0 0 12px 12px;
-          display: flex;
-          justify-content: space-between;
-          align-items: center;
-        }
-        .srf-footer-left {
-          font-size: 12px;
-          color: #888;
-        }
-        .srf-footer-right {
-          display: flex;
-          gap: 12px;
-        }
-        .srf-btn {
-          padding: 10px 24px;
-          border: none;
-          border-radius: 6px;
-          font-size: 14px;
-          font-weight: 500;
-          cursor: pointer;
-          transition: all 0.2s;
-        }
-        .srf-btn-secondary {
-          background: #e0e0e0;
-          color: #333;
-        }
-        .srf-btn-secondary:hover {
-          background: #d0d0d0;
-        }
-        .srf-btn-primary {
-          background: #3F51B5;
-          color: white;
-        }
-        .srf-btn-primary:hover {
-          background: #303F9F;
-        }
-        .srf-btn-primary:disabled {
-          background: #ccc;
-          cursor: not-allowed;
-        }
-        .srf-btn-link {
-          background: #E8EAF6;
-          color: #3F51B5;
-          border: 1px solid #9FA8DA;
-          padding: 8px 12px;
-          white-space: nowrap;
-          font-size: 13px;
-        }
-        .srf-btn-link:hover {
-          background: #C5CAE9;
-        }
-        /* 処方履歴選択 */
-        .srf-use-toggle {
-          display: flex;
-          align-items: center;
-          gap: 8px;
-          margin-bottom: 12px;
-        }
-        .srf-use-toggle input[type="checkbox"] {
-          width: 16px;
-          height: 16px;
-          cursor: pointer;
-        }
-        .srf-use-toggle label {
-          font-size: 14px;
-          color: #333;
-          cursor: pointer;
         }
         .srf-checkbox-group {
           display: flex;
@@ -1234,6 +411,22 @@
           font-size: 13px;
           color: #666;
           line-height: 1.5;
+        }
+        .srf-use-toggle {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          margin-bottom: 12px;
+        }
+        .srf-use-toggle input[type="checkbox"] {
+          width: 16px;
+          height: 16px;
+          cursor: pointer;
+        }
+        .srf-use-toggle label {
+          font-size: 14px;
+          color: #333;
+          cursor: pointer;
         }
       </style>
       <div class="srf-container">
@@ -1754,155 +947,112 @@
   // ==========================================
 
   async function generateGoogleDoc(formData) {
-    // スピナー表示
-    const HenryCore = pageWindow.HenryCore;
-    const spinner = HenryCore?.ui?.showSpinner?.('Google Docsを生成中...');
+    // 傷病名テキスト作成（病名選択 + 自由記述）
+    const diagnosisParts = [];
 
-    try {
-      // アクセストークン確認
-      const googleAuth = getGoogleAuth();
-      await googleAuth.getValidAccessToken();
-
-      // 出力フォルダ取得/作成
-      const folder = await DriveAPI.getOrCreateFolder(TEMPLATE_CONFIG.OUTPUT_FOLDER_NAME);
-
-      // テンプレートをコピー（メタデータ付き）
-      const fileName = `診療申込書_高松赤十字病院_${formData.patient_name}_${new Date().toISOString().slice(0, 10)}`;
-      const properties = {
-        henryPatientUuid: formData.patient_uuid || '',
-        henryFileUuid: '',
-        henryFolderUuid: folder.id,
-        henrySource: 'sekijuji-referral-form'
-      };
-      const newDoc = await DriveAPI.copyFile(TEMPLATE_CONFIG.TEMPLATE_ID, fileName, folder.id, properties);
-
-      // 傷病名テキスト作成（病名選択 + 自由記述）
-      const diagnosisParts = [];
-
-      // 選択された病名
-      if (formData.diseases.length > 0 && formData.selected_diseases?.length > 0) {
-        const selectedDiseases = formData.diseases.filter(d => formData.selected_diseases.includes(d.uuid));
-        const diseaseText = selectedDiseases.map(d => d.name).join('，');
-        if (diseaseText) {
-          diagnosisParts.push(diseaseText);
-        }
+    // 選択された病名
+    if (formData.diseases.length > 0 && formData.selected_diseases?.length > 0) {
+      const selectedDiseases = formData.diseases.filter(d => formData.selected_diseases.includes(d.uuid));
+      const diseaseText = selectedDiseases.map(d => d.name).join('，');
+      if (diseaseText) {
+        diagnosisParts.push(diseaseText);
       }
-
-      // 自由記述
-      if (formData.diagnosis_text) {
-        diagnosisParts.push(formData.diagnosis_text);
-      }
-
-      const diagnosisText = diagnosisParts.join('\n');
-
-      // 受診歴テキスト作成
-      let visitHistoryText = '';
-      if (formData.visit_history === 'yes') {
-        visitHistoryText = formData.visit_history_id
-          ? `有（ID: ${formData.visit_history_id}）`
-          : '有';
-      } else if (formData.visit_history === 'no') {
-        visitHistoryText = '無';
-      } else {
-        visitHistoryText = '不明';
-      }
-
-      // 現在の状況テキスト作成
-      let currentStatusText = '';
-      switch (formData.current_status) {
-        case 'outpatient':
-          currentStatusText = '外来通院中';
-          break;
-        case 'inpatient-dpc':
-          currentStatusText = '入院中（DPC対象）';
-          break;
-        case 'inpatient-non-dpc':
-          currentStatusText = '入院中（DPC対象外）';
-          break;
-        case 'facility':
-          currentStatusText = formData.facility_name
-            ? `介護施設入所中（${formData.facility_name}）`
-            : '介護施設入所中';
-          break;
-        default:
-          currentStatusText = '';
-      }
-
-      // 希望日フォーマット
-      const hopeDate1Text = formatHopeDate(formData.hope_date_1);
-      const hopeDate2Text = formatHopeDate(formData.hope_date_2);
-
-      // 処方テキスト作成
-      let prescriptionText = '';
-      if (formData.use_prescriptions && formData.prescriptions?.length > 0 && formData.selected_prescriptions?.length > 0) {
-        prescriptionText = formatSelectedPrescriptions(formData.prescriptions, formData.selected_prescriptions);
-      } else {
-        prescriptionText = formData.prescription_text || '';
-      }
-
-      // プレースホルダー置換リクエスト作成
-      const requests = [
-        DocsAPI.createReplaceTextRequest('{{作成日}}', formData.creation_date_wareki),
-        DocsAPI.createReplaceTextRequest('{{ふりがな}}', formData.patient_name_kana),
-        DocsAPI.createReplaceTextRequest('{{患者氏名}}', formData.patient_name),
-        DocsAPI.createReplaceTextRequest('{{性別}}', formData.sex),
-        DocsAPI.createReplaceTextRequest('{{生年月日}}', formData.birth_date_wareki),
-        DocsAPI.createReplaceTextRequest('{{旧姓}}', formData.maiden_name),
-        DocsAPI.createReplaceTextRequest('{{郵便番号}}', formData.postal_code),
-        DocsAPI.createReplaceTextRequest('{{住所}}', formData.address),
-        DocsAPI.createReplaceTextRequest('{{電話番号}}', formData.phone),
-        DocsAPI.createReplaceTextRequest('{{携帯電話}}', formData.mobile_phone),
-        DocsAPI.createReplaceTextRequest('{{医師名}}', formData.physician_name),
-        DocsAPI.createReplaceTextRequest('{{受診希望科}}', formData.destination_department),
-        DocsAPI.createReplaceTextRequest('{{希望医師名}}', formData.destination_doctor),
-        DocsAPI.createReplaceTextRequest('{{第1希望日}}', hopeDate1Text),
-        DocsAPI.createReplaceTextRequest('{{第2希望日}}', hopeDate2Text),
-        DocsAPI.createReplaceTextRequest('{{受診歴}}', visitHistoryText),
-        DocsAPI.createReplaceTextRequest('{{当院受診状況}}', currentStatusText),
-        DocsAPI.createReplaceTextRequest('{{傷病名}}', diagnosisText),
-        DocsAPI.createReplaceTextRequest('{{治療経過}}', formData.treatment_history),
-        DocsAPI.createReplaceTextRequest('{{既往歴・アレルギー}}', formData.past_history_allergy),
-        DocsAPI.createReplaceTextRequest('{{現在の処方}}', prescriptionText),
-        DocsAPI.createReplaceTextRequest('{{備考}}', formData.remarks)
-      ];
-
-      // 置換実行
-      await DocsAPI.batchUpdate(newDoc.id, requests);
-
-      spinner?.close();
-
-      // 新しいドキュメントを開く
-      const docUrl = `https://docs.google.com/document/d/${newDoc.id}/edit`;
-      GM_openInTab(docUrl, { active: true });
-
-      console.log(`[${SCRIPT_NAME}] Google Docs生成完了: ${docUrl}`);
-
-    } catch (e) {
-      spinner?.close();
-      throw e;
     }
+
+    // 自由記述
+    if (formData.diagnosis_text) {
+      diagnosisParts.push(formData.diagnosis_text);
+    }
+
+    const diagnosisText = diagnosisParts.join('\n');
+
+    // 受診歴テキスト作成
+    let visitHistoryText = '';
+    if (formData.visit_history === 'yes') {
+      visitHistoryText = formData.visit_history_id
+        ? `有（ID: ${formData.visit_history_id}）`
+        : '有';
+    } else if (formData.visit_history === 'no') {
+      visitHistoryText = '無';
+    } else {
+      visitHistoryText = '不明';
+    }
+
+    // 現在の状況テキスト作成
+    let currentStatusText = '';
+    switch (formData.current_status) {
+      case 'outpatient':
+        currentStatusText = '外来通院中';
+        break;
+      case 'inpatient-dpc':
+        currentStatusText = '入院中（DPC対象）';
+        break;
+      case 'inpatient-non-dpc':
+        currentStatusText = '入院中（DPC対象外）';
+        break;
+      case 'facility':
+        currentStatusText = formData.facility_name
+          ? `介護施設入所中（${formData.facility_name}）`
+          : '介護施設入所中';
+        break;
+      default:
+        currentStatusText = '';
+    }
+
+    // 希望日フォーマット
+    const hopeDate1Text = formatHopeDate(formData.hope_date_1);
+    const hopeDate2Text = formatHopeDate(formData.hope_date_2);
+
+    // 処方テキスト作成
+    let prescriptionText = '';
+    if (formData.use_prescriptions && formData.prescriptions?.length > 0 && formData.selected_prescriptions?.length > 0) {
+      prescriptionText = formatSelectedPrescriptions(formData.prescriptions, formData.selected_prescriptions);
+    } else {
+      prescriptionText = formData.prescription_text || '';
+    }
+
+    // 共通フローで出力
+    await FC().generateDoc({
+      scriptName: SCRIPT_NAME,
+      templateId: TEMPLATE_CONFIG.TEMPLATE_ID,
+      fileName: `診療申込書_高松赤十字病院_${formData.patient_name}_${new Date().toISOString().slice(0, 10)}`,
+      source: 'sekijuji-referral-form',
+      patientUuid: formData.patient_uuid,
+      replacements: {
+        '{{作成日}}': formData.creation_date_wareki,
+        '{{ふりがな}}': formData.patient_name_kana,
+        '{{患者氏名}}': formData.patient_name,
+        '{{性別}}': formData.sex,
+        '{{生年月日}}': formData.birth_date_wareki,
+        '{{旧姓}}': formData.maiden_name,
+        '{{郵便番号}}': formData.postal_code,
+        '{{住所}}': formData.address,
+        '{{電話番号}}': formData.phone,
+        '{{携帯電話}}': formData.mobile_phone,
+        '{{医師名}}': formData.physician_name,
+        '{{受診希望科}}': formData.destination_department,
+        '{{希望医師名}}': formData.destination_doctor,
+        '{{第1希望日}}': hopeDate1Text,
+        '{{第2希望日}}': hopeDate2Text,
+        '{{受診歴}}': visitHistoryText,
+        '{{当院受診状況}}': currentStatusText,
+        '{{傷病名}}': diagnosisText,
+        '{{治療経過}}': formData.treatment_history,
+        '{{既往歴・アレルギー}}': formData.past_history_allergy,
+        '{{現在の処方}}': prescriptionText,
+        '{{備考}}': formData.remarks
+      }
+    });
   }
 
   // ==========================================
   // 初期化
   // ==========================================
 
-  async function init() {
-    // HenryCore待機
-    let waited = 0;
-    while (!pageWindow.HenryCore) {
-      await new Promise(r => setTimeout(r, 100));
-      waited += 100;
-      if (waited > 10000) {
-        console.error(`[${SCRIPT_NAME}] HenryCore が見つかりません`);
-        return;
-      }
-    }
-
-    log = pageWindow.HenryCore.utils?.createLogger?.(SCRIPT_NAME);
-
-    // プラグイン登録
-    await pageWindow.HenryCore.registerPlugin({
+  FC().initPlugin({
+    scriptName: SCRIPT_NAME,
+    version: VERSION,
+    pluginConfig: {
       id: 'sekijuji-referral-form',
       name: '診療申込書（高松赤十字病院）',
       icon: '🏥',
@@ -1912,10 +1062,6 @@
       group: '診療申込書',
       groupIcon: '📋',
       onClick: showSekijujiForm
-    });
-
-    console.log(`[${SCRIPT_NAME}] Ready (v${VERSION})`);
-  }
-
-  init();
+    }
+  });
 })();

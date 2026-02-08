@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         香川大学医学部附属病院 FAX診療予約申込書
 // @namespace    https://henry-app.jp/
-// @version      1.3.0
+// @version      1.4.0
 // @description  香川大学医学部附属病院へのFAX診療予約申込書を作成
 // @author       sk powered by Claude
 // @match        https://henry-app.jp/*
@@ -43,6 +43,8 @@
  *
  * ■ 依存関係
  * - henry_core.user.js: GoogleAuth API（OAuth認証）
+ * - henry_form_commons.user.js: 共通モジュール
+ * - henry_hospitals.user.js: 香川大学病院の診療科・医師データ
  * - Google Docs API: 文書の作成・編集
  */
 
@@ -54,14 +56,12 @@
 
   const pageWindow = typeof unsafeWindow !== 'undefined' ? unsafeWindow : window;
 
+  // 共通モジュール参照
+  const FC = () => pageWindow.HenryFormCommons;
+
   // ==========================================
   // 設定
   // ==========================================
-
-  const API_CONFIG = {
-    DRIVE_API_BASE: 'https://www.googleapis.com/drive/v3',
-    DOCS_API_BASE: 'https://docs.googleapis.com/v1'
-  };
 
   const TEMPLATE_CONFIG = {
     TEMPLATE_ID: '1yrp8y4PJEKMFxA52tjp-grpxMixsJz3b5Gbx4W79oo8',
@@ -141,306 +141,9 @@
     accent: '#C5CAE9'
   };
 
-
-  let log = null;
-
   // ==========================================
-  // GraphQL クエリ
+  // 香川大学病院固有ユーティリティ
   // ==========================================
-
-  const QUERIES = {
-    GetPatient: `
-      query GetPatient($input: GetPatientRequestInput!) {
-        getPatient(input: $input) {
-          serialNumber
-          fullName
-          fullNamePhonetic
-          detail {
-            birthDate { year month day }
-            sexType
-            postalCode
-            addressLine_1
-            phoneNumber
-          }
-        }
-      }
-    `,
-    ListUsers: `
-      query ListUsers($input: ListUsersRequestInput!) {
-        listUsers(input: $input) {
-          users {
-            uuid
-            name
-          }
-        }
-      }
-    `,
-    ListPatientReceiptDiseases: `
-      query ListPatientReceiptDiseases($input: ListPatientReceiptDiseasesRequestInput!) {
-        listPatientReceiptDiseases(input: $input) {
-          patientReceiptDiseases {
-            uuid
-            startDate { year month day }
-            endDate { year month day }
-            outcome
-            isMain
-            isSuspected
-            masterDisease { name code }
-            masterModifiers { name code position }
-            customDiseaseName { value }
-          }
-        }
-      }
-    `
-  };
-
-  // ==========================================
-  // GoogleAuth取得ヘルパー
-  // ==========================================
-
-  function getGoogleAuth() {
-    return pageWindow.HenryCore?.modules?.GoogleAuth;
-  }
-
-  // ==========================================
-  // Google Drive API モジュール
-  // ==========================================
-
-  const DriveAPI = {
-    async request(method, url, options = {}) {
-      const accessToken = await getGoogleAuth().getValidAccessToken();
-
-      return new Promise((resolve, reject) => {
-        const headers = {
-          'Authorization': `Bearer ${accessToken}`,
-          ...options.headers
-        };
-
-        GM_xmlhttpRequest({
-          method,
-          url,
-          headers,
-          data: options.body,
-          responseType: options.responseType || 'text',
-          onload: (response) => {
-            if (response.status >= 200 && response.status < 300) {
-              if (options.responseType === 'arraybuffer') {
-                resolve(response.response);
-              } else {
-                try {
-                  resolve(JSON.parse(response.responseText));
-                } catch {
-                  resolve(response.responseText);
-                }
-              }
-            } else if (response.status === 401) {
-              getGoogleAuth().refreshAccessToken()
-                .then(() => this.request(method, url, options))
-                .then(resolve)
-                .catch(reject);
-            } else {
-              console.error(`[${SCRIPT_NAME}] DriveAPI Error ${response.status}:`, response.responseText);
-              reject(new Error(`API Error: ${response.status}`));
-            }
-          },
-          onerror: (err) => {
-            console.error(`[${SCRIPT_NAME}] DriveAPI Network error:`, err);
-            reject(new Error('API通信エラー'));
-          }
-        });
-      });
-    },
-
-    async copyFile(fileId, newName, parentFolderId = null, properties = null) {
-      const url = `${API_CONFIG.DRIVE_API_BASE}/files/${fileId}/copy`;
-      const body = { name: newName };
-      if (parentFolderId) {
-        body.parents = [parentFolderId];
-      }
-      if (properties) {
-        body.properties = properties;
-      }
-      return await this.request('POST', url, {
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body)
-      });
-    },
-
-    async findFolder(folderName) {
-      const query = `name='${folderName}' and mimeType='application/vnd.google-apps.folder' and 'root' in parents and trashed=false`;
-      const url = `${API_CONFIG.DRIVE_API_BASE}/files?q=${encodeURIComponent(query)}&fields=files(id,name)`;
-      const result = await this.request('GET', url);
-      return result.files?.[0] || null;
-    },
-
-    async createFolder(folderName) {
-      const url = `${API_CONFIG.DRIVE_API_BASE}/files`;
-      return await this.request('POST', url, {
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          name: folderName,
-          mimeType: 'application/vnd.google-apps.folder',
-          parents: ['root']
-        })
-      });
-    },
-
-    async getOrCreateFolder(folderName) {
-      let folder = await this.findFolder(folderName);
-      if (!folder) {
-        folder = await this.createFolder(folderName);
-      }
-      return folder;
-    }
-  };
-
-  // ==========================================
-  // Google Docs API モジュール
-  // ==========================================
-
-  const DocsAPI = {
-    async getDocument(documentId) {
-      const accessToken = await getGoogleAuth().getValidAccessToken();
-      const url = `${API_CONFIG.DOCS_API_BASE}/documents/${documentId}`;
-
-      return new Promise((resolve, reject) => {
-        GM_xmlhttpRequest({
-          method: 'GET',
-          url,
-          headers: { 'Authorization': `Bearer ${accessToken}` },
-          onload: (response) => {
-            if (response.status === 200) {
-              resolve(JSON.parse(response.responseText));
-            } else {
-              reject(new Error(`Docs API Error: ${response.status}`));
-            }
-          },
-          onerror: () => reject(new Error('Docs API通信エラー'))
-        });
-      });
-    },
-
-    async batchUpdate(documentId, requests) {
-      const accessToken = await getGoogleAuth().getValidAccessToken();
-      const url = `${API_CONFIG.DOCS_API_BASE}/documents/${documentId}:batchUpdate`;
-
-      return new Promise((resolve, reject) => {
-        GM_xmlhttpRequest({
-          method: 'POST',
-          url,
-          headers: {
-            'Authorization': `Bearer ${accessToken}`,
-            'Content-Type': 'application/json'
-          },
-          data: JSON.stringify({ requests }),
-          onload: (response) => {
-            if (response.status === 200) {
-              resolve(JSON.parse(response.responseText));
-            } else {
-              console.error(`[${SCRIPT_NAME}] DocsAPI batchUpdate Error:`, response.responseText);
-              reject(new Error(`Docs API Error: ${response.status}`));
-            }
-          },
-          onerror: () => reject(new Error('Docs API通信エラー'))
-        });
-      });
-    },
-
-    createReplaceTextRequest(searchText, replaceText) {
-      return {
-        replaceAllText: {
-          containsText: {
-            text: searchText,
-            matchCase: true
-          },
-          replaceText: replaceText || ''
-        }
-      };
-    }
-  };
-
-  // ==========================================
-  // ユーティリティ関数
-  // ==========================================
-
-  function katakanaToHiragana(str) {
-    if (!str) return '';
-    return str.replace(/[ァ-ヶ]/g, char =>
-      String.fromCharCode(char.charCodeAt(0) - 0x60)
-    );
-  }
-
-  function toWareki(year, month, day) {
-    if (!year) return '';
-
-    let eraName, eraYear;
-    const y = parseInt(year);
-    const m = parseInt(month) || 1;
-
-    if (y >= 2019 && (y > 2019 || m >= 5)) {
-      eraName = '令和';
-      eraYear = y - 2018;
-    } else if (y >= 1989) {
-      eraName = '平成';
-      eraYear = y - 1988;
-    } else if (y >= 1926) {
-      eraName = '昭和';
-      eraYear = y - 1925;
-    } else if (y >= 1912) {
-      eraName = '大正';
-      eraYear = y - 1911;
-    } else {
-      eraName = '明治';
-      eraYear = y - 1867;
-    }
-
-    return `${eraName}${eraYear}年${month}月${day}日`;
-  }
-
-  function toBirthDateWareki(year, month, day) {
-    if (!year) return '';
-    return toWareki(year, month, day);
-  }
-
-  function getTodayWareki() {
-    const today = new Date();
-    return toWareki(today.getFullYear(), today.getMonth() + 1, today.getDate());
-  }
-
-  function formatSex(sexType) {
-    if (sexType === 'SEX_TYPE_MALE') return '男';
-    if (sexType === 'SEX_TYPE_FEMALE') return '女';
-    return '';
-  }
-
-  function formatPhoneNumber(phone) {
-    if (!phone) return '';
-
-    // 全角数字を半角に変換
-    let normalized = phone.replace(/[０-９]/g, s => String.fromCharCode(s.charCodeAt(0) - 0xFEE0));
-    // 全角ハイフン等を半角に変換
-    normalized = normalized.replace(/[ー−‐―]/g, '-');
-    // 数字のみ抽出
-    const digitsOnly = normalized.replace(/[^0-9]/g, '');
-
-    // 携帯電話（11桁、090/080/070/060で始まる）
-    if (digitsOnly.length === 11 && /^0[6789]0/.test(digitsOnly)) {
-      return `${digitsOnly.slice(0, 3)}-${digitsOnly.slice(3, 7)}-${digitsOnly.slice(7)}`;
-    }
-
-    // 市外局番省略（7桁）→ XXX-XXXX
-    if (digitsOnly.length === 7) {
-      return `${digitsOnly.slice(0, 3)}-${digitsOnly.slice(3)}`;
-    }
-
-    // 市外局番省略（8桁）→ XXXX-XXXX
-    if (digitsOnly.length === 8) {
-      return `${digitsOnly.slice(0, 4)}-${digitsOnly.slice(4)}`;
-    }
-
-    // それ以外は全角→半角変換のみ
-    return normalized;
-  }
 
   /**
    * 希望日のフォーマット: "○月○日（曜日）○時頃"
@@ -455,146 +158,10 @@
     return `${month}月${day}日（${weekdays[d.getDay()]}）${timeText}`;
   }
 
-  /**
-   * 年齢計算
-   */
-  function calculateAge(birthYear, birthMonth, birthDay) {
-    if (!birthYear || !birthMonth || !birthDay) return '';
-
-    const today = new Date();
-    const birthDate = new Date(birthYear, birthMonth - 1, birthDay);
-    let age = today.getFullYear() - birthDate.getFullYear();
-    const monthDiff = today.getMonth() - birthDate.getMonth();
-
-    if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < birthDate.getDate())) {
-      age--;
-    }
-
-    return `${age}歳`;
-  }
-
-  function escapeHtml(str) {
-    if (!str) return '';
-    return str
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;')
-      .replace(/"/g, '&quot;')
-      .replace(/'/g, '&#039;');
-  }
-
-
-  // ==========================================
-  // データ取得関数
-  // ==========================================
-
-  async function fetchPatientInfo() {
-    const HenryCore = pageWindow.HenryCore;
-    if (!HenryCore) return null;
-
-    const patientUuid = HenryCore.getPatientUuid();
-    if (!patientUuid) return null;
-
-    try {
-      const result = await HenryCore.query(QUERIES.GetPatient, {
-        input: { uuid: patientUuid }
-      });
-
-      const p = result.data?.getPatient;
-      if (!p) return null;
-
-      const birthDate = p.detail?.birthDate;
-      const birthYear = birthDate?.year;
-      const birthMonth = birthDate?.month;
-      const birthDay = birthDate?.day;
-
-      return {
-        patient_uuid: patientUuid,
-        patient_name: (p.fullName || '').replace(/\u3000/g, ' '),
-        patient_name_kana: katakanaToHiragana(p.fullNamePhonetic || ''),
-        birth_year: birthYear,
-        birth_month: birthMonth,
-        birth_day: birthDay,
-        birth_date_wareki: birthYear ? toBirthDateWareki(birthYear, birthMonth, birthDay) : '',
-        age: calculateAge(birthYear, birthMonth, birthDay),
-        sex: formatSex(p.detail?.sexType),
-        postal_code: p.detail?.postalCode || '',
-        address: p.detail?.addressLine_1 || '',
-        phone: p.detail?.phoneNumber || ''
-      };
-    } catch (e) {
-      console.error(`[${SCRIPT_NAME}] 患者情報取得エラー:`, e.message);
-      return null;
-    }
-  }
-
-  async function fetchPhysicianName() {
-    const HenryCore = pageWindow.HenryCore;
-    if (!HenryCore) return '';
-
-    try {
-      const myUuid = await HenryCore.getMyUuid();
-      if (!myUuid) return '';
-
-      const result = await HenryCore.query(QUERIES.ListUsers, {
-        input: { role: 'DOCTOR', onlyNarcoticPractitioner: false }
-      });
-
-      const users = result.data?.listUsers?.users || [];
-      const me = users.find(u => u.uuid === myUuid);
-      return (me?.name || '').replace(/\u3000/g, ' ');
-    } catch (e) {
-      console.error(`[${SCRIPT_NAME}] 医師名取得エラー:`, e.message);
-      return '';
-    }
-  }
-
   async function fetchDepartmentName() {
     const HenryCore = pageWindow.HenryCore;
     if (!HenryCore) return '';
     return await HenryCore.getMyDepartment() || '';
-  }
-
-
-  async function fetchDiseases(patientUuid) {
-    const HenryCore = pageWindow.HenryCore;
-    if (!HenryCore) return [];
-
-    try {
-      const result = await HenryCore.query(QUERIES.ListPatientReceiptDiseases, {
-        input: {
-          patientUuids: [patientUuid],
-          patientCareType: 'PATIENT_CARE_TYPE_ANY',
-          onlyMain: false
-        }
-      });
-
-      const diseases = result.data?.listPatientReceiptDiseases?.patientReceiptDiseases || [];
-
-      // 終了していない病名のみ、主病名優先でソート
-      return diseases
-        .filter(d => !d.endDate && d.outcome !== 'OUTCOME_CURED' && d.outcome !== 'OUTCOME_DIED')
-        .sort((a, b) => {
-          if (a.isMain && !b.isMain) return -1;
-          if (!a.isMain && b.isMain) return 1;
-          return 0;
-        })
-        .map(d => {
-          const mods = d.masterModifiers || [];
-          const prefixes = mods.filter(m => m.position === 'PREFIX').map(m => m.name.replace(/^・/, '')).join('');
-          const suffixes = mods.filter(m => m.position === 'SUFFIX').map(m => m.name.replace(/^・/, '')).join('');
-          const baseName = d.customDiseaseName?.value || d.masterDisease?.name || '';
-          return {
-            uuid: d.uuid,
-            name: prefixes + baseName + suffixes,
-            isMain: d.isMain,
-            isSuspected: d.isSuspected
-          };
-        });
-    } catch (e) {
-      console.error(`[${SCRIPT_NAME}] 病名取得エラー:`, e.message);
-      return [];
-    }
   }
 
   // ==========================================
@@ -615,7 +182,7 @@
     }
 
     // Google認証チェック
-    const googleAuth = getGoogleAuth();
+    const googleAuth = FC().getGoogleAuth();
     if (!googleAuth) {
       alert('Google認証が設定されていません。\nHenry Toolboxの設定からGoogle認証を行ってください。');
       return;
@@ -625,12 +192,14 @@
     const spinner = HenryCore.ui?.showSpinner?.('データを取得中...');
 
     try {
+      const { data } = FC();
+
       // データ取得（並列実行）
       const [patientInfo, physicianName, departmentName, diseases] = await Promise.all([
-        fetchPatientInfo(),
-        fetchPhysicianName(),
+        data.fetchPatientInfo(SCRIPT_NAME),
+        data.fetchPhysicianName(SCRIPT_NAME),
         fetchDepartmentName(),
-        fetchDiseases(patientUuid)
+        data.fetchDiseases(patientUuid, SCRIPT_NAME)
       ]);
 
       spinner?.close();
@@ -639,6 +208,8 @@
         alert('患者情報を取得できませんでした');
         return;
       }
+
+      const { utils } = FC();
 
       // 下書き読み込み
       const ds = pageWindow.HenryCore?.modules?.DraftStorage;
@@ -657,10 +228,10 @@
         age: patientInfo.age,
         sex: patientInfo.sex,
         address: patientInfo.address,
-        phone: formatPhoneNumber(patientInfo.phone),
+        phone: utils.formatPhoneNumber(patientInfo.phone),
         physician_name: physicianName,
         department_name: departmentName,
-        creation_date_wareki: getTodayWareki(),
+        creation_date_wareki: utils.getTodayWareki(),
 
         // 病名
         diseases: diseases,
@@ -704,7 +275,7 @@
       formData.address = patientInfo.address;
 
       // 電話番号の振り分け（携帯番号パターンなら携帯電話に、それ以外は固定電話に）
-      const rawPhone = formatPhoneNumber(patientInfo.phone);
+      const rawPhone = utils.formatPhoneNumber(patientInfo.phone);
       const phoneDigits = rawPhone.replace(/[^0-9]/g, '');
       if (/^0[6789]0/.test(phoneDigits)) {
         formData.phone = '';
@@ -717,7 +288,7 @@
 
       formData.physician_name = physicianName;
       formData.department_name = departmentName;
-      formData.creation_date_wareki = getTodayWareki();
+      formData.creation_date_wareki = utils.getTodayWareki();
       formData.diseases = diseases;
 
       // モーダル表示
@@ -732,232 +303,24 @@
 
   function showFormModal(formData, lastSavedAt) {
     // 既存モーダルを削除
-    const existingModal = document.getElementById('university-form-modal');
+    const existingModal = document.getElementById('urf-form-modal');
     if (existingModal) existingModal.remove();
 
+    const { utils } = FC();
+    const escapeHtml = utils.escapeHtml;
+
     const modal = document.createElement('div');
-    modal.id = 'university-form-modal';
+    modal.id = 'urf-form-modal';
     modal.innerHTML = `
       <style>
-        #university-form-modal {
-          position: fixed;
-          top: 0;
-          left: 0;
-          width: 100%;
-          height: 100%;
-          background: rgba(0,0,0,0.5);
-          z-index: 1500;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-        }
+        ${FC().generateBaseCSS('urf')}
+        /* 香川大学病院固有のCSS */
         .urf-container {
-          background: #fff;
-          border-radius: 12px;
-          width: 95%;
           max-width: 1100px;
-          max-height: 90vh;
-          display: flex;
-          flex-direction: column;
-          box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+          width: 95%;
         }
         .urf-header {
-          padding: 20px 24px;
           background: linear-gradient(135deg, ${THEME.primary} 0%, ${THEME.primaryDark} 100%);
-          color: white;
-          border-radius: 12px 12px 0 0;
-          display: flex;
-          justify-content: space-between;
-          align-items: center;
-        }
-        .urf-header h2 {
-          margin: 0;
-          font-size: 20px;
-          font-weight: 600;
-        }
-        .urf-close {
-          background: rgba(255,255,255,0.2);
-          border: none;
-          color: white;
-          width: 32px;
-          height: 32px;
-          border-radius: 6px;
-          cursor: pointer;
-          font-size: 20px;
-        }
-        .urf-close:hover {
-          background: rgba(255,255,255,0.3);
-        }
-        .urf-body {
-          flex: 1;
-          overflow-y: auto;
-          padding: 24px;
-        }
-        .urf-section {
-          margin-bottom: 24px;
-        }
-        .urf-section-title {
-          font-size: 16px;
-          font-weight: 600;
-          color: ${THEME.primary};
-          margin-bottom: 12px;
-          padding-bottom: 8px;
-          border-bottom: 2px solid ${THEME.primaryLight};
-        }
-        .urf-row {
-          display: flex;
-          gap: 16px;
-          margin-bottom: 12px;
-        }
-        .urf-field {
-          flex: 1;
-        }
-        .urf-field label {
-          display: block;
-          font-size: 13px;
-          font-weight: 500;
-          color: #666;
-          margin-bottom: 4px;
-        }
-        .urf-field input, .urf-field textarea, .urf-field select {
-          width: 100%;
-          padding: 10px 12px;
-          border: 1px solid #ddd;
-          border-radius: 6px;
-          font-size: 14px;
-          box-sizing: border-box;
-        }
-        .urf-field input:focus, .urf-field textarea:focus, .urf-field select:focus {
-          outline: none;
-          border-color: ${THEME.primary};
-          box-shadow: 0 0 0 3px rgba(79, 195, 247, 0.2);
-        }
-        .urf-field select {
-          background: #fff;
-          cursor: pointer;
-        }
-        .urf-field textarea {
-          resize: vertical;
-          min-height: 80px;
-        }
-        .urf-field.readonly input {
-          background: #f5f5f5;
-          color: #666;
-        }
-        .urf-combobox {
-          position: relative;
-        }
-        .urf-combobox-input {
-          width: 100%;
-          padding: 10px 36px 10px 12px;
-          border: 1px solid #ddd;
-          border-radius: 6px;
-          font-size: 14px;
-          box-sizing: border-box;
-        }
-        .urf-combobox-input:focus {
-          outline: none;
-          border-color: ${THEME.primary};
-          box-shadow: 0 0 0 3px rgba(79, 195, 247, 0.2);
-        }
-        .urf-combobox-toggle {
-          position: absolute;
-          right: 1px;
-          top: 1px;
-          bottom: 1px;
-          width: 32px;
-          background: #f5f5f5;
-          border: none;
-          border-left: 1px solid #ddd;
-          border-radius: 0 5px 5px 0;
-          cursor: pointer;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          color: #666;
-          font-size: 12px;
-        }
-        .urf-combobox-toggle:hover {
-          background: #e8e8e8;
-        }
-        .urf-combobox-dropdown {
-          display: none;
-          position: absolute;
-          top: 100%;
-          left: 0;
-          right: 0;
-          max-height: 200px;
-          overflow-y: auto;
-          background: #fff;
-          border: 1px solid #ddd;
-          border-top: none;
-          border-radius: 0 0 6px 6px;
-          box-shadow: 0 4px 12px rgba(0,0,0,0.15);
-          z-index: 1000;
-        }
-        .urf-combobox-dropdown.open {
-          display: block;
-        }
-        .urf-combobox-option {
-          padding: 10px 12px;
-          cursor: pointer;
-          font-size: 14px;
-        }
-        .urf-combobox-option:hover {
-          background: ${THEME.accent};
-        }
-        .urf-combobox-option.selected {
-          background: ${THEME.primaryLight};
-          color: ${THEME.primaryDark};
-        }
-        .urf-checkbox-group {
-          margin-top: 8px;
-          max-height: 200px;
-          overflow-y: auto;
-        }
-        .urf-checkbox-item {
-          display: flex;
-          align-items: center;
-          gap: 8px;
-          padding: 8px 12px;
-          background: #f8f9fa;
-          border-radius: 6px;
-          margin-bottom: 6px;
-        }
-        .urf-checkbox-item input[type="checkbox"] {
-          width: 18px;
-          height: 18px;
-        }
-        .urf-checkbox-item label {
-          margin: 0;
-          flex: 1;
-          font-size: 14px;
-          color: #333;
-        }
-        .urf-checkbox-item.main-disease {
-          background: ${THEME.accent};
-          border: 1px solid ${THEME.primaryLight};
-        }
-        .urf-radio-group {
-          display: flex;
-          gap: 16px;
-          margin-top: 8px;
-          flex-wrap: wrap;
-        }
-        .urf-radio-item {
-          display: flex;
-          align-items: center;
-          gap: 6px;
-        }
-        .urf-radio-item input[type="radio"] {
-          width: 18px;
-          height: 18px;
-        }
-        .urf-radio-item label {
-          font-size: 14px;
-          color: #333;
-          margin: 0;
         }
         .urf-conditional-field {
           margin-top: 8px;
@@ -1077,49 +440,6 @@
         }
         .urf-external-link:hover {
           text-decoration: underline;
-        }
-        .urf-footer {
-          padding: 16px 24px;
-          background: #f5f5f5;
-          border-radius: 0 0 12px 12px;
-          display: flex;
-          justify-content: space-between;
-          align-items: center;
-        }
-        .urf-footer-left {
-          font-size: 12px;
-          color: #888;
-        }
-        .urf-footer-right {
-          display: flex;
-          gap: 12px;
-        }
-        .urf-btn {
-          padding: 10px 24px;
-          border: none;
-          border-radius: 6px;
-          font-size: 14px;
-          font-weight: 500;
-          cursor: pointer;
-          transition: all 0.2s;
-        }
-        .urf-btn-secondary {
-          background: #e0e0e0;
-          color: #333;
-        }
-        .urf-btn-secondary:hover {
-          background: #d0d0d0;
-        }
-        .urf-btn-primary {
-          background: ${THEME.primary};
-          color: white;
-        }
-        .urf-btn-primary:hover {
-          background: ${THEME.primaryDark};
-        }
-        .urf-btn-primary:disabled {
-          background: #ccc;
-          cursor: not-allowed;
         }
       </style>
       <div class="urf-container">
@@ -1409,7 +729,6 @@
   }
 
   function setupEventListeners(modal, formData) {
-    // 閉じるボタン
     // 変更追跡フラグ
     let isDirty = false;
     const formBody = modal.querySelector('.urf-body');
@@ -1417,6 +736,9 @@
       formBody.addEventListener('input', () => { isDirty = true; });
       formBody.addEventListener('change', () => { isDirty = true; });
     }
+
+    const { utils } = FC();
+    const escapeHtml = utils.escapeHtml;
 
     // モーダルクローズ時の保存確認
     async function confirmClose() {
@@ -1546,7 +868,6 @@
       });
     });
 
-    // 下書き保存
     // クリアボタン
     modal.querySelector('#urf-clear').addEventListener('click', async () => {
       const confirmed = await pageWindow.HenryCore?.ui?.showConfirm?.({
@@ -1585,6 +906,7 @@
       isDirty = false;
     });
 
+    // 下書き保存
     modal.querySelector('#urf-save-draft').addEventListener('click', async () => {
       const data = collectFormData(modal, formData);
       const ds = pageWindow.HenryCore?.modules?.DraftStorage;
@@ -1687,175 +1009,132 @@
   // ==========================================
 
   async function generateGoogleDoc(formData) {
-    // スピナー表示
-    const HenryCore = pageWindow.HenryCore;
-    const spinner = HenryCore?.ui?.showSpinner?.('Google Docsを生成中...');
+    // 傷病名テキスト作成（病名選択 + 自由記述）
+    const diagnosisParts = [];
 
-    try {
-      // アクセストークン確認
-      const googleAuth = getGoogleAuth();
-      await googleAuth.getValidAccessToken();
-
-      // 出力フォルダ取得/作成
-      const folder = await DriveAPI.getOrCreateFolder(TEMPLATE_CONFIG.OUTPUT_FOLDER_NAME);
-
-      // テンプレートをコピー（メタデータ付き）
-      const fileName = `FAX診療予約申込書_香川大学病院_${formData.patient_name}_${new Date().toISOString().slice(0, 10)}`;
-      const properties = {
-        henryPatientUuid: formData.patient_uuid || '',
-        henryFileUuid: '',
-        henryFolderUuid: folder.id,
-        henrySource: 'university-referral-form'
-      };
-      const newDoc = await DriveAPI.copyFile(TEMPLATE_CONFIG.TEMPLATE_ID, fileName, folder.id, properties);
-
-      // 傷病名テキスト作成（病名選択 + 自由記述）
-      const diagnosisParts = [];
-
-      // 選択された病名
-      if (formData.diseases.length > 0 && formData.selected_diseases?.length > 0) {
-        const selectedDiseases = formData.diseases.filter(d => formData.selected_diseases.includes(d.uuid));
-        const diseaseText = selectedDiseases.map(d => d.name).join('、');
-        if (diseaseText) {
-          diagnosisParts.push(diseaseText);
-        }
+    // 選択された病名
+    if (formData.diseases.length > 0 && formData.selected_diseases?.length > 0) {
+      const selectedDiseases = formData.diseases.filter(d => formData.selected_diseases.includes(d.uuid));
+      const diseaseText = selectedDiseases.map(d => d.name).join('、');
+      if (diseaseText) {
+        diagnosisParts.push(diseaseText);
       }
-
-      // 自由記述
-      if (formData.diagnosis_text) {
-        diagnosisParts.push(formData.diagnosis_text);
-      }
-
-      const diagnosisText = diagnosisParts.join('\n');
-
-      // 受診歴テキスト作成
-      let visitHistoryText = '';
-      if (formData.visit_history === 'yes') {
-        visitHistoryText = formData.visit_history_id
-          ? `有（ID: ${formData.visit_history_id}）`
-          : '有';
-      } else if (formData.visit_history === 'unknown') {
-        visitHistoryText = '不明';
-      } else {
-        visitHistoryText = '無';
-      }
-
-      // 希望日フォーマット（時間付き）
-      const hopeDate1Text = formatHopeDate(formData.hope_date_1, formData.hope_date_1_time);
-      const hopeDate2Text = formatHopeDate(formData.hope_date_2, formData.hope_date_2_time);
-
-      // 受診希望科（チェックボックス形式、タブ区切り・行ごとに改行）
-      const departmentsText = DEPARTMENT_ROWS.map(row => {
-        return row.map(dept => {
-          const isSelected = formData.selected_department === dept;
-          return `${isSelected ? '■' : '□'}${dept}`;
-        }).join('\t');
-      }).join('\n');
-
-      // 連絡状況
-      const contactedText = formData.doctor_contacted === 'done' ? '済' : '未';
-
-      // 緊急性
-      const urgencyText = formData.urgency === 'yes' ? '有' : '無';
-
-      // 現在の状況
-      const statusText = formData.current_status === 'hospitalized' ? '入院中' : '入院中でない';
-
-      // 検査データ等の有無
-      let testDataText = '';
-      if (formData.test_data_status === 'yes') {
-        const types = [];
-        if (formData.test_data_xray) types.push('X線');
-        if (formData.test_data_ct) types.push('CT');
-        if (formData.test_data_mr) types.push('MR');
-        if (formData.test_data_other) types.push('その他');
-        testDataText = types.length > 0 ? `有（${types.join('・')}）` : '有';
-      } else {
-        testDataText = '無';
-      }
-
-      // K-MIX R同意書の有無
-      const kmixText = formData.kmix_consent === 'yes' ? '有' : '無';
-
-      // COVID-19
-      let covidText = '';
-      if (formData.covid_status === 'positive') {
-        covidText = '陽性者';
-      } else if (formData.covid_status === 'suspected') {
-        covidText = '疑い（症状あり）';
-      } else {
-        covidText = '症状なし';
-      }
-
-      // プレースホルダー置換リクエスト作成
-      const requests = [
-        DocsAPI.createReplaceTextRequest('{{作成日}}', formData.creation_date_wareki),
-        DocsAPI.createReplaceTextRequest('{{フリガナ}}', formData.patient_name_kana),
-        DocsAPI.createReplaceTextRequest('{{患者氏名}}', formData.patient_name),
-        DocsAPI.createReplaceTextRequest('{{性別}}', formData.sex),
-        DocsAPI.createReplaceTextRequest('{{生年月日}}', formData.birth_date_wareki),
-        DocsAPI.createReplaceTextRequest('{{年齢}}', formData.age),
-        DocsAPI.createReplaceTextRequest('{{住所}}', formData.address),
-        DocsAPI.createReplaceTextRequest('{{電話番号}}', formData.phone),
-        DocsAPI.createReplaceTextRequest('{{携帯電話}}', formData.mobile_phone),
-        DocsAPI.createReplaceTextRequest('{{旧姓}}', formData.maiden_name),
-        DocsAPI.createReplaceTextRequest('{{医師名}}', formData.physician_name),
-        DocsAPI.createReplaceTextRequest('{{診療科}}', formData.department_name),
-        DocsAPI.createReplaceTextRequest('{{受診希望科}}', departmentsText),
-        DocsAPI.createReplaceTextRequest('{{希望医師名}}', formData.destination_doctor),
-        DocsAPI.createReplaceTextRequest('{{連絡}}', contactedText),
-        DocsAPI.createReplaceTextRequest('{{連絡担当者}}', formData.contact_person),
-        DocsAPI.createReplaceTextRequest('{{第1希望日}}', hopeDate1Text),
-        DocsAPI.createReplaceTextRequest('{{第2希望日}}', hopeDate2Text),
-        DocsAPI.createReplaceTextRequest('{{いつまで希望}}', formData.hope_date_until),
-        DocsAPI.createReplaceTextRequest('{{その他希望日}}', formData.hope_date_other),
-        DocsAPI.createReplaceTextRequest('{{受診歴}}', visitHistoryText),
-        DocsAPI.createReplaceTextRequest('{{受診の緊急性}}', urgencyText),
-        DocsAPI.createReplaceTextRequest('{{現在の状況}}', statusText),
-        DocsAPI.createReplaceTextRequest('{{傷病名}}', diagnosisText),
-        DocsAPI.createReplaceTextRequest('{{紹介目的と症状経過}}', formData.referral_purpose),
-        DocsAPI.createReplaceTextRequest('{{検査データ等の有無}}', testDataText),
-        DocsAPI.createReplaceTextRequest('{{K-MIXR同意書の有無}}', kmixText),
-        DocsAPI.createReplaceTextRequest('{{COVID-19}}', covidText)
-      ];
-
-      // 置換実行
-      await DocsAPI.batchUpdate(newDoc.id, requests);
-
-      spinner?.close();
-
-      // 新しいドキュメントを開く
-      const docUrl = `https://docs.google.com/document/d/${newDoc.id}/edit`;
-      GM_openInTab(docUrl, { active: true });
-
-      console.log(`[${SCRIPT_NAME}] Google Docs生成完了: ${docUrl}`);
-
-    } catch (e) {
-      spinner?.close();
-      throw e;
     }
+
+    // 自由記述
+    if (formData.diagnosis_text) {
+      diagnosisParts.push(formData.diagnosis_text);
+    }
+
+    const diagnosisText = diagnosisParts.join('\n');
+
+    // 受診歴テキスト作成
+    let visitHistoryText = '';
+    if (formData.visit_history === 'yes') {
+      visitHistoryText = formData.visit_history_id
+        ? `有（ID: ${formData.visit_history_id}）`
+        : '有';
+    } else if (formData.visit_history === 'unknown') {
+      visitHistoryText = '不明';
+    } else {
+      visitHistoryText = '無';
+    }
+
+    // 希望日フォーマット（時間付き）
+    const hopeDate1Text = formatHopeDate(formData.hope_date_1, formData.hope_date_1_time);
+    const hopeDate2Text = formatHopeDate(formData.hope_date_2, formData.hope_date_2_time);
+
+    // 受診希望科（チェックボックス形式、タブ区切り・行ごとに改行）
+    const departmentsText = DEPARTMENT_ROWS.map(row => {
+      return row.map(dept => {
+        const isSelected = formData.selected_department === dept;
+        return `${isSelected ? '■' : '□'}${dept}`;
+      }).join('\t');
+    }).join('\n');
+
+    // 連絡状況
+    const contactedText = formData.doctor_contacted === 'done' ? '済' : '未';
+
+    // 緊急性
+    const urgencyText = formData.urgency === 'yes' ? '有' : '無';
+
+    // 現在の状況
+    const statusText = formData.current_status === 'hospitalized' ? '入院中' : '入院中でない';
+
+    // 検査データ等の有無
+    let testDataText = '';
+    if (formData.test_data_status === 'yes') {
+      const types = [];
+      if (formData.test_data_xray) types.push('X線');
+      if (formData.test_data_ct) types.push('CT');
+      if (formData.test_data_mr) types.push('MR');
+      if (formData.test_data_other) types.push('その他');
+      testDataText = types.length > 0 ? `有（${types.join('・')}）` : '有';
+    } else {
+      testDataText = '無';
+    }
+
+    // K-MIX R同意書の有無
+    const kmixText = formData.kmix_consent === 'yes' ? '有' : '無';
+
+    // COVID-19
+    let covidText = '';
+    if (formData.covid_status === 'positive') {
+      covidText = '陽性者';
+    } else if (formData.covid_status === 'suspected') {
+      covidText = '疑い（症状あり）';
+    } else {
+      covidText = '症状なし';
+    }
+
+    // 共通フローで出力
+    await FC().generateDoc({
+      scriptName: SCRIPT_NAME,
+      templateId: TEMPLATE_CONFIG.TEMPLATE_ID,
+      fileName: `FAX診療予約申込書_香川大学病院_${formData.patient_name}_${new Date().toISOString().slice(0, 10)}`,
+      source: 'university-referral-form',
+      patientUuid: formData.patient_uuid,
+      replacements: {
+        '{{作成日}}': formData.creation_date_wareki,
+        '{{フリガナ}}': formData.patient_name_kana,
+        '{{患者氏名}}': formData.patient_name,
+        '{{性別}}': formData.sex,
+        '{{生年月日}}': formData.birth_date_wareki,
+        '{{年齢}}': formData.age,
+        '{{住所}}': formData.address,
+        '{{電話番号}}': formData.phone,
+        '{{携帯電話}}': formData.mobile_phone,
+        '{{旧姓}}': formData.maiden_name,
+        '{{医師名}}': formData.physician_name,
+        '{{診療科}}': formData.department_name,
+        '{{受診希望科}}': departmentsText,
+        '{{希望医師名}}': formData.destination_doctor,
+        '{{連絡}}': contactedText,
+        '{{連絡担当者}}': formData.contact_person,
+        '{{第1希望日}}': hopeDate1Text,
+        '{{第2希望日}}': hopeDate2Text,
+        '{{いつまで希望}}': formData.hope_date_until,
+        '{{その他希望日}}': formData.hope_date_other,
+        '{{受診歴}}': visitHistoryText,
+        '{{受診の緊急性}}': urgencyText,
+        '{{現在の状況}}': statusText,
+        '{{傷病名}}': diagnosisText,
+        '{{紹介目的と症状経過}}': formData.referral_purpose,
+        '{{検査データ等の有無}}': testDataText,
+        '{{K-MIXR同意書の有無}}': kmixText,
+        '{{COVID-19}}': covidText
+      }
+    });
   }
 
   // ==========================================
   // 初期化
   // ==========================================
 
-  async function init() {
-    // HenryCore待機
-    let waited = 0;
-    while (!pageWindow.HenryCore) {
-      await new Promise(r => setTimeout(r, 100));
-      waited += 100;
-      if (waited > 10000) {
-        console.error(`[${SCRIPT_NAME}] HenryCore が見つかりません`);
-        return;
-      }
-    }
-
-    log = pageWindow.HenryCore.utils?.createLogger?.(SCRIPT_NAME);
-
-    // プラグイン登録
-    await pageWindow.HenryCore.registerPlugin({
+  FC().initPlugin({
+    scriptName: SCRIPT_NAME,
+    version: VERSION,
+    pluginConfig: {
       id: 'university-referral-form',
       name: '診療申込書（香川大学病院）',
       icon: '🎓',
@@ -1865,10 +1144,6 @@
       group: '診療申込書',
       groupIcon: '📋',
       onClick: showUniversityForm
-    });
-
-    console.log(`[${SCRIPT_NAME}] Ready (v${VERSION})`);
-  }
-
-  init();
+    }
+  });
 })();

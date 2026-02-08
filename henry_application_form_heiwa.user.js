@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         高松平和病院 診療申込書
 // @namespace    https://henry-app.jp/
-// @version      1.4.0
+// @version      1.5.0
 // @description  高松平和病院への診療申込書を作成
 // @author       sk powered by Claude
 // @match        https://henry-app.jp/*
@@ -44,6 +44,7 @@
  *
  * ■ 依存関係
  * - henry_core.user.js: GoogleAuth API（OAuth認証）
+ * - henry_form_commons.user.js: 共通モジュール
  * - henry_hospitals.user.js: 高松平和病院の診療科・医師データ
  * - Google Docs API: 文書の作成・編集
  */
@@ -59,11 +60,6 @@
   // ==========================================
   // 設定
   // ==========================================
-
-  const API_CONFIG = {
-    DRIVE_API_BASE: 'https://www.googleapis.com/drive/v3',
-    DOCS_API_BASE: 'https://docs.googleapis.com/v1'
-  };
 
   const TEMPLATE_CONFIG = {
     TEMPLATE_ID: '1fYGffOVDrurJyLPWZh9nokDexZh7Rg4tgzEJ1VeGmo8',
@@ -97,64 +93,23 @@
     accent: '#C5CAE9'
   };
 
-  let log = null;
+  // 共通モジュール参照
+  const FC = () => pageWindow.HenryFormCommons;
 
   // ==========================================
-  // GraphQL クエリ
+  // 高松平和病院固有ユーティリティ
   // ==========================================
 
-  const QUERIES = {
-    GetPatient: `
-      query GetPatient($input: GetPatientRequestInput!) {
-        getPatient(input: $input) {
-          serialNumber
-          fullName
-          fullNamePhonetic
-          detail {
-            birthDate { year month day }
-            sexType
-            postalCode
-            addressLine_1
-            phoneNumber
-          }
-        }
-      }
-    `,
-    ListUsers: `
-      query ListUsers($input: ListUsersRequestInput!) {
-        listUsers(input: $input) {
-          users {
-            uuid
-            name
-          }
-        }
-      }
-    `,
-    ListPatientReceiptDiseases: `
-      query ListPatientReceiptDiseases($input: ListPatientReceiptDiseasesRequestInput!) {
-        listPatientReceiptDiseases(input: $input) {
-          patientReceiptDiseases {
-            uuid
-            startDate { year month day }
-            endDate { year month day }
-            outcome
-            isMain
-            isSuspected
-            masterDisease { name code }
-            masterModifiers { name code position }
-            customDiseaseName { value }
-          }
-        }
-      }
-    `
-  };
-
-  // ==========================================
-  // GoogleAuth取得ヘルパー
-  // ==========================================
-
-  function getGoogleAuth() {
-    return pageWindow.HenryCore?.modules?.GoogleAuth;
+  /**
+   * 希望日のフォーマット: "○月○日（曜日）"
+   */
+  function formatHopeDate(dateStr) {
+    if (!dateStr) return '';
+    const d = new Date(dateStr);
+    const weekdays = ['日', '月', '火', '水', '木', '金', '土'];
+    const month = d.getMonth() + 1;
+    const day = d.getDate();
+    return `${month}月${day}日（${weekdays[d.getDay()]}）`;
   }
 
   // ==========================================
@@ -177,374 +132,6 @@
   }
 
   // ==========================================
-  // Google Drive API モジュール
-  // ==========================================
-
-  const DriveAPI = {
-    async request(method, url, options = {}) {
-      const accessToken = await getGoogleAuth().getValidAccessToken();
-
-      return new Promise((resolve, reject) => {
-        const headers = {
-          'Authorization': `Bearer ${accessToken}`,
-          ...options.headers
-        };
-
-        GM_xmlhttpRequest({
-          method,
-          url,
-          headers,
-          data: options.body,
-          responseType: options.responseType || 'text',
-          onload: (response) => {
-            if (response.status >= 200 && response.status < 300) {
-              if (options.responseType === 'arraybuffer') {
-                resolve(response.response);
-              } else {
-                try {
-                  resolve(JSON.parse(response.responseText));
-                } catch {
-                  resolve(response.responseText);
-                }
-              }
-            } else if (response.status === 401) {
-              getGoogleAuth().refreshAccessToken()
-                .then(() => this.request(method, url, options))
-                .then(resolve)
-                .catch(reject);
-            } else {
-              console.error(`[${SCRIPT_NAME}] DriveAPI Error ${response.status}:`, response.responseText);
-              reject(new Error(`API Error: ${response.status}`));
-            }
-          },
-          onerror: (err) => {
-            console.error(`[${SCRIPT_NAME}] DriveAPI Network error:`, err);
-            reject(new Error('API通信エラー'));
-          }
-        });
-      });
-    },
-
-    async copyFile(fileId, newName, parentFolderId = null, properties = null) {
-      const url = `${API_CONFIG.DRIVE_API_BASE}/files/${fileId}/copy`;
-      const body = { name: newName };
-      if (parentFolderId) {
-        body.parents = [parentFolderId];
-      }
-      if (properties) {
-        body.properties = properties;
-      }
-      return await this.request('POST', url, {
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body)
-      });
-    },
-
-    async findFolder(folderName) {
-      const query = `name='${folderName}' and mimeType='application/vnd.google-apps.folder' and 'root' in parents and trashed=false`;
-      const url = `${API_CONFIG.DRIVE_API_BASE}/files?q=${encodeURIComponent(query)}&fields=files(id,name)`;
-      const result = await this.request('GET', url);
-      return result.files?.[0] || null;
-    },
-
-    async createFolder(folderName) {
-      const url = `${API_CONFIG.DRIVE_API_BASE}/files`;
-      return await this.request('POST', url, {
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          name: folderName,
-          mimeType: 'application/vnd.google-apps.folder',
-          parents: ['root']
-        })
-      });
-    },
-
-    async getOrCreateFolder(folderName) {
-      let folder = await this.findFolder(folderName);
-      if (!folder) {
-        folder = await this.createFolder(folderName);
-      }
-      return folder;
-    }
-  };
-
-  // ==========================================
-  // Google Docs API モジュール
-  // ==========================================
-
-  const DocsAPI = {
-    async getDocument(documentId) {
-      const accessToken = await getGoogleAuth().getValidAccessToken();
-      const url = `${API_CONFIG.DOCS_API_BASE}/documents/${documentId}`;
-
-      return new Promise((resolve, reject) => {
-        GM_xmlhttpRequest({
-          method: 'GET',
-          url,
-          headers: { 'Authorization': `Bearer ${accessToken}` },
-          onload: (response) => {
-            if (response.status === 200) {
-              resolve(JSON.parse(response.responseText));
-            } else {
-              reject(new Error(`Docs API Error: ${response.status}`));
-            }
-          },
-          onerror: () => reject(new Error('Docs API通信エラー'))
-        });
-      });
-    },
-
-    async batchUpdate(documentId, requests) {
-      const accessToken = await getGoogleAuth().getValidAccessToken();
-      const url = `${API_CONFIG.DOCS_API_BASE}/documents/${documentId}:batchUpdate`;
-
-      return new Promise((resolve, reject) => {
-        GM_xmlhttpRequest({
-          method: 'POST',
-          url,
-          headers: {
-            'Authorization': `Bearer ${accessToken}`,
-            'Content-Type': 'application/json'
-          },
-          data: JSON.stringify({ requests }),
-          onload: (response) => {
-            if (response.status === 200) {
-              resolve(JSON.parse(response.responseText));
-            } else {
-              console.error(`[${SCRIPT_NAME}] DocsAPI batchUpdate Error:`, response.responseText);
-              reject(new Error(`Docs API Error: ${response.status}`));
-            }
-          },
-          onerror: () => reject(new Error('Docs API通信エラー'))
-        });
-      });
-    },
-
-    createReplaceTextRequest(searchText, replaceText) {
-      return {
-        replaceAllText: {
-          containsText: {
-            text: searchText,
-            matchCase: true
-          },
-          replaceText: replaceText || ''
-        }
-      };
-    }
-  };
-
-  // ==========================================
-  // ユーティリティ関数
-  // ==========================================
-
-  function katakanaToHiragana(str) {
-    if (!str) return '';
-    return str.replace(/[ァ-ヶ]/g, char =>
-      String.fromCharCode(char.charCodeAt(0) - 0x60)
-    );
-  }
-
-  function toWareki(year, month, day) {
-    if (!year) return '';
-
-    let eraName, eraYear;
-    const y = parseInt(year);
-    const m = parseInt(month) || 1;
-
-    if (y >= 2019 && (y > 2019 || m >= 5)) {
-      eraName = '令和';
-      eraYear = y - 2018;
-    } else if (y >= 1989) {
-      eraName = '平成';
-      eraYear = y - 1988;
-    } else if (y >= 1926) {
-      eraName = '昭和';
-      eraYear = y - 1925;
-    } else if (y >= 1912) {
-      eraName = '大正';
-      eraYear = y - 1911;
-    } else {
-      eraName = '明治';
-      eraYear = y - 1867;
-    }
-
-    return `${eraName}${eraYear}年${month}月${day}日`;
-  }
-
-  /**
-   * 生年月日の和暦フォーマット
-   * 例: 昭和60年5月10日
-   */
-  function toBirthDateWareki(year, month, day) {
-    if (!year) return '';
-    return toWareki(year, month, day);
-  }
-
-  function getTodayWareki() {
-    const today = new Date();
-    return toWareki(today.getFullYear(), today.getMonth() + 1, today.getDate());
-  }
-
-  function formatSex(sexType) {
-    if (sexType === 'SEX_TYPE_MALE') return '男';
-    if (sexType === 'SEX_TYPE_FEMALE') return '女';
-    return '';
-  }
-
-  function formatPhoneNumber(phone) {
-    if (!phone) return '';
-
-    // 全角数字を半角に変換
-    let normalized = phone.replace(/[０-９]/g, s => String.fromCharCode(s.charCodeAt(0) - 0xFEE0));
-    // 全角ハイフン等を半角に変換
-    normalized = normalized.replace(/[ー−‐―]/g, '-');
-    // 数字のみ抽出
-    const digitsOnly = normalized.replace(/[^0-9]/g, '');
-
-    // 携帯電話（11桁、090/080/070/060で始まる）
-    if (digitsOnly.length === 11 && /^0[6789]0/.test(digitsOnly)) {
-      return `${digitsOnly.slice(0, 3)}-${digitsOnly.slice(3, 7)}-${digitsOnly.slice(7)}`;
-    }
-
-    // 市外局番省略（7桁）→ XXX-XXXX
-    if (digitsOnly.length === 7) {
-      return `${digitsOnly.slice(0, 3)}-${digitsOnly.slice(3)}`;
-    }
-
-    // 市外局番省略（8桁）→ XXXX-XXXX
-    if (digitsOnly.length === 8) {
-      return `${digitsOnly.slice(0, 4)}-${digitsOnly.slice(4)}`;
-    }
-
-    // それ以外は全角→半角変換のみ
-    return normalized;
-  }
-
-  /**
-   * 希望日のフォーマット: "○月○日（曜日）"
-   */
-  function formatHopeDate(dateStr) {
-    if (!dateStr) return '';
-    const d = new Date(dateStr);
-    const weekdays = ['日', '月', '火', '水', '木', '金', '土'];
-    const month = d.getMonth() + 1;
-    const day = d.getDate();
-    return `${month}月${day}日（${weekdays[d.getDay()]}）`;
-  }
-
-  function escapeHtml(str) {
-    if (!str) return '';
-    return str
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;')
-      .replace(/"/g, '&quot;')
-      .replace(/'/g, '&#039;');
-  }
-
-  // ==========================================
-  // データ取得関数
-  // ==========================================
-
-  async function fetchPatientInfo() {
-    const HenryCore = pageWindow.HenryCore;
-    if (!HenryCore) return null;
-
-    const patientUuid = HenryCore.getPatientUuid();
-    if (!patientUuid) return null;
-
-    try {
-      const result = await HenryCore.query(QUERIES.GetPatient, {
-        input: { uuid: patientUuid }
-      });
-
-      const p = result.data?.getPatient;
-      if (!p) return null;
-
-      const birthDate = p.detail?.birthDate;
-      const birthYear = birthDate?.year;
-      const birthMonth = birthDate?.month;
-      const birthDay = birthDate?.day;
-
-      return {
-        patient_uuid: patientUuid,
-        patient_name: (p.fullName || '').replace(/\u3000/g, ' '),
-        patient_name_kana: katakanaToHiragana(p.fullNamePhonetic || ''),
-        birth_date_wareki: birthYear ? toBirthDateWareki(birthYear, birthMonth, birthDay) : '',
-        sex: formatSex(p.detail?.sexType),
-        postal_code: p.detail?.postalCode || '',
-        address: p.detail?.addressLine_1 || '',
-        phone: p.detail?.phoneNumber || ''
-      };
-    } catch (e) {
-      console.error(`[${SCRIPT_NAME}] 患者情報取得エラー:`, e.message);
-      return null;
-    }
-  }
-
-  async function fetchPhysicianName() {
-    const HenryCore = pageWindow.HenryCore;
-    if (!HenryCore) return '';
-
-    try {
-      const myUuid = await HenryCore.getMyUuid();
-      if (!myUuid) return '';
-
-      const result = await HenryCore.query(QUERIES.ListUsers, {
-        input: { role: 'DOCTOR', onlyNarcoticPractitioner: false }
-      });
-
-      const users = result.data?.listUsers?.users || [];
-      const me = users.find(u => u.uuid === myUuid);
-      return (me?.name || '').replace(/\u3000/g, ' ');
-    } catch (e) {
-      console.error(`[${SCRIPT_NAME}] 医師名取得エラー:`, e.message);
-      return '';
-    }
-  }
-
-  async function fetchDiseases(patientUuid) {
-    const HenryCore = pageWindow.HenryCore;
-    if (!HenryCore) return [];
-
-    try {
-      const result = await HenryCore.query(QUERIES.ListPatientReceiptDiseases, {
-        input: {
-          patientUuids: [patientUuid],
-          patientCareType: 'PATIENT_CARE_TYPE_ANY',
-          onlyMain: false
-        }
-      });
-
-      const diseases = result.data?.listPatientReceiptDiseases?.patientReceiptDiseases || [];
-
-      // 終了していない病名のみ、主病名優先でソート
-      return diseases
-        .filter(d => !d.endDate && d.outcome !== 'OUTCOME_CURED' && d.outcome !== 'OUTCOME_DIED')
-        .sort((a, b) => {
-          if (a.isMain && !b.isMain) return -1;
-          if (!a.isMain && b.isMain) return 1;
-          return 0;
-        })
-        .map(d => {
-          const mods = d.masterModifiers || [];
-          const prefixes = mods.filter(m => m.position === 'PREFIX').map(m => m.name.replace(/^・/, '')).join('');
-          const suffixes = mods.filter(m => m.position === 'SUFFIX').map(m => m.name.replace(/^・/, '')).join('');
-          const baseName = d.customDiseaseName?.value || d.masterDisease?.name || '';
-          return {
-            uuid: d.uuid,
-            name: prefixes + baseName + suffixes,
-            isMain: d.isMain,
-            isSuspected: d.isSuspected
-          };
-        });
-    } catch (e) {
-      console.error(`[${SCRIPT_NAME}] 病名取得エラー:`, e.message);
-      return [];
-    }
-  }
-
-  // ==========================================
   // フォーム表示
   // ==========================================
 
@@ -562,7 +149,7 @@
     }
 
     // Google認証チェック
-    const googleAuth = getGoogleAuth();
+    const googleAuth = FC().getGoogleAuth();
     if (!googleAuth) {
       alert('Google認証が設定されていません。\nHenry Toolboxの設定からGoogle認証を行ってください。');
       return;
@@ -572,11 +159,13 @@
     const spinner = HenryCore.ui?.showSpinner?.('データを取得中...');
 
     try {
+      const { data } = FC();
+
       // データ取得（並列実行）
       const [patientInfo, physicianName, diseases] = await Promise.all([
-        fetchPatientInfo(),
-        fetchPhysicianName(),
-        fetchDiseases(patientUuid)
+        data.fetchPatientInfo(SCRIPT_NAME),
+        data.fetchPhysicianName(SCRIPT_NAME),
+        data.fetchDiseases(patientUuid, SCRIPT_NAME)
       ]);
 
       spinner?.close();
@@ -585,6 +174,8 @@
         alert('患者情報を取得できませんでした');
         return;
       }
+
+      const { utils } = FC();
 
       // 下書き読み込み（DraftStorage / localStorageマイグレーション対応）
       const ds = pageWindow.HenryCore?.modules?.DraftStorage;
@@ -603,9 +194,9 @@
         sex: patientInfo.sex,
         postal_code: patientInfo.postal_code,
         address: patientInfo.address,
-        phone: formatPhoneNumber(patientInfo.phone),
+        phone: utils.formatPhoneNumber(patientInfo.phone),
         physician_name: physicianName,
-        creation_date_wareki: getTodayWareki(),
+        creation_date_wareki: utils.getTodayWareki(),
 
         // 病名
         diseases: diseases,
@@ -661,9 +252,9 @@
       formData.sex = patientInfo.sex;
       formData.postal_code = patientInfo.postal_code;
       formData.address = patientInfo.address;
-      formData.phone = formatPhoneNumber(patientInfo.phone);
+      formData.phone = utils.formatPhoneNumber(patientInfo.phone);
       formData.physician_name = physicianName;
-      formData.creation_date_wareki = getTodayWareki();
+      formData.creation_date_wareki = utils.getTodayWareki();
       formData.diseases = diseases;
 
       // モーダル表示
@@ -678,78 +269,23 @@
 
   function showFormModal(formData, lastSavedAt) {
     // 既存モーダルを削除
-    const existingModal = document.getElementById('heiwa-form-modal');
+    const existingModal = document.getElementById('hrf-form-modal');
     if (existingModal) existingModal.remove();
 
+    const { utils } = FC();
+    const escapeHtml = utils.escapeHtml;
+
     const modal = document.createElement('div');
-    modal.id = 'heiwa-form-modal';
+    modal.id = 'hrf-form-modal';
     modal.innerHTML = `
       <style>
-        #heiwa-form-modal {
-          position: fixed;
-          top: 0;
-          left: 0;
-          width: 100%;
-          height: 100%;
-          background: rgba(0,0,0,0.5);
-          z-index: 1500;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-        }
+        ${FC().generateBaseCSS('hrf')}
+        /* 高松平和病院固有のスタイルオーバーライド */
         .hrf-container {
-          background: #fff;
-          border-radius: 12px;
-          width: 90%;
           max-width: 900px;
-          max-height: 90vh;
-          display: flex;
-          flex-direction: column;
-          box-shadow: 0 20px 60px rgba(0,0,0,0.3);
         }
         .hrf-header {
-          padding: 20px 24px;
           background: linear-gradient(135deg, ${THEME.primary} 0%, ${THEME.primaryDark} 100%);
-          color: white;
-          border-radius: 12px 12px 0 0;
-          display: flex;
-          justify-content: space-between;
-          align-items: center;
-        }
-        .hrf-header h2 {
-          margin: 0;
-          font-size: 20px;
-          font-weight: 600;
-        }
-        .hrf-close {
-          background: rgba(255,255,255,0.2);
-          border: none;
-          color: white;
-          width: 32px;
-          height: 32px;
-          border-radius: 6px;
-          cursor: pointer;
-          font-size: 20px;
-        }
-        .hrf-close:hover {
-          background: rgba(255,255,255,0.3);
-        }
-        .hrf-body {
-          flex: 1;
-          overflow-y: auto;
-          padding: 24px;
-        }
-        .hrf-section {
-          margin-bottom: 24px;
-        }
-        .hrf-section-title {
-          font-size: 16px;
-          font-weight: 600;
-          color: ${THEME.primary};
-          margin-bottom: 12px;
-          padding-bottom: 8px;
-          border-bottom: 2px solid ${THEME.primaryLight};
         }
         .hrf-section-title.collapsible {
           cursor: pointer;
@@ -758,7 +294,7 @@
           gap: 8px;
         }
         .hrf-section-title.collapsible::before {
-          content: '▼';
+          content: '\\25BC';
           font-size: 12px;
           transition: transform 0.2s;
         }
@@ -773,181 +309,13 @@
           max-height: 0;
           padding: 0;
         }
-        .hrf-row {
-          display: flex;
-          gap: 16px;
-          margin-bottom: 12px;
-        }
-        .hrf-field {
-          flex: 1;
-        }
-        .hrf-field label {
-          display: block;
-          font-size: 13px;
-          font-weight: 500;
-          color: #666;
-          margin-bottom: 4px;
-        }
-        .hrf-field input, .hrf-field textarea, .hrf-field select {
-          width: 100%;
-          padding: 10px 12px;
-          border: 1px solid #ddd;
-          border-radius: 6px;
-          font-size: 14px;
-          box-sizing: border-box;
-        }
-        .hrf-field input:focus, .hrf-field textarea:focus, .hrf-field select:focus {
-          outline: none;
-          border-color: ${THEME.primary};
-          box-shadow: 0 0 0 3px rgba(63, 81, 181, 0.2);
-        }
-        .hrf-field select {
-          background: #fff;
-          cursor: pointer;
-        }
-        .hrf-field select:disabled {
-          background: #f5f5f5;
-          color: #999;
-          cursor: not-allowed;
-        }
-        .hrf-field textarea {
-          resize: vertical;
-          min-height: 60px;
-        }
-        .hrf-field.readonly input {
-          background: #f5f5f5;
-          color: #666;
-        }
-        .hrf-combobox {
-          position: relative;
-        }
-        .hrf-combobox-input {
-          width: 100%;
-          padding: 10px 36px 10px 12px;
-          border: 1px solid #ddd;
-          border-radius: 6px;
-          font-size: 14px;
-          box-sizing: border-box;
-        }
-        .hrf-combobox-input:focus {
-          outline: none;
-          border-color: ${THEME.primary};
-          box-shadow: 0 0 0 3px rgba(63, 81, 181, 0.2);
-        }
-        .hrf-combobox-input:disabled {
-          background: #f5f5f5;
-          color: #999;
-        }
-        .hrf-combobox-toggle {
-          position: absolute;
-          right: 1px;
-          top: 1px;
-          bottom: 1px;
-          width: 32px;
-          background: #f5f5f5;
-          border: none;
-          border-left: 1px solid #ddd;
-          border-radius: 0 5px 5px 0;
-          cursor: pointer;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          color: #666;
-          font-size: 12px;
-        }
-        .hrf-combobox-toggle:hover {
-          background: #e8e8e8;
-        }
-        .hrf-combobox-toggle:disabled {
-          cursor: not-allowed;
-          color: #bbb;
-        }
-        .hrf-combobox-dropdown {
-          display: none;
-          position: absolute;
-          top: 100%;
-          left: 0;
-          right: 0;
-          max-height: 200px;
-          overflow-y: auto;
-          background: #fff;
-          border: 1px solid #ddd;
-          border-top: none;
-          border-radius: 0 0 6px 6px;
-          box-shadow: 0 4px 12px rgba(0,0,0,0.15);
-          z-index: 1000;
-        }
-        .hrf-combobox-dropdown.open {
-          display: block;
-        }
-        .hrf-combobox-option {
-          padding: 10px 12px;
-          cursor: pointer;
-          font-size: 14px;
-        }
-        .hrf-combobox-option:hover {
-          background: ${THEME.accent};
-        }
-        .hrf-combobox-option.selected {
-          background: ${THEME.primaryLight};
-          color: ${THEME.primaryDark};
-        }
-        .hrf-combobox-empty {
-          padding: 10px 12px;
-          color: #999;
-          font-size: 14px;
-        }
         .hrf-checkbox-group {
-          margin-top: 8px;
           max-height: 200px;
           overflow-y: auto;
-        }
-        .hrf-checkbox-item {
-          display: flex;
-          align-items: center;
-          gap: 8px;
-          padding: 8px 12px;
-          background: #f8f9fa;
-          border-radius: 6px;
-          margin-bottom: 6px;
-        }
-        .hrf-checkbox-item input[type="checkbox"] {
-          width: 18px;
-          height: 18px;
-        }
-        .hrf-checkbox-item label {
-          margin: 0;
-          flex: 1;
-          font-size: 14px;
-          color: #333;
-        }
-        .hrf-checkbox-item.main-disease {
-          background: ${THEME.accent};
-          border: 1px solid ${THEME.primaryLight};
-        }
-        .hrf-radio-group {
-          display: flex;
-          gap: 16px;
-          margin-top: 8px;
-          flex-wrap: wrap;
         }
         .hrf-radio-group.vertical {
           flex-direction: column;
           gap: 8px;
-        }
-        .hrf-radio-item {
-          display: flex;
-          align-items: center;
-          gap: 6px;
-        }
-        .hrf-radio-item input[type="radio"] {
-          width: 18px;
-          height: 18px;
-        }
-        .hrf-radio-item label {
-          font-size: 14px;
-          color: #333;
-          margin: 0;
         }
         .hrf-inline-checkbox {
           display: flex;
@@ -1000,60 +368,6 @@
         .hrf-multi-checkbox .hrf-checkbox-item {
           flex: 0 0 auto;
           margin-bottom: 0;
-        }
-        .hrf-footer {
-          padding: 16px 24px;
-          background: #f5f5f5;
-          border-radius: 0 0 12px 12px;
-          display: flex;
-          justify-content: space-between;
-          align-items: center;
-        }
-        .hrf-footer-left {
-          font-size: 12px;
-          color: #888;
-        }
-        .hrf-footer-right {
-          display: flex;
-          gap: 12px;
-        }
-        .hrf-btn {
-          padding: 10px 24px;
-          border: none;
-          border-radius: 6px;
-          font-size: 14px;
-          font-weight: 500;
-          cursor: pointer;
-          transition: all 0.2s;
-        }
-        .hrf-btn-secondary {
-          background: #e0e0e0;
-          color: #333;
-        }
-        .hrf-btn-secondary:hover {
-          background: #d0d0d0;
-        }
-        .hrf-btn-primary {
-          background: ${THEME.primary};
-          color: white;
-        }
-        .hrf-btn-primary:hover {
-          background: ${THEME.primaryDark};
-        }
-        .hrf-btn-primary:disabled {
-          background: #ccc;
-          cursor: not-allowed;
-        }
-        .hrf-btn-link {
-          background: ${THEME.accent};
-          color: ${THEME.primary};
-          border: 1px solid ${THEME.primaryLight};
-          padding: 8px 12px;
-          white-space: nowrap;
-          font-size: 13px;
-        }
-        .hrf-btn-link:hover {
-          background: ${THEME.primaryLight};
         }
         .hrf-note {
           background: #fff3e0;
@@ -1564,6 +878,8 @@
     const doctorInput = modal.querySelector('#hrf-dest-doctor');
     const doctorDropdown = modal.querySelector('#hrf-doctor-dropdown');
     const doctorCombobox = modal.querySelector('.hrf-combobox[data-field="doctor"]');
+    const { utils } = FC();
+    const escapeHtml = utils.escapeHtml;
 
     // ドロップダウンを閉じる
     function closeAllDropdowns() {
@@ -1835,230 +1151,185 @@
   // ==========================================
 
   async function generateGoogleDoc(formData) {
-    // スピナー表示
-    const HenryCore = pageWindow.HenryCore;
-    const spinner = HenryCore?.ui?.showSpinner?.('Google Docsを生成中...');
-
-    try {
-      // アクセストークン確認
-      const googleAuth = getGoogleAuth();
-      await googleAuth.getValidAccessToken();
-
-      // 出力フォルダ取得/作成
-      const folder = await DriveAPI.getOrCreateFolder(TEMPLATE_CONFIG.OUTPUT_FOLDER_NAME);
-
-      // テンプレートをコピー（メタデータ付き）
-      const fileName = `診療申込書_高松平和病院_${formData.patient_name}_${new Date().toISOString().slice(0, 10)}`;
-      const properties = {
-        henryPatientUuid: formData.patient_uuid || '',
-        henryFileUuid: '',
-        henryFolderUuid: folder.id,
-        henrySource: 'heiwa-referral-form'
-      };
-      const newDoc = await DriveAPI.copyFile(TEMPLATE_CONFIG.TEMPLATE_ID, fileName, folder.id, properties);
-
-      // 各プレースホルダーの値を生成
-
-      // 傷病名テキスト
-      const diagnosisParts = [];
-      if (formData.diseases.length > 0 && formData.selected_diseases?.length > 0) {
-        const selectedDiseases = formData.diseases.filter(d => formData.selected_diseases.includes(d.uuid));
-        const diseaseText = selectedDiseases.map(d => d.name).join('、');
-        if (diseaseText) {
-          diagnosisParts.push(diseaseText);
-        }
+    // 傷病名テキスト
+    const diagnosisParts = [];
+    if (formData.diseases.length > 0 && formData.selected_diseases?.length > 0) {
+      const selectedDiseases = formData.diseases.filter(d => formData.selected_diseases.includes(d.uuid));
+      const diseaseText = selectedDiseases.map(d => d.name).join('、');
+      if (diseaseText) {
+        diagnosisParts.push(diseaseText);
       }
-      if (formData.diagnosis_text) {
-        diagnosisParts.push(formData.diagnosis_text);
-      }
-      const diagnosisText = diagnosisParts.join('\n');
+    }
+    if (formData.diagnosis_text) {
+      diagnosisParts.push(formData.diagnosis_text);
+    }
+    const diagnosisText = diagnosisParts.join('\n');
 
-      // 診察・検査目的テキスト
-      let purposeText = '';
-      if (formData.purpose_type === 'test') {
-        // 大腸内視鏡検査は内科診察が必要
-        if (formData.lower_endoscopy) {
-          purposeText = '検査、内科（大腸内視鏡）';
-        } else {
-          purposeText = '検査';
-        }
-      } else {
-        const dept = formData.destination_department;
-        const doctorName = formData.destination_doctor || '';
-        if (dept) {
-          purposeText = doctorName ? `${dept}（${doctorName}医師）` : dept;
-        }
-      }
-
-      // 内視鏡検査テキスト（統合形式）
-      let endoscopyText = 'なし';
-      const endoscopyParts = [];
-
-      // 上部内視鏡検査
-      if (formData.upper_endoscopy) {
-        const upperLines = [];
-        // 1行目: 検査名と方法
-        const method = formData.upper_endoscopy_method === 'oral' ? '経口' : '経鼻';
-        let methodDetail = method;
-        if (formData.upper_endoscopy_method === 'oral') {
-          methodDetail += `、鎮静剤${formData.upper_endoscopy_sedation === 'yes' ? 'あり' : 'なし'}`;
-        }
-        upperLines.push(`上部内視鏡検査（${methodDetail}）`);
-
-        // 2行目: 抗血栓剤
-        if (formData.upper_endoscopy_anticoagulant === 'yes') {
-          upperLines.push(`抗血栓剤：あり（${formData.upper_endoscopy_anticoagulant_name || '薬剤名未記入'}）`);
-        } else {
-          upperLines.push('抗血栓剤：なし');
-        }
-
-        endoscopyParts.push(upperLines.join('\n'));
-      }
-
-      // 大腸内視鏡検査
+    // 診察・検査目的テキスト
+    let purposeText = '';
+    if (formData.purpose_type === 'test') {
+      // 大腸内視鏡検査は内科診察が必要
       if (formData.lower_endoscopy) {
-        endoscopyParts.push('大腸内視鏡検査');
+        purposeText = '検査、内科（大腸内視鏡）';
+      } else {
+        purposeText = '検査';
+      }
+    } else {
+      const dept = formData.destination_department;
+      const doctorName = formData.destination_doctor || '';
+      if (dept) {
+        purposeText = doctorName ? `${dept}（${doctorName}医師）` : dept;
+      }
+    }
+
+    // 内視鏡検査テキスト（統合形式）
+    let endoscopyText = 'なし';
+    const endoscopyParts = [];
+
+    // 上部内視鏡検査
+    if (formData.upper_endoscopy) {
+      const upperLines = [];
+      // 1行目: 検査名と方法
+      const method = formData.upper_endoscopy_method === 'oral' ? '経口' : '経鼻';
+      let methodDetail = method;
+      if (formData.upper_endoscopy_method === 'oral') {
+        methodDetail += `、鎮静剤${formData.upper_endoscopy_sedation === 'yes' ? 'あり' : 'なし'}`;
+      }
+      upperLines.push(`上部内視鏡検査（${methodDetail}）`);
+
+      // 2行目: 抗血栓剤
+      if (formData.upper_endoscopy_anticoagulant === 'yes') {
+        upperLines.push(`抗血栓剤：あり（${formData.upper_endoscopy_anticoagulant_name || '薬剤名未記入'}）`);
+      } else {
+        upperLines.push('抗血栓剤：なし');
       }
 
-      if (endoscopyParts.length > 0) {
-        endoscopyText = endoscopyParts.join('\n');
+      endoscopyParts.push(upperLines.join('\n'));
+    }
+
+    // 大腸内視鏡検査
+    if (formData.lower_endoscopy) {
+      endoscopyParts.push('大腸内視鏡検査');
+    }
+
+    if (endoscopyParts.length > 0) {
+      endoscopyText = endoscopyParts.join('\n');
+    }
+
+    // 放射線検査テキスト（統合形式）
+    let radiologyText = 'なし';
+    if (formData.radiology_exam) {
+      const radiologyLines = [];
+
+      // 1行目: 検査種類と部位
+      const examType = formData.radiology_type === 'mri' ? 'MRI（1.5テスラ）' : 'CT';
+      const site = formData.radiology_site || '部位未記入';
+      radiologyLines.push(`${examType}　部位（${site}）`);
+
+      // 2行目: 造影剤
+      if (formData.radiology_contrast === 'yes') {
+        const cr = formData.radiology_cr || '未記入';
+        const examDate = formData.radiology_exam_date ? formatHopeDate(formData.radiology_exam_date) : '未記入';
+        radiologyLines.push(`造影剤：あり（Cr ${cr} mg/dl、検査日 ${examDate}）`);
+      } else {
+        radiologyLines.push('造影剤：なし');
       }
 
-      // 放射線検査テキスト（統合形式）
-      let radiologyText = 'なし';
-      if (formData.radiology_exam) {
-        const radiologyLines = [];
-
-        // 1行目: 検査種類と部位
-        const examType = formData.radiology_type === 'mri' ? 'MRI（1.5テスラ）' : 'CT';
-        const site = formData.radiology_site || '部位未記入';
-        radiologyLines.push(`${examType}　部位（${site}）`);
-
-        // 2行目: 造影剤
-        if (formData.radiology_contrast === 'yes') {
-          const cr = formData.radiology_cr || '未記入';
-          const examDate = formData.radiology_exam_date ? formatHopeDate(formData.radiology_exam_date) : '未記入';
-          radiologyLines.push(`造影剤：あり（Cr ${cr} mg/dl、検査日 ${examDate}）`);
-        } else {
-          radiologyLines.push('造影剤：なし');
-        }
-
-        // 3行目: 糖尿病薬服用
-        if (formData.radiology_diabetes_med === 'yes') {
-          const medName = formData.radiology_diabetes_med_name || '薬剤名未記入';
-          radiologyLines.push(`糖尿病薬服用：あり（${medName}）`);
-        } else {
-          radiologyLines.push('糖尿病薬服用：なし');
-        }
-
-        // 4行目: 結果と所見
-        const media = formData.radiology_media === 'film' ? 'フィルム' : 'CD-R';
-        const delivery = formData.radiology_result_delivery === 'mail' ? '郵送' : '患者様持ち帰り';
-        radiologyLines.push(`結果：${media}　所見：${delivery}`);
-
-        radiologyText = radiologyLines.join('\n');
+      // 3行目: 糖尿病薬服用
+      if (formData.radiology_diabetes_med === 'yes') {
+        const medName = formData.radiology_diabetes_med_name || '薬剤名未記入';
+        radiologyLines.push(`糖尿病薬服用：あり（${medName}）`);
+      } else {
+        radiologyLines.push('糖尿病薬服用：なし');
       }
 
-      // 超音波検査テキスト（統合形式）
-      let ultrasoundText = 'なし';
-      if (formData.ultrasound_types.length > 0) {
-        const ultrasoundLines = [];
+      // 4行目: 結果と所見
+      const media = formData.radiology_media === 'film' ? 'フィルム' : 'CD-R';
+      const delivery = formData.radiology_result_delivery === 'mail' ? '郵送' : '患者様持ち帰り';
+      radiologyLines.push(`結果：${media}　所見：${delivery}`);
 
-        // 1行目: 検査種類（カンマ区切り）
-        const types = formData.ultrasound_types.map(t => `${t}エコー`).join('、');
-        ultrasoundLines.push(types);
+      radiologyText = radiologyLines.join('\n');
+    }
 
-        // 2行目: 所見の伝達
-        const delivery = formData.ultrasound_result_delivery === 'mail' ? '郵送' : '患者様持ち帰り';
-        ultrasoundLines.push(`所見：${delivery}`);
+    // 超音波検査テキスト（統合形式）
+    let ultrasoundText = 'なし';
+    if (formData.ultrasound_types.length > 0) {
+      const ultrasoundLines = [];
 
-        ultrasoundText = ultrasoundLines.join('\n');
-      }
+      // 1行目: 検査種類（カンマ区切り）
+      const types = formData.ultrasound_types.map(t => `${t}エコー`).join('、');
+      ultrasoundLines.push(types);
 
-      // コロナ対策テキスト
-      const covidTravelText = formData.covid_travel === 'yes' ? 'あり' : 'なし';
-      const covidContactText = formData.covid_contact === 'yes' ? 'あり' : 'なし';
-      const covidSymptomsText = formData.covid_symptoms === 'yes' ? 'あり' : 'なし';
+      // 2行目: 所見の伝達
+      const delivery = formData.ultrasound_result_delivery === 'mail' ? '郵送' : '患者様持ち帰り';
+      ultrasoundLines.push(`所見：${delivery}`);
 
-      // プレースホルダー置換リクエスト作成
-      const requests = [
+      ultrasoundText = ultrasoundLines.join('\n');
+    }
+
+    // コロナ対策テキスト
+    const covidTravelText = formData.covid_travel === 'yes' ? 'あり' : 'なし';
+    const covidContactText = formData.covid_contact === 'yes' ? 'あり' : 'なし';
+    const covidSymptomsText = formData.covid_symptoms === 'yes' ? 'あり' : 'なし';
+
+    // 共通フローで出力
+    await FC().generateDoc({
+      scriptName: SCRIPT_NAME,
+      templateId: TEMPLATE_CONFIG.TEMPLATE_ID,
+      fileName: `診療申込書_高松平和病院_${formData.patient_name}_${new Date().toISOString().slice(0, 10)}`,
+      source: 'heiwa-referral-form',
+      patientUuid: formData.patient_uuid,
+      replacements: {
         // 患者情報
-        DocsAPI.createReplaceTextRequest('{{作成日}}', formData.creation_date_wareki),
-        DocsAPI.createReplaceTextRequest('{{ふりがな}}', formData.patient_name_kana),
-        DocsAPI.createReplaceTextRequest('{{患者氏名}}', formData.patient_name),
-        DocsAPI.createReplaceTextRequest('{{性別}}', formData.sex),
-        DocsAPI.createReplaceTextRequest('{{生年月日}}', formData.birth_date_wareki),
-        DocsAPI.createReplaceTextRequest('{{郵便番号}}', formData.postal_code),
-        DocsAPI.createReplaceTextRequest('{{住所}}', formData.address),
-        DocsAPI.createReplaceTextRequest('{{電話番号}}', formData.phone),
+        '{{作成日}}': formData.creation_date_wareki,
+        '{{ふりがな}}': formData.patient_name_kana,
+        '{{患者氏名}}': formData.patient_name,
+        '{{性別}}': formData.sex,
+        '{{生年月日}}': formData.birth_date_wareki,
+        '{{郵便番号}}': formData.postal_code,
+        '{{住所}}': formData.address,
+        '{{電話番号}}': formData.phone,
 
         // 紹介元
-        DocsAPI.createReplaceTextRequest('{{医師名}}', formData.physician_name),
+        '{{医師名}}': formData.physician_name,
 
-        // 診察目的（チェックボックス形式）
-        DocsAPI.createReplaceTextRequest('{{診察・検査目的}}', purposeText),
-        DocsAPI.createReplaceTextRequest('{{主訴または傷病名}}', diagnosisText),
+        // 診察目的
+        '{{診察・検査目的}}': purposeText,
+        '{{主訴または傷病名}}': diagnosisText,
 
         // 希望日
-        DocsAPI.createReplaceTextRequest('{{第1希望日}}', formatHopeDate(formData.hope_date_1)),
-        DocsAPI.createReplaceTextRequest('{{第2希望日}}', formatHopeDate(formData.hope_date_2)),
-        DocsAPI.createReplaceTextRequest('{{第3希望日}}', formatHopeDate(formData.hope_date_3)),
+        '{{第1希望日}}': formatHopeDate(formData.hope_date_1),
+        '{{第2希望日}}': formatHopeDate(formData.hope_date_2),
+        '{{第3希望日}}': formatHopeDate(formData.hope_date_3),
 
         // 内視鏡検査
-        DocsAPI.createReplaceTextRequest('{{内視鏡検査}}', endoscopyText),
+        '{{内視鏡検査}}': endoscopyText,
 
         // 放射線検査
-        DocsAPI.createReplaceTextRequest('{{放射線検査}}', radiologyText),
+        '{{放射線検査}}': radiologyText,
 
         // 超音波検査
-        DocsAPI.createReplaceTextRequest('{{超音波検査}}', ultrasoundText),
+        '{{超音波検査}}': ultrasoundText,
 
         // コロナ対策
-        DocsAPI.createReplaceTextRequest('{{訪問歴の有無}}', covidTravelText),
-        DocsAPI.createReplaceTextRequest('{{接触歴の有無}}', covidContactText),
-        DocsAPI.createReplaceTextRequest('{{症状の有無}}', covidSymptomsText),
+        '{{訪問歴の有無}}': covidTravelText,
+        '{{接触歴の有無}}': covidContactText,
+        '{{症状の有無}}': covidSymptomsText,
 
         // その他
-        DocsAPI.createReplaceTextRequest('{{その他}}', formData.other_notes)
-      ];
-
-      // 置換実行
-      await DocsAPI.batchUpdate(newDoc.id, requests);
-
-      spinner?.close();
-
-      // 新しいドキュメントを開く
-      const docUrl = `https://docs.google.com/document/d/${newDoc.id}/edit`;
-      GM_openInTab(docUrl, { active: true });
-
-      console.log(`[${SCRIPT_NAME}] Google Docs生成完了: ${docUrl}`);
-
-    } catch (e) {
-      spinner?.close();
-      throw e;
-    }
+        '{{その他}}': formData.other_notes
+      }
+    });
   }
 
   // ==========================================
   // 初期化
   // ==========================================
 
-  async function init() {
-    // HenryCore待機
-    let waited = 0;
-    while (!pageWindow.HenryCore) {
-      await new Promise(r => setTimeout(r, 100));
-      waited += 100;
-      if (waited > 10000) {
-        console.error(`[${SCRIPT_NAME}] HenryCore が見つかりません`);
-        return;
-      }
-    }
-
-    log = pageWindow.HenryCore.utils?.createLogger?.(SCRIPT_NAME);
-
-    // プラグイン登録
-    await pageWindow.HenryCore.registerPlugin({
+  FC().initPlugin({
+    scriptName: SCRIPT_NAME,
+    version: VERSION,
+    pluginConfig: {
       id: 'heiwa-referral-form',
       name: '診療申込書（高松平和病院）',
       icon: '🏥',
@@ -2068,10 +1339,6 @@
       group: '診療申込書',
       groupIcon: '📋',
       onClick: showHeiwaForm
-    });
-
-    console.log(`[${SCRIPT_NAME}] Ready (v${VERSION})`);
-  }
-
-  init();
+    }
+  });
 })();
