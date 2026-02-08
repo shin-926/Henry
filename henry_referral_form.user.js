@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         診療情報提供書フォーム
 // @namespace    https://henry-app.jp/
-// @version      1.5.3
+// @version      1.6.0
 // @description  診療情報提供書の入力フォームとGoogle Docs出力
 // @author       sk powered by Claude
 // @match        https://henry-app.jp/*
@@ -1270,6 +1270,7 @@
             ${lastSavedAt ? `下書き: ${new Date(lastSavedAt).toLocaleString('ja-JP')}` : ''}
           </div>
           <div class="rf-footer-right">
+            <button class="rf-btn rf-btn-secondary" id="rf-clear">クリア</button>
             <button class="rf-btn rf-btn-secondary" id="rf-save-draft">下書き保存</button>
             <button class="rf-btn rf-btn-primary" id="rf-generate">Google Docsに出力</button>
           </div>
@@ -1490,6 +1491,33 @@
         }
       });
     }
+
+    // クリア
+    modal.querySelector('#rf-clear').addEventListener('click', async () => {
+      const confirmed = await pageWindow.HenryCore?.ui?.showConfirm?.({
+        title: '入力内容のクリア',
+        message: '手入力した内容をすべてクリアしますか？\n（患者情報などの自動入力項目はクリアされません）',
+        confirmLabel: 'クリア',
+        cancelLabel: 'キャンセル'
+      });
+      if (!confirmed) return;
+
+      // 紹介先
+      const hospitalInput = modal.querySelector('#rf-dest-hospital');
+      const deptInput = modal.querySelector('#rf-dest-department');
+      const doctorInput = modal.querySelector('#rf-dest-doctor');
+      if (hospitalInput) hospitalInput.value = '';
+      if (deptInput) { deptInput.value = ''; deptInput.disabled = true; }
+      if (doctorInput) { doctorInput.value = ''; doctorInput.disabled = true; }
+
+      // テキストエリア
+      modal.querySelectorAll('textarea').forEach(ta => { ta.value = ''; });
+
+      // チェックボックス（病名・処方・既往歴の選択をリセット）
+      modal.querySelectorAll('.rf-checkbox-group input[type="checkbox"], .rf-checkbox-list input[type="checkbox"]').forEach(cb => {
+        cb.checked = false;
+      });
+    });
 
     // 下書き保存
     modal.querySelector('#rf-save-draft').addEventListener('click', async () => {
