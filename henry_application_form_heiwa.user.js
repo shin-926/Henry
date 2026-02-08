@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         高松平和病院 診療申込書
 // @namespace    https://henry-app.jp/
-// @version      1.3.0
+// @version      1.3.1
 // @description  高松平和病院への診療申込書を作成
 // @author       sk powered by Claude
 // @match        https://henry-app.jp/*
@@ -574,14 +574,13 @@
           return 0;
         })
         .map(d => {
-          const modifiers = (d.masterModifiers || [])
-            .sort((a, b) => (a.position || 0) - (b.position || 0))
-            .map(m => m.name.replace(/^・/, ''))
-            .join('');
+          const mods = d.masterModifiers || [];
+          const prefixes = mods.filter(m => m.position === 'PREFIX').map(m => m.name.replace(/^・/, '')).join('');
+          const suffixes = mods.filter(m => m.position === 'SUFFIX').map(m => m.name.replace(/^・/, '')).join('');
           const baseName = d.customDiseaseName?.value || d.masterDisease?.name || '';
           return {
             uuid: d.uuid,
-            name: modifiers + baseName,
+            name: prefixes + baseName + suffixes,
             isMain: d.isMain,
             isSuspected: d.isSuspected
           };

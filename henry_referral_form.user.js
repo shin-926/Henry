@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         診療情報提供書フォーム
 // @namespace    https://henry-app.jp/
-// @version      1.4.4
+// @version      1.4.6
 // @description  診療情報提供書の入力フォームとGoogle Docs出力
 // @author       sk powered by Claude
 // @match        https://henry-app.jp/*
@@ -544,14 +544,13 @@
           return 0;
         })
         .map(d => {
-          const modifiers = (d.masterModifiers || [])
-            .sort((a, b) => (a.position || 0) - (b.position || 0))
-            .map(m => m.name.replace(/^・/, ''))
-            .join('');
+          const mods = d.masterModifiers || [];
+          const prefixes = mods.filter(m => m.position === 'PREFIX').map(m => m.name.replace(/^・/, '')).join('');
+          const suffixes = mods.filter(m => m.position === 'SUFFIX').map(m => m.name.replace(/^・/, '')).join('');
           const baseName = d.customDiseaseName?.value || d.masterDisease?.name || '';
           return {
             uuid: d.uuid,
-            name: modifiers + baseName,
+            name: prefixes + baseName + suffixes,
             isMain: d.isMain,
             isSuspected: d.isSuspected
           };
@@ -1159,57 +1158,10 @@
       </style>
       <div class="rf-container">
         <div class="rf-header">
-          <h2>診療情報提供書</h2>
+          <h2>診療情報提供書 - ${escapeHtml(formData.patient_name)}</h2>
           <button class="rf-close" title="閉じる">&times;</button>
         </div>
         <div class="rf-body">
-          <!-- 自動入力項目 -->
-          <div class="rf-section">
-            <div class="rf-section-title">患者情報（自動入力）</div>
-            <div class="rf-row">
-              <div class="rf-field readonly">
-                <label>患者氏名</label>
-                <input type="text" value="${escapeHtml(formData.patient_name)}" readonly>
-              </div>
-              <div class="rf-field readonly">
-                <label>生年月日</label>
-                <input type="text" value="${escapeHtml(formData.patient_birth_date_wareki)}" readonly>
-              </div>
-              <div class="rf-field readonly" style="flex: 0.3;">
-                <label>年齢</label>
-                <input type="text" value="${formData.patient_age}歳" readonly>
-              </div>
-              <div class="rf-field readonly" style="flex: 0.3;">
-                <label>性別</label>
-                <input type="text" value="${escapeHtml(formData.patient_sex)}" readonly>
-              </div>
-            </div>
-            <div class="rf-row">
-              <div class="rf-field readonly">
-                <label>住所</label>
-                <input type="text" value="${escapeHtml(formData.patient_address)}" readonly>
-              </div>
-              <div class="rf-field readonly" style="flex: 0.5;">
-                <label>電話番号</label>
-                <input type="text" value="${escapeHtml(formData.patient_phone)}" readonly>
-              </div>
-            </div>
-            <div class="rf-row">
-              <div class="rf-field readonly">
-                <label>診療科</label>
-                <input type="text" value="${escapeHtml(formData.department_name)}" readonly>
-              </div>
-              <div class="rf-field readonly">
-                <label>作成者</label>
-                <input type="text" value="${escapeHtml(formData.physician_name)}" readonly>
-              </div>
-              <div class="rf-field readonly" style="flex: 0.5;">
-                <label>作成日</label>
-                <input type="text" value="${escapeHtml(formData.creation_date_wareki)}" readonly>
-              </div>
-            </div>
-          </div>
-
           <!-- 紹介先 -->
           <div class="rf-section">
             <div class="rf-section-title">紹介先</div>
