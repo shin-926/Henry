@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         高松市立みんなの病院 診療申込書
 // @namespace    https://henry-app.jp/
-// @version      1.4.0
+// @version      1.4.1
 // @description  高松市立みんなの病院へのFAX診療申込書を作成
 // @author       sk powered by Claude
 // @match        https://henry-app.jp/*
@@ -821,18 +821,33 @@
 
     // 希望日
     data.hope_date_type = bodyEl.querySelector('input[name="mrf-hope-date-type"]:checked')?.value || 'date';
-    data.hope_date_1 = bodyEl.querySelector('#mrf-hope-date-1')?.value || '';
-    data.hope_time_1 = bodyEl.querySelector('#mrf-hope-time-1')?.value || '';
-    data.hope_date_2 = bodyEl.querySelector('#mrf-hope-date-2')?.value || '';
-    data.hope_time_2 = bodyEl.querySelector('#mrf-hope-time-2')?.value || '';
+    if (data.hope_date_type === 'date') {
+      data.hope_date_1 = bodyEl.querySelector('#mrf-hope-date-1')?.value || '';
+      data.hope_time_1 = bodyEl.querySelector('#mrf-hope-time-1')?.value || '';
+      data.hope_date_2 = bodyEl.querySelector('#mrf-hope-date-2')?.value || '';
+      data.hope_time_2 = bodyEl.querySelector('#mrf-hope-time-2')?.value || '';
+    } else {
+      data.hope_date_1 = '';
+      data.hope_time_1 = '';
+      data.hope_date_2 = '';
+      data.hope_time_2 = '';
+    }
 
     // 画像の有無
     data.has_image = bodyEl.querySelector('input[name="mrf-has-image"]:checked')?.value === 'yes';
-    data.image_ct = bodyEl.querySelector('#mrf-image-ct')?.checked || false;
-    data.image_mri = bodyEl.querySelector('#mrf-image-mri')?.checked || false;
-    data.image_xp = bodyEl.querySelector('#mrf-image-xp')?.checked || false;
-    data.image_pet = bodyEl.querySelector('#mrf-image-pet')?.checked || false;
-    data.image_date = bodyEl.querySelector('#mrf-image-date')?.value || '';
+    if (data.has_image) {
+      data.image_ct = bodyEl.querySelector('#mrf-image-ct')?.checked || false;
+      data.image_mri = bodyEl.querySelector('#mrf-image-mri')?.checked || false;
+      data.image_xp = bodyEl.querySelector('#mrf-image-xp')?.checked || false;
+      data.image_pet = bodyEl.querySelector('#mrf-image-pet')?.checked || false;
+      data.image_date = bodyEl.querySelector('#mrf-image-date')?.value || '';
+    } else {
+      data.image_ct = false;
+      data.image_mri = false;
+      data.image_xp = false;
+      data.image_pet = false;
+      data.image_date = '';
+    }
 
     // 事前連絡
     data.prior_contact = bodyEl.querySelector('input[name="mrf-prior-contact"]:checked')?.value || 'no';
@@ -849,7 +864,9 @@
     } else {
       data.current_status_detail = '';
     }
-    data.facility_name = bodyEl.querySelector('#mrf-facility-name')?.value || '';
+    data.facility_name = data.current_status === 'facility'
+      ? (bodyEl.querySelector('#mrf-facility-name')?.value || '')
+      : '';
 
     // 病名（選択と自由記述の両方を取得）
     data.selected_diseases = [];

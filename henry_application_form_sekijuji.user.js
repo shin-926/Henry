@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         高松赤十字病院 診療申込書
 // @namespace    https://henry-app.jp/
-// @version      1.6.0
+// @version      1.6.1
 // @description  高松赤十字病院への診療情報提供書兼FAX診療申込書を作成
 // @author       sk powered by Claude
 // @match        https://henry-app.jp/*
@@ -836,16 +836,19 @@
 
     // 処方
     data.use_prescriptions = bodyEl.querySelector('#srf-use-prescriptions')?.checked ?? false;
-    data.selected_prescriptions = [];
-    if (data.prescriptions && data.prescriptions.length > 0) {
+    if (data.use_prescriptions && data.prescriptions?.length > 0) {
+      data.selected_prescriptions = [];
       data.prescriptions.forEach(rx => {
         const cb = bodyEl.querySelector(`#srf-prescription-${rx.recordId}`);
         if (cb?.checked) {
           data.selected_prescriptions.push(rx.recordId);
         }
       });
+      data.prescription_text = bodyEl.querySelector('#srf-prescription-text')?.value || '';
+    } else {
+      data.selected_prescriptions = [];
+      data.prescription_text = bodyEl.querySelector('#srf-prescription-text')?.value || '';
     }
-    data.prescription_text = bodyEl.querySelector('#srf-prescription-text')?.value || '';
 
     return data;
   }

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         主治医意見書作成フォーム
 // @namespace    https://henry-app.jp/
-// @version      2.8.1
+// @version      2.8.2
 // @description  主治医意見書の入力フォームとGoogle Docs出力（GAS不要版・API直接呼び出し）
 // @author       sk powered by Claude & Gemini
 // @match        https://henry-app.jp/*
@@ -3329,20 +3329,20 @@
       }
     });
 
-    // 日付
+    // 日付（disabled なフィールドはスキップ）
     container.querySelectorAll('input[type="date"]').forEach(input => {
       const section = input.dataset.section;
       const fieldName = input.dataset.fieldName;
-      if (section && fieldName && input.value) {
+      if (section && fieldName && input.value && !input.disabled) {
         formData[section][fieldName] = input.value.replace(/-/g, '');
       }
     });
 
-    // テキスト入力
+    // テキスト入力（disabled なフィールドはスキップ＝条件付きフィールドOFF時のstaleデータ防止）
     container.querySelectorAll('input[type="text"], textarea').forEach(input => {
       const section = input.dataset.section;
       const fieldName = input.dataset.fieldName;
-      if (section && fieldName) {
+      if (section && fieldName && !input.disabled) {
         formData[section][fieldName] = input.value;
       }
     });

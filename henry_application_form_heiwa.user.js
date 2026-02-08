@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         高松平和病院 診療申込書
 // @namespace    https://henry-app.jp/
-// @version      1.6.0
+// @version      1.6.1
 // @description  高松平和病院への診療申込書を作成
 // @author       sk powered by Claude
 // @match        https://henry-app.jp/*
@@ -985,11 +985,6 @@
     } else {
       data.destination_department = bodyEl.querySelector('#hrf-dest-department')?.value || '';
       data.destination_doctor = bodyEl.querySelector('#hrf-dest-doctor')?.value || '';
-      // 診察の場合は検査項目をリセット
-      data.upper_endoscopy = false;
-      data.lower_endoscopy = false;
-      data.radiology_exam = false;
-      data.ultrasound_types = [];
     }
 
     // 希望日
@@ -1009,35 +1004,58 @@
     }
     data.diagnosis_text = bodyEl.querySelector('#hrf-diagnosis-text')?.value || '';
 
-    // 内視鏡検査
-    data.upper_endoscopy = bodyEl.querySelector('#hrf-upper-endoscopy')?.checked || false;
-    data.upper_endoscopy_method = bodyEl.querySelector('input[name="hrf-upper-method"]:checked')?.value || 'nasal';
-    data.upper_endoscopy_sedation = bodyEl.querySelector('input[name="hrf-sedation"]:checked')?.value || 'no';
-    data.upper_endoscopy_anticoagulant = bodyEl.querySelector('input[name="hrf-anticoagulant"]:checked')?.value || 'no';
-    data.upper_endoscopy_anticoagulant_name = bodyEl.querySelector('#hrf-anticoagulant-name')?.value || '';
-    data.lower_endoscopy = bodyEl.querySelector('#hrf-lower-endoscopy')?.checked || false;
+    // 検査フィールド（検査タイプの場合のみ収集）
+    if (data.purpose_type === 'test') {
+      // 内視鏡検査
+      data.upper_endoscopy = bodyEl.querySelector('#hrf-upper-endoscopy')?.checked || false;
+      data.upper_endoscopy_method = bodyEl.querySelector('input[name="hrf-upper-method"]:checked')?.value || 'nasal';
+      data.upper_endoscopy_sedation = bodyEl.querySelector('input[name="hrf-sedation"]:checked')?.value || 'no';
+      data.upper_endoscopy_anticoagulant = bodyEl.querySelector('input[name="hrf-anticoagulant"]:checked')?.value || 'no';
+      data.upper_endoscopy_anticoagulant_name = bodyEl.querySelector('#hrf-anticoagulant-name')?.value || '';
+      data.lower_endoscopy = bodyEl.querySelector('#hrf-lower-endoscopy')?.checked || false;
 
-    // 放射線検査
-    data.radiology_exam = bodyEl.querySelector('#hrf-radiology-exam')?.checked || false;
-    data.radiology_type = bodyEl.querySelector('input[name="hrf-radiology-type"]:checked')?.value || 'ct';
-    data.radiology_site = bodyEl.querySelector('#hrf-radiology-site')?.value || '';
-    data.radiology_contrast = bodyEl.querySelector('input[name="hrf-contrast"]:checked')?.value || 'no';
-    data.radiology_cr = bodyEl.querySelector('#hrf-radiology-cr')?.value || '';
-    data.radiology_exam_date = bodyEl.querySelector('#hrf-radiology-exam-date')?.value || '';
-    data.radiology_diabetes_med = bodyEl.querySelector('input[name="hrf-diabetes-med"]:checked')?.value || 'no';
-    data.radiology_diabetes_med_name = bodyEl.querySelector('#hrf-diabetes-med-name')?.value || '';
-    data.radiology_media = bodyEl.querySelector('input[name="hrf-media"]:checked')?.value || 'cd';
-    data.radiology_result_delivery = bodyEl.querySelector('input[name="hrf-radiology-delivery"]:checked')?.value || 'patient';
+      // 放射線検査
+      data.radiology_exam = bodyEl.querySelector('#hrf-radiology-exam')?.checked || false;
+      data.radiology_type = bodyEl.querySelector('input[name="hrf-radiology-type"]:checked')?.value || 'ct';
+      data.radiology_site = bodyEl.querySelector('#hrf-radiology-site')?.value || '';
+      data.radiology_contrast = bodyEl.querySelector('input[name="hrf-contrast"]:checked')?.value || 'no';
+      data.radiology_cr = bodyEl.querySelector('#hrf-radiology-cr')?.value || '';
+      data.radiology_exam_date = bodyEl.querySelector('#hrf-radiology-exam-date')?.value || '';
+      data.radiology_diabetes_med = bodyEl.querySelector('input[name="hrf-diabetes-med"]:checked')?.value || 'no';
+      data.radiology_diabetes_med_name = bodyEl.querySelector('#hrf-diabetes-med-name')?.value || '';
+      data.radiology_media = bodyEl.querySelector('input[name="hrf-media"]:checked')?.value || 'cd';
+      data.radiology_result_delivery = bodyEl.querySelector('input[name="hrf-radiology-delivery"]:checked')?.value || 'patient';
 
-    // 超音波検査
-    data.ultrasound_types = [];
-    ULTRASOUND_TYPES.forEach(type => {
-      const cb = bodyEl.querySelector(`#hrf-us-${type}`);
-      if (cb?.checked) {
-        data.ultrasound_types.push(type);
-      }
-    });
-    data.ultrasound_result_delivery = bodyEl.querySelector('input[name="hrf-us-delivery"]:checked')?.value || 'patient';
+      // 超音波検査
+      data.ultrasound_types = [];
+      ULTRASOUND_TYPES.forEach(type => {
+        const cb = bodyEl.querySelector(`#hrf-us-${type}`);
+        if (cb?.checked) {
+          data.ultrasound_types.push(type);
+        }
+      });
+      data.ultrasound_result_delivery = bodyEl.querySelector('input[name="hrf-us-delivery"]:checked')?.value || 'patient';
+    } else {
+      // 診察の場合は検査項目をリセット
+      data.upper_endoscopy = false;
+      data.upper_endoscopy_method = 'nasal';
+      data.upper_endoscopy_sedation = 'no';
+      data.upper_endoscopy_anticoagulant = 'no';
+      data.upper_endoscopy_anticoagulant_name = '';
+      data.lower_endoscopy = false;
+      data.radiology_exam = false;
+      data.radiology_type = 'ct';
+      data.radiology_site = '';
+      data.radiology_contrast = 'no';
+      data.radiology_cr = '';
+      data.radiology_exam_date = '';
+      data.radiology_diabetes_med = 'no';
+      data.radiology_diabetes_med_name = '';
+      data.radiology_media = 'cd';
+      data.radiology_result_delivery = 'patient';
+      data.ultrasound_types = [];
+      data.ultrasound_result_delivery = 'patient';
+    }
 
     // コロナ対策
     data.covid_travel = bodyEl.querySelector('input[name="hrf-covid-travel"]:checked')?.value || 'no';
