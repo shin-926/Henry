@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         主治医意見書作成フォーム
 // @namespace    https://henry-app.jp/
-// @version      2.7.4
+// @version      2.8.1
 // @description  主治医意見書の入力フォームとGoogle Docs出力（GAS不要版・API直接呼び出し）
 // @author       sk powered by Claude & Gemini
 // @match        https://henry-app.jp/*
@@ -246,212 +246,8 @@
     }
   };
 
-  // =============================================================================
-  // 下書き管理（Google Spreadsheet）
-  // =============================================================================
-
-  const SHEETS_API_BASE = 'https://sheets.googleapis.com/v4';
-  const DRAFT_SPREADSHEET_NAME = 'Henry_下書きデータ';
-  const DRAFT_TYPE_IKENSHO = 'ikensho';
-
-  const DraftStorage = {
-    _spreadsheetId: null,
-    _cache: null, // { [patientUuid]: { rowIndex, jsonData, savedAt, patientName } }
-
-    // スプレッドシートを検索（Drive API）
-    async _findSpreadsheet() {
-      if (this._spreadsheetId) return this._spreadsheetId;
-
-      const query = `name='${DRAFT_SPREADSHEET_NAME}' and mimeType='application/vnd.google-apps.spreadsheet' and 'root' in parents and trashed=false`;
-      const url = `${API_CONFIG.DRIVE_API_BASE}/files?q=${encodeURIComponent(query)}&fields=files(id,name)`;
-      const result = await DriveAPI.request('GET', url);
-      if (result.files?.length > 0) {
-        this._spreadsheetId = result.files[0].id;
-        return this._spreadsheetId;
-      }
-      return null;
-    },
-
-    // スプレッドシートを新規作成（ヘッダー行付き）
-    async _createSpreadsheet() {
-      const url = `${SHEETS_API_BASE}/spreadsheets`;
-      const result = await DriveAPI.request('POST', url, {
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          properties: { title: DRAFT_SPREADSHEET_NAME },
-          sheets: [{
-            properties: { title: '下書き' },
-            data: [{
-              startRow: 0,
-              startColumn: 0,
-              rowData: [{
-                values: [
-                  { userEnteredValue: { stringValue: '患者UUID' } },
-                  { userEnteredValue: { stringValue: '下書き種別' } },
-                  { userEnteredValue: { stringValue: 'JSONデータ' } },
-                  { userEnteredValue: { stringValue: '保存日時' } },
-                  { userEnteredValue: { stringValue: '患者名' } }
-                ]
-              }]
-            }]
-          }]
-        })
-      });
-      this._spreadsheetId = result.spreadsheetId;
-      log?.info('下書きスプレッドシートを作成:', this._spreadsheetId);
-      return this._spreadsheetId;
-    },
-
-    // 取得 or 作成
-    async _getOrCreateSpreadsheet() {
-      let id = await this._findSpreadsheet();
-      if (!id) {
-        id = await this._createSpreadsheet();
-      }
-      return id;
-    },
-
-    // 全データを読み込んでキャッシュ（種別フィルタ付き）
-    async _loadAll() {
-      if (this._cache) return this._cache;
-
-      const spreadsheetId = await this._findSpreadsheet();
-      if (!spreadsheetId) {
-        this._cache = {};
-        return this._cache;
-      }
-
-      const url = `${SHEETS_API_BASE}/spreadsheets/${spreadsheetId}/values/${encodeURIComponent('下書き')}!A:E`;
-      const result = await DriveAPI.request('GET', url);
-      const rows = result.values || [];
-      this._cache = {};
-
-      for (let i = 1; i < rows.length; i++) {
-        const row = rows[i];
-        if (row[0] && row[1] === DRAFT_TYPE_IKENSHO) {
-          this._cache[row[0]] = {
-            rowIndex: i + 1,
-            jsonData: row[2] || '',
-            savedAt: row[3] || '',
-            patientName: row[4] || ''
-          };
-        }
-      }
-
-      return this._cache;
-    },
-
-    // 下書き保存（既存行更新 or 新規行追加）
-    async save(patientUuid, formData) {
-      const spreadsheetId = await this._getOrCreateSpreadsheet();
-      const now = new Date().toISOString();
-      const jsonStr = JSON.stringify({ schemaVersion: DRAFT_SCHEMA_VERSION, data: formData });
-      const patientName = formData.basic_info?.patient_name || '';
-
-      await this._loadAll();
-
-      const existing = this._cache[patientUuid];
-      const rowValues = [[patientUuid, DRAFT_TYPE_IKENSHO, jsonStr, now, patientName]];
-
-      let newRowIndex;
-      if (existing) {
-        const url = `${SHEETS_API_BASE}/spreadsheets/${spreadsheetId}/values/${encodeURIComponent('下書き')}!A${existing.rowIndex}:E${existing.rowIndex}?valueInputOption=RAW`;
-        await DriveAPI.request('PUT', url, {
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ values: rowValues })
-        });
-        newRowIndex = existing.rowIndex;
-      } else {
-        const url = `${SHEETS_API_BASE}/spreadsheets/${spreadsheetId}/values/${encodeURIComponent('下書き')}!A:E:append?valueInputOption=RAW&insertDataOption=INSERT_ROWS`;
-        const appendResult = await DriveAPI.request('POST', url, {
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ values: rowValues })
-        });
-        const range = appendResult?.updates?.updatedRange || '';
-        const match = range.match(/!A(\d+):/);
-        newRowIndex = match ? parseInt(match[1], 10) : Object.keys(this._cache).length + 2;
-      }
-
-      this._cache[patientUuid] = { rowIndex: newRowIndex, jsonData: jsonStr, savedAt: now, patientName };
-      log?.info('下書き保存完了（Spreadsheet）:', patientUuid);
-      return true;
-    },
-
-    // 下書き読み込み（Spreadsheet → localStorage マイグレーション付き）
-    async load(patientUuid) {
-      try {
-        await this._loadAll();
-
-        // Spreadsheet にあればそれを返す
-        const cached = this._cache[patientUuid];
-        if (cached) {
-          try {
-            const parsed = JSON.parse(cached.jsonData);
-            if (!parsed.schemaVersion || parsed.schemaVersion !== DRAFT_SCHEMA_VERSION) {
-              log?.info('互換性のない下書きをスキップ（バージョン不一致）');
-              return null;
-            }
-            if (!parsed.data?.basic_info) {
-              log?.info('不正な構造の下書きをスキップ');
-              return null;
-            }
-            return { data: parsed.data, savedAt: cached.savedAt };
-          } catch (e) {
-            log?.error('下書きJSONパースエラー:', e.message);
-            return null;
-          }
-        }
-
-        // localStorage からのマイグレーション
-        const lsKey = `${STORAGE_KEY_PREFIX}${patientUuid}`;
-        const stored = localStorage.getItem(lsKey);
-        if (stored) {
-          try {
-            const draft = JSON.parse(stored);
-            if (draft.schemaVersion === DRAFT_SCHEMA_VERSION && draft.data?.basic_info) {
-              log?.info('localStorage → Spreadsheet マイグレーション:', patientUuid);
-              await this.save(patientUuid, draft.data);
-              localStorage.removeItem(lsKey);
-              return { data: draft.data, savedAt: draft.savedAt };
-            }
-          } catch (e) {
-            log?.error('localStorage マイグレーションエラー:', e.message);
-          }
-          // 不正データはlocalStorageから削除
-          localStorage.removeItem(lsKey);
-        }
-
-        return null;
-      } catch (e) {
-        console.error(`[${SCRIPT_NAME}] 下書き読み込みエラー:`, e);
-        return null;
-      }
-    },
-
-    // 下書き削除
-    async delete(patientUuid) {
-      try {
-        const spreadsheetId = await this._findSpreadsheet();
-        if (!spreadsheetId) return;
-
-        await this._loadAll();
-        const existing = this._cache[patientUuid];
-        if (!existing) return;
-
-        // 行をクリア（削除ではなく空にする）
-        const url = `${SHEETS_API_BASE}/spreadsheets/${spreadsheetId}/values/${encodeURIComponent('下書き')}!A${existing.rowIndex}:E${existing.rowIndex}:clear`;
-        await DriveAPI.request('POST', url, {
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({})
-        });
-
-        delete this._cache[patientUuid];
-        log?.info('下書き削除完了:', patientUuid);
-      } catch (e) {
-        console.error(`[${SCRIPT_NAME}] 下書き削除エラー:`, e);
-      }
-    }
-  };
+  // 下書き管理（HenryCore.modules.DraftStorage を使用）
+  const DRAFT_TYPE = 'ikensho';
 
   // =============================================================================
   // Google Docs API モジュール
@@ -1559,12 +1355,10 @@
    * フォームを表示
    */
   async function showOpinionForm(pageWindow) {
-    const { close: hideSpinner } = pageWindow.HenryCore.ui.showSpinner('主治医意見書を準備中...');
+    const HenryCore = pageWindow.HenryCore;
+    const { close: hideSpinner } = HenryCore.ui.showSpinner('主治医意見書を準備中...');
     try {
-      // 下書きキャッシュのプリロードを開始（Sheets APIが最も遅いため先行実行）
-      const preloadPromise = DraftStorage._loadAll();
-
-      // 患者情報・医師情報を逐次取得
+      // 患者情報・医師情報を取得
       const patientInfo = await fetchPatientInfo(pageWindow);
       if (!patientInfo) {
         hideSpinner();
@@ -1573,12 +1367,15 @@
       }
       const physicianName = await fetchPhysicianInfo(pageWindow);
 
-      // プリロード完了を待ってから下書き検索（キャッシュ済みなので即座に完了）
-      await preloadPromise;
-      const savedDraft = await DraftStorage.load(patientInfo.patient_uuid);
+      // 下書き読み込み（HenryCore DraftStorage）
+      const ds = HenryCore.modules?.DraftStorage;
+      const savedDraft = ds ? await ds.load(DRAFT_TYPE, patientInfo.patient_uuid, {
+        localStoragePrefix: STORAGE_KEY_PREFIX,
+        validate: (p) => p.schemaVersion === DRAFT_SCHEMA_VERSION && p.data?.basic_info
+      }) : null;
 
-      // データの準備
-      const formData = savedDraft?.data || createInitialFormData(patientInfo, physicianName);
+      // データの準備（HenryCore DraftStorage.load は { data: { schemaVersion, data: formData }, savedAt } を返す）
+      const formData = savedDraft?.data?.data || createInitialFormData(patientInfo, physicianName);
       const lastSavedAt = savedDraft?.savedAt || null;
 
       // 基本情報は常に最新の患者情報で上書き（下書きがあっても患者情報は最新を使用）
@@ -1598,11 +1395,11 @@
       formData.basic_info.physician_name = physicianName;
 
       // フォームHTML生成
-      const formHTML = createFormHTML(formData, lastSavedAt);
+      const formHTML = createFormHTML(formData);
 
       // モーダル表示
       hideSpinner();
-      showFormModal(pageWindow, formHTML, formData);
+      showFormModal(pageWindow, formHTML, formData, lastSavedAt);
 
     } catch (e) {
       hideSpinner();
@@ -1748,26 +1545,8 @@
    * @param {object} formData - フォームデータ
    * @param {string|null} lastSavedAt - 最終保存日時（ISO形式）
    */
-  function createFormHTML(formData, lastSavedAt = null) {
+  function createFormHTML(formData) {
     const container = document.createElement('div');
-    container.style.cssText = 'max-height: 70vh; overflow-y: auto; padding: 20px;';
-
-    // 最終更新日表示
-    const lastUpdatedArea = document.createElement('div');
-    lastUpdatedArea.id = 'ikensho-last-saved';
-    lastUpdatedArea.style.cssText = 'padding: 10px 14px; margin-bottom: 16px; background-color: #f0f9ff; border: 1px solid #bae6fd; border-radius: 6px; font-size: 13px; color: #0369a1;' + (lastSavedAt ? '' : ' display: none;');
-    if (lastSavedAt) {
-      const savedDate = new Date(lastSavedAt);
-      const formattedDate = savedDate.toLocaleString('ja-JP', {
-        year: 'numeric',
-        month: '2-digit',
-        day: '2-digit',
-        hour: '2-digit',
-        minute: '2-digit'
-      });
-      lastUpdatedArea.textContent = `📝 下書き最終更新: ${formattedDate}`;
-    }
-    container.appendChild(lastUpdatedArea);
 
     // メッセージ表示領域
     const messageArea = document.createElement('div');
@@ -1826,8 +1605,8 @@
     // 最終診察日（カレンダー）
     section.appendChild(createDateField('最終診察日', 'last_examination_date', 'basic_info', data.last_examination_date, true));
 
-    // 意見書作成回数
-    section.appendChild(createRadioField(
+    // 意見書作成回数 + 他科受診の有無（横並び）
+    const opinionCountField = createRadioField(
       '意見書作成回数',
       'opinion_count',
       'basic_info',
@@ -1837,10 +1616,8 @@
       ],
       data.opinion_count,
       true
-    ));
-
-    // 他科受診の有無
-    section.appendChild(createRadioField(
+    );
+    const otherDeptVisitField = createRadioField(
       '他科受診の有無',
       'other_department_visit',
       'basic_info',
@@ -1850,7 +1627,8 @@
       ],
       data.other_department_visit,
       true
-    ));
+    );
+    section.appendChild(createRow([opinionCountField, otherDeptVisitField]));
 
     // 受診科（チェックボックス、13桁のビットフラグ）+ その他の科名入力（6文字）
     const departmentField = createCheckboxFieldWithOtherInput(
@@ -1883,23 +1661,23 @@
 
     const data = formData.diagnosis;
 
-    // 診断名1（必須、30文字）
-    section.appendChild(createTextField('診断名1', 'diagnosis_1_name', 'diagnosis', data.diagnosis_1_name, true, '', 30));
+    // 診断名1 + 発症年月日1（横並び 2:1）
+    section.appendChild(createRow([
+      createTextField('診断名1', 'diagnosis_1_name', 'diagnosis', data.diagnosis_1_name, true, '', 30),
+      createTextField('発症年月日1', 'diagnosis_1_onset', 'diagnosis', data.diagnosis_1_onset, true, '', 15)
+    ], { columns: '2fr 1fr' }));
 
-    // 発症年月日1（必須、15文字）
-    section.appendChild(createTextField('発症年月日1', 'diagnosis_1_onset', 'diagnosis', data.diagnosis_1_onset, true, '', 15));
+    // 診断名2 + 発症年月日2（横並び 2:1）
+    section.appendChild(createRow([
+      createTextField('診断名2', 'diagnosis_2_name', 'diagnosis', data.diagnosis_2_name, false, '', 30),
+      createTextField('発症年月日2', 'diagnosis_2_onset', 'diagnosis', data.diagnosis_2_onset, false, '', 15)
+    ], { columns: '2fr 1fr' }));
 
-    // 診断名2（任意、30文字）
-    section.appendChild(createTextField('診断名2', 'diagnosis_2_name', 'diagnosis', data.diagnosis_2_name, false, '', 30));
-
-    // 発症年月日2（任意、15文字）
-    section.appendChild(createTextField('発症年月日2', 'diagnosis_2_onset', 'diagnosis', data.diagnosis_2_onset, false, '', 15));
-
-    // 診断名3（任意、30文字）
-    section.appendChild(createTextField('診断名3', 'diagnosis_3_name', 'diagnosis', data.diagnosis_3_name, false, '', 30));
-
-    // 発症年月日3（任意、15文字）
-    section.appendChild(createTextField('発症年月日3', 'diagnosis_3_onset', 'diagnosis', data.diagnosis_3_onset, false, '', 15));
+    // 診断名3 + 発症年月日3（横並び 2:1）
+    section.appendChild(createRow([
+      createTextField('診断名3', 'diagnosis_3_name', 'diagnosis', data.diagnosis_3_name, false, '', 30),
+      createTextField('発症年月日3', 'diagnosis_3_onset', 'diagnosis', data.diagnosis_3_onset, false, '', 15)
+    ], { columns: '2fr 1fr' }));
 
     // 症状としての安定性（必須）
     const stabilityField = createRadioField(
@@ -2118,8 +1896,8 @@
     // (2) 認知症の中核症状（認知症以外の疾患で同様の症状を認める場合を含む）
     section.appendChild(createSubsectionTitle('(2) 認知症の中核症状（認知症以外の疾患で同様の症状を認める場合を含む）'));
 
-    // 短期記憶（必須）
-    section.appendChild(createRadioField(
+    // 短期記憶 + 認知能力（横並び）
+    const shortTermMemoryField = createRadioField(
       '短期記憶',
       'short_term_memory',
       'mental_physical_state',
@@ -2129,10 +1907,8 @@
       ],
       data.short_term_memory,
       true
-    ));
-
-    // 日常の意思決定を行うための認知能力
-    section.appendChild(createRadioField(
+    );
+    const cognitiveAbilityField = createRadioField(
       '日常の意思決定を行うための認知能力',
       'cognitive_ability',
       'mental_physical_state',
@@ -2144,7 +1920,8 @@
       ],
       data.cognitive_ability,
       true
-    ));
+    );
+    section.appendChild(createRow([shortTermMemoryField, cognitiveAbilityField]));
 
     // 自分の意思の伝達能力
     section.appendChild(createRadioField(
@@ -2194,7 +1971,7 @@
     // (4) その他の精神・神経症状
     section.appendChild(createSubsectionTitle('(4) その他の精神・神経症状'));
 
-    // 症状の有無（必須）
+    // 症状の有無 + 症状名（横並び）
     const psychiatricSymptomsField = createRadioField(
       '症状の有無',
       'psychiatric_symptoms',
@@ -2206,15 +1983,11 @@
       data.psychiatric_symptoms,
       true
     );
-    section.appendChild(psychiatricSymptomsField);
-
-    // 症状名（任意、16文字）
     const psychiatricSymptomNameField = createTextField('症状名', 'psychiatric_symptom_name', 'mental_physical_state', data.psychiatric_symptom_name, false, '', 16);
-    psychiatricSymptomNameField.style.marginLeft = '24px';
-    section.appendChild(psychiatricSymptomNameField);
+    section.appendChild(createRow([psychiatricSymptomsField, psychiatricSymptomNameField]));
     setupConditionalField(psychiatricSymptomsField, psychiatricSymptomNameField, '1');
 
-    // 専門医受診の有無（必須）
+    // 専門医受診の有無 + 受診科名（横並び）
     const specialistVisitField = createRadioField(
       '専門医受診の有無',
       'specialist_visit',
@@ -2226,19 +1999,15 @@
       data.specialist_visit,
       true
     );
-    section.appendChild(specialistVisitField);
-
-    // 受診科名（任意、9文字）
     const specialistDepartmentField = createTextField('受診科名', 'specialist_department', 'mental_physical_state', data.specialist_department, false, '', 9);
-    specialistDepartmentField.style.marginLeft = '24px';
-    section.appendChild(specialistDepartmentField);
+    section.appendChild(createRow([specialistVisitField, specialistDepartmentField]));
     setupConditionalField(specialistVisitField, specialistDepartmentField, '1');
 
     // (5) 身体の状態
     section.appendChild(createSubsectionTitle('(5) 身体の状態'));
 
-    // 利き腕（必須）
-    section.appendChild(createRadioField(
+    // 利き腕 + 身長 + 体重 + 体重の変化（4列横並び）
+    const dominantHandField = createRadioField(
       '利き腕',
       'dominant_hand',
       'mental_physical_state',
@@ -2248,16 +2017,10 @@
       ],
       data.dominant_hand,
       true
-    ));
-
-    // 身長（必須）
-    section.appendChild(createTextField('身長', 'height', 'mental_physical_state', data.height, true, ''));
-
-    // 体重（必須）
-    section.appendChild(createTextField('体重', 'weight', 'mental_physical_state', data.weight, true, ''));
-
-    // 過去6ヶ月の体重の変化（必須）
-    section.appendChild(createRadioField(
+    );
+    const heightField = createTextField('身長', 'height', 'mental_physical_state', data.height, true, '');
+    const weightField = createTextField('体重', 'weight', 'mental_physical_state', data.weight, true, '');
+    const weightChangeField = createRadioField(
       '過去6ヶ月の体重の変化',
       'weight_change',
       'mental_physical_state',
@@ -2268,7 +2031,8 @@
       ],
       data.weight_change,
       true
-    ));
+    );
+    section.appendChild(createRow([dominantHandField, heightField, weightField, weightChangeField]));
 
     // 四肢欠損
     const limbLossField = createRadioField(
@@ -2304,7 +2068,7 @@
     );
     section.appendChild(paralysisField);
 
-    // 麻痺の詳細（右上肢）
+    // 麻痺の詳細（右上肢）- 有無 + 程度を横並び
     const paralysisRightUpperLimbField = createRadioField(
       '右上肢',
       'paralysis_right_upper_limb',
@@ -2316,9 +2080,6 @@
       data.paralysis_right_upper_limb,
       false
     );
-    paralysisRightUpperLimbField.style.marginLeft = '24px';
-    section.appendChild(paralysisRightUpperLimbField);
-
     const paralysisRightUpperLimbSeverityField = createRadioField(
       '程度',
       'paralysis_right_upper_limb_severity',
@@ -2331,10 +2092,11 @@
       data.paralysis_right_upper_limb_severity,
       false
     );
-    paralysisRightUpperLimbSeverityField.style.marginLeft = '48px';
-    section.appendChild(paralysisRightUpperLimbSeverityField);
+    const rightUpperRow = createRow([paralysisRightUpperLimbField, paralysisRightUpperLimbSeverityField]);
+    rightUpperRow.style.marginLeft = '24px';
+    section.appendChild(rightUpperRow);
 
-    // 麻痺の詳細（左上肢）
+    // 麻痺の詳細（左上肢）- 有無 + 程度を横並び
     const paralysisLeftUpperLimbField = createRadioField(
       '左上肢',
       'paralysis_left_upper_limb',
@@ -2346,9 +2108,6 @@
       data.paralysis_left_upper_limb,
       false
     );
-    paralysisLeftUpperLimbField.style.marginLeft = '24px';
-    section.appendChild(paralysisLeftUpperLimbField);
-
     const paralysisLeftUpperLimbSeverityField = createRadioField(
       '程度',
       'paralysis_left_upper_limb_severity',
@@ -2361,10 +2120,11 @@
       data.paralysis_left_upper_limb_severity,
       false
     );
-    paralysisLeftUpperLimbSeverityField.style.marginLeft = '48px';
-    section.appendChild(paralysisLeftUpperLimbSeverityField);
+    const leftUpperRow = createRow([paralysisLeftUpperLimbField, paralysisLeftUpperLimbSeverityField]);
+    leftUpperRow.style.marginLeft = '24px';
+    section.appendChild(leftUpperRow);
 
-    // 麻痺の詳細（右下肢）
+    // 麻痺の詳細（右下肢）- 有無 + 程度を横並び
     const paralysisRightLowerLimbField = createRadioField(
       '右下肢',
       'paralysis_right_lower_limb',
@@ -2376,9 +2136,6 @@
       data.paralysis_right_lower_limb,
       false
     );
-    paralysisRightLowerLimbField.style.marginLeft = '24px';
-    section.appendChild(paralysisRightLowerLimbField);
-
     const paralysisRightLowerLimbSeverityField = createRadioField(
       '程度',
       'paralysis_right_lower_limb_severity',
@@ -2391,10 +2148,11 @@
       data.paralysis_right_lower_limb_severity,
       false
     );
-    paralysisRightLowerLimbSeverityField.style.marginLeft = '48px';
-    section.appendChild(paralysisRightLowerLimbSeverityField);
+    const rightLowerRow = createRow([paralysisRightLowerLimbField, paralysisRightLowerLimbSeverityField]);
+    rightLowerRow.style.marginLeft = '24px';
+    section.appendChild(rightLowerRow);
 
-    // 麻痺の詳細（左下肢）
+    // 麻痺の詳細（左下肢）- 有無 + 程度を横並び
     const paralysisLeftLowerLimbField = createRadioField(
       '左下肢',
       'paralysis_left_lower_limb',
@@ -2406,9 +2164,6 @@
       data.paralysis_left_lower_limb,
       false
     );
-    paralysisLeftLowerLimbField.style.marginLeft = '24px';
-    section.appendChild(paralysisLeftLowerLimbField);
-
     const paralysisLeftLowerLimbSeverityField = createRadioField(
       '程度',
       'paralysis_left_lower_limb_severity',
@@ -2421,10 +2176,11 @@
       data.paralysis_left_lower_limb_severity,
       false
     );
-    paralysisLeftLowerLimbSeverityField.style.marginLeft = '48px';
-    section.appendChild(paralysisLeftLowerLimbSeverityField);
+    const leftLowerRow = createRow([paralysisLeftLowerLimbField, paralysisLeftLowerLimbSeverityField]);
+    leftLowerRow.style.marginLeft = '24px';
+    section.appendChild(leftLowerRow);
 
-    // 麻痺の詳細（その他）
+    // 麻痺の詳細（その他）- 有無は単独行、部位+程度を横並び
     const paralysisOtherField = createRadioField(
       'その他',
       'paralysis_other',
@@ -2440,9 +2196,6 @@
     section.appendChild(paralysisOtherField);
 
     const paralysisOtherLocationField = createTextField('麻痺 - その他部位', 'paralysis_other_location', 'mental_physical_state', data.paralysis_other_location, false, '', 16);
-    paralysisOtherLocationField.style.marginLeft = '48px';
-    section.appendChild(paralysisOtherLocationField);
-
     const paralysisOtherSeverityField = createRadioField(
       '程度',
       'paralysis_other_severity',
@@ -2455,8 +2208,9 @@
       data.paralysis_other_severity,
       false
     );
-    paralysisOtherSeverityField.style.marginLeft = '48px';
-    section.appendChild(paralysisOtherSeverityField);
+    const otherParalysisRow = createRow([paralysisOtherLocationField, paralysisOtherSeverityField]);
+    otherParalysisRow.style.marginLeft = '48px';
+    section.appendChild(otherParalysisRow);
 
     // 麻痺の連動ロジック
     const paralysisRadios = paralysisField.querySelectorAll('input[type="radio"]');
@@ -2607,20 +2361,32 @@
     // 初期状態を設定
     updateParalysisState();
 
-    // 筋力低下
-    createBodyConditionFields('筋力低下', 'muscle_weakness', 'mental_physical_state', data).forEach(field => {
-      section.appendChild(field);
-    });
+    // 筋力低下（親ラジオ + 部位・程度を横並び）
+    {
+      const [parentField, locationField, severityField] = createBodyConditionFields('筋力低下', 'muscle_weakness', 'mental_physical_state', data);
+      section.appendChild(parentField);
+      const detailRow = createRow([locationField, severityField]);
+      detailRow.style.marginLeft = '24px';
+      section.appendChild(detailRow);
+    }
 
-    // 関節拘縮
-    createBodyConditionFields('関節拘縮', 'joint_contracture', 'mental_physical_state', data).forEach(field => {
-      section.appendChild(field);
-    });
+    // 関節拘縮（親ラジオ + 部位・程度を横並び）
+    {
+      const [parentField, locationField, severityField] = createBodyConditionFields('関節拘縮', 'joint_contracture', 'mental_physical_state', data);
+      section.appendChild(parentField);
+      const detailRow = createRow([locationField, severityField]);
+      detailRow.style.marginLeft = '24px';
+      section.appendChild(detailRow);
+    }
 
-    // 関節痛み
-    createBodyConditionFields('関節痛み', 'joint_pain', 'mental_physical_state', data).forEach(field => {
-      section.appendChild(field);
-    });
+    // 関節痛み（親ラジオ + 部位・程度を横並び）
+    {
+      const [parentField, locationField, severityField] = createBodyConditionFields('関節痛み', 'joint_pain', 'mental_physical_state', data);
+      section.appendChild(parentField);
+      const detailRow = createRow([locationField, severityField]);
+      detailRow.style.marginLeft = '24px';
+      section.appendChild(detailRow);
+    }
 
     // 失調不随意運動
     const ataxiaField = createRadioField(
@@ -2643,9 +2409,6 @@
       ['右', '左'],
       data.ataxia_upper_limbs
     );
-    ataxiaUpperLimbsField.style.marginLeft = '24px';
-    section.appendChild(ataxiaUpperLimbsField);
-
     const ataxiaLowerLimbsField = createCheckboxField(
       '下肢',
       'ataxia_lower_limbs',
@@ -2653,9 +2416,6 @@
       ['右', '左'],
       data.ataxia_lower_limbs
     );
-    ataxiaLowerLimbsField.style.marginLeft = '24px';
-    section.appendChild(ataxiaLowerLimbsField);
-
     const ataxiaTrunkField = createCheckboxField(
       '体幹',
       'trunk',
@@ -2663,8 +2423,9 @@
       ['右', '左'],
       data.trunk
     );
-    ataxiaTrunkField.style.marginLeft = '24px';
-    section.appendChild(ataxiaTrunkField);
+    const ataxiaDetailRow = createRow([ataxiaUpperLimbsField, ataxiaLowerLimbsField, ataxiaTrunkField]);
+    ataxiaDetailRow.style.marginLeft = '24px';
+    section.appendChild(ataxiaDetailRow);
 
     // 失調不随意運動の連動ロジック
     const ataxiaRadios = ataxiaField.querySelectorAll('input[type="radio"]');
@@ -2689,15 +2450,23 @@
 
     updateAtaxiaDetailsState(); // 初期状態を設定
 
-    // 褥瘡
-    createBodyConditionFields('褥瘡', 'pressure_ulcer', 'mental_physical_state', data).forEach(field => {
-      section.appendChild(field);
-    });
+    // 褥瘡（親ラジオ + 部位・程度を横並び）
+    {
+      const [parentField, locationField, severityField] = createBodyConditionFields('褥瘡', 'pressure_ulcer', 'mental_physical_state', data);
+      section.appendChild(parentField);
+      const detailRow = createRow([locationField, severityField]);
+      detailRow.style.marginLeft = '24px';
+      section.appendChild(detailRow);
+    }
 
-    // その他皮膚疾患
-    createBodyConditionFields('その他皮膚疾患', 'other_skin_disease', 'mental_physical_state', data).forEach(field => {
-      section.appendChild(field);
-    });
+    // その他皮膚疾患（親ラジオ + 部位・程度を横並び）
+    {
+      const [parentField, locationField, severityField] = createBodyConditionFields('その他皮膚疾患', 'other_skin_disease', 'mental_physical_state', data);
+      section.appendChild(parentField);
+      const detailRow = createRow([locationField, severityField]);
+      detailRow.style.marginLeft = '24px';
+      section.appendChild(detailRow);
+    }
 
     return section;
   }
@@ -2719,8 +2488,8 @@
     // (1) 移動
     section.appendChild(createSubsectionTitle('(1) 移動'));
 
-    // 屋外歩行（必須）
-    section.appendChild(createRadioField(
+    // 屋外歩行 + 車いすの使用（横並び）
+    const outdoorWalkingField = createRadioField(
       '屋外歩行',
       'outdoor_walking',
       'life_function',
@@ -2731,10 +2500,8 @@
       ],
       data.outdoor_walking,
       true
-    ));
-
-    // 車いすの使用（必須）
-    section.appendChild(createRadioField(
+    );
+    const wheelchairUseField = createRadioField(
       '車いすの使用',
       'wheelchair_use',
       'life_function',
@@ -2745,7 +2512,8 @@
       ],
       data.wheelchair_use,
       true
-    ));
+    );
+    section.appendChild(createRow([outdoorWalkingField, wheelchairUseField]));
 
     // 歩行補助具・装具の使用（チェックボックス、3桁）
     section.appendChild(createCheckboxField(
@@ -2759,8 +2527,8 @@
     // (2) 栄養・食生活
     section.appendChild(createSubsectionTitle('(2) 栄養・食生活'));
 
-    // 食事行為（必須）
-    section.appendChild(createRadioField(
+    // 食事行為 + 現在の栄養状態（横並び）
+    const eatingBehaviorField = createRadioField(
       '食事行為',
       'eating_behavior',
       'life_function',
@@ -2770,10 +2538,8 @@
       ],
       data.eating_behavior,
       true
-    ));
-
-    // 現在の栄養状態（必須）
-    section.appendChild(createRadioField(
+    );
+    const nutritionStatusField = createRadioField(
       '現在の栄養状態',
       'current_nutrition_status',
       'life_function',
@@ -2783,7 +2549,8 @@
       ],
       data.current_nutrition_status,
       true
-    ));
+    );
+    section.appendChild(createRow([eatingBehaviorField, nutritionStatusField]));
 
     // 栄養・食生活上の留意点（任意、40文字）
     section.appendChild(createTextField('栄養・食生活上の留意点', 'nutrition_diet_notes', 'life_function', data.nutrition_diet_notes, false, '', 40));
@@ -2853,7 +2620,7 @@
     // (6) サービス提供時における医学的観点からの留意事項
     section.appendChild(createSubsectionTitle('(6) サービス提供時における医学的観点からの留意事項'));
 
-    // サービス提供時の血圧
+    // サービス提供時の血圧（ラジオ + 留意事項を横並び）
     const serviceBloodPressureField = createInlineRadioField(
       '血圧',
       'service_blood_pressure',
@@ -2864,14 +2631,11 @@
       ],
       data.service_blood_pressure
     );
-    section.appendChild(serviceBloodPressureField);
-
     const serviceBloodPressureNotesField = createTextField('留意事項', 'service_blood_pressure_notes', 'life_function', data.service_blood_pressure_notes, false, '', 14);
-    serviceBloodPressureNotesField.style.marginLeft = '24px';
-    section.appendChild(serviceBloodPressureNotesField);
+    section.appendChild(createRow([serviceBloodPressureField, serviceBloodPressureNotesField]));
     setupConditionalField(serviceBloodPressureField, serviceBloodPressureNotesField, '2');
 
-    // サービス提供時の摂食
+    // サービス提供時の摂食（ラジオ + 留意事項を横並び）
     const serviceEatingField = createInlineRadioField(
       '摂食',
       'service_eating',
@@ -2882,14 +2646,11 @@
       ],
       data.service_eating
     );
-    section.appendChild(serviceEatingField);
-
     const serviceEatingNotesField = createTextField('留意事項', 'service_eating_notes', 'life_function', data.service_eating_notes, false, '', 14);
-    serviceEatingNotesField.style.marginLeft = '24px';
-    section.appendChild(serviceEatingNotesField);
+    section.appendChild(createRow([serviceEatingField, serviceEatingNotesField]));
     setupConditionalField(serviceEatingField, serviceEatingNotesField, '2');
 
-    // サービス提供時の嚥下
+    // サービス提供時の嚥下（ラジオ + 留意事項を横並び）
     const serviceSwallowingField = createInlineRadioField(
       '嚥下',
       'service_swallowing',
@@ -2900,14 +2661,11 @@
       ],
       data.service_swallowing
     );
-    section.appendChild(serviceSwallowingField);
-
     const serviceSwallowingNotesField = createTextField('留意事項', 'service_swallowing_notes', 'life_function', data.service_swallowing_notes, false, '', 14);
-    serviceSwallowingNotesField.style.marginLeft = '24px';
-    section.appendChild(serviceSwallowingNotesField);
+    section.appendChild(createRow([serviceSwallowingField, serviceSwallowingNotesField]));
     setupConditionalField(serviceSwallowingField, serviceSwallowingNotesField, '2');
 
-    // サービス提供時の移動
+    // サービス提供時の移動（ラジオ + 留意事項を横並び）
     const serviceMobilityField = createInlineRadioField(
       '移動',
       'service_mobility',
@@ -2918,14 +2676,11 @@
       ],
       data.service_mobility
     );
-    section.appendChild(serviceMobilityField);
-
     const serviceMobilityNotesField = createTextField('留意事項', 'service_mobility_notes', 'life_function', data.service_mobility_notes, false, '', 14);
-    serviceMobilityNotesField.style.marginLeft = '24px';
-    section.appendChild(serviceMobilityNotesField);
+    section.appendChild(createRow([serviceMobilityField, serviceMobilityNotesField]));
     setupConditionalField(serviceMobilityField, serviceMobilityNotesField, '2');
 
-    // サービス提供時の運動
+    // サービス提供時の運動（ラジオ + 留意事項を横並び）
     const serviceExerciseField = createInlineRadioField(
       '運動',
       'service_exercise',
@@ -2936,11 +2691,8 @@
       ],
       data.service_exercise
     );
-    section.appendChild(serviceExerciseField);
-
     const serviceExerciseNotesField = createTextField('留意事項', 'service_exercise_notes', 'life_function', data.service_exercise_notes, false, '', 14);
-    serviceExerciseNotesField.style.marginLeft = '24px';
-    section.appendChild(serviceExerciseNotesField);
+    section.appendChild(createRow([serviceExerciseField, serviceExerciseNotesField]));
     setupConditionalField(serviceExerciseField, serviceExerciseNotesField, '2');
 
     // その他の留意事項
@@ -2949,7 +2701,7 @@
   // (7) 感染症
   section.appendChild(createSubsectionTitle('(7) 感染症'));
 
-  // 感染症有無（必須）
+  // 感染症有無 + 感染症名（横並び）
   const infectionField = createRadioField(
     '感染症有無',
     'infection',
@@ -2962,12 +2714,8 @@
     data.infection,
     true
   );
-  section.appendChild(infectionField);
-
-  // 感染症名（条件付き必須、38文字）
   const infectionNameField = createTextField('感染症名', 'infection_name', 'life_function', data.infection_name, false, '', 38);
-  infectionNameField.style.marginLeft = '24px';
-  section.appendChild(infectionNameField);
+  section.appendChild(createRow([infectionField, infectionNameField]));
   setupConditionalField(infectionField, infectionNameField, '1');
 
   return section;
@@ -2991,6 +2739,17 @@
     section.appendChild(createTextareaField('特記すべき事項', 'other_notes', 'special_notes', data.other_notes, false, 57, 8));
 
     return section;
+  }
+
+  /**
+   * 横並びレイアウト用のグリッドコンテナを生成
+   */
+  function createRow(fields, { gap = '16px', columns } = {}) {
+    const row = document.createElement('div');
+    const cols = columns || `repeat(${fields.length}, 1fr)`;
+    row.style.cssText = `display: grid; grid-template-columns: ${cols}; gap: ${gap}; margin-bottom: 16px;`;
+    fields.forEach(f => { f.style.marginBottom = '0'; row.appendChild(f); });
+    return row;
   }
 
   /**
@@ -3089,7 +2848,6 @@
 
     // 部位フィールド（19文字）
     const locationField = createTextField('部位', `${namePrefix}_location`, section, data[`${namePrefix}_location`], false, '', 19);
-    locationField.style.marginLeft = '24px';
     fields.push(locationField);
 
     // 程度フィールド
@@ -3105,7 +2863,6 @@
       data[`${namePrefix}_severity`],
       false
     );
-    severityField.style.marginLeft = '24px';
     fields.push(severityField);
 
     // 連動ロジック設定
@@ -3622,157 +3379,64 @@
   }
 
   /**
-   * フォームモーダル表示
+   * フォームモーダル表示（FC().showFormModal() 使用）
    */
-  function showFormModal(pageWindow, formHTML, formData) {
-    // 変更追跡フラグ
-    let isDirty = false;
+  function showFormModal(pageWindow, formHTML, formData, lastSavedAt) {
+    const FC = () => pageWindow.HenryFormCommons;
 
-    // フォーム変更を監視
-    formHTML.addEventListener('input', () => { isDirty = true; });
-    formHTML.addEventListener('change', () => { isDirty = true; });
-
-    const modal = pageWindow.HenryCore.ui.showModal({
+    FC().showFormModal({
+      id: 'ikensho-form-modal',
       title: `主治医意見書 - ${formData.basic_info.patient_name}`,
-      content: formHTML,
-      width: '700px',
-      closeOnOverlayClick: false,
-      actions: [
+      prefix: '',
+      bodyHTML: formHTML,
+      headerColor: '#3F51B5',
+      width: '900px',
+
+      draftType: DRAFT_TYPE,
+      draftSchemaVersion: DRAFT_SCHEMA_VERSION,
+      patientUuid: formData.basic_info.patient_uuid,
+      patientName: formData.basic_info.patient_name,
+      lastSavedAt,
+      deleteDraftOnGenerate: false,
+
+      extraActions: [
         {
           label: 'テストデータ',
           variant: 'secondary',
           autoClose: false,
-          onClick: () => fillTestData(formHTML)
+          onClick: (e, btn, bodyEl) => fillTestData(bodyEl),
         },
-        {
-          label: 'クリア',
-          variant: 'secondary',
-          autoClose: false,
-          onClick: () => {
-            if (!confirm('入力内容をクリアしますか？')) return;
+      ],
 
-            // フォームをクリア
-            clearFormData(formHTML);
-
-            isDirty = false;
-            showFormMessage('入力内容をクリアしました', 'success');
-          }
-        },
-        {
-          label: 'キャンセル',
-          variant: 'secondary',
-          autoClose: false,
-          onClick: () => {
-            if (!isDirty || confirm('入力内容が破棄されます。本当に閉じますか？')) {
-              modal.close();
-            }
-          }
-        },
-        {
-          label: '一時保存',
-          autoClose: false,
-          onClick: async (e, button) => {
-            const originalText = button?.textContent;
-            try {
-              const collected = collectFormData(formHTML);
-              // 自動入力項目をマージ（収集値を優先）
-              collected.basic_info = { ...formData.basic_info, ...collected.basic_info };
-
-              // 保存中UI
-              if (button) {
-                button.disabled = true;
-                button.textContent = '保存中...';
-              }
-
-              await DraftStorage.save(formData.basic_info.patient_uuid, collected);
-              isDirty = false;
-              // 最終更新日時を更新
-              const savedArea = formHTML.querySelector('#ikensho-last-saved');
-              if (savedArea) {
-                const now = new Date().toLocaleString('ja-JP', {
-                  year: 'numeric', month: '2-digit', day: '2-digit',
-                  hour: '2-digit', minute: '2-digit'
-                });
-                savedArea.textContent = `📝 下書き最終更新: ${now}`;
-                savedArea.style.display = '';
-              }
-              // ボタンテキストを一時的に変更（目立たない通知）
-              if (button) {
-                button.disabled = false;
-                button.textContent = '✓ 保存しました';
-                setTimeout(() => { button.textContent = originalText; }, 1500);
-              }
-            } catch (e) {
-              log?.error('一時保存失敗', e.message);
-              showFormMessage(`保存に失敗しました: ${e.message}`, 'error');
-              if (button) {
-                button.disabled = false;
-                button.textContent = originalText;
-              }
-            }
-          }
-        },
-        {
-          label: 'Googleドキュメント作成',
-          autoClose: false,
-          onClick: async (e, button) => {
-            const originalText = button.textContent;
-            try {
-              const collected = collectFormData(formHTML);
-              // 自動入力項目をマージ（収集値を優先）
-              collected.basic_info = { ...formData.basic_info, ...collected.basic_info };
-
-              // バリデーション
-              const errors = validateFormData(collected);
-              if (errors.length > 0) {
-                const errorMessage = '以下の項目に入力エラーがあります：\n\n' + errors.join('\n');
-                showFormMessage(errorMessage, 'error');
-                log?.warn('バリデーションエラー:', errors);
-                return;
-              }
-              hideFormMessage(); // エラーがなければメッセージをクリア
-
-              // ファイル名生成
-              const fileName = generateFileName(collected);
-
-              // 処理中表示
-              button.disabled = true;
-              button.textContent = '作成中...';
-
-              // 一時保存（Googleドキュメントを閉じても編集内容が残るように）
-              await DraftStorage.save(formData.basic_info.patient_uuid, collected);
-              isDirty = false;
-
-              try {
-                // Google Docs生成
-                const result = await createGoogleDoc(collected, fileName);
-
-                // 成功時：ドキュメントを新しいタブで開く
-                if (result.documentUrl) {
-                  window.open(result.documentUrl, '_blank');
-
-                  // 下書きを削除（任意）
-                  // await DraftStorage.delete(formData.basic_info.patient_uuid);
-
-                  modal.close();
-                }
-              } catch (apiError) {
-                const errMsg = apiError?.message || String(apiError) || '不明なエラー';
-                showFormMessage(`ドキュメント作成エラー：\n${errMsg}`, 'error');
-                log?.error('Google Docs API エラー:', errMsg);
-                console.error('[OpinionForm] Full error:', apiError);
-              } finally {
-                // ボタンを元に戻す
-                button.textContent = originalText;
-                button.disabled = false;
-              }
-            } catch (e) {
-              log?.error('ドキュメント作成失敗', e.message);
-              showFormMessage(`エラーが発生しました: ${e.message}`, 'error');
-            }
-          }
+      collectFormData: (bodyEl) => {
+        const data = collectFormData(bodyEl);
+        data.basic_info = { ...formData.basic_info, ...data.basic_info };
+        return data;
+      },
+      onClear: (bodyEl) => clearFormData(bodyEl),
+      onGenerate: async (data) => {
+        // バリデーション
+        const errors = validateFormData(data);
+        if (errors.length > 0) {
+          showFormMessage('以下の項目に入力エラーがあります：\n\n' + errors.join('\n'), 'error');
+          throw new Error('バリデーションエラー');
         }
-      ]
+        hideFormMessage();
+
+        // 一時保存（安全のため）
+        const ds = pageWindow.HenryCore.modules?.DraftStorage;
+        if (ds) {
+          await ds.save(DRAFT_TYPE, formData.basic_info.patient_uuid,
+            { schemaVersion: DRAFT_SCHEMA_VERSION, data }, formData.basic_info.patient_name);
+        }
+
+        // Google Docs生成 + 新規タブで開く
+        const fileName = generateFileName(data);
+        const result = await createGoogleDoc(data, fileName);
+        if (result?.documentUrl) {
+          window.open(result.documentUrl, '_blank');
+        }
+      },
     });
   }
 

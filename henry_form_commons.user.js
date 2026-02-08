@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry フォーム共通モジュール
 // @namespace    https://henry-app.jp/
-// @version      1.1.0
+// @version      1.2.0
 // @description  申込書・診断書フォームスクリプトの共通機能を提供
 // @author       sk powered by Claude
 // @match        https://henry-app.jp/*
@@ -1270,7 +1270,7 @@
    * @param {string} config.id - モーダルID（重複排除用）
    * @param {string} config.title - モーダルタイトル
    * @param {string} config.prefix - CSSプレフィックス
-   * @param {string} config.bodyHTML - フォーム本体のHTML文字列
+   * @param {string|HTMLElement} config.bodyHTML - フォーム本体のHTML文字列またはDOM要素
    * @param {string} [config.headerColor='#3F51B5'] - ヘッダー背景色
    * @param {string} [config.extraCSS=''] - スクリプト固有の追加CSS
    * @param {string} [config.width] - モーダルの幅
@@ -1280,6 +1280,9 @@
    * @param {string} config.patientUuid - 患者UUID
    * @param {string} config.patientName - 患者名（DraftStorage保存用）
    * @param {string|null} [config.lastSavedAt] - 前回保存日時
+   *
+   * @param {Array} [config.extraActions=[]] - 標準ボタンの前に追加するアクション配列
+   * @param {boolean} [config.deleteDraftOnGenerate=true] - Google Docs出力成功後に下書きを削除するか
    *
    * @param {function} config.collectFormData - (bodyEl) => Object フォームデータを収集
    * @param {function} config.onClear - (bodyEl) => void クリア処理
@@ -1294,6 +1297,7 @@
       headerColor = '#3F51B5', extraCSS = '', width = '90%',
       draftType, draftSchemaVersion, patientUuid, patientName,
       lastSavedAt = null,
+      extraActions = [], deleteDraftOnGenerate = true,
       collectFormData, onClear, onGenerate, onSetup,
     } = config;
 
@@ -1309,7 +1313,17 @@
 
     // CSS付きのコンテンツを構築
     const contentEl = document.createElement('div');
-    contentEl.innerHTML = `<style>${generateFormCSS(prefix)}${extraCSS}</style>${bodyHTML}`;
+    if (typeof bodyHTML === 'string') {
+      const cssStr = prefix ? generateFormCSS(prefix) : '';
+      contentEl.innerHTML = `<style>${cssStr}${extraCSS}</style>${bodyHTML}`;
+    } else if (bodyHTML instanceof HTMLElement) {
+      if (prefix || extraCSS) {
+        const style = document.createElement('style');
+        style.textContent = (prefix ? generateFormCSS(prefix) : '') + extraCSS;
+        contentEl.appendChild(style);
+      }
+      contentEl.appendChild(bodyHTML);
+    }
 
     // isDirty 追跡
     let isDirty = false;
@@ -1382,8 +1396,10 @@
           try {
             const data = collectFormData(modal.body);
             await onGenerate(data);
-            const ds = HenryCore.modules?.DraftStorage;
-            if (ds) await ds.delete(draftType, patientUuid);
+            if (deleteDraftOnGenerate !== false) {
+              const ds = HenryCore.modules?.DraftStorage;
+              if (ds) await ds.delete(draftType, patientUuid);
+            }
             modal.close();
           } catch (err) {
             console.error(`[${SCRIPT_NAME}] 出力エラー:`, err);
@@ -1395,11 +1411,19 @@
       },
     ];
 
+    // extraActions を標準ボタンの前に追加（onClick に bodyEl を渡す）
+    let modalRef = null;
+    const wrappedExtraActions = extraActions.map(action => ({
+      ...action,
+      onClick: (e, btn) => action.onClick(e, btn, modalRef?.body),
+    }));
+    const allActions = [...wrappedExtraActions, ...actions];
+
     // showModal({ variant: 'form' }) を呼ぶ
     const modal = HenryCore.ui.showModal({
       title,
       content: contentEl,
-      actions,
+      actions: allActions,
       width,
       variant: 'form',
       showCloseButton: true,
@@ -1410,6 +1434,8 @@
       footerLeft: lastSavedAt ? `下書き: ${new Date(lastSavedAt).toLocaleString('ja-JP')}` : '',
       className: id,
     });
+
+    modalRef = modal;
 
     // モーダルにIDを設定（重複排除用）
     const modalContent = modal.element.querySelector('.henry-modal-content');
