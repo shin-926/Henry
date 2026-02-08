@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry Core
 // @namespace    https://henry-app.jp/
-// @version      2.35.0
+// @version      2.36.0
 // @description  Henry スクリプト実行基盤 (GoogleAuth統合 / Google Docs対応)
 // @author       sk powered by Claude & Gemini
 // @match        https://henry-app.jp/*
@@ -14,6 +14,8 @@
 // @grant        unsafeWindow
 // @connect      accounts.google.com
 // @connect      oauth2.googleapis.com
+// @connect      sheets.googleapis.com
+// @connect      www.googleapis.com
 // @updateURL    https://raw.githubusercontent.com/shin-926/Henry/main/henry_core.user.js
 // @downloadURL  https://raw.githubusercontent.com/shin-926/Henry/main/henry_core.user.js
 // @run-at       document-start
@@ -38,7 +40,7 @@
 
 /**
  * ============================================
- * Henry Core API 目次 (v2.35.0)
+ * Henry Core API 目次 (v2.36.0)
  * ============================================
  *
  * ■ Config (config.*)
@@ -104,6 +106,12 @@
  *   saveCredentials(clientId, clientSecret)      - 認証情報保存
  *   clearCredentials()                           - 認証情報削除
  *   showConfigDialog()                           - 設定ダイアログ表示
+ *
+ * ■ DraftStorage (modules.DraftStorage.*)
+ *   load(type, patientUuid, options?)            - 下書き読み込み（localStorageマイグレーション付き）
+ *   save(type, patientUuid, formData, patientName?) - 下書き保存
+ *   delete(type, patientUuid)                    - 下書き削除
+ *   preload(type)                                - プリロード（フォーム表示高速化用）
  *
  * 詳細は各関数の実装を参照
  * ============================================
@@ -2211,12 +2219,288 @@
   };
 
   // ==========================================
-  // 8. Plugin Registry
+  // 8. DraftStorage Module (下書きSpreadsheet管理)
+  // ==========================================
+  const SHEETS_API_BASE = 'https://sheets.googleapis.com/v4';
+  const DRIVE_API_BASE_V3 = 'https://www.googleapis.com/drive/v3';
+  const DRAFT_SPREADSHEET_NAME = 'Henry_下書きデータ';
+  const DRAFT_SHEET_NAME = '下書き';
+
+  const DraftStorage = {
+    _spreadsheetId: null,
+    _caches: {},  // { [type]: { [patientUuid]: { rowIndex, jsonData, savedAt, patientName } } }
+
+    // OAuth付きHTTPリクエスト（401時リトライ）
+    async _request(method, url, options = {}) {
+      const accessToken = await GoogleAuth.getValidAccessToken();
+
+      return new Promise((resolve, reject) => {
+        GM_xmlhttpRequest({
+          method,
+          url,
+          headers: {
+            'Authorization': `Bearer ${accessToken}`,
+            ...options.headers
+          },
+          data: options.body,
+          onload: (response) => {
+            if (response.status >= 200 && response.status < 300) {
+              try {
+                resolve(JSON.parse(response.responseText));
+              } catch {
+                resolve(response.responseText);
+              }
+            } else if (response.status === 401) {
+              // トークン失効 → リフレッシュして1回リトライ
+              GoogleAuth.refreshAccessToken()
+                .then(() => this._request(method, url, options))
+                .then(resolve)
+                .catch(reject);
+            } else {
+              console.error(`[Henry Core] DraftStorage API Error ${response.status}:`, response.responseText);
+              reject(new Error(`DraftStorage API Error: ${response.status}`));
+            }
+          },
+          onerror: (err) => {
+            console.error('[Henry Core] DraftStorage Network error:', err);
+            reject(new Error('DraftStorage 通信エラー'));
+          }
+        });
+      });
+    },
+
+    // スプレッドシート検索（Drive API）
+    async _findSpreadsheet() {
+      if (this._spreadsheetId) return this._spreadsheetId;
+
+      const query = `name='${DRAFT_SPREADSHEET_NAME}' and mimeType='application/vnd.google-apps.spreadsheet' and 'root' in parents and trashed=false`;
+      const url = `${DRIVE_API_BASE_V3}/files?q=${encodeURIComponent(query)}&fields=files(id,name)`;
+      const result = await this._request('GET', url);
+      if (result.files?.length > 0) {
+        this._spreadsheetId = result.files[0].id;
+        return this._spreadsheetId;
+      }
+      return null;
+    },
+
+    // スプレッドシート新規作成（ヘッダー行付き）
+    async _createSpreadsheet() {
+      const url = `${SHEETS_API_BASE}/spreadsheets`;
+      const result = await this._request('POST', url, {
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          properties: { title: DRAFT_SPREADSHEET_NAME },
+          sheets: [{
+            properties: { title: DRAFT_SHEET_NAME },
+            data: [{
+              startRow: 0,
+              startColumn: 0,
+              rowData: [{
+                values: [
+                  { userEnteredValue: { stringValue: '患者UUID' } },
+                  { userEnteredValue: { stringValue: '下書き種別' } },
+                  { userEnteredValue: { stringValue: 'JSONデータ' } },
+                  { userEnteredValue: { stringValue: '保存日時' } },
+                  { userEnteredValue: { stringValue: '患者名' } }
+                ]
+              }]
+            }]
+          }]
+        })
+      });
+      this._spreadsheetId = result.spreadsheetId;
+      console.log('[Henry Core] DraftStorage: スプレッドシートを作成:', this._spreadsheetId);
+      return this._spreadsheetId;
+    },
+
+    // 取得 or 作成
+    async _getOrCreateSpreadsheet() {
+      let id = await this._findSpreadsheet();
+      if (!id) id = await this._createSpreadsheet();
+      return id;
+    },
+
+    // 全データ読み込み → キャッシュ（種別フィルタ）
+    async _loadAll(type) {
+      if (this._caches[type]) return this._caches[type];
+
+      const spreadsheetId = await this._findSpreadsheet();
+      if (!spreadsheetId) {
+        this._caches[type] = {};
+        return this._caches[type];
+      }
+
+      const url = `${SHEETS_API_BASE}/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(DRAFT_SHEET_NAME)}!A:E`;
+      const result = await this._request('GET', url);
+      const rows = result.values || [];
+      this._caches[type] = {};
+
+      for (let i = 1; i < rows.length; i++) {
+        const row = rows[i];
+        if (row[0] && row[1] === type) {
+          this._caches[type][row[0]] = {
+            rowIndex: i + 1,
+            jsonData: row[2] || '',
+            savedAt: row[3] || '',
+            patientName: row[4] || ''
+          };
+        }
+      }
+
+      return this._caches[type];
+    },
+
+    /**
+     * 下書き読み込み（localStorageマイグレーション付き）
+     * @param {string} type - 種別（'referral', 'ikensho'等）
+     * @param {string} patientUuid - 患者UUID
+     * @param {Object} [options] - オプション
+     * @param {string} [options.localStoragePrefix] - マイグレーション用のlocalStorageキー接頭辞
+     * @param {function} [options.validate] - バリデーション関数 (parsed) => boolean
+     * @returns {Promise<{data: Object, savedAt: string}|null>}
+     */
+    async load(type, patientUuid, options = {}) {
+      try {
+        const cache = await this._loadAll(type);
+
+        // Spreadsheet にあればそれを返す
+        const cached = cache[patientUuid];
+        if (cached) {
+          try {
+            const parsed = JSON.parse(cached.jsonData);
+            if (options.validate && !options.validate(parsed)) {
+              console.log('[Henry Core] DraftStorage: バリデーション不合格、スキップ');
+              return null;
+            }
+            return { data: parsed, savedAt: cached.savedAt };
+          } catch (e) {
+            console.error('[Henry Core] DraftStorage: JSONパースエラー:', e.message);
+            return null;
+          }
+        }
+
+        // localStorage からのマイグレーション
+        if (options.localStoragePrefix) {
+          const lsKey = `${options.localStoragePrefix}${patientUuid}`;
+          const stored = localStorage.getItem(lsKey);
+          if (stored) {
+            try {
+              const parsed = JSON.parse(stored);
+              if (!options.validate || options.validate(parsed)) {
+                console.log('[Henry Core] DraftStorage: localStorage → Spreadsheet マイグレーション:', patientUuid);
+                await this.save(type, patientUuid, parsed, '');
+                localStorage.removeItem(lsKey);
+                return { data: parsed, savedAt: parsed.savedAt || '' };
+              }
+            } catch (e) {
+              console.error('[Henry Core] DraftStorage: localStorage マイグレーションエラー:', e.message);
+            }
+            // 不正データはlocalStorageから削除
+            localStorage.removeItem(lsKey);
+          }
+        }
+
+        return null;
+      } catch (e) {
+        console.error('[Henry Core] DraftStorage: 読み込みエラー:', e);
+        return null;
+      }
+    },
+
+    /**
+     * 下書き保存（既存行更新 or 新規行追加）
+     * @param {string} type - 種別
+     * @param {string} patientUuid - 患者UUID
+     * @param {Object} formData - 保存するデータ（JSON化される）
+     * @param {string} [patientName=''] - 患者名（スプレッドシートE列）
+     * @returns {Promise<boolean>}
+     */
+    async save(type, patientUuid, formData, patientName = '') {
+      try {
+        const spreadsheetId = await this._getOrCreateSpreadsheet();
+        const now = new Date().toISOString();
+        const jsonStr = JSON.stringify(formData);
+
+        const cache = await this._loadAll(type);
+        const existing = cache[patientUuid];
+        const rowValues = [[patientUuid, type, jsonStr, now, patientName]];
+
+        let newRowIndex;
+        if (existing) {
+          const url = `${SHEETS_API_BASE}/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(DRAFT_SHEET_NAME)}!A${existing.rowIndex}:E${existing.rowIndex}?valueInputOption=RAW`;
+          await this._request('PUT', url, {
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ values: rowValues })
+          });
+          newRowIndex = existing.rowIndex;
+        } else {
+          const url = `${SHEETS_API_BASE}/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(DRAFT_SHEET_NAME)}!A:E:append?valueInputOption=RAW&insertDataOption=INSERT_ROWS`;
+          const appendResult = await this._request('POST', url, {
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ values: rowValues })
+          });
+          const range = appendResult?.updates?.updatedRange || '';
+          const match = range.match(/!A(\d+):/);
+          newRowIndex = match ? parseInt(match[1], 10) : Object.keys(cache).length + 2;
+        }
+
+        this._caches[type][patientUuid] = { rowIndex: newRowIndex, jsonData: jsonStr, savedAt: now, patientName };
+        console.log('[Henry Core] DraftStorage: 保存完了:', type, patientUuid);
+        return true;
+      } catch (e) {
+        console.error('[Henry Core] DraftStorage: 保存エラー:', e);
+        return false;
+      }
+    },
+
+    /**
+     * 下書き削除
+     * @param {string} type - 種別
+     * @param {string} patientUuid - 患者UUID
+     */
+    async delete(type, patientUuid) {
+      try {
+        const spreadsheetId = await this._findSpreadsheet();
+        if (!spreadsheetId) return;
+
+        const cache = await this._loadAll(type);
+        const existing = cache[patientUuid];
+        if (!existing) return;
+
+        // 行をクリア（削除ではなく空にする）
+        const url = `${SHEETS_API_BASE}/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(DRAFT_SHEET_NAME)}!A${existing.rowIndex}:E${existing.rowIndex}:clear`;
+        await this._request('POST', url, {
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({})
+        });
+
+        delete this._caches[type][patientUuid];
+        console.log('[Henry Core] DraftStorage: 削除完了:', type, patientUuid);
+      } catch (e) {
+        console.error('[Henry Core] DraftStorage: 削除エラー:', e);
+      }
+    },
+
+    /**
+     * プリロード（フォーム表示高速化用）
+     * @param {string} type - 種別
+     */
+    async preload(type) {
+      try {
+        await this._loadAll(type);
+      } catch (e) {
+        // プリロードは失敗しても無視
+      }
+    }
+  };
+
+  // ==========================================
+  // 9. Plugin Registry
   // ==========================================
   const pluginRegistry = [];
 
   // ==========================================
-  // 9. Public API
+  // 10. Public API
   // ==========================================
   pageWindow.HenryCore = {
     // 施設設定（ハードコード値の一元管理）
@@ -2233,7 +2517,8 @@
 
     // モジュール（GoogleAuth等）
     modules: {
-      GoogleAuth: GoogleAuth
+      GoogleAuth: GoogleAuth,
+      DraftStorage: DraftStorage
     },
 
     plugins: pluginRegistry,
@@ -2299,7 +2584,7 @@
   };
 
   // ==========================================
-  // 10. 初期化
+  // 11. 初期化
   // ==========================================
 
   // 認証コールバック処理（Henryドメインのみ）

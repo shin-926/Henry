@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         診療情報提供書フォーム
 // @namespace    https://henry-app.jp/
-// @version      1.4.7
+// @version      1.5.0
 // @description  診療情報提供書の入力フォームとGoogle Docs出力
 // @author       sk powered by Claude
 // @match        https://henry-app.jp/*
@@ -60,8 +60,9 @@
     OUTPUT_FOLDER_NAME: 'Henry一時ファイル'
   };
 
-  // localStorage設定
-  const STORAGE_KEY_PREFIX = 'henry_referral_draft_';
+  // 下書き設定
+  const DRAFT_TYPE = 'referral';
+  const DRAFT_LS_PREFIX = 'henry_referral_draft_';  // マイグレーション用
   const DRAFT_SCHEMA_VERSION = 1;
 
   let log = null;
@@ -396,54 +397,6 @@
   }
 
   // ==========================================
-  // localStorage管理
-  // ==========================================
-
-  function saveDraft(patientUuid, formData) {
-    try {
-      const key = `${STORAGE_KEY_PREFIX}${patientUuid}`;
-      const draft = {
-        schemaVersion: DRAFT_SCHEMA_VERSION,
-        data: formData,
-        savedAt: new Date().toISOString(),
-        patientName: formData.patient_name
-      };
-      localStorage.setItem(key, JSON.stringify(draft));
-      return true;
-    } catch (e) {
-      console.error(`[${SCRIPT_NAME}] 下書き保存失敗:`, e.message);
-      return false;
-    }
-  }
-
-  function loadDraft(patientUuid) {
-    try {
-      const key = `${STORAGE_KEY_PREFIX}${patientUuid}`;
-      const stored = localStorage.getItem(key);
-      if (!stored) return null;
-
-      const draft = JSON.parse(stored);
-      if (!draft.schemaVersion || draft.schemaVersion !== DRAFT_SCHEMA_VERSION) {
-        localStorage.removeItem(key);
-        return null;
-      }
-
-      return { data: draft.data, savedAt: draft.savedAt };
-    } catch (e) {
-      return null;
-    }
-  }
-
-  function deleteDraft(patientUuid) {
-    try {
-      const key = `${STORAGE_KEY_PREFIX}${patientUuid}`;
-      localStorage.removeItem(key);
-    } catch (e) {
-      // ignore
-    }
-  }
-
-  // ==========================================
   // データ取得関数
   // ==========================================
 
@@ -748,8 +701,12 @@
         return;
       }
 
-      // 下書き読み込み
-      const savedDraft = loadDraft(patientUuid);
+      // 下書き読み込み（Spreadsheet / localStorageマイグレーション）
+      const ds = pageWindow.HenryCore?.modules?.DraftStorage;
+      const savedDraft = ds ? await ds.load(DRAFT_TYPE, patientUuid, {
+        localStoragePrefix: DRAFT_LS_PREFIX,
+        validate: (p) => p.schemaVersion === DRAFT_SCHEMA_VERSION && p.data
+      }) : null;
 
       // フォームデータ作成
       const formData = savedDraft?.data || {
@@ -1532,10 +1489,13 @@
     }
 
     // 下書き保存
-    modal.querySelector('#rf-save-draft').addEventListener('click', () => {
+    modal.querySelector('#rf-save-draft').addEventListener('click', async () => {
       const data = collectFormData(modal, formData);
-      if (saveDraft(formData.patient_uuid, data)) {
-        alert('下書きを保存しました');
+      const ds = pageWindow.HenryCore?.modules?.DraftStorage;
+      if (ds) {
+        const payload = { schemaVersion: DRAFT_SCHEMA_VERSION, data };
+        const saved = await ds.save(DRAFT_TYPE, formData.patient_uuid, payload, data.patient_name || '');
+        if (saved) alert('下書きを保存しました');
       }
     });
 
@@ -1548,7 +1508,8 @@
       try {
         const data = collectFormData(modal, formData);
         await generateGoogleDoc(data);
-        deleteDraft(formData.patient_uuid);
+        const ds = pageWindow.HenryCore?.modules?.DraftStorage;
+        if (ds) await ds.delete(DRAFT_TYPE, formData.patient_uuid);
         modal.remove();
       } catch (e) {
         console.error(`[${SCRIPT_NAME}] 出力エラー:`, e);
