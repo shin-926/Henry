@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         診療情報提供書フォーム
 // @namespace    https://henry-app.jp/
-// @version      1.9.0
+// @version      1.9.1
 // @description  診療情報提供書の入力フォームとGoogle Docs出力
 // @author       sk powered by Claude
 // @match        https://henry-app.jp/*
@@ -85,19 +85,6 @@
     const weekdays = ['日', '月', '火', '水', '木', '金', '土'];
     const w = weekdays[d.getDay()];
     return `${y}/${m}/${day}(${w})`;
-  }
-
-  // 処方を文字列にフォーマット（複数処方対応 - 後方互換）
-  function formatPrescriptions(prescriptions) {
-    if (!prescriptions || prescriptions.length === 0) return '';
-    const latest = prescriptions[0];
-    return FC().data.formatSinglePrescription(latest);
-  }
-
-  // 病名を文字列にフォーマット
-  function formatDiseases(diseases) {
-    if (!diseases || diseases.length === 0) return '';
-    return diseases.map(d => d.name).join('，');
   }
 
   // 診療科名取得（紹介状固有）
@@ -754,6 +741,8 @@
           data.selected_family_diseases.push(d.uuid);
         }
       });
+    } else {
+      data.selected_family_diseases = [];
     }
 
     // 病名
@@ -769,6 +758,7 @@
         }
       });
     } else {
+      data.selected_diseases = [];
       data.diagnosis_text = bodyEl.querySelector(`#${prefix}-diagnosis-text`)?.value || '';
     }
 
@@ -785,6 +775,7 @@
         }
       });
     } else {
+      data.selected_prescriptions = [];
       data.prescription_text = bodyEl.querySelector(`#${prefix}-prescription-text`)?.value || '';
     }
 
