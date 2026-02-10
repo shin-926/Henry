@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         予約システム連携
 // @namespace    https://github.com/shin-926/Henry
-// @version      4.7.24
+// @version      4.7.25
 // @description  Henryカルテと予約システム間の双方向連携（再診予約・照射オーダー自動予約・自動印刷・患者プレビュー）
 // @author       sk powered by Claude & Gemini
 // @match        https://henry-app.jp/*
@@ -1285,17 +1285,6 @@ html, body { margin: 0; padding: 0; }
     // --------------------------------------------
     const HENRY_CORE_URL = 'https://raw.githubusercontent.com/shin-926/Henry/main/henry_core.user.js';
 
-    async function waitForHenryCore(timeout = CONFIG.HENRY_CORE_TIMEOUT) {
-      let waited = 0;
-      while (!unsafeWindow.HenryCore) {
-        await new Promise(r => setTimeout(r, CONFIG.POLLING_INTERVAL));
-        waited += CONFIG.POLLING_INTERVAL;
-        if (waited > timeout) {
-          return null;
-        }
-      }
-      return unsafeWindow.HenryCore;
-    }
 
     function showHenryCoreRequiredMessage() {
       alert(
@@ -1315,8 +1304,8 @@ html, body { margin: 0; padding: 0; }
     // --------------------------------------------
     async function syncTokenToGMStorage() {
       try {
-        const HenryCore = await waitForHenryCore();
-        if (!HenryCore) {
+        let HenryCore;
+        try { HenryCore = await waitForHenryCore(); } catch {
           log.warn('HenryCoreが見つかりません');
           return;
         }
@@ -1342,8 +1331,8 @@ html, body { margin: 0; padding: 0; }
       if (!remote) return; // 自分の変更は無視
 
       log.info('トークンリクエスト受信');
-      const HenryCore = await waitForHenryCore();
-      if (!HenryCore) {
+      let HenryCore;
+      try { HenryCore = await waitForHenryCore(); } catch {
         log.warn('HenryCoreが見つかりません');
         return;
       }
@@ -1392,8 +1381,8 @@ html, body { margin: 0; padding: 0; }
         throw new Error('患者ページを開いてください');
       }
 
-      const HenryCore = await waitForHenryCore();
-      if (!HenryCore) {
+      let HenryCore;
+      try { HenryCore = await waitForHenryCore(); } catch {
         showHenryCoreRequiredMessage();
         throw new Error('HenryCoreが必要です');
       }
@@ -1460,8 +1449,8 @@ html, body { margin: 0; padding: 0; }
     // --------------------------------------------
     (async function registerPlugin() {
       try {
-        const HenryCore = await waitForHenryCore();
-        if (!HenryCore) {
+        let HenryCore;
+        try { HenryCore = await waitForHenryCore(); } catch {
           showHenryCoreRequiredMessage();
           return;
         }
@@ -1943,8 +1932,8 @@ html, body { margin: 0; padding: 0; }
 
     // 照射オーダーfetchインターセプト（予約連携 + 自動印刷統合）
     (async function setupImagingOrderIntercept() {
-      const HenryCore = await waitForHenryCore();
-      if (!HenryCore) return;
+      let HenryCore;
+      try { HenryCore = await waitForHenryCore(); } catch { return; }
 
       // 初期化時に古いコンテキストをクリア
       GM_setValue('imagingOrderContext', null);

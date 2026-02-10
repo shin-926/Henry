@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry Patient Timeline
 // @namespace    https://github.com/shin-926/Henry
-// @version      2.134.11
+// @version      2.134.12
 // @description  入院患者の各種記録・オーダーをガントチャート風タイムラインで表示
 // @author       sk powered by Claude
 // @match        https://henry-app.jp/*
@@ -7499,22 +7499,6 @@
   }
 
   // HenryCore待機
-  function waitForHenryCore(maxWait = 10000) {
-    return new Promise((resolve, reject) => {
-      if (window.HenryCore?.query) return resolve(window.HenryCore);
-      const start = Date.now();
-      const check = setInterval(() => {
-        if (window.HenryCore?.query) {
-          clearInterval(check);
-          resolve(window.HenryCore);
-        } else if (Date.now() - start > maxWait) {
-          clearInterval(check);
-          reject(new Error('HenryCore not found'));
-        }
-      }, 100);
-    });
-  }
-
   // メイン処理
   async function main() {
     await waitForHenryCore();

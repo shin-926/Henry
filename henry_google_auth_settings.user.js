@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Google認証設定
 // @namespace    https://henry-app.jp/
-// @version      1.0.0
+// @version      1.0.1
 // @description  Google OAuth認証の設定・管理ツール
 // @author       sk powered by Claude
 // @match        https://henry-app.jp/*
@@ -19,15 +19,6 @@
   const pageWindow = typeof unsafeWindow !== 'undefined' ? unsafeWindow : window;
 
   // HenryCore待機
-  async function waitForHenryCore(timeout = 5000) {
-    let waited = 0;
-    while (!pageWindow.HenryCore) {
-      await new Promise(r => setTimeout(r, 100));
-      waited += 100;
-      if (waited > timeout) return null;
-    }
-    return pageWindow.HenryCore;
-  }
 
   // GoogleAuth取得
   function getGoogleAuth() {
@@ -232,8 +223,8 @@
 
   // 初期化
   async function init() {
-    const core = await waitForHenryCore();
-    if (!core) {
+    let core;
+    try { core = await waitForHenryCore(); } catch {
       console.error(`[${SCRIPT_NAME}] HenryCore が見つかりません`);
       return;
     }

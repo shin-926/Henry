@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry Hospitalization Search
 // @namespace    https://github.com/shin-926/Henry
-// @version      1.8.0
+// @version      1.8.1
 // @description  カルテの医師記録（入院・外来）から特定文字列を検索
 // @author       sk powered by Claude
 // @match        https://henry-app.jp/*
@@ -1085,22 +1085,6 @@
   }
 
   // HenryCore待機
-  function waitForHenryCore(maxWait = 10000) {
-    return new Promise((resolve, reject) => {
-      if (window.HenryCore?.query) return resolve(window.HenryCore);
-      const start = Date.now();
-      const check = setInterval(() => {
-        if (window.HenryCore?.query) {
-          clearInterval(check);
-          resolve(window.HenryCore);
-        } else if (Date.now() - start > maxWait) {
-          clearInterval(check);
-          reject(new Error('HenryCore not found'));
-        }
-      }, 100);
-    });
-  }
-
   // メイン処理
   async function main() {
     const core = await waitForHenryCore();

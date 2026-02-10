@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry Core
 // @namespace    https://henry-app.jp/
-// @version      2.37.0
+// @version      2.38.0
 // @description  Henry スクリプト実行基盤 (GoogleAuth統合 / Google Docs対応)
 // @author       sk powered by Claude & Gemini
 // @match        https://henry-app.jp/*
@@ -40,7 +40,7 @@
 
 /**
  * ============================================
- * Henry Core API 目次 (v2.37.0)
+ * Henry Core API 目次 (v2.38.0)
  * ============================================
  *
  * ■ Config (config.*)
@@ -50,6 +50,9 @@
  *   hospital.address                             - 住所
  *   hospital.phone                               - 電話番号
  *   hospital.fax                                 - FAX番号
+ *
+ * ■ Global Function
+ *   waitForHenryCore(timeout?)                   - HenryCore読み込み待機（window.waitForHenryCore）
  *
  * ■ Core API
  *   query(queryString, variables?, options?)     - GraphQL API呼び出し（エンドポイント自動学習）
@@ -127,6 +130,19 @@
 
   // 二重起動防止
   if (pageWindow.HenryCore) return;
+
+  // グローバル関数: 他のスクリプトがHenryCoreの読み込みを待つために使用
+  // @require で同期実行されるため、動的ロードされる各スクリプトより先に登録される
+  pageWindow.waitForHenryCore = async function(timeout = 10000) {
+    const start = Date.now();
+    while (!pageWindow.HenryCore?.query) {
+      if (Date.now() - start > timeout) {
+        throw new Error('waitForHenryCore: HenryCore not found after ' + timeout + 'ms');
+      }
+      await new Promise(r => setTimeout(r, 100));
+    }
+    return pageWindow.HenryCore;
+  };
 
   // ドメイン判定
   const isHenry = location.host === 'henry-app.jp';

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry 外来受付フィルタ
 // @namespace    https://github.com/shin-926/Henry
-// @version      1.3.5
+// @version      1.3.6
 // @description  外来受付画面で「未完了」（会計待ち・会計済み以外）の患者のみ表示
 // @author       sk powered by Claude & Gemini
 // @match        https://henry-app.jp/*
@@ -272,27 +272,16 @@
   /**
    * HenryCore を使用した SPA 対応
    */
-  function waitForHenryCore() {
-    const checkCore = setInterval(() => {
-      if (window.HenryCore?.utils) {
-        clearInterval(checkCore);
-        const cleaner = HenryCore.utils.createCleaner();
-        HenryCore.utils.subscribeNavigation(cleaner, () => init(cleaner));
-        console.log(`[${SCRIPT_NAME}] Ready (v${VERSION})`);
-      }
-    }, 100);
-
-    // HenryCoreが見つからない場合のフォールバック
-    setTimeout(() => {
-      clearInterval(checkCore);
-      if (!window.HenryCore) {
-        console.log(`[${SCRIPT_NAME}] HenryCore未検出、単独モードで起動`);
-        init({ add: () => {} });
-        // SPA遷移を監視
-        window.addEventListener('popstate', () => init({ add: () => {} }));
-      }
-    }, 5000);
-  }
-
-  waitForHenryCore();
+  (async () => {
+    try {
+      await waitForHenryCore();
+      const cleaner = HenryCore.utils.createCleaner();
+      HenryCore.utils.subscribeNavigation(cleaner, () => init(cleaner));
+      console.log(`[${SCRIPT_NAME}] Ready (v${VERSION})`);
+    } catch {
+      console.log(`[${SCRIPT_NAME}] HenryCore未検出、単独モードで起動`);
+      init({ add: () => {} });
+      window.addEventListener('popstate', () => init({ add: () => {} }));
+    }
+  })();
 })();

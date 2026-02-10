@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         主治医意見書作成フォーム
 // @namespace    https://henry-app.jp/
-// @version      2.8.2
+// @version      2.8.3
 // @description  主治医意見書の入力フォームとGoogle Docs出力（GAS不要版・API直接呼び出し）
 // @author       sk powered by Claude & Gemini
 // @match        https://henry-app.jp/*
@@ -324,19 +324,6 @@
   /**
    * HenryCoreの待機
    */
-  async function waitForHenryCore(timeout = 5000) {
-    const pageWindow = typeof unsafeWindow !== 'undefined' ? unsafeWindow : window;
-    let waited = 0;
-    while (!pageWindow.HenryCore) {
-      await new Promise(r => setTimeout(r, 100));
-      waited += 100;
-      if (waited > timeout) {
-        console.error(`[${SCRIPT_NAME}] HenryCore が見つかりません`);
-        return false;
-      }
-    }
-    return true;
-  }
 
   /**
    *カタカナ→ひらがな変換
@@ -3447,7 +3434,7 @@
   async function init() {
     const pageWindow = typeof unsafeWindow !== 'undefined' ? unsafeWindow : window;
 
-    if (!(await waitForHenryCore())) return;
+    try { await waitForHenryCore(); } catch { return; }
 
     log = pageWindow.HenryCore.utils.createLogger(SCRIPT_NAME);
     log.info(`Ready (v${VERSION})`);

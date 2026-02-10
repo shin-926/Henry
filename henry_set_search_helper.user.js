@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry セット展開検索ヘルパー
 // @namespace    https://henry-app.jp/
-// @version      2.5.0
+// @version      2.5.1
 // @description  セット展開画面の検索ボックス上にクイック検索ボタンを追加
 // @author       sk powered by Claude & Gemini
 // @match        https://henry-app.jp/*
@@ -68,18 +68,6 @@
   }
 
   // HenryCore待機
-  async function waitForHenryCore(timeout = 5000) {
-    let waited = 0;
-    while (!pageWindow.HenryCore) {
-      await new Promise(r => setTimeout(r, 100));
-      waited += 100;
-      if (waited > timeout) {
-        console.error(`[${SCRIPT_NAME}] HenryCore が見つかりません`);
-        return false;
-      }
-    }
-    return true;
-  }
 
   // React対応でinputのvalueをセット
   function setInputValueReactSafe(input, value) {
@@ -1294,10 +1282,8 @@
   // - subscribeNavigation は登録時に initFn を即時実行する仕様
   // - そのため setup() を別途呼ぶ必要はない
   async function init() {
-    const coreReady = await waitForHenryCore();
-    if (!coreReady) return;
-
-    const HenryCore = pageWindow.HenryCore;
+    let HenryCore;
+    try { HenryCore = await waitForHenryCore(); } catch { return; }
     const cleaner = HenryCore.utils.createCleaner();
 
     HenryCore.utils.subscribeNavigation(cleaner, () => setup(cleaner));
