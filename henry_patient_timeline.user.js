@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry Patient Timeline
 // @namespace    https://github.com/shin-926/Henry
-// @version      2.134.12
+// @version      2.134.13
 // @description  入院患者の各種記録・オーダーをガントチャート風タイムラインで表示
 // @author       sk powered by Claude
 // @match        https://henry-app.jp/*
@@ -2439,7 +2439,7 @@
 
   const SUMMARY_SPREADSHEET_NAME = 'Henry_患者サマリー';
   let summarySpreadsheetId = null; // スプレッドシートIDキャッシュ
-  let summaryCache = null; // 全サマリーキャッシュ { patientUuid: { patientName, summary, summaryUpdatedAt, profile, profileUpdatedAt, rowIndex } }
+  let summaryCache = null; // 全サマリーキャッシュ { patientUuid: { summary, summaryUpdatedAt, profile, profileUpdatedAt, rowIndex } }
   let summaryCacheLoading = null; // 読み込み中のPromise（重複防止）
 
   // Google Sheets API ヘルパー
@@ -2518,7 +2518,6 @@
             rowData: [{
               values: [
                 { userEnteredValue: { stringValue: '患者UUID' } },
-                { userEnteredValue: { stringValue: '患者名' } },
                 { userEnteredValue: { stringValue: 'サマリー' } },
                 { userEnteredValue: { stringValue: 'サマリー更新日時' } },
                 { userEnteredValue: { stringValue: 'プロフィール' } },
@@ -2568,7 +2567,7 @@
         }
 
         const response = await sheetsApiRequest(
-          `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/サマリー!A:F`
+          `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/サマリー!A:E`
         );
 
         const rows = response.values || [];
@@ -2580,11 +2579,10 @@
           if (row[0]) {
             summaryCache[row[0]] = {
               rowIndex: i + 1, // 1-based（Sheets APIでの行番号）
-              patientName: row[1] || '',
-              summary: row[2] || '',
-              summaryUpdatedAt: row[3] || '',
-              profile: row[4] || '',
-              profileUpdatedAt: row[5] || ''
+              summary: row[1] || '',
+              summaryUpdatedAt: row[2] || '',
+              profile: row[3] || '',
+              profileUpdatedAt: row[4] || ''
             };
           }
         }
@@ -2615,7 +2613,7 @@
   }
 
   // 患者のサマリーを保存
-  async function savePatientSummary(patientUuid, patientName, summary) {
+  async function savePatientSummary(patientUuid, summary) {
     try {
       const spreadsheetId = await getOrCreateSummarySpreadsheet();
       const now = new Date().toISOString();
@@ -2634,24 +2632,24 @@
       if (existing) {
         // 更新（既存行を上書き）- プロフィールは維持
         await sheetsApiRequest(
-          `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/サマリー!A${existing.rowIndex}:F${existing.rowIndex}?valueInputOption=RAW`,
+          `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/サマリー!A${existing.rowIndex}:E${existing.rowIndex}?valueInputOption=RAW`,
           'PUT',
           {
-            values: [[patientUuid, patientName, summary, now, existingProfile, existingProfileUpdatedAt]]
+            values: [[patientUuid, summary, now, existingProfile, existingProfileUpdatedAt]]
           }
         );
         newRowIndex = existing.rowIndex;
       } else {
         // 新規追加（末尾に追加）
         const appendResponse = await sheetsApiRequest(
-          `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/サマリー!A:F:append?valueInputOption=RAW&insertDataOption=INSERT_ROWS`,
+          `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/サマリー!A:E:append?valueInputOption=RAW&insertDataOption=INSERT_ROWS`,
           'POST',
           {
-            values: [[patientUuid, patientName, summary, now, '', '']]
+            values: [[patientUuid, summary, now, '', '']]
           }
         );
         // レスポンスから追加された行番号を取得
-        // updatedRange: "サマリー!A5:F5" のような形式
+        // updatedRange: "サマリー!A5:E5" のような形式
         const range = appendResponse?.updates?.updatedRange || '';
         const match = range.match(/!A(\d+):/);
         newRowIndex = match ? parseInt(match[1], 10) : Object.keys(summaryCache).length + 2;
@@ -2660,7 +2658,6 @@
       // キャッシュを更新
       summaryCache[patientUuid] = {
         rowIndex: newRowIndex,
-        patientName,
         summary,
         summaryUpdatedAt: now,
         profile: existingProfile,
@@ -2675,7 +2672,7 @@
   }
 
   // 患者のプロフィールを保存
-  async function savePatientProfile(patientUuid, patientName, profile) {
+  async function savePatientProfile(patientUuid, profile) {
     try {
       const spreadsheetId = await getOrCreateSummarySpreadsheet();
       const now = new Date().toISOString();
@@ -2694,20 +2691,20 @@
       if (existing) {
         // 更新（既存行を上書き）- サマリーは維持
         await sheetsApiRequest(
-          `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/サマリー!A${existing.rowIndex}:F${existing.rowIndex}?valueInputOption=RAW`,
+          `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/サマリー!A${existing.rowIndex}:E${existing.rowIndex}?valueInputOption=RAW`,
           'PUT',
           {
-            values: [[patientUuid, patientName, existingSummary, existingSummaryUpdatedAt, profile, now]]
+            values: [[patientUuid, existingSummary, existingSummaryUpdatedAt, profile, now]]
           }
         );
         newRowIndex = existing.rowIndex;
       } else {
         // 新規追加（末尾に追加）
         const appendResponse = await sheetsApiRequest(
-          `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/サマリー!A:F:append?valueInputOption=RAW&insertDataOption=INSERT_ROWS`,
+          `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/サマリー!A:E:append?valueInputOption=RAW&insertDataOption=INSERT_ROWS`,
           'POST',
           {
-            values: [[patientUuid, patientName, '', '', profile, now]]
+            values: [[patientUuid, '', '', profile, now]]
           }
         );
         // レスポンスから追加された行番号を取得
@@ -2719,7 +2716,6 @@
       // キャッシュを更新
       summaryCache[patientUuid] = {
         rowIndex: newRowIndex,
-        patientName,
         summary: existingSummary,
         summaryUpdatedAt: existingSummaryUpdatedAt,
         profile,
@@ -5962,7 +5958,6 @@
           try {
             await savePatientSummary(
               state.patient.selected.uuid,
-              state.patient.selected.fullName,
               summary
             );
             // 保存成功のフィードバック（控えめに）
@@ -6933,7 +6928,6 @@
               try {
                 await savePatientProfile(
                   state.patient.selected.uuid,
-                  state.patient.selected.fullName,
                   profile
                 );
                 textarea.blur(); // フォーカスを外して矢印キーで患者変更可能に
