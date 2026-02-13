@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         予約システム連携
 // @namespace    https://github.com/shin-926/Henry
-// @version      4.7.27
+// @version      4.7.28
 // @description  Henryカルテと予約システム間の双方向連携（再診予約・照射オーダー自動予約・自動印刷・患者プレビュー）
 // @author       sk powered by Claude & Gemini
 // @match        https://henry-app.jp/*
@@ -1423,11 +1423,18 @@ html, body { margin: 0; padding: 0; }
 
         // NOTE: 患者名をGM_setValueで一時保存（クロスタブ通信用、完了後にクリア）
         // PII永続保存禁止ルールの例外: 一時的な受け渡しで即クリアされるため許容 (Issue #37)
-        GM_setValue('pendingPatient', { id: patientId, name: patientData.name || '' });
+        try {
+          GM_setValue('pendingPatient', { id: patientId, name: patientData.name || '' });
+        } catch (e) {
+          log.warn('GM_setValueに失敗（ポート切断の可能性）:', e.message);
+        }
+
+        // URLパラメータにも患者情報を付与（GM_*ストレージ切断時のフォールバック）
+        const reserveUrl = `https://manage-maokahp.reserve.ne.jp/?henryPatientId=${encodeURIComponent(patientId)}&henryPatientName=${encodeURIComponent(patientData.name || '')}`;
 
         // オーバーレイ付きで予約システムを開く
         openReserveWithOverlay(
-          'https://manage-maokahp.reserve.ne.jp/',
+          reserveUrl,
           `再診予約 - ${patientId} ${patientData.name || ''}`
         );
 
@@ -1582,9 +1589,13 @@ html, body { margin: 0; padding: 0; }
           modality: modality,  // CT, MRI等
           timestamp: Date.now()
         };
-        GM_setValue('imagingOrderContext', context);
-        // NOTE: PII一時保存（クロスタブ通信用、完了/タイムアウト時にクリア）Issue #37
-        GM_setValue('pendingPatient', { id: patientInfo.id, name: patientInfo.name });
+        try {
+          GM_setValue('imagingOrderContext', context);
+          // NOTE: PII一時保存（クロスタブ通信用、完了/タイムアウト時にクリア）Issue #37
+          GM_setValue('pendingPatient', { id: patientInfo.id, name: patientInfo.name });
+        } catch (e) {
+          log.warn('GM_setValueに失敗（ポート切断の可能性）:', e.message);
+        }
         log.info('照射オーダーコンテキストを保存: ' + JSON.stringify(context));
 
         // タイムアウト設定（5分）
@@ -1622,7 +1633,7 @@ html, body { margin: 0; padding: 0; }
         // 予約システムを開く
         const targetDate = new Date(dateObj.year, dateObj.month - 1, dateObj.day, 9, 0, 0);
         const limit = Math.floor(targetDate.getTime() / 1000);
-        const reserveUrl = `https://manage-maokahp.reserve.ne.jp/manage/calendar.php?from_date=${context.date}&limit=${limit}`;
+        const reserveUrl = `https://manage-maokahp.reserve.ne.jp/manage/calendar.php?from_date=${context.date}&limit=${limit}&henryPatientId=${encodeURIComponent(patientInfo.id)}&henryPatientName=${encodeURIComponent(patientInfo.name || '')}`;
 
         // オーバーレイ付きで予約システムを開く
         openReserveWithOverlay(
@@ -2184,8 +2195,19 @@ html, body { margin: 0; padding: 0; }
     }
 
     // 同一スクリプト内のGM_*ストレージから取得
-    const pendingPatient = !isLoginPage ? GM_getValue('pendingPatient', null) : null;
+    let pendingPatient = !isLoginPage ? GM_getValue('pendingPatient', null) : null;
     let imagingOrderContext = !isLoginPage ? GM_getValue('imagingOrderContext', null) : null;
+
+    // GM_*ストレージが空の場合、URLパラメータからフォールバック取得
+    // （長時間放置によるService Workerポート切断でGM_setValueがサイレント失敗した場合の救済）
+    if (!pendingPatient && !isLoginPage) {
+      const params = new URLSearchParams(location.search);
+      const urlPatientId = params.get('henryPatientId');
+      if (urlPatientId) {
+        pendingPatient = { id: urlPatientId, name: params.get('henryPatientName') || '' };
+        log.info('URLパラメータから患者情報を取得（GM_*フォールバック）');
+      }
+    }
 
     // 照射オーダーコンテキストが古い場合は無効化
     if (imagingOrderContext && imagingOrderContext.timestamp) {
