@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry Patient Timeline
 // @namespace    https://github.com/shin-926/Henry
-// @version      2.135.0
+// @version      2.136.0
 // @description  入院患者の各種記録・オーダーをガントチャート風タイムラインで表示
 // @author       sk powered by Claude
 // @match        https://henry-app.jp/*
@@ -2605,6 +2605,73 @@
     })();
 
     return summaryCacheLoading;
+  }
+
+  // 退院患者のサマリーデータをスプレッドシートから削除
+  async function cleanupStalePatients(currentPatientUuids) {
+    try {
+      if (!summaryCache || Object.keys(summaryCache).length === 0) return;
+
+      const spreadsheetId = await findSummarySpreadsheet();
+      if (!spreadsheetId) return;
+
+      // スプレッドシートにあって入院患者リストにいないUUIDを抽出
+      const staleUuids = Object.keys(summaryCache).filter(uuid => !currentPatientUuids.has(uuid));
+      if (staleUuids.length === 0) {
+        DEBUG && console.log(`[${SCRIPT_NAME}] クリーンアップ: 削除対象なし`);
+        return;
+      }
+
+      // 削除対象の行インデックスを降順ソート（下から削除してインデックスずれを防ぐ）
+      const rowsToDelete = staleUuids
+        .map(uuid => ({ uuid, rowIndex: summaryCache[uuid].rowIndex }))
+        .sort((a, b) => b.rowIndex - a.rowIndex);
+
+      // シートIDを取得（batchUpdate APIに必要）
+      const metadata = await sheetsApiRequest(
+        `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}?fields=sheets.properties`
+      );
+      const sheetId = metadata.sheets?.[0]?.properties?.sheetId ?? 0;
+
+      // 行削除リクエストを構築（降順なのでbatchUpdate内で順次処理されてもインデックスがずれない）
+      const requests = rowsToDelete.map(({ rowIndex }) => ({
+        deleteDimension: {
+          range: {
+            sheetId,
+            dimension: 'ROWS',
+            startIndex: rowIndex - 1, // 0-based に変換
+            endIndex: rowIndex        // exclusive
+          }
+        }
+      }));
+
+      await sheetsApiRequest(
+        `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}:batchUpdate`,
+        'POST',
+        { requests }
+      );
+
+      // キャッシュから削除済みエントリを除去
+      for (const { uuid } of rowsToDelete) {
+        delete summaryCache[uuid];
+      }
+
+      // 残りのエントリのrowIndexを再計算（削除された行の分だけ繰り上げ）
+      const deletedIndices = rowsToDelete.map(r => r.rowIndex).sort((a, b) => a - b);
+      for (const data of Object.values(summaryCache)) {
+        let shift = 0;
+        for (const delIdx of deletedIndices) {
+          if (delIdx < data.rowIndex) shift++;
+          else break;
+        }
+        data.rowIndex -= shift;
+      }
+
+      console.log(`[${SCRIPT_NAME}] クリーンアップ完了: ${staleUuids.length}件の退院患者データを削除`);
+    } catch (e) {
+      console.error(`[${SCRIPT_NAME}] クリーンアップエラー:`, e);
+      // クリーンアップ失敗は致命的ではないので静かに終了
+    }
   }
 
   // 患者のサマリーを取得（キャッシュから）
@@ -7508,6 +7575,10 @@
         state.patient.all = patients;
         state.ui.isLoading = false;
         DEBUG && console.log(`[${SCRIPT_NAME}] 入院患者一覧取得: ${state.patient.all.length}名`);
+
+        // 退院患者のサマリーデータをクリーンアップ（バックグラウンド実行）
+        const currentPatientUuids = new Set(patients.map(p => p.patient?.uuid).filter(Boolean));
+        cleanupStalePatients(currentPatientUuids).catch(() => {});
 
         // 担当医カラーマップを構築
         state.filter.doctorColorMap = buildDoctorColorMap(state.patient.all);
