@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry Patient Timeline
 // @namespace    https://github.com/shin-926/Henry
-// @version      2.134.13
+// @version      2.135.0
 // @description  入院患者の各種記録・オーダーをガントチャート風タイムラインで表示
 // @author       sk powered by Claude
 // @match        https://henry-app.jp/*
@@ -367,6 +367,12 @@
     if (!name) return '';
     // 全角・半角スペースをすべて除去して比較用キーを作成
     return name.replace(/[\s\u3000]+/g, '');
+  }
+
+  // 表示用の医師名（全角スペース→半角）
+  function displayDoctorName(name) {
+    if (!name) return '';
+    return name.replace(/\u3000/g, ' ');
   }
 
   // 年齢を計算
@@ -3339,6 +3345,21 @@
       font-size: 13px;
       color: #666;
     }
+    #patient-timeline-modal .header-action-btn {
+      background: none;
+      border: 1px solid #ddd;
+      font-size: 12px;
+      cursor: pointer !important;
+      padding: 3px 8px;
+      border-radius: 4px;
+      color: #666;
+      display: none;
+    }
+    #patient-timeline-modal .header-action-btn:hover {
+      background: #f0f0f0;
+      color: #333;
+      border-color: #bbb;
+    }
     #patient-timeline-modal .close-btn {
       background: none;
       border: none;
@@ -4041,6 +4062,7 @@
             </div>
             <h2 id="modal-title">入院タイムライン</h2>
             <span class="hosp-info" id="hosp-info"></span>
+            <button class="header-action-btn" id="disease-register-btn" title="病名登録">病名</button>
             <div id="header-search-container" style="display: none;"></div>
           </div>
           <button class="close-btn" title="閉じる">&times;</button>
@@ -4110,8 +4132,19 @@
     const prescriptionOrderContent = modal.querySelector('#prescription-order-content');
     const fixedInfoContent = modal.querySelector('#fixed-info-content');
     const hospInfo = modal.querySelector('#hosp-info');
+    const diseaseRegisterBtn = modal.querySelector('#disease-register-btn');
     const doctorLegend = modal.querySelector('#doctor-legend');
     const addRecordBtn = modal.querySelector('#add-record-btn');
+
+    // 病名登録ボタン
+    diseaseRegisterBtn.onclick = () => {
+      if (!state.patient.selected) return;
+      if (typeof window.openDiseaseRegister === 'function') {
+        window.openDiseaseRegister(state.patient.selected.uuid);
+      } else {
+        window.HenryCore.ui.showToast('病名登録スクリプトが読み込まれていません', 'error');
+      }
+    };
 
     // =========================================================================
     // 記録追加・編集
@@ -4531,6 +4564,7 @@
       backBtn.style.display = 'none';
       prevBtn.style.display = 'none';
       nextBtn.style.display = 'none';
+      diseaseRegisterBtn.style.display = 'none';
       modalTitle.textContent = '入院タイムライン';
       hospInfo.textContent = '';
 
@@ -4564,6 +4598,7 @@
       state.timeline.selectedDate = null;
 
       backBtn.style.display = 'block';
+      diseaseRegisterBtn.style.display = 'inline-block';
       updateNavButtons();
       // 年齢・性別を表示（患者IDは非表示）
       const age = patient.birthDate ? calculateAge(patient.birthDate) : null;
@@ -4781,7 +4816,7 @@
           return `
             <div class="legend-item ${stateClass}" data-doctor="${escapeHtml(doc.normalizedName)}">
               <div class="legend-color" style="background: ${doc.bg}; border-color: ${doc.border};"></div>
-              <span>${escapeHtml(doc.name || '不明')}</span>
+              <span>${escapeHtml(displayDoctorName(doc.name) || '不明')}</span>
               <span class="legend-count">(${doc.count}名)</span>
             </div>
           `;
@@ -4882,7 +4917,7 @@
               const p = item.patient;
               const days = (item.hospitalizationDayCount?.value ?? -1) + 1;
               const doctorUuid = item.hospitalizationDoctor?.doctor?.uuid;
-              const doctorName = item.hospitalizationDoctor?.doctor?.name || '担当医不明';
+              const doctorName = displayDoctorName(item.hospitalizationDoctor?.doctor?.name) || '担当医不明';
               const color = state.filter.doctorColorMap.get(doctorUuid) || { bg: '#f5f5f5', border: '#bdbdbd' };
 
               // 入院予定患者の場合は日付を表示
@@ -7370,7 +7405,7 @@
         const startDateStr = `${state.hospitalization.current.startDate.year}/${state.hospitalization.current.startDate.month}/${state.hospitalization.current.startDate.day}`;
         const dayCount = (state.hospitalization.current.hospitalizationDayCount?.value ?? -1) + 1;
         const ward = state.hospitalization.current.lastHospitalizationLocation?.ward?.name || '-';
-        const doctorName = state.hospitalization.current.hospitalizationDoctor?.doctor?.name;
+        const doctorName = displayDoctorName(state.hospitalization.current.hospitalizationDoctor?.doctor?.name);
         const doctorInfo = doctorName ? `　担当医：${doctorName}` : '';
         hospInfo.textContent = `${ward} | ${startDateStr}〜 (${dayCount}日目)${doctorInfo}`;
 

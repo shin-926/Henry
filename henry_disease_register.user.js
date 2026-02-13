@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry Disease Register
 // @namespace    https://henry-app.jp/
-// @version      3.32.0
+// @version      3.33.0
 // @description  高速病名検索・登録
 // @author       sk powered by Claude & Gemini
 // @match        https://henry-app.jp/*
@@ -3378,6 +3378,12 @@
         new DiseaseRegisterModal(patientUuid);
       }
     });
+
+    // 外部スクリプトから呼び出し可能なAPIを公開
+    window.openDiseaseRegister = function(patientUuid) {
+      if (!patientUuid) return;
+      new DiseaseRegisterModal(patientUuid);
+    };
 
     console.log(`[${SCRIPT_NAME}] Ready (v${VERSION})`);
   }
