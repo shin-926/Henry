@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         予約システム連携
 // @namespace    https://github.com/shin-926/Henry
-// @version      4.7.26
+// @version      4.7.27
 // @description  Henryカルテと予約システム間の双方向連携（再診予約・照射オーダー自動予約・自動印刷・患者プレビュー）
 // @author       sk powered by Claude & Gemini
 // @match        https://henry-app.jp/*
@@ -1893,11 +1893,21 @@ html, body { margin: 0; padding: 0; }
     }
 
     // 当日の照射オーダー処理（印刷のみ）
-    async function handleSameDayOrder(args, originalFetch, fetchContext) {
+    async function handleSameDayOrder(HenryCore, body, args, originalFetch, fetchContext) {
       const response = await originalFetch.apply(fetchContext, args);
 
+      // 入院チェック
+      const patientUuid = body.variables?.input?.patientUuid;
+      const dateObj = body.variables?.input?.date;
+      const isHospitalized = patientUuid && dateObj
+        ? await isHospitalizedOnDate(HenryCore, patientUuid, dateObj)
+        : false;
+      if (isHospitalized) {
+        log.info('入院中の患者の当日照射オーダーを検出');
+      }
+
       // 印刷実行
-      await printOrderFromResponse(response, '当日照射オーダー検出 - 印刷実行');
+      await printOrderFromResponse(response, '当日照射オーダー検出 - 印刷実行', isHospitalized);
 
       return response;
     }
@@ -2009,7 +2019,7 @@ html, body { margin: 0; padding: 0; }
 
               // 当日の場合：レスポンス監視して印刷
               if (!dateObj || !isFutureDate(dateObj)) {
-                return await handleSameDayOrder(args, originalFetch, this);
+                return await handleSameDayOrder(HenryCore, body, args, originalFetch, this);
               }
             }
           } catch (e) {
