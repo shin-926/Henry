@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         予約システム連携
 // @namespace    https://github.com/shin-926/Henry
-// @version      4.7.28
+// @version      4.7.30
 // @description  Henryカルテと予約システム間の双方向連携（再診予約・照射オーダー自動予約・自動印刷・患者プレビュー）
 // @author       sk powered by Claude & Gemini
 // @match        https://henry-app.jp/*
@@ -296,6 +296,20 @@
             state
             startDate { year month day }
             endDate { year month day }
+            lastHospitalizationLocation {
+              ward { name }
+              room { name }
+            }
+          }
+        }
+      }
+    `,
+    ListHospitalizationDepartments: `
+      query ListHospitalizationDepartments($input: ListHospitalizationDepartmentsRequestInput!) {
+        listHospitalizationDepartments(input: $input) {
+          hospitalizationDepartments {
+            date { year month day }
+            department { name }
           }
         }
       }
@@ -350,7 +364,7 @@
       const hospitalizations = result.data?.listPatientHospitalizations?.hospitalizations || [];
       const orderDate = dateToNumber(orderDateObj);
 
-      return hospitalizations.some(h => {
+      return hospitalizations.find(h => {
         if (h.state === 'ADMITTED') {
           // 入院中 → 常にtrue
           return true;
@@ -361,10 +375,10 @@
           return orderDate >= admitDate;
         }
         return false;
-      });
+      }) || null;
     } catch (e) {
       log.error('入院状態取得エラー: ' + e.message);
-      return false; // エラー時は外来扱い（安全側に倒す）
+      return null; // エラー時は外来扱い（安全側に倒す）
     }
   }
 
@@ -574,6 +588,25 @@
         log.error(`診療科取得エラー: ${e.message}`);
         return '';
       }
+    },
+
+    async getHospitalizationDepartmentName(hospitalizationUuid) {
+      if (!hospitalizationUuid) return '';
+
+      try {
+        const HenryCore = unsafeWindow.HenryCore;
+        if (!HenryCore) return '';
+
+        const result = await HenryCore.query(QUERIES.ListHospitalizationDepartments, {
+          input: { hospitalizationUuid }
+        });
+        const depts = result.data?.listHospitalizationDepartments?.hospitalizationDepartments || [];
+        // 最後のエントリ（最新の診療科）を使用
+        return depts.length > 0 ? (depts[depts.length - 1].department?.name || '') : '';
+      } catch (e) {
+        log.error(`入院診療科取得エラー: ${e.message}`);
+        return '';
+      }
     }
   };
 
@@ -582,7 +615,7 @@
   // ==========================================
 
   const HtmlGenerator = {
-    generate(order, patient, departmentName, isHospitalized = false) {
+    generate(order, patient, departmentName, isHospitalized = false, wardName = '', roomName = '') {
       const now = new Date();
       const issueDateTime = `${now.getFullYear()}/${String(now.getMonth() + 1).padStart(2, '0')}/${String(now.getDate()).padStart(2, '0')} ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
 
@@ -854,7 +887,7 @@ html, body { margin: 0; padding: 0; }
             <h2 class="patient-name">${escapeHtml(patient.fullName || '')}</h2>
             <p class="patient-detail">${patientId} ${fullNamePhonetic} ${sex}</p>
             <p class="patient-detail">生年月日 ${birthDate}</p>
-            <p class="patient-detail">${isHospitalized ? '入院' : '外来'}: ${escapeHtml(departmentName)}</p>
+            <p class="patient-detail">${isHospitalized ? '入院' : '外来'}: ${escapeHtml(departmentName)}${wardName ? ' ' + escapeHtml(wardName) : ''}${roomName ? ' ' + escapeHtml(roomName) : ''}</p>
           </div>
           <table class="signature-table">
             <tbody>
@@ -1070,7 +1103,9 @@ html, body { margin: 0; padding: 0; }
 
       const [patient, departmentName] = await Promise.all([
         PrintDataFetcher.getPatient(patientUuid),
-        PrintDataFetcher.getDepartmentName(encounterId)
+        isHospitalized
+          ? PrintDataFetcher.getHospitalizationDepartmentName(isHospitalized.uuid)
+          : PrintDataFetcher.getDepartmentName(encounterId)
       ]);
 
       if (!patient) {
@@ -1080,7 +1115,9 @@ html, body { margin: 0; padding: 0; }
 
       log.info('印刷データ取得完了');
 
-      const html = HtmlGenerator.generate(orderData, patient, departmentName, isHospitalized);
+      const wardName = isHospitalized?.lastHospitalizationLocation?.ward?.name || '';
+      const roomName = isHospitalized?.lastHospitalizationLocation?.room?.name || '';
+      const html = HtmlGenerator.generate(orderData, patient, departmentName, isHospitalized, wardName, roomName);
 
       const iframe = document.createElement('iframe');
       iframe.style.cssText = 'position: fixed; top: -10000px; left: -10000px; width: 0; height: 0;';
@@ -1823,7 +1860,7 @@ html, body { margin: 0; padding: 0; }
         const response = await originalFetch.call(fetchContext, url, options);
 
         // 印刷実行（入院患者）
-        await printOrderFromResponse(response, hospitalizedPrintLogMessage, true);
+        await printOrderFromResponse(response, hospitalizedPrintLogMessage, isHospitalized);
 
         return response;
       }
