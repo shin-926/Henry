@@ -322,8 +322,7 @@
       "file": "henry_patient_timeline.user.js",
       "match": ["henry-app.jp"],
       "category": "karte",
-      "order": 11,
-      "beta": true
+      "order": 11
     },
     {
       "name": "henry_summary_export",
