@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry Patient Timeline
 // @namespace    https://github.com/shin-926/Henry
-// @version      2.136.0
+// @version      2.137.2
 // @description  入院患者の各種記録・オーダーをガントチャート風タイムラインで表示
 // @author       sk powered by Claude
 // @match        https://henry-app.jp/*
@@ -842,21 +842,20 @@
   // インライン方式のフルクエリを使用する。
 
   // 入院中・入院予定の全患者を取得
-  // 7日後の日付で検索することで、入院予定患者（WILL_ADMIT）も含めて取得
+  // 今日の日付で現入院患者を、+7日で入院予定患者を取得しマージする
   async function fetchAllHospitalizedPatients() {
     try {
       const today = new Date();
-      // 7日後の日付で検索（入院予定患者も含めて取得するため）
-      const searchDate = new Date(today);
-      searchDate.setDate(searchDate.getDate() + 7);
+      const futureDate = new Date(today);
+      futureDate.setDate(futureDate.getDate() + 7);
 
       // フルクエリ + インライン形式（変数形式は型定義がスキーマに存在しないためエラー）
       // NOTE: このクエリは /graphql でのみ利用可能（/graphql-v2 では未定義）
-      const query = `
+      const buildQuery = (date) => `
         query ListDailyWardHospitalizations {
           listDailyWardHospitalizations(input: {
             wardIds: [],
-            searchDate: { year: ${searchDate.getFullYear()}, month: ${searchDate.getMonth() + 1}, day: ${searchDate.getDate()} },
+            searchDate: { year: ${date.getFullYear()}, month: ${date.getMonth() + 1}, day: ${date.getDate()} },
             roomIds: [],
             searchText: ""
           }) {
@@ -941,55 +940,81 @@
         }
       `;
 
-      // NOTE: このクエリは /graphql でのみ利用可能（/graphql-v2 では未定義）
-      const result = await window.HenryCore.query(query, {}, { endpoint: '/graphql' });
+      // 今日（現入院患者）と+7日（入院予定患者）を並列取得
+      const [todayResult, futureResult] = await Promise.all([
+        window.HenryCore.query(buildQuery(today), {}, { endpoint: '/graphql' }),
+        window.HenryCore.query(buildQuery(futureDate), {}, { endpoint: '/graphql' })
+      ]);
 
       // GraphQL errors をチェック
-      if (result?.errors) {
-        console.error(`[${SCRIPT_NAME}] GraphQL errors:`, result.errors);
-        throw new Error(result.errors[0]?.message || 'GraphQL Error');
-      }
-
-      // 3階層構造（病棟 → 部屋 → 入院患者）をフラット化
-      const wards = result?.data?.listDailyWardHospitalizations?.dailyWardHospitalizations || [];
-      const allPatients = [];
-
-      for (const ward of wards) {
-        const rooms = ward.roomHospitalizationDistributions || [];
-        for (const room of rooms) {
-          const hospitalizations = room.hospitalizations || [];
-          for (const hosp of hospitalizations) {
-            // 入院予定患者（WILL_ADMIT）かどうかを判定
-            const isScheduled = hosp.state === 'WILL_ADMIT';
-            let scheduledDate = null;
-
-            if (isScheduled && hosp.startDate) {
-              // 入院予定日を計算
-              const startDate = new Date(hosp.startDate.year, hosp.startDate.month - 1, hosp.startDate.day);
-              const daysUntilAdmit = Math.ceil((startDate - today) / (1000 * 60 * 60 * 24));
-              // 7日以内の入院予定のみ表示
-              if (daysUntilAdmit < 0 || daysUntilAdmit > 7) {
-                continue; // スキップ
-              }
-              scheduledDate = {
-                month: hosp.startDate.month,
-                day: hosp.startDate.day
-              };
-            }
-
-            // 患者情報に病棟・部屋情報と入院予定フラグを付加
-            allPatients.push({
-              ...hosp,
-              wardId: ward.wardId,
-              roomId: room.roomId,
-              isScheduled,
-              scheduledDate
-            });
-          }
+      for (const result of [todayResult, futureResult]) {
+        if (result?.errors) {
+          console.error(`[${SCRIPT_NAME}] GraphQL errors:`, result.errors);
+          throw new Error(result.errors[0]?.message || 'GraphQL Error');
         }
       }
 
-      return allPatients;
+      // Apollo CacheからwardId/roomIdの名前を解決するヘルパー
+      // WILL_DISCHARGE患者はstatusHospitalizationLocationのward/roomがnullのため必要
+      function resolveNameFromCache(type, uuid) {
+        try {
+          const entry = window.__APOLLO_CLIENT__?.cache?.data?.data?.[`${type}:${uuid}`];
+          return entry?.[`name@endpointV1`] || entry?.name || null;
+        } catch { return null; }
+      }
+
+      // 3階層構造（病棟 → 部屋 → 入院患者）をフラット化するヘルパー
+      function flattenWardData(result) {
+        const wards = result?.data?.listDailyWardHospitalizations?.dailyWardHospitalizations || [];
+        const patients = [];
+        for (const ward of wards) {
+          const rooms = ward.roomHospitalizationDistributions || [];
+          for (const room of rooms) {
+            for (const hosp of (room.hospitalizations || [])) {
+              const isScheduled = hosp.state === 'WILL_ADMIT';
+              let scheduledDate = null;
+
+              if (isScheduled && hosp.startDate) {
+                const startDate = new Date(hosp.startDate.year, hosp.startDate.month - 1, hosp.startDate.day);
+                const daysUntilAdmit = Math.ceil((startDate - today) / (1000 * 60 * 60 * 24));
+                if (daysUntilAdmit < 0 || daysUntilAdmit > 7) {
+                  continue;
+                }
+                scheduledDate = {
+                  month: hosp.startDate.month,
+                  day: hosp.startDate.day
+                };
+              }
+
+              patients.push({
+                ...hosp,
+                wardId: ward.wardId,
+                roomId: room.roomId,
+                isScheduled,
+                scheduledDate,
+                _wardName: hosp.statusHospitalizationLocation?.ward?.name || resolveNameFromCache('Ward', ward.wardId),
+                _roomName: hosp.statusHospitalizationLocation?.room?.name || resolveNameFromCache('Room', room.roomId)
+              });
+            }
+          }
+        }
+        return patients;
+      }
+
+      // 今日の結果をベースに（現入院患者を確実に含む）
+      const patientMap = new Map();
+      for (const patient of flattenWardData(todayResult)) {
+        patientMap.set(patient.uuid, patient);
+      }
+
+      // +7日の結果からWILL_ADMIT患者のみ追加（重複排除）
+      for (const patient of flattenWardData(futureResult)) {
+        if (patient.isScheduled && !patientMap.has(patient.uuid)) {
+          patientMap.set(patient.uuid, patient);
+        }
+      }
+
+      return Array.from(patientMap.values());
     } catch (e) {
       console.error(`[${SCRIPT_NAME}] 入院患者一覧取得エラー:`, e?.message || e);
       return [];
@@ -3978,6 +4003,25 @@
       color: #666;
       margin-left: 2px;
     }
+    #patient-timeline-modal .scheduled-section {
+      grid-column: 1 / -1;
+      border-top: 2px solid #e0e0e0;
+      margin-top: 8px;
+      padding-top: 8px;
+    }
+    #patient-timeline-modal .scheduled-section-header {
+      font-weight: 600;
+      font-size: 13px;
+      color: #555;
+      margin-bottom: 6px;
+      padding-left: 4px;
+    }
+    #patient-timeline-modal .scheduled-patients {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 4px;
+      padding-left: 4px;
+    }
     #patient-timeline-modal .legend-container {
       padding: 10px 16px;
       background: #fafafa;
@@ -4561,8 +4605,8 @@
           fullName: patient.patient.fullName,
           sexType: patient.patient.detail?.sexType,
           birthDate: patient.patient.detail?.birthDate,
-          wardName: patient.statusHospitalizationLocation?.ward?.name,
-          roomName: patient.statusHospitalizationLocation?.room?.name,
+          wardName: patient._wardName || patient.statusHospitalizationLocation?.ward?.name,
+          roomName: patient._roomName || patient.statusHospitalizationLocation?.room?.name,
           hospitalizationDayCount: patient.hospitalizationDayCount
         });
       }
@@ -4579,8 +4623,8 @@
           fullName: patient.patient.fullName,
           sexType: patient.patient.detail?.sexType,
           birthDate: patient.patient.detail?.birthDate,
-          wardName: patient.statusHospitalizationLocation?.ward?.name,
-          roomName: patient.statusHospitalizationLocation?.room?.name,
+          wardName: patient._wardName || patient.statusHospitalizationLocation?.ward?.name,
+          roomName: patient._roomName || patient.statusHospitalizationLocation?.room?.name,
           hospitalizationDayCount: patient.hospitalizationDayCount
         });
       }
@@ -4942,11 +4986,16 @@
         return;
       }
 
-      // 病棟・部屋ごとにグループ化
+      // 入院予定患者を分離し、通常患者のみ病棟・部屋ごとにグループ化
+      const scheduledPatients = [];
       const wardMap = new Map();
       for (const item of filteredPatients) {
-        const wardName = item.statusHospitalizationLocation?.ward?.name || '病棟不明';
-        const roomName = item.statusHospitalizationLocation?.room?.name || '部屋不明';
+        if (item.isScheduled) {
+          scheduledPatients.push(item);
+          continue;
+        }
+        const wardName = item._wardName || item.statusHospitalizationLocation?.ward?.name || '病棟不明';
+        const roomName = item._roomName || item.statusHospitalizationLocation?.room?.name || '部屋不明';
 
         if (!wardMap.has(wardName)) {
           wardMap.set(wardName, new Map());
@@ -4957,6 +5006,13 @@
         }
         roomMap.get(roomName).push(item);
       }
+
+      // 入院予定患者を入院日順にソート
+      scheduledPatients.sort((a, b) => {
+        const dateA = a.scheduledDate ? new Date(a.scheduledDate.year, a.scheduledDate.month - 1, a.scheduledDate.day) : new Date(9999, 0);
+        const dateB = b.scheduledDate ? new Date(b.scheduledDate.year, b.scheduledDate.month - 1, b.scheduledDate.day) : new Date(9999, 0);
+        return dateA - dateB;
+      });
 
       // 一般病棟と療養病棟を分離
       const generalWards = [];
@@ -5013,6 +5069,33 @@
         return sectionsHtml;
       }
 
+      // 入院予定セクションのHTML生成
+      function generateScheduledSection(patients) {
+        if (patients.length === 0) return '';
+        let html = '<div class="scheduled-section">';
+        html += `<div class="scheduled-section-header">入院予定（${patients.length}名）</div>`;
+        html += '<div class="scheduled-patients">';
+        for (const item of patients) {
+          const p = item.patient;
+          const doctorUuid = item.hospitalizationDoctor?.doctor?.uuid;
+          const doctorName = displayDoctorName(item.hospitalizationDoctor?.doctor?.name) || '担当医不明';
+          const color = state.filter.doctorColorMap.get(doctorUuid) || { bg: '#f5f5f5', border: '#bdbdbd' };
+          let displayName = escapeHtml(p.fullName || '名前不明');
+          if (item.scheduledDate) {
+            displayName += `<span class="scheduled-date">（${item.scheduledDate.month}/${item.scheduledDate.day}入院予定）</span>`;
+          }
+          const tooltip = item.scheduledDate
+            ? `${item.scheduledDate.month}/${item.scheduledDate.day}入院予定 / ${escapeHtml(doctorName)}`
+            : escapeHtml(doctorName);
+          html += `
+            <div class="patient-chip scheduled" data-uuid="${p.uuid}" title="${tooltip}" style="background: ${color.bg}; border-color: ${color.border}; opacity: 0.85;">
+              ${displayName}
+            </div>`;
+        }
+        html += '</div></div>';
+        return html;
+      }
+
       // 2列レイアウトでHTML生成
       let html = `
         <div class="ward-column">
@@ -5023,6 +5106,7 @@
           <div class="ward-column-header ryoyo">療養病棟</div>
           ${generateWardSections(ryoyoWards)}
         </div>
+        ${generateScheduledSection(scheduledPatients)}
       `;
 
       patientListContainer.innerHTML = html;
@@ -5038,8 +5122,8 @@
               fullName: patient.patient.fullName,
               sexType: patient.patient.detail?.sexType,
               birthDate: patient.patient.detail?.birthDate,
-              wardName: patient.statusHospitalizationLocation?.ward?.name,
-              roomName: patient.statusHospitalizationLocation?.room?.name,
+              wardName: patient._wardName || patient.statusHospitalizationLocation?.ward?.name,
+              roomName: patient._roomName || patient.statusHospitalizationLocation?.room?.name,
               hospitalizationDayCount: patient.hospitalizationDayCount
             });
           }
