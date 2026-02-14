@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry Patient Timeline
 // @namespace    https://github.com/shin-926/Henry
-// @version      2.137.2
+// @version      2.138.0
 // @description  入院患者の各種記録・オーダーをガントチャート風タイムラインで表示
 // @author       sk powered by Claude
 // @match        https://henry-app.jp/*
@@ -903,6 +903,10 @@
                   }
                   hospitalizationDayCount { value }
                   lastHospitalizationLocationUuid
+                  lastHospitalizationLocation {
+                    ward { name }
+                    room { name }
+                  }
                   statusHospitalizationLocation {
                     uuid
                     hospitalizationUuid
@@ -954,21 +958,21 @@
         }
       }
 
-      // Apollo CacheからwardId/roomIdの名前を解決するヘルパー
-      // WILL_DISCHARGE患者はstatusHospitalizationLocationのward/roomがnullのため必要
-      function resolveNameFromCache(type, uuid) {
-        try {
-          const entry = window.__APOLLO_CLIENT__?.cache?.data?.data?.[`${type}:${uuid}`];
-          return entry?.[`name@endpointV1`] || entry?.name || null;
-        } catch { return null; }
-      }
-
       // 3階層構造（病棟 → 部屋 → 入院患者）をフラット化するヘルパー
-      function flattenWardData(result) {
+      // wardIdToName / roomIdToName: 外部から渡す名前解決マップ（オプション）
+      function flattenWardData(result, wardIdToName = new Map(), roomIdToName = new Map()) {
         const wards = result?.data?.listDailyWardHospitalizations?.dailyWardHospitalizations || [];
         const patients = [];
         for (const ward of wards) {
           const rooms = ward.roomHospitalizationDistributions || [];
+          // このward内の患者からward名を収集
+          for (const room of rooms) {
+            for (const h of (room.hospitalizations || [])) {
+              const loc = h.statusHospitalizationLocation;
+              if (loc?.ward?.name) wardIdToName.set(ward.wardId, loc.ward.name);
+              if (loc?.room?.name) roomIdToName.set(room.roomId, loc.room.name);
+            }
+          }
           for (const room of rooms) {
             for (const hosp of (room.hospitalizations || [])) {
               const isScheduled = hosp.state === 'WILL_ADMIT';
@@ -992,8 +996,8 @@
                 roomId: room.roomId,
                 isScheduled,
                 scheduledDate,
-                _wardName: hosp.statusHospitalizationLocation?.ward?.name || resolveNameFromCache('Ward', ward.wardId),
-                _roomName: hosp.statusHospitalizationLocation?.room?.name || resolveNameFromCache('Room', room.roomId)
+                _wardName: hosp.statusHospitalizationLocation?.ward?.name || hosp.lastHospitalizationLocation?.ward?.name || wardIdToName.get(ward.wardId),
+                _roomName: hosp.statusHospitalizationLocation?.room?.name || hosp.lastHospitalizationLocation?.room?.name || roomIdToName.get(room.roomId)
               });
             }
           }
@@ -1001,9 +1005,10 @@
         return patients;
       }
 
-      // 今日の結果をベースに（現入院患者を確実に含む）
+      // 今日の結果をフラット化
+      const todayPatients = flattenWardData(todayResult);
       const patientMap = new Map();
-      for (const patient of flattenWardData(todayResult)) {
+      for (const patient of todayPatients) {
         patientMap.set(patient.uuid, patient);
       }
 
@@ -3363,8 +3368,10 @@
       justify-content: center;
     }
     #patient-timeline-modal .modal-content {
+      position: relative;
       background: white;
       border-radius: 8px;
+      overflow: hidden;
       width: 98vw;
       height: 98vh;
       display: flex;
@@ -3453,6 +3460,10 @@
       border-color: #bbb;
     }
     #patient-timeline-modal .close-btn {
+      position: absolute;
+      top: 12px;
+      right: 16px;
+      z-index: 10;
       background: none;
       border: none;
       font-size: 24px;
@@ -3942,7 +3953,7 @@
       overflow-y: auto;
       padding: 16px;
       display: grid;
-      grid-template-columns: 1fr 1fr;
+      grid-template-columns: 3fr 3fr 4fr;
       gap: 16px;
     }
     #patient-timeline-modal .ward-column-header {
@@ -4006,7 +4017,6 @@
     #patient-timeline-modal .scheduled-section {
       grid-column: 1 / -1;
       border-top: 2px solid #e0e0e0;
-      margin-top: 8px;
       padding-top: 8px;
     }
     #patient-timeline-modal .scheduled-section-header {
@@ -4092,7 +4102,6 @@
       // 患者
       patient: {
         all: [],              // 患者一覧
-        searchText: '',       // 検索テキスト
         selected: null,       // 選択中の患者
         profile: null,        // プロフィール
       },
@@ -4164,23 +4173,21 @@
     modal.innerHTML = `
       <style>${MODAL_CSS}</style>
       <div class="modal-content">
-        <div class="modal-header">
+        <button class="close-btn" title="閉じる">&times;</button>
+        <div class="modal-header" id="modal-header" style="display: none;">
           <div class="header-info">
             <div class="header-left">
               <button class="back-btn" id="back-btn" title="患者選択に戻る" style="display: none;">←</button>
               <button class="nav-btn" id="prev-patient-btn" title="前の患者">◀</button>
               <button class="nav-btn" id="next-patient-btn" title="次の患者">▶</button>
             </div>
-            <h2 id="modal-title">入院タイムライン</h2>
+            <h2 id="modal-title"></h2>
             <span class="hosp-info" id="hosp-info"></span>
             <button class="header-action-btn" id="disease-register-btn" title="病名登録">病名</button>
             <div id="header-search-container" style="display: none;"></div>
           </div>
-          <button class="close-btn" title="閉じる">&times;</button>
         </div>
-        <div class="controls" id="controls-area">
-          <input type="text" class="search-input" placeholder="患者検索（名前・患者番号）..." id="patient-search-input">
-        </div>
+        <div class="controls" id="controls-area" style="display: none;"></div>
         <div class="main-area">
           <div class="patient-select-view" id="patient-select-view">
             <div class="legend-container" id="doctor-legend" style="display: none;"></div>
@@ -4232,7 +4239,6 @@
     const prevBtn = modal.querySelector('#prev-patient-btn');
     const nextBtn = modal.querySelector('#next-patient-btn');
     const modalTitle = modal.querySelector('#modal-title');
-    const patientSearchInput = modal.querySelector('#patient-search-input');
     const controlsArea = modal.querySelector('#controls-area');
     const patientSelectView = modal.querySelector('#patient-select-view');
     const patientListContainer = modal.querySelector('#patient-list-container');
@@ -4672,22 +4678,9 @@
       // キャッシュをクリア
       state.cache.clear();
 
-      backBtn.style.display = 'none';
-      prevBtn.style.display = 'none';
-      nextBtn.style.display = 'none';
-      diseaseRegisterBtn.style.display = 'none';
-      modalTitle.textContent = '入院タイムライン';
-      hospInfo.textContent = '';
-
-      // ヘッダーの検索ボックスを非表示にし、controls-areaに患者検索ボックスを復元
-      const headerSearchContainer = modal.querySelector('#header-search-container');
-      headerSearchContainer.style.display = 'none';
-      headerSearchContainer.innerHTML = '';
-      controlsArea.style.display = 'flex';
-      controlsArea.innerHTML = `
-        <input type="text" class="search-input" placeholder="患者検索（名前・患者番号）..." id="patient-search-input" value="${escapeHtml(state.patient.searchText)}">
-      `;
-      setupPatientSearchEvent();
+      // ヘッダー全体を非表示
+      modal.querySelector('#modal-header').style.display = 'none';
+      controlsArea.style.display = 'none';
 
       patientSelectView.style.display = 'flex';
       timelineContainer.style.display = 'none';
@@ -4708,10 +4701,13 @@
       // 選択日付もリセット（新患者の入院期間外を参照しないように）
       state.timeline.selectedDate = null;
 
+      // ヘッダーを表示
+      const modalHeader = modal.querySelector('#modal-header');
+      modalHeader.style.display = '';
       backBtn.style.display = 'block';
       diseaseRegisterBtn.style.display = 'inline-block';
       updateNavButtons();
-      // 年齢・性別を表示（患者IDは非表示）
+      // 年齢・性別を表示
       const age = patient.birthDate ? calculateAge(patient.birthDate) : null;
       const sexLabel = patient.sexType === 'SEX_TYPE_MALE' ? '男性' : patient.sexType === 'SEX_TYPE_FEMALE' ? '女性' : '';
       const info = [age ? `${age}歳` : null, sexLabel].filter(Boolean).join('・');
@@ -4834,27 +4830,6 @@
     // イベント設定
     // =========================================================================
 
-    // 患者検索イベント設定
-    function setupPatientSearchEvent() {
-      const input = modal.querySelector('#patient-search-input');
-      if (!input) return;
-
-      let timeout;
-      const handlePatientSearchInput = () => {
-        clearTimeout(timeout);
-        timeout = setTimeout(() => {
-          state.patient.searchText = input.value;
-          renderPatientList();
-        }, 200);
-      };
-      input.addEventListener('input', handlePatientSearchInput);
-      cleaner.add(() => {
-        clearTimeout(timeout);
-        input.removeEventListener('input', handlePatientSearchInput);
-      });
-      input.focus();
-    }
-
     // タイムライン検索イベント設定
     function setupTimelineSearchEvent() {
       const input = modal.querySelector('#timeline-search-input');
@@ -4961,16 +4936,7 @@
         return;
       }
 
-      // 検索フィルタ
       let filteredPatients = state.patient.all;
-      if (state.patient.searchText.trim()) {
-        const search = state.patient.searchText.toLowerCase();
-        filteredPatients = filteredPatients.filter(p =>
-          p.patient?.fullName?.toLowerCase().includes(search) ||
-          p.patient?.fullNamePhonetic?.toLowerCase().includes(search) ||
-          p.patient?.serialNumber?.includes(search)
-        );
-      }
 
       // 担当医フィルタ
       if (state.filter.doctors.size > 0) {
@@ -5014,15 +4980,27 @@
         return dateA - dateB;
       });
 
-      // 一般病棟と療養病棟を分離
-      const generalWards = [];
+      // 一般病棟を400番台と500番台に分離
+      const general400 = [];
+      const general500 = [];
       const ryoyoWards = [];
 
       for (const [wardName, roomMap] of wardMap) {
         if (wardName === '療養病棟') {
           ryoyoWards.push({ wardName, roomMap });
         } else {
-          generalWards.push({ wardName, roomMap });
+          // 一般病棟の部屋を400番台と500番台に分離
+          const rooms400 = new Map();
+          const rooms500 = new Map();
+          for (const [roomName, patients] of roomMap) {
+            if (roomName.startsWith('4')) {
+              rooms400.set(roomName, patients);
+            } else {
+              rooms500.set(roomName, patients);
+            }
+          }
+          if (rooms400.size > 0) general400.push({ wardName, roomMap: rooms400 });
+          if (rooms500.size > 0) general500.push({ wardName, roomMap: rooms500 });
         }
       }
 
@@ -5096,11 +5074,15 @@
         return html;
       }
 
-      // 2列レイアウトでHTML生成
+      // 3列レイアウトでHTML生成
       let html = `
         <div class="ward-column">
-          <div class="ward-column-header">一般病棟</div>
-          ${generateWardSections(generalWards)}
+          <div class="ward-column-header">一般病棟（4階）</div>
+          ${generateWardSections(general400)}
+        </div>
+        <div class="ward-column">
+          <div class="ward-column-header">一般病棟（5階）</div>
+          ${generateWardSections(general500)}
         </div>
         <div class="ward-column">
           <div class="ward-column-header ryoyo">療養病棟</div>
@@ -7678,7 +7660,6 @@
     }
 
     document.body.appendChild(modal);
-    setupPatientSearchEvent();
     loadPatientList();
   }
 
