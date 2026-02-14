@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry Disease Register
 // @namespace    https://henry-app.jp/
-// @version      3.33.0
+// @version      3.33.2
 // @description  高速病名検索・登録
 // @author       sk powered by Claude & Gemini
 // @match        https://henry-app.jp/*
@@ -3322,8 +3322,8 @@
         // Step 2: 承認mutationを実行
         const approveResult = await HenryCore.query(APPROVE_DISEASE_MUTATION, {
           input: {
-            patientReceiptDiseaseConfirmationRequestUuid: confirmationRequestUuid,
-            confirmAction: 'CONFIRM'
+            patientReceiptDiseaseConfirmationRequestId: confirmationRequestUuid,
+            confirmAction: 'CONFIRM_ACTION_APPROVE'
           }
         });
 
