@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         診療情報提供書フォーム
 // @namespace    https://henry-app.jp/
-// @version      1.9.1
+// @version      1.10.0
 // @description  診療情報提供書の入力フォームとGoogle Docs出力
 // @author       sk powered by Claude
 // @match        https://henry-app.jp/*
@@ -169,9 +169,6 @@
         // 選択式自動取得
         diseases: diseases,
         prescriptions: prescriptions,
-        use_diseases: true,
-        use_prescriptions: true,
-        use_family_diseases: true,
         selected_diseases: [],
         selected_family_diseases: [],
         selected_prescriptions: [],
@@ -252,84 +249,68 @@
       <div class="${prefix}-section">
         <div class="${prefix}-section-title">診断名</div>
         ${formData.diseases.length > 0 ? `
-          <div class="${prefix}-use-toggle">
-            <input type="checkbox" id="${prefix}-use-diseases" ${formData.use_diseases ? 'checked' : ''}>
-            <label for="${prefix}-use-diseases">登録済み病名を使用する</label>
-          </div>
-          <div id="${prefix}-diseases-list" class="${prefix}-checkbox-group" ${formData.use_diseases ? '' : 'style="display:none;"'}>
-            ${formData.diseases.map(d => `
-              <div class="${prefix}-checkbox-item ${d.isMain ? 'main-disease' : ''}">
-                <input type="checkbox" id="${prefix}-disease-${d.uuid}" value="${d.uuid}"
-                  ${formData.selected_diseases?.includes(d.uuid) ? 'checked' : ''}>
-                <label for="${prefix}-disease-${d.uuid}">${escapeHtml(d.name)}${d.isMain ? ' (主病名)' : ''}${d.isSuspected ? ' (疑い)' : ''}</label>
-              </div>
-            `).join('')}
-          </div>
-          <div id="${prefix}-diagnosis-manual" style="${formData.use_diseases ? 'display:none;' : ''}">
-            <div class="${prefix}-field">
-              <label>診断名（手入力）</label>
-              <textarea id="${prefix}-diagnosis-text" placeholder="診断名を入力">${escapeHtml(formData.diagnosis_text)}</textarea>
+          <div style="margin-bottom: 12px;">
+            <label style="display: block; font-size: 13px; font-weight: 500; color: #666; margin-bottom: 8px;">登録済み病名から選択</label>
+            <div id="${prefix}-diseases-list" class="${prefix}-checkbox-group">
+              ${formData.diseases.map(d => `
+                <div class="${prefix}-checkbox-item ${d.isMain ? 'main-disease' : ''}">
+                  <input type="checkbox" id="${prefix}-disease-${d.uuid}" value="${d.uuid}"
+                    ${formData.selected_diseases?.includes(d.uuid) ? 'checked' : ''}>
+                  <label for="${prefix}-disease-${d.uuid}">${escapeHtml(d.name)}${d.isMain ? ' (主病名)' : ''}${d.isSuspected ? ' (疑い)' : ''}</label>
+                </div>
+              `).join('')}
             </div>
           </div>
-        ` : `
-          <div class="${prefix}-field">
-            <label>診断名</label>
-            <textarea id="${prefix}-diagnosis-text" placeholder="診断名を入力">${escapeHtml(formData.diagnosis_text)}</textarea>
-          </div>
-        `}
+        ` : ''}
+        <div class="${prefix}-field">
+          <label>自由記述</label>
+          <textarea id="${prefix}-diagnosis-text" placeholder="診断名を入力">${escapeHtml(formData.diagnosis_text)}</textarea>
+        </div>
       </div>
 
       <!-- 処方 -->
       <div class="${prefix}-section">
         <div class="${prefix}-section-title">現在の処方</div>
         ${formData.prescriptions.length > 0 ? `
-          <div class="${prefix}-use-toggle">
-            <input type="checkbox" id="${prefix}-use-prescriptions" ${formData.use_prescriptions ? 'checked' : ''}>
-            <label for="${prefix}-use-prescriptions">処方履歴から選択する</label>
-          </div>
-          <div id="${prefix}-prescriptions-list" class="${prefix}-checkbox-group" ${formData.use_prescriptions ? '' : 'style="display:none;"'}>
-            ${formData.prescriptions.map(rx => {
-              const dateStr = formatDateShort(rx.startDate || rx.date);
-              const category = categoryToLabel(rx.category);
-              const categoryStyle = rx.category === 'MEDICATION_CATEGORY_OUT_OF_HOSPITAL'
-                ? 'background: #e3f2fd; color: #1565c0; border: 1px solid #90caf9;'
-                : rx.category === 'MEDICATION_CATEGORY_IN_HOSPITAL'
-                  ? 'background: #fff3e0; color: #e65100; border: 1px solid #ffcc80;'
-                  : 'background: #f5f5f5; color: #666;';
-              const medsPreview = rx.medicines.map(m => {
-                let text = m.name.replace(/「[^」]*」/g, '').trim();
-                if (m.quantity) text += ` ${m.quantity}${m.unit}`;
-                if (m.days) text += ` ${m.days}日分`;
-                else if (m.asNeeded) text += ' 頓用';
-                return text;
-              }).join('、');
-              const isSelected = formData.selected_prescriptions?.includes(rx.recordId);
-              return `
-                <div class="${prefix}-checkbox-item ${prefix}-prescription-item">
-                  <input type="checkbox" id="${prefix}-prescription-${rx.recordId}" value="${rx.recordId}" ${isSelected ? 'checked' : ''}>
-                  <div class="${prefix}-prescription-content">
-                    <div class="${prefix}-prescription-header">
-                      <span class="${prefix}-prescription-date">${dateStr}</span>
-                      ${category ? `<span class="${prefix}-prescription-category" style="${categoryStyle}">${category}</span>` : ''}
+          <div style="margin-bottom: 12px;">
+            <label style="display: block; font-size: 13px; font-weight: 500; color: #666; margin-bottom: 8px;">処方履歴から選択</label>
+            <div id="${prefix}-prescriptions-list" class="${prefix}-checkbox-group">
+              ${formData.prescriptions.map(rx => {
+                const dateStr = formatDateShort(rx.startDate || rx.date);
+                const category = categoryToLabel(rx.category);
+                const categoryStyle = rx.category === 'MEDICATION_CATEGORY_OUT_OF_HOSPITAL'
+                  ? 'background: #e3f2fd; color: #1565c0; border: 1px solid #90caf9;'
+                  : rx.category === 'MEDICATION_CATEGORY_IN_HOSPITAL'
+                    ? 'background: #fff3e0; color: #e65100; border: 1px solid #ffcc80;'
+                    : 'background: #f5f5f5; color: #666;';
+                const medsPreview = rx.medicines.map(m => {
+                  let text = m.name.replace(/「[^」]*」/g, '').trim();
+                  if (m.quantity) text += ` ${m.quantity}${m.unit}`;
+                  if (m.days) text += ` ${m.days}日分`;
+                  else if (m.asNeeded) text += ' 頓用';
+                  return text;
+                }).join('、');
+                const isSelected = formData.selected_prescriptions?.includes(rx.recordId);
+                return `
+                  <div class="${prefix}-checkbox-item ${prefix}-prescription-item">
+                    <input type="checkbox" id="${prefix}-prescription-${rx.recordId}" value="${rx.recordId}" ${isSelected ? 'checked' : ''}>
+                    <div class="${prefix}-prescription-content">
+                      <div class="${prefix}-prescription-header">
+                        <span class="${prefix}-prescription-date">${dateStr}</span>
+                        ${category ? `<span class="${prefix}-prescription-category" style="${categoryStyle}">${category}</span>` : ''}
+                      </div>
+                      <div class="${prefix}-prescription-meds">${escapeHtml(medsPreview)}</div>
                     </div>
-                    <div class="${prefix}-prescription-meds">${escapeHtml(medsPreview)}</div>
                   </div>
-                </div>
-              `;
-            }).join('')}
-          </div>
-          <div id="${prefix}-prescription-manual" style="${formData.use_prescriptions ? 'display:none;' : ''}">
-            <div class="${prefix}-field">
-              <label>処方内容（手入力）</label>
-              <textarea id="${prefix}-prescription-text" placeholder="処方内容を入力">${escapeHtml(formData.prescription_text)}</textarea>
+                `;
+              }).join('')}
             </div>
           </div>
-        ` : `
-          <div class="${prefix}-field">
-            <label>処方内容</label>
-            <textarea id="${prefix}-prescription-text" placeholder="処方内容を入力">${escapeHtml(formData.prescription_text)}</textarea>
-          </div>
-        `}
+        ` : ''}
+        <div class="${prefix}-field">
+          <label>自由記述</label>
+          <textarea id="${prefix}-prescription-text" placeholder="処方内容を入力">${escapeHtml(formData.prescription_text)}</textarea>
+        </div>
       </div>
 
       <!-- 紹介目的・経過 -->
@@ -344,25 +325,22 @@
       <div class="${prefix}-section">
         <div class="${prefix}-section-title">既往歴および家族歴</div>
         ${formData.diseases.length > 0 ? `
-          <div class="${prefix}-use-toggle">
-            <input type="checkbox" id="${prefix}-use-family-diseases" ${formData.use_family_diseases ? 'checked' : ''}>
-            <label for="${prefix}-use-family-diseases">登録病名から選択</label>
-          </div>
-          <div id="${prefix}-family-diseases-list" class="${prefix}-checkbox-group" style="${formData.use_family_diseases ? '' : 'display:none;'}">
-            ${formData.diseases.map(d => `
-              <div class="${prefix}-checkbox-item">
-                <input type="checkbox" id="${prefix}-family-disease-${d.uuid}" value="${d.uuid}"
-                  ${formData.selected_family_diseases?.includes(d.uuid) ? 'checked' : ''}>
-                <label for="${prefix}-family-disease-${d.uuid}">${escapeHtml(d.name)}${d.isSuspected ? ' (疑い)' : ''}</label>
-              </div>
-            `).join('')}
+          <div style="margin-bottom: 12px;">
+            <label style="display: block; font-size: 13px; font-weight: 500; color: #666; margin-bottom: 8px;">登録済み病名から選択</label>
+            <div id="${prefix}-family-diseases-list" class="${prefix}-checkbox-group">
+              ${formData.diseases.map(d => `
+                <div class="${prefix}-checkbox-item">
+                  <input type="checkbox" id="${prefix}-family-disease-${d.uuid}" value="${d.uuid}"
+                    ${formData.selected_family_diseases?.includes(d.uuid) ? 'checked' : ''}>
+                  <label for="${prefix}-family-disease-${d.uuid}">${escapeHtml(d.name)}${d.isSuspected ? ' (疑い)' : ''}</label>
+                </div>
+              `).join('')}
+            </div>
           </div>
         ` : ''}
-        <div id="${prefix}-family-history-manual" style="${formData.use_family_diseases ? 'display:none;' : ''}">
-          <div class="${prefix}-field">
-            <label>既往歴・家族歴（手入力）</label>
-            <textarea id="${prefix}-family-history" rows="3" placeholder="既往歴、家族歴を入力">${escapeHtml(formData.family_history_text)}</textarea>
-          </div>
+        <div class="${prefix}-field">
+          <label>自由記述</label>
+          <textarea id="${prefix}-family-history" rows="3" placeholder="既往歴、家族歴を入力">${escapeHtml(formData.family_history_text)}</textarea>
         </div>
       </div>
 
@@ -562,53 +540,6 @@
       }
     });
 
-    // 病名使用トグル
-    const useDiseases = bodyEl.querySelector(`#${prefix}-use-diseases`);
-    if (useDiseases) {
-      useDiseases.addEventListener('change', () => {
-        const diseasesList = bodyEl.querySelector(`#${prefix}-diseases-list`);
-        const diagnosisManual = bodyEl.querySelector(`#${prefix}-diagnosis-manual`);
-        if (useDiseases.checked) {
-          diseasesList.style.display = '';
-          diagnosisManual.style.display = 'none';
-        } else {
-          diseasesList.style.display = 'none';
-          diagnosisManual.style.display = '';
-        }
-      });
-    }
-
-    // 処方使用トグル
-    const usePrescriptions = bodyEl.querySelector(`#${prefix}-use-prescriptions`);
-    if (usePrescriptions) {
-      usePrescriptions.addEventListener('change', () => {
-        const prescriptionsList = bodyEl.querySelector(`#${prefix}-prescriptions-list`);
-        const prescriptionManual = bodyEl.querySelector(`#${prefix}-prescription-manual`);
-        if (usePrescriptions.checked) {
-          prescriptionsList.style.display = '';
-          prescriptionManual.style.display = 'none';
-        } else {
-          prescriptionsList.style.display = 'none';
-          prescriptionManual.style.display = '';
-        }
-      });
-    }
-
-    // 既往歴病名選択トグル
-    const useFamilyDiseases = bodyEl.querySelector(`#${prefix}-use-family-diseases`);
-    if (useFamilyDiseases) {
-      useFamilyDiseases.addEventListener('change', () => {
-        const familyDiseasesList = bodyEl.querySelector(`#${prefix}-family-diseases-list`);
-        const familyHistoryManual = bodyEl.querySelector(`#${prefix}-family-history-manual`);
-        if (useFamilyDiseases.checked) {
-          familyDiseasesList.style.display = '';
-          familyHistoryManual.style.display = 'none';
-        } else {
-          familyDiseasesList.style.display = 'none';
-          familyHistoryManual.style.display = '';
-        }
-      });
-    }
   }
 
   function showFormModal(formData, lastSavedAt) {
@@ -729,55 +660,40 @@
     data.family_history_text = bodyEl.querySelector(`#${prefix}-family-history`)?.value || '';
     data.remarks = bodyEl.querySelector(`#${prefix}-remarks`)?.value || '';
 
-    // 既往歴（病名選択）
-    const useFamilyDiseases = bodyEl.querySelector(`#${prefix}-use-family-diseases`);
-    data.use_family_diseases = useFamilyDiseases?.checked ?? false;
-
-    if (data.use_family_diseases && data.diseases.length > 0) {
-      data.selected_family_diseases = [];
+    // 既往歴（選択と自由記述の両方を取得）
+    data.selected_family_diseases = [];
+    if (data.diseases.length > 0) {
       data.diseases.forEach(d => {
         const cb = bodyEl.querySelector(`#${prefix}-family-disease-${d.uuid}`);
         if (cb?.checked) {
           data.selected_family_diseases.push(d.uuid);
         }
       });
-    } else {
-      data.selected_family_diseases = [];
     }
 
-    // 病名
-    const useDiseases = bodyEl.querySelector(`#${prefix}-use-diseases`);
-    data.use_diseases = useDiseases?.checked ?? false;
-
-    if (data.use_diseases && data.diseases.length > 0) {
-      data.selected_diseases = [];
+    // 病名（選択と自由記述の両方を取得）
+    data.selected_diseases = [];
+    if (data.diseases.length > 0) {
       data.diseases.forEach(d => {
         const cb = bodyEl.querySelector(`#${prefix}-disease-${d.uuid}`);
         if (cb?.checked) {
           data.selected_diseases.push(d.uuid);
         }
       });
-    } else {
-      data.selected_diseases = [];
-      data.diagnosis_text = bodyEl.querySelector(`#${prefix}-diagnosis-text`)?.value || '';
     }
+    data.diagnosis_text = bodyEl.querySelector(`#${prefix}-diagnosis-text`)?.value || '';
 
-    // 処方
-    const usePrescriptions = bodyEl.querySelector(`#${prefix}-use-prescriptions`);
-    data.use_prescriptions = usePrescriptions?.checked ?? false;
-
-    if (data.use_prescriptions && data.prescriptions.length > 0) {
-      data.selected_prescriptions = [];
+    // 処方（選択と自由記述の両方を取得）
+    data.selected_prescriptions = [];
+    if (data.prescriptions.length > 0) {
       data.prescriptions.forEach(rx => {
         const cb = bodyEl.querySelector(`#${prefix}-prescription-${rx.recordId}`);
         if (cb?.checked) {
           data.selected_prescriptions.push(rx.recordId);
         }
       });
-    } else {
-      data.selected_prescriptions = [];
-      data.prescription_text = bodyEl.querySelector(`#${prefix}-prescription-text`)?.value || '';
     }
+    data.prescription_text = bodyEl.querySelector(`#${prefix}-prescription-text`)?.value || '';
 
     return data;
   }
@@ -787,31 +703,40 @@
   // ==========================================
 
   async function generateGoogleDoc(formData) {
-    // 診断名テキスト作成
-    let diagnosisText = '';
-    if (formData.use_diseases && formData.diseases.length > 0 && formData.selected_diseases?.length > 0) {
+    // 診断名テキスト作成（選択 + 自由記述を結合）
+    const diagnosisParts = [];
+    if (formData.selected_diseases?.length > 0) {
       const selectedDiseases = formData.diseases.filter(d => formData.selected_diseases.includes(d.uuid));
-      diagnosisText = selectedDiseases.map(d => d.name).join('，');
-    } else {
-      diagnosisText = formData.diagnosis_text || '';
+      const diseaseText = selectedDiseases.map(d => d.name).join('，');
+      if (diseaseText) diagnosisParts.push(diseaseText);
     }
-
-    // 処方テキスト作成
-    let prescriptionText = '';
-    if (formData.use_prescriptions && formData.prescriptions.length > 0 && formData.selected_prescriptions?.length > 0) {
-      prescriptionText = FC().data.formatSelectedPrescriptions(formData.prescriptions, formData.selected_prescriptions);
-    } else {
-      prescriptionText = formData.prescription_text || '';
+    if (formData.diagnosis_text) {
+      diagnosisParts.push(formData.diagnosis_text);
     }
+    const diagnosisText = diagnosisParts.join('\n');
 
-    // 既往歴テキスト作成
-    let familyHistoryText = '';
-    if (formData.use_family_diseases && formData.diseases.length > 0 && formData.selected_family_diseases?.length > 0) {
+    // 処方テキスト作成（選択 + 自由記述を結合）
+    const prescriptionParts = [];
+    if (formData.selected_prescriptions?.length > 0) {
+      const selectedText = FC().data.formatSelectedPrescriptions(formData.prescriptions, formData.selected_prescriptions);
+      if (selectedText) prescriptionParts.push(selectedText);
+    }
+    if (formData.prescription_text) {
+      prescriptionParts.push(formData.prescription_text);
+    }
+    const prescriptionText = prescriptionParts.join('\n');
+
+    // 既往歴テキスト作成（選択 + 自由記述を結合）
+    const familyHistoryParts = [];
+    if (formData.selected_family_diseases?.length > 0) {
       const selectedDiseases = formData.diseases.filter(d => formData.selected_family_diseases.includes(d.uuid));
-      familyHistoryText = selectedDiseases.map(d => d.name).join('，');
-    } else {
-      familyHistoryText = formData.family_history_text || '';
+      const diseaseText = selectedDiseases.map(d => d.name).join('，');
+      if (diseaseText) familyHistoryParts.push(diseaseText);
     }
+    if (formData.family_history_text) {
+      familyHistoryParts.push(formData.family_history_text);
+    }
+    const familyHistoryText = familyHistoryParts.join('\n');
 
     // 共通フローで出力
     await FC().generateDoc({
