@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry Patient Timeline
 // @namespace    https://github.com/shin-926/Henry
-// @version      2.138.0
+// @version      2.139.0
 // @description  入院患者の各種記録・オーダーをガントチャート風タイムラインで表示
 // @author       sk powered by Claude
 // @match        https://henry-app.jp/*
@@ -211,6 +211,38 @@
     return JSON.stringify({ blocks, entityMap: {} }, null, 2);
   }
 
+  // テキスト+画像をDraft.js形式に変換
+  function buildEditorDataWithImages(text, images = []) {
+    const blocks = [];
+    const lines = text ? text.split('\n') : [''];
+    for (const line of lines) {
+      blocks.push({
+        key: Math.random().toString(36).substring(2, 7),
+        type: 'unstyled', text: line, depth: 0,
+        inlineStyleRanges: [], entityRanges: [], data: {}
+      });
+    }
+    for (const img of images) {
+      blocks.push({
+        key: Math.random().toString(36).substring(2, 7),
+        type: 'atomic', text: '', depth: 0,
+        inlineStyleRanges: [], entityRanges: [],
+        data: {
+          fileBlock: {
+            mimeType: img.mimeType,
+            fileType: 'FILE_TYPE_IMAGE',
+            redirectUrl: img.redirectUrl,
+            fileSize: img.fileSize || 0,
+            previewImageUrl: img.redirectUrl,
+            imageWidth: 0,
+            imageHeight: 0
+          }
+        }
+      });
+    }
+    return JSON.stringify({ blocks, entityMap: {} }, null, 2);
+  }
+
   // editorDataをテキストに変換
   function parseEditorData(editorDataStr, options = {}) {
     try {
@@ -258,6 +290,25 @@
     } catch (e) {
       return [];
     }
+  }
+
+  // GCSに画像をアップロード
+  async function uploadImageToHenry(file) {
+    const query = `query GetFileUploadUrl($input: GetFileUploadUrlRequestInput!) {
+      getFileUploadUrl(input: $input) { uploadUrl fileUrl }
+    }`;
+    const result = await window.HenryCore.query(query, {
+      input: { pathType: 'CONSULTATION_FILE' }
+    }, { endpoint: '/graphql' });
+    const { uploadUrl } = result.data.getFileUploadUrl;
+
+    const formData = new FormData();
+    formData.append('file', file, file.name);
+    const response = await fetch(uploadUrl, { method: 'POST', body: formData });
+    if (!response.ok) throw new Error(`Upload failed: ${response.status}`);
+
+    const redirectUrl = uploadUrl.split('?')[0];
+    return { redirectUrl, mimeType: file.type, fileSize: file.size };
   }
 
   // 日付フォーマット（短縮形）
@@ -500,6 +551,12 @@
           ${categoryBadge}
         </div>
         <div class="record-card-text">${textHtml}</div>
+        ${(item.editorData ? extractImagesFromEditorData(item.editorData) : []).map(img => `
+          <img src="${img.url}" alt="記録画像"
+            style="max-width: 100%; border-radius: 4px; margin-top: 8px; cursor: pointer;"
+            onclick="window.open('${img.url}', '_blank')"
+            title="クリックで拡大表示" />
+        `).join('')}
       </div>
     `;
   }
@@ -767,7 +824,8 @@
             date: doc.performTime?.seconds ? new Date(doc.performTime.seconds * 1000) : null,
             title: '看護記録',
             text,
-            author: doc.creator?.name || '不明'
+            author: doc.creator?.name || '不明',
+            editorData: doc.editorData
           });
         }
       }
@@ -3746,6 +3804,12 @@
     #patient-timeline-modal .record-card[data-record-id^="meal-"] .record-card-text {
       font-family: monospace;
     }
+    .record-image-container { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+    .record-image-item { position: relative; width: 80px; height: 80px; border-radius: 4px; overflow: hidden; }
+    .record-image-item img { width: 100%; height: 100%; object-fit: cover; }
+    .record-image-remove { position: absolute; top: 2px; right: 2px; width: 20px; height: 20px; background: rgba(0,0,0,0.6); color: #fff; border: none; border-radius: 50%; cursor: pointer; font-size: 12px; line-height: 20px; text-align: center; padding: 0; }
+    .record-image-add { width: 80px; height: 80px; border: 2px dashed #ccc; border-radius: 4px; display: flex; align-items: center; justify-content: center; cursor: pointer; font-size: 24px; color: #999; background: transparent; }
+    .record-image-add:hover { border-color: #999; color: #666; }
     #patient-timeline-modal .vital-high {
       color: #c62828;
       font-weight: 700;
@@ -4371,14 +4435,135 @@
 
       contentDiv.appendChild(contentSection);
 
+      // 画像セクション
+      const MAX_IMAGES = 5;
+      const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
+      const imageState = {
+        existing: [],              // 編集時の既存画像 [{ url, mimeType, fileSize }]
+        pending: [],               // 新規選択 [{ file, previewUrl }]
+        removedExistingUrls: new Set()
+      };
+
+      // 編集時: 既存画像を取得
+      if (isEdit && existingRecord?.editorData) {
+        const imgs = extractImagesFromEditorData(existingRecord.editorData);
+        imageState.existing = imgs.map(img => ({
+          url: img.url, mimeType: img.mimeType || 'image/png', fileSize: 0
+        }));
+      }
+
+      const imageSection = document.createElement('div');
+      imageSection.style.marginTop = '12px';
+
+      const imageLabel = document.createElement('label');
+      imageLabel.style.cssText = 'display: block; margin-bottom: 4px; font-weight: 500; font-size: 13px;';
+      imageLabel.textContent = '画像';
+      imageSection.appendChild(imageLabel);
+
+      const imageContainer = document.createElement('div');
+      imageContainer.className = 'record-image-container';
+      imageSection.appendChild(imageContainer);
+
+      const fileInput = document.createElement('input');
+      fileInput.type = 'file';
+      fileInput.accept = 'image/*';
+      fileInput.multiple = true;
+      fileInput.style.display = 'none';
+
+      function getTotalImageCount() {
+        const existingCount = imageState.existing.filter(img => !imageState.removedExistingUrls.has(img.url)).length;
+        return existingCount + imageState.pending.length;
+      }
+
+      function renderImagePreviews() {
+        while (imageContainer.firstChild) imageContainer.removeChild(imageContainer.firstChild);
+        // 既存画像
+        for (const img of imageState.existing) {
+          if (imageState.removedExistingUrls.has(img.url)) continue;
+          const item = document.createElement('div');
+          item.className = 'record-image-item';
+          const imgEl = document.createElement('img');
+          imgEl.src = img.url;
+          imgEl.alt = '既存画像';
+          item.appendChild(imgEl);
+          const removeBtn = document.createElement('button');
+          removeBtn.className = 'record-image-remove';
+          removeBtn.textContent = '×';
+          removeBtn.addEventListener('click', () => {
+            imageState.removedExistingUrls.add(img.url);
+            renderImagePreviews();
+          });
+          item.appendChild(removeBtn);
+          imageContainer.appendChild(item);
+        }
+        // 新規画像
+        for (let i = 0; i < imageState.pending.length; i++) {
+          const pending = imageState.pending[i];
+          const item = document.createElement('div');
+          item.className = 'record-image-item';
+          const imgEl = document.createElement('img');
+          imgEl.src = pending.previewUrl;
+          imgEl.alt = '新規画像';
+          item.appendChild(imgEl);
+          const removeBtn = document.createElement('button');
+          removeBtn.className = 'record-image-remove';
+          removeBtn.textContent = '×';
+          removeBtn.addEventListener('click', () => {
+            URL.revokeObjectURL(pending.previewUrl);
+            imageState.pending.splice(i, 1);
+            renderImagePreviews();
+          });
+          item.appendChild(removeBtn);
+          imageContainer.appendChild(item);
+        }
+        // 追加ボタン（上限未満の場合）
+        if (getTotalImageCount() < MAX_IMAGES) {
+          const addBtn = document.createElement('button');
+          addBtn.className = 'record-image-add';
+          addBtn.textContent = '＋';
+          addBtn.title = '画像を追加';
+          addBtn.addEventListener('click', () => fileInput.click());
+          imageContainer.appendChild(addBtn);
+        }
+      }
+
+      fileInput.addEventListener('change', () => {
+        const files = Array.from(fileInput.files || []);
+        const remaining = MAX_IMAGES - getTotalImageCount();
+        const toAdd = files.slice(0, remaining);
+        for (const file of toAdd) {
+          if (!file.type.startsWith('image/')) {
+            window.HenryCore.ui.showToast('画像ファイルのみ添付できます', 'error');
+            continue;
+          }
+          if (file.size > MAX_FILE_SIZE) {
+            window.HenryCore.ui.showToast(`${file.name} は10MBを超えています`, 'error');
+            continue;
+          }
+          imageState.pending.push({ file, previewUrl: URL.createObjectURL(file) });
+        }
+        if (files.length > remaining && remaining >= 0) {
+          window.HenryCore.ui.showToast(`画像は最大${MAX_IMAGES}枚までです`, 'error');
+        }
+        fileInput.value = '';
+        renderImagePreviews();
+      });
+
+      imageSection.appendChild(fileInput);
+      renderImagePreviews();
+      contentDiv.appendChild(imageSection);
+
       let recordModal;
       recordModal = window.HenryCore.ui.showModal({
         title: title,
         width: '600px',
         content: contentDiv,
         actions: [
-          { label: 'キャンセル', variant: 'secondary', onClick: () => recordModal.close() },
-          { label: buttonLabel, variant: 'primary', onClick: () => saveRecord(recordModal, isEdit ? existingRecord : null) }
+          { label: 'キャンセル', variant: 'secondary', onClick: () => {
+            for (const p of imageState.pending) URL.revokeObjectURL(p.previewUrl);
+            recordModal.close();
+          }},
+          { label: buttonLabel, variant: 'primary', onClick: () => saveRecord(recordModal, isEdit ? existingRecord : null, imageState) }
         ]
       });
 
@@ -4389,14 +4574,19 @@
     }
 
     // 記録保存
-    async function saveRecord(recordModal, existingRecord = null) {
+    async function saveRecord(recordModal, existingRecord = null, imageState = null) {
       const contentInput = document.getElementById('record-content-input');
       const timeInput = document.getElementById('record-time-input');
       const dateInput = document.getElementById('record-date-input');
       const content = contentInput?.value?.trim();
 
-      if (!content) {
-        window.HenryCore.ui.showToast('記録内容を入力してください', 'error');
+      const hasImages = imageState && (
+        imageState.pending.length > 0 ||
+        imageState.existing.some(img => !imageState.removedExistingUrls.has(img.url))
+      );
+
+      if (!content && !hasImages) {
+        window.HenryCore.ui.showToast('記録内容または画像を入力してください', 'error');
         return;
       }
 
@@ -4408,10 +4598,30 @@
       const performDate = new Date(year, month - 1, day, hours, minutes, 0, 0);
       const performTimeSeconds = Math.floor(performDate.getTime() / 1000);
 
-      const editorData = textToEditorData(content);
       const spinner = window.HenryCore.ui.showSpinner('保存中...');
 
       try {
+        // 新規画像をアップロード
+        const uploadedImages = [];
+        if (imageState) {
+          for (const pending of imageState.pending) {
+            const result = await uploadImageToHenry(pending.file);
+            uploadedImages.push(result);
+          }
+        }
+
+        // 既存画像（削除されていないもの）+ 新規アップロード画像
+        const allImages = imageState ? [
+          ...imageState.existing
+            .filter(img => !imageState.removedExistingUrls.has(img.url))
+            .map(img => ({ redirectUrl: img.url, mimeType: img.mimeType, fileSize: img.fileSize || 0 })),
+          ...uploadedImages
+        ] : [];
+
+        const editorData = allImages.length > 0
+          ? buildEditorDataWithImages(content || '', allImages)
+          : textToEditorData(content || '');
+
         const isEdit = !!existingRecord;
 
         if (isEdit) {
@@ -4433,6 +4643,11 @@
             state.hospitalization.current.uuid
           );
           await window.HenryCore.query(mutation);
+        }
+
+        // プレビューURLを解放
+        if (imageState) {
+          for (const p of imageState.pending) URL.revokeObjectURL(p.previewUrl);
         }
 
         recordModal.close();
@@ -5246,13 +5461,16 @@
           state.hospitalization.current.startDate.month - 1,
           state.hospitalization.current.startDate.day
         );
-        const endDate = state.hospitalization.current.endDate
+        const hospEndDate = state.hospitalization.current.endDate
           ? new Date(
               state.hospitalization.current.endDate.year,
               state.hospitalization.current.endDate.month - 1,
               state.hospitalization.current.endDate.day
             )
-          : new Date();
+          : null;
+        const today = new Date();
+        // 退院予定日が未来の場合は今日を上限にする
+        const endDate = hospEndDate && hospEndDate <= today ? hospEndDate : today;
 
         state.timeline.dates = generateDateList(startDate, endDate);
 
@@ -7382,7 +7600,7 @@
 
       try {
         const hospitalizations = await fetchHospitalizations(patientUuid);
-        const currentHosp = hospitalizations.find(h => h.state === 'ADMITTED');
+        const currentHosp = hospitalizations.find(h => h.state === 'ADMITTED' || h.state === 'HOSPITALIZED' || h.state === 'WILL_DISCHARGE');
         if (!currentHosp || !currentHosp.startDate) return;
 
         const startDate = new Date(
@@ -7448,7 +7666,7 @@
           ]);
 
           state.hospitalization.list = hospitalizations;
-          state.hospitalization.current = hospitalizations.find(h => h.state === 'ADMITTED');
+          state.hospitalization.current = hospitalizations.find(h => h.state === 'ADMITTED' || h.state === 'HOSPITALIZED' || h.state === 'WILL_DISCHARGE');
 
           if (!state.hospitalization.current) {
             hospInfo.textContent = '入院中ではありません';
