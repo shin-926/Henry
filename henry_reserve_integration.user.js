@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         予約システム連携
 // @namespace    https://github.com/shin-926/Henry
-// @version      4.7.30
+// @version      4.7.31
 // @description  Henryカルテと予約システム間の双方向連携（再診予約・照射オーダー自動予約・自動印刷・患者プレビュー）
 // @author       sk powered by Claude & Gemini
 // @match        https://henry-app.jp/*
@@ -365,7 +365,7 @@
       const orderDate = dateToNumber(orderDateObj);
 
       return hospitalizations.find(h => {
-        if (h.state === 'ADMITTED') {
+        if (h.state === 'ADMITTED' || h.state === 'HOSPITALIZED' || h.state === 'WILL_DISCHARGE') {
           // 入院中 → 常にtrue
           return true;
         }

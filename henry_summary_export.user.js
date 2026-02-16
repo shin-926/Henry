@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry Summary Export
 // @namespace    https://github.com/shin-926/Henry
-// @version      1.7.7
+// @version      1.7.8
 // @description  入院患者のサマリー用データをマークダウン形式でダウンロード
 // @author       sk powered by Claude
 // @match        https://henry-app.jp/*
@@ -256,8 +256,8 @@
         for (const room of rooms) {
           const hospitalizations = room.hospitalizations || [];
           for (const hosp of hospitalizations) {
-            // 入院中（ADMITTED）のみ
-            if (hosp.state !== 'ADMITTED') continue;
+            // 入院中（ADMITTED/HOSPITALIZED/WILL_DISCHARGE）のみ
+            if (hosp.state !== 'ADMITTED' && hosp.state !== 'HOSPITALIZED' && hosp.state !== 'WILL_DISCHARGE') continue;
             // 病棟名・部屋名は statusHospitalizationLocation から取得
             const wardName = hosp.statusHospitalizationLocation?.ward?.name || '';
             const roomName = hosp.statusHospitalizationLocation?.room?.name || '';
@@ -313,7 +313,7 @@
     try {
       const result = await window.HenryCore.query(query);
       const hospitalizations = result?.data?.listPatientHospitalizations?.hospitalizations || [];
-      return hospitalizations.find(h => h.state === 'HOSPITALIZED' || h.state === 'ADMITTED') || hospitalizations[0] || null;
+      return hospitalizations.find(h => h.state === 'HOSPITALIZED' || h.state === 'ADMITTED' || h.state === 'WILL_DISCHARGE') || hospitalizations[0] || null;
     } catch (e) {
       console.error(`[${SCRIPT_NAME}] 入院情報取得エラー:`, e);
       return null;

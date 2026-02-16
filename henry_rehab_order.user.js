@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry リハビリオーダー
 // @namespace    https://henry-app.jp/
-// @version      1.3.1
+// @version      1.3.2
 // @description  リハビリオーダー作成 + リハビリ指示記事作成（入院/外来両対応）
 // @author       sk powered by Claude
 // @match        https://henry-app.jp/*
@@ -365,7 +365,7 @@
     `;
     const result = await core.query(query);
     const hospitalizations = result?.data?.listPatientHospitalizations?.hospitalizations || [];
-    return hospitalizations.find(h => h.state === 'ADMITTED') || null;
+    return hospitalizations.find(h => h.state === 'ADMITTED' || h.state === 'HOSPITALIZED' || h.state === 'WILL_DISCHARGE') || null;
   }
 
   async function createRehabOrder(core, orderData) {

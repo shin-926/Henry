@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry Hospitalization Search
 // @namespace    https://github.com/shin-926/Henry
-// @version      1.8.1
+// @version      1.8.2
 // @description  カルテの医師記録（入院・外来）から特定文字列を検索
 // @author       sk powered by Claude
 // @match        https://henry-app.jp/*
@@ -590,7 +590,7 @@
       option.value = hosp.uuid;
       const start = formatDate(hosp.startDate);
       const end = hosp.endDate ? formatDate(hosp.endDate) : '入院中';
-      const suffix = hosp.state === 'ADMITTED' ? '（入院中）' : '';
+      const suffix = (hosp.state === 'ADMITTED' || hosp.state === 'HOSPITALIZED' || hosp.state === 'WILL_DISCHARGE') ? '（入院中）' : '';
       option.textContent = `${start}〜${end}${suffix}`;
       periodSelect.appendChild(option);
     }
@@ -939,7 +939,7 @@
     // 入院情報を表示
     async function loadHospitalizations() {
       hospitalizations = await fetchHospitalizations(patientUuid);
-      const current = hospitalizations.find(h => h.state === 'ADMITTED');
+      const current = hospitalizations.find(h => h.state === 'ADMITTED' || h.state === 'HOSPITALIZED' || h.state === 'WILL_DISCHARGE');
       if (current) {
         hospInfo.textContent = `現在入院中: ${formatDate(current.startDate)}〜 (${current.hospitalizationDayCount?.value || 0}日目)`;
       } else {
