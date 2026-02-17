@@ -327,6 +327,27 @@ GraphQL APIを使用する際は、**コードを書く前に**以下の手順�
 - ペイロード構造（フィールド、型）を確認
 - **推測でコードを書かない。スピードより確認の正確さを優先する**
 
+##### ネットワークリクエスト調査手順（get_network_request 活用）
+
+新しいAPIを調査する際は、以下の手順で `get_network_request` を活用する：
+
+1. **ページ選択**: `list_pages` → `select_page` でHenryのタブを選択
+2. **リクエスト一覧取得**: `list_network_requests(resourceTypes: ["fetch"])` で通信をキャプチャ
+3. **GraphQLリクエスト特定**: 一覧から `/graphql` or `/graphql-v2` の `reqid` を把握
+4. **詳細取得**: `get_network_request(reqid)` でヘッダー・ボディ・レスポンスを一括取得
+
+**取得できる情報**（ブラウザの「Copy as fetch」と同等）：
+- リクエストヘッダー（Authorization, x-auth-organization-uuid 等）
+- リクエストボディ（operationName, variables, query/extensions）
+- レスポンスボディ（完全なJSONレスポンス）
+
+**フィルタリングのコツ**:
+- 一覧では `operationName` が見えないため、目的のクエリを特定するには**差分方式**が有効
+  - 操作前にリクエスト一覧を取得 → 操作してもらう → 再取得して新しい `reqid` を確認
+- `reqid` は昇順なので、最新のリクエストほど大きい番号になる
+
+**注意**: 取得結果にJWTトークンやCookieが含まれるため、ログや出力に残さないこと
+
 #### 2. 開発中：段階的に検証
 
 1. **エラーログを確認** - 何が起きているか把握する
