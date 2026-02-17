@@ -56,7 +56,19 @@ MCPサーバーが接続されるのを確認（起動時に `chrome-devtools` �
 | ナビゲーション | `navigate_page` | URLへ移動 |
 | スクリーンショット | `take_screenshot` | 画面キャプチャ |
 
-### 4. 活用シーン
+### 4. 使用前の必須手順
+
+**YOU MUST**: DevTools MCPのツールを使用する前に、必ず `list_pages` で対象ページが選択されているか確認すること。
+
+```
+1. list_pages で [selected] のページを確認
+2. 対象と異なる場合は select_page で切り替え
+3. その後にネットワーク・コンソール等の操作を行う
+```
+
+複数タブが開いている場合、意図しないページ（Google Apps Script等）が選択されていることが多い。確認せずに操作すると空振りする。
+
+### 5. 活用シーン
 
 - **GraphQL API調査**: 画面操作しながら `list_network_requests` でAPIをキャプチャ
 - **スクリプト動作確認**: `list_console_messages` でログ出力を直接確認
