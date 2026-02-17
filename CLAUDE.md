@@ -300,6 +300,8 @@ chrome-devtools-mcpでリアルタイム調査。静的リファレンスは廃�
 
 **YOU MUST**: ユーザーから「chrome-devtoolsの起動方法」を聞かれたら、`NOTES.md` の手順を参照して回答すること。
 
+**YOU MUST**: DevTools MCPのツール（`list_network_requests`, `list_console_messages`, `take_snapshot` 等）を使用する前に、必ず `list_pages` で対象ページが `[selected]` になっているか確認すること。複数タブが開いている場合、意図しないページが選択されていることが多い。
+
 ### バージョン管理
 
 **YOU MUST**: 全てのスクリプトはセマンティックバージョニング（x.y.z）に従うこと。
