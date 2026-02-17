@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry Core
 // @namespace    https://henry-app.jp/
-// @version      2.39.0
+// @version      2.39.1
 // @description  Henry スクリプト実行基盤 (GoogleAuth統合 / Google Docs対応)
 // @author       sk powered by Claude & Gemini
 // @match        https://henry-app.jp/*
@@ -194,9 +194,17 @@
     }
   };
 
+  // 複数の同時呼び出しがリフレッシュAPIを重複して叩かないようPromiseをキャッシュ
+  let _refreshPromise = null;
+
   const Auth = {
     // NOTE: Henry本体のFirebase Auth実装に依存（IndexedDB 'firebaseLocalStorageDb' の構造）
+    // NOTE: db.close() は意図的に省略。スコープ外でGC回収されるため、
+    //       全パスに finalize を通す複雑さに見合わない。変更前から同様。
     getToken: () => new Promise((resolve) => {
+      // リフレッシュ処理中なら、その結果に相乗りする
+      if (_refreshPromise) return _refreshPromise.then(resolve);
+
       const req = indexedDB.open('firebaseLocalStorageDb');
       req.onerror = () => resolve(null);
       req.onsuccess = (e) => {
@@ -216,6 +224,9 @@
             .sort((a, b) => b.expirationTime - a.expirationTime)[0];
           if (valid?.accessToken) return resolve(valid.accessToken);
 
+          // 非同期の間に他の呼び出しがリフレッシュを開始していないか再チェック
+          if (_refreshPromise) return _refreshPromise.then(resolve);
+
           // トークン期限切れ → リフレッシュ試行
           const record = records.find(r => r.value?.stsTokenManager?.refreshToken);
           if (!record) return resolve(null);
@@ -224,50 +235,60 @@
           const apiKey = record.value.apiKey;
           if (!refreshToken || !apiKey) return resolve(null);
 
-          try {
-            const resp = await fetch(
-              `https://securetoken.googleapis.com/v1/token?key=${apiKey}`,
-              {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-                body: `grant_type=refresh_token&refresh_token=${encodeURIComponent(refreshToken)}`,
+          _refreshPromise = (async () => {
+            try {
+              const resp = await fetch(
+                `https://securetoken.googleapis.com/v1/token?key=${apiKey}`,
+                {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                  body: `grant_type=refresh_token&refresh_token=${encodeURIComponent(refreshToken)}`,
+                }
+              );
+              if (!resp.ok) {
+                console.error('[Henry Core] Token refresh failed:', resp.status);
+                return null;
               }
-            );
-            if (!resp.ok) {
-              console.error('[Henry Core] Token refresh failed:', resp.status);
-              return resolve(null);
-            }
-            const data = await resp.json();
+              const data = await resp.json();
 
-            // IndexedDB を readwrite で開いてトークンを更新
-            const writeReq = indexedDB.open('firebaseLocalStorageDb');
-            writeReq.onerror = () => resolve(data.id_token);
-            writeReq.onsuccess = (ev) => {
-              try {
-                const writeDb = ev.target.result;
-                const writeTx = writeDb.transaction('firebaseLocalStorage', 'readwrite');
-                const store = writeTx.objectStore('firebaseLocalStorage');
-                const getReq = store.get(record.key);
-                getReq.onsuccess = () => {
-                  const entry = getReq.result;
-                  if (entry?.value?.stsTokenManager) {
-                    entry.value.stsTokenManager.accessToken = data.id_token;
-                    entry.value.stsTokenManager.refreshToken = data.refresh_token;
-                    entry.value.stsTokenManager.expirationTime = Date.now() + parseInt(data.expires_in) * 1000;
-                    store.put(entry);
+              // IndexedDB を readwrite で開いてトークンを更新
+              await new Promise((resolveWrite) => {
+                const writeReq = indexedDB.open('firebaseLocalStorageDb');
+                writeReq.onerror = () => resolveWrite();
+                writeReq.onsuccess = (ev) => {
+                  try {
+                    const writeDb = ev.target.result;
+                    const writeTx = writeDb.transaction('firebaseLocalStorage', 'readwrite');
+                    const store = writeTx.objectStore('firebaseLocalStorage');
+                    const getReq = store.get(record.key);
+                    getReq.onsuccess = () => {
+                      const entry = getReq.result;
+                      if (entry?.value?.stsTokenManager) {
+                        entry.value.stsTokenManager.accessToken = data.id_token;
+                        entry.value.stsTokenManager.refreshToken = data.refresh_token;
+                        entry.value.stsTokenManager.expirationTime = Date.now() + parseInt(data.expires_in) * 1000;
+                        store.put(entry);
+                      }
+                      resolveWrite();
+                    };
+                    getReq.onerror = () => resolveWrite();
+                  } catch {
+                    resolveWrite();
                   }
-                  console.log('[Henry Core] Token refreshed successfully');
-                  resolve(data.id_token);
                 };
-                getReq.onerror = () => resolve(data.id_token);
-              } catch {
-                resolve(data.id_token);
-              }
-            };
-          } catch (err) {
-            console.error('[Henry Core] Token refresh error:', err);
-            resolve(null);
-          }
+              });
+
+              console.log('[Henry Core] Token refreshed successfully');
+              return data.id_token;
+            } catch (err) {
+              console.error('[Henry Core] Token refresh error:', err);
+              return null;
+            } finally {
+              _refreshPromise = null;
+            }
+          })();
+
+          resolve(await _refreshPromise);
         };
         reqAll.onerror = () => resolve(null);
       };
