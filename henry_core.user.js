@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry Core
 // @namespace    https://henry-app.jp/
-// @version      2.38.0
+// @version      2.39.0
 // @description  Henry スクリプト実行基盤 (GoogleAuth統合 / Google Docs対応)
 // @author       sk powered by Claude & Gemini
 // @match        https://henry-app.jp/*
@@ -16,6 +16,7 @@
 // @connect      oauth2.googleapis.com
 // @connect      sheets.googleapis.com
 // @connect      www.googleapis.com
+// @connect      securetoken.googleapis.com
 // @updateURL    https://raw.githubusercontent.com/shin-926/Henry/main/henry_core.user.js
 // @downloadURL  https://raw.githubusercontent.com/shin-926/Henry/main/henry_core.user.js
 // @run-at       document-start
@@ -204,13 +205,69 @@
 
         const tx = db.transaction('firebaseLocalStorage', 'readonly');
         const reqAll = tx.objectStore('firebaseLocalStorage').getAll();
-        reqAll.onsuccess = () => {
+        reqAll.onsuccess = async () => {
           const now = Date.now();
-          const valid = reqAll.result
+          const records = reqAll.result;
+
+          // 高速パス: 有効期限内のトークンがあればそのまま返す
+          const valid = records
             .map(r => r.value?.stsTokenManager)
             .filter(t => t && t.accessToken && t.expirationTime > now)
             .sort((a, b) => b.expirationTime - a.expirationTime)[0];
-          resolve(valid?.accessToken || null);
+          if (valid?.accessToken) return resolve(valid.accessToken);
+
+          // トークン期限切れ → リフレッシュ試行
+          const record = records.find(r => r.value?.stsTokenManager?.refreshToken);
+          if (!record) return resolve(null);
+
+          const { refreshToken } = record.value.stsTokenManager;
+          const apiKey = record.value.apiKey;
+          if (!refreshToken || !apiKey) return resolve(null);
+
+          try {
+            const resp = await fetch(
+              `https://securetoken.googleapis.com/v1/token?key=${apiKey}`,
+              {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                body: `grant_type=refresh_token&refresh_token=${encodeURIComponent(refreshToken)}`,
+              }
+            );
+            if (!resp.ok) {
+              console.error('[Henry Core] Token refresh failed:', resp.status);
+              return resolve(null);
+            }
+            const data = await resp.json();
+
+            // IndexedDB を readwrite で開いてトークンを更新
+            const writeReq = indexedDB.open('firebaseLocalStorageDb');
+            writeReq.onerror = () => resolve(data.id_token);
+            writeReq.onsuccess = (ev) => {
+              try {
+                const writeDb = ev.target.result;
+                const writeTx = writeDb.transaction('firebaseLocalStorage', 'readwrite');
+                const store = writeTx.objectStore('firebaseLocalStorage');
+                const getReq = store.get(record.key);
+                getReq.onsuccess = () => {
+                  const entry = getReq.result;
+                  if (entry?.value?.stsTokenManager) {
+                    entry.value.stsTokenManager.accessToken = data.id_token;
+                    entry.value.stsTokenManager.refreshToken = data.refresh_token;
+                    entry.value.stsTokenManager.expirationTime = Date.now() + parseInt(data.expires_in) * 1000;
+                    store.put(entry);
+                  }
+                  console.log('[Henry Core] Token refreshed successfully');
+                  resolve(data.id_token);
+                };
+                getReq.onerror = () => resolve(data.id_token);
+              } catch {
+                resolve(data.id_token);
+              }
+            };
+          } catch (err) {
+            console.error('[Henry Core] Token refresh error:', err);
+            resolve(null);
+          }
         };
         reqAll.onerror = () => resolve(null);
       };
