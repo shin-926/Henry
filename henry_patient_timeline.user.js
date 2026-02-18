@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry Patient Timeline
 // @namespace    https://github.com/shin-926/Henry
-// @version      2.140.0
+// @version      2.140.1
 // @description  入院患者の各種記録・オーダーをガントチャート風タイムラインで表示
 // @author       sk powered by Claude
 // @match        https://henry-app.jp/*
@@ -3455,6 +3455,12 @@
       gap: 16px;
       flex: 1;
     }
+    #patient-timeline-modal #modal-title {
+      cursor: pointer;
+    }
+    #patient-timeline-modal #modal-title:hover {
+      text-decoration: underline;
+    }
     #patient-timeline-modal #header-search-container {
       margin-left: auto;
       margin-right: 24px;
@@ -4942,6 +4948,9 @@
       const info = [age ? `${age}歳` : null, sexLabel].filter(Boolean).join('・');
       const titleBase = info ? `${patient.fullName}（${info}）` : patient.fullName;
       modalTitle.textContent = titleBase;
+      modalTitle.onclick = () => {
+        window.open(`https://henry-app.jp/patients/${patient.uuid}`, '_blank');
+      };
       // 患者IDバッジを更新
       const badge = modal.querySelector('#patient-id-badge');
       if (badge && patient.serialNumber) {
