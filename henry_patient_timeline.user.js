@@ -4946,7 +4946,7 @@
       const badge = modal.querySelector('#patient-id-badge');
       if (badge && patient.serialNumber) {
         badge.textContent = `ID:${patient.serialNumber}`;
-        badge.style.display = '';
+        badge.style.display = 'inline-block';
         badge.onclick = () => {
           navigator.clipboard.writeText(String(patient.serialNumber)).then(() => {
             window.HenryCore.ui.showToast('患者IDをコピーしました', 'success');
