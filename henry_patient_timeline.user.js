@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry Patient Timeline
 // @namespace    https://github.com/shin-926/Henry
-// @version      2.139.0
+// @version      2.139.2
 // @description  入院患者の各種記録・オーダーをガントチャート風タイムラインで表示
 // @author       sk powered by Claude
 // @match        https://henry-app.jp/*
@@ -3808,8 +3808,8 @@
     .record-image-item { position: relative; width: 80px; height: 80px; border-radius: 4px; overflow: hidden; }
     .record-image-item img { width: 100%; height: 100%; object-fit: cover; }
     .record-image-remove { position: absolute; top: 2px; right: 2px; width: 20px; height: 20px; background: rgba(0,0,0,0.6); color: #fff; border: none; border-radius: 50%; cursor: pointer; font-size: 12px; line-height: 20px; text-align: center; padding: 0; }
-    .record-image-add { width: 80px; height: 80px; border: 2px dashed #ccc; border-radius: 4px; display: flex; align-items: center; justify-content: center; cursor: pointer; font-size: 24px; color: #999; background: transparent; }
-    .record-image-add:hover { border-color: #999; color: #666; }
+    .record-image-attach-link { background: none; border: none; cursor: pointer; font-size: 12px; color: #888; padding: 0; margin-top: 4px; }
+    .record-image-attach-link:hover { color: #555; text-decoration: underline; }
     #patient-timeline-modal .vital-high {
       color: #c62828;
       font-weight: 700;
@@ -4351,11 +4351,12 @@
 
       // 編集モードの場合は元の時刻と日付を使用、新規作成は現在日時
       let timeStr = currentTimeStr;
-      let dateStr = new Date().toISOString().split('T')[0];  // デフォルトは常に本日
+      const _today = new Date();
+      let dateStr = `${_today.getFullYear()}-${(_today.getMonth()+1).toString().padStart(2,'0')}-${_today.getDate().toString().padStart(2,'0')}`;  // ローカル日付
       if (isEdit && existingRecord.performTime) {
         const originalDate = new Date(existingRecord.performTime);
         timeStr = `${originalDate.getHours().toString().padStart(2, '0')}:${originalDate.getMinutes().toString().padStart(2, '0')}`;
-        dateStr = originalDate.toISOString().split('T')[0];  // 元の記録日付
+        dateStr = `${originalDate.getFullYear()}-${(originalDate.getMonth()+1).toString().padStart(2,'0')}-${originalDate.getDate().toString().padStart(2,'0')}`;  // 元の記録日付
       }
 
       // DOM要素を作成（HenryCore.ui.showModalはcontentが文字列だとtextContentとして設定するため）
@@ -4453,12 +4454,7 @@
       }
 
       const imageSection = document.createElement('div');
-      imageSection.style.marginTop = '12px';
-
-      const imageLabel = document.createElement('label');
-      imageLabel.style.cssText = 'display: block; margin-bottom: 4px; font-weight: 500; font-size: 13px;';
-      imageLabel.textContent = '画像';
-      imageSection.appendChild(imageLabel);
+      imageSection.style.marginTop = '6px';
 
       const imageContainer = document.createElement('div');
       imageContainer.className = 'record-image-container';
@@ -4516,14 +4512,14 @@
           item.appendChild(removeBtn);
           imageContainer.appendChild(item);
         }
-        // 追加ボタン（上限未満の場合）
-        if (getTotalImageCount() < MAX_IMAGES) {
-          const addBtn = document.createElement('button');
-          addBtn.className = 'record-image-add';
-          addBtn.textContent = '＋';
-          addBtn.title = '画像を追加';
-          addBtn.addEventListener('click', () => fileInput.click());
-          imageContainer.appendChild(addBtn);
+        // 添付リンク
+        const totalCount = getTotalImageCount();
+        if (totalCount < MAX_IMAGES) {
+          const link = document.createElement('button');
+          link.className = 'record-image-attach-link';
+          link.textContent = totalCount === 0 ? '画像を添付' : '+ 追加';
+          link.addEventListener('click', () => fileInput.click());
+          imageContainer.appendChild(link);
         }
       }
 
@@ -4593,7 +4589,8 @@
       // 実施日時を計算（入力された日付 + 入力時刻）
       const [hours, minutes] = (timeInput?.value || '12:00').split(':').map(Number);
       // dateInputはYYYY-MM-DD形式
-      const dateValue = dateInput?.value || state.timeline.selectedDate || new Date().toISOString().split('T')[0];
+      const _now = new Date();
+      const dateValue = dateInput?.value || state.timeline.selectedDate || `${_now.getFullYear()}-${(_now.getMonth()+1).toString().padStart(2,'0')}-${_now.getDate().toString().padStart(2,'0')}`;
       const [year, month, day] = dateValue.split('-').map(Number);
       const performDate = new Date(year, month - 1, day, hours, minutes, 0, 0);
       const performTimeSeconds = Math.floor(performDate.getTime() / 1000);
