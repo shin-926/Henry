@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry Patient Timeline
 // @namespace    https://github.com/shin-926/Henry
-// @version      2.139.2
+// @version      2.140.0
 // @description  入院患者の各種記録・オーダーをガントチャート風タイムラインで表示
 // @author       sk powered by Claude
 // @match        https://henry-app.jp/*
@@ -3498,6 +3498,20 @@
       color: #ccc;
       cursor: not-allowed;
     }
+    #patient-timeline-modal #patient-id-badge {
+      display: none;
+      font-size: 12px;
+      padding: 2px 8px;
+      border-radius: 10px;
+      background: #e8f0fe;
+      color: #1a73e8;
+      cursor: pointer;
+      user-select: none;
+      margin-right: 6px;
+    }
+    #patient-timeline-modal #patient-id-badge:hover {
+      background: #c6d9f7;
+    }
     #patient-timeline-modal .hosp-info {
       font-size: 13px;
       color: #666;
@@ -4246,6 +4260,7 @@
               <button class="nav-btn" id="next-patient-btn" title="次の患者">▶</button>
             </div>
             <h2 id="modal-title"></h2>
+            <span id="patient-id-badge" title="クリックでコピー"></span>
             <span class="hosp-info" id="hosp-info"></span>
             <button class="header-action-btn" id="disease-register-btn" title="病名登録">病名</button>
             <div id="header-search-container" style="display: none;"></div>
@@ -4821,6 +4836,7 @@
         switchToTimeline({
           uuid: patient.patient.uuid,
           fullName: patient.patient.fullName,
+          serialNumber: patient.patient.serialNumber,
           sexType: patient.patient.detail?.sexType,
           birthDate: patient.patient.detail?.birthDate,
           wardName: patient._wardName || patient.statusHospitalizationLocation?.ward?.name,
@@ -4839,6 +4855,7 @@
         switchToTimeline({
           uuid: patient.patient.uuid,
           fullName: patient.patient.fullName,
+          serialNumber: patient.patient.serialNumber,
           sexType: patient.patient.detail?.sexType,
           birthDate: patient.patient.detail?.birthDate,
           wardName: patient._wardName || patient.statusHospitalizationLocation?.ward?.name,
@@ -4925,6 +4942,19 @@
       const info = [age ? `${age}歳` : null, sexLabel].filter(Boolean).join('・');
       const titleBase = info ? `${patient.fullName}（${info}）` : patient.fullName;
       modalTitle.textContent = titleBase;
+      // 患者IDバッジを更新
+      const badge = modal.querySelector('#patient-id-badge');
+      if (badge && patient.serialNumber) {
+        badge.textContent = `ID:${patient.serialNumber}`;
+        badge.style.display = '';
+        badge.onclick = () => {
+          navigator.clipboard.writeText(String(patient.serialNumber)).then(() => {
+            window.HenryCore.ui.showToast('患者IDをコピーしました', 'success');
+          });
+        };
+      } else if (badge) {
+        badge.style.display = 'none';
+      }
       hospInfo.textContent = '読み込み中...';
 
       // 患者選択画面の検索ボックスをクリアし、ヘッダーに検索ボックスを表示
@@ -5314,6 +5344,7 @@
             switchToTimeline({
               uuid: patient.patient.uuid,
               fullName: patient.patient.fullName,
+              serialNumber: patient.patient.serialNumber,
               sexType: patient.patient.detail?.sexType,
               birthDate: patient.patient.detail?.birthDate,
               wardName: patient._wardName || patient.statusHospitalizationLocation?.ward?.name,
