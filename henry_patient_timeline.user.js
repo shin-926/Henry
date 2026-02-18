@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry Patient Timeline
 // @namespace    https://github.com/shin-926/Henry
-// @version      2.140.1
+// @version      2.141.0
 // @description  入院患者の各種記録・オーダーをガントチャート風タイムラインで表示
 // @author       sk powered by Claude
 // @match        https://henry-app.jp/*
@@ -3179,13 +3179,13 @@
     };
 
     // ドット生成
-    const generateDots = (points, getValue, yScaleFn, color) => {
+    const generateDots = (points, getValue, yScaleFn, color, label) => {
       return points.map(p => {
         const v = getValue(p);
         if (v === null) return '';
         const x = xScale(p.timestamp);
         const y = yScaleFn(v);
-        return `<circle cx="${x}" cy="${y}" r="3" fill="${color}" />`;
+        return `<circle class="bs-dot" cx="${x}" cy="${y}" r="3" fill="${color}" data-value="${v}" data-label="${label}" />`;
       }).join('');
     };
 
@@ -3246,9 +3246,9 @@
 
     // 30日表示時はドット非表示
     const showDots = days !== 30;
-    const morningDots = showDots ? generateDots(data, d => d.morning, yScale, '#FF9800') : '';
-    const noonDots = showDots ? generateDots(data, d => d.noon, yScale, '#4CAF50') : '';
-    const eveningDots = showDots ? generateDots(data, d => d.evening, yScale, '#2196F3') : '';
+    const morningDots = showDots ? generateDots(data, d => d.morning, yScale, '#FF9800', '朝') : '';
+    const noonDots = showDots ? generateDots(data, d => d.noon, yScale, '#4CAF50', '昼') : '';
+    const eveningDots = showDots ? generateDots(data, d => d.evening, yScale, '#2196F3', '夕') : '';
 
     // 基準値帯（70〜130 mg/dL）
     const normalBand = generateNormalBand(normalRange.min, normalRange.max, yMin, yMax, chartTop, 'rgba(255, 152, 0, 0.15)');
@@ -3267,6 +3267,7 @@
 
     return `
       <svg width="${width}" height="${totalHeight}" style="display:block;margin:0 auto;">
+        <style>.bs-dot { cursor: pointer; transition: r 0.1s; } .bs-dot:hover { r: 5; }</style>
         <!-- 血糖グラフ -->
         <rect x="${margin.left}" y="${chartTop}" width="${chartWidth}" height="${chartHeight}" fill="#fafafa" />
         ${normalBand}
@@ -3285,6 +3286,49 @@
         ${legend}
       </svg>
     `;
+  }
+
+  // 血糖値ドットのホバーツールチップを設定
+  function setupBloodSugarTooltip(container) {
+    const svgEl = container.querySelector('svg');
+    if (!svgEl) return;
+
+    const tooltip = document.createElement('div');
+    Object.assign(tooltip.style, {
+      position: 'absolute',
+      display: 'none',
+      padding: '4px 8px',
+      background: 'rgba(0,0,0,0.8)',
+      color: '#fff',
+      borderRadius: '4px',
+      fontSize: '12px',
+      pointerEvents: 'none',
+      whiteSpace: 'nowrap',
+      zIndex: '10'
+    });
+    container.style.position = 'relative';
+    container.appendChild(tooltip);
+
+    container.addEventListener('mouseenter', (e) => {
+      if (!e.target.classList?.contains('bs-dot')) return;
+      const label = e.target.dataset.label;
+      const value = e.target.dataset.value;
+      tooltip.textContent = `${label} ${value} mg/dL`;
+      // SVGのcontainer内でのオフセットを考慮
+      const svgRect = svgEl.getBoundingClientRect();
+      const containerRect = container.getBoundingClientRect();
+      const cx = parseFloat(e.target.getAttribute('cx'));
+      const cy = parseFloat(e.target.getAttribute('cy'));
+      tooltip.style.left = `${cx + (svgRect.left - containerRect.left)}px`;
+      tooltip.style.top = `${cy + (svgRect.top - containerRect.top) - 30}px`;
+      tooltip.style.transform = 'translateX(-50%)';
+      tooltip.style.display = 'block';
+    }, true);
+
+    container.addEventListener('mouseleave', (e) => {
+      if (!e.target.classList?.contains('bs-dot')) return;
+      tooltip.style.display = 'none';
+    }, true);
   }
 
   // SVGで尿量折れ線グラフを描画
@@ -6059,6 +6103,7 @@
         const bodyEl = titleEl?.nextElementSibling;
         if (bodyEl) {
           bodyEl.innerHTML = buttonGroupHtml + svgHtml;
+          setupBloodSugarTooltip(bodyEl);
           // ボタンにイベントを再設定
           bodyEl.querySelectorAll('.blood-sugar-days-btn').forEach(btn => {
             btn.onclick = () => {
@@ -6073,6 +6118,7 @@
       // 新規モーダル作成
       const svgContainer = document.createElement('div');
       svgContainer.innerHTML = buttonGroupHtml + svgHtml;
+      setupBloodSugarTooltip(svgContainer);
 
       // ボタンにクリックイベントを設定
       svgContainer.querySelectorAll('.blood-sugar-days-btn').forEach(btn => {
