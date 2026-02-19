@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry Summary Export
 // @namespace    https://github.com/shin-926/Henry
-// @version      1.7.8
+// @version      1.7.9
 // @description  入院患者のサマリー用データをマークダウン形式でダウンロード
 // @author       sk powered by Claude
 // @match        https://henry-app.jp/*
@@ -1201,7 +1201,6 @@
 
     // === フロントマター ===
     lines.push('---');
-    lines.push(`patient_name: "${patientDetails.fullName}"`);
     lines.push(`patient_id: "${patientDetails.uuid}"`);
     lines.push(`export_date: "${todayIso}"`);
     lines.push(`admission_date: "${startDateIso}"`);
@@ -1214,7 +1213,6 @@
     lines.push('# 入院患者データ（AIサマリー作成用）\n');
 
     lines.push('## 患者基本情報\n');
-    lines.push(`- 氏名: ${patientDetails.fullName}`);
     lines.push(`- 年齢・性別: ${age}歳 ${gender}`);
     lines.push(`- 主病名: ${diseaseName}`);
     lines.push(`- 入院日: ${startDateIso}（${dayCount}日目）`);
