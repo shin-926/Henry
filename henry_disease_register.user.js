@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry Disease Register
 // @namespace    https://henry-app.jp/
-// @version      3.34.0
+// @version      3.34.1
 // @description  高速病名検索・登録
 // @author       sk powered by Claude & Gemini
 // @match        https://henry-app.jp/*
@@ -36,6 +36,7 @@
  * - henry_disease_data.js: 病名マスタデータ（@require で読み込み）
  *
  * ■ 変更履歴
+ * v3.34.1 (2026-02-20) - 開始日カレンダー手動変更時にドロップダウン表示をリセット
  * v3.25.1 (2026-01-28) - 「登録済み病名」→「現在有効な病名」に表記変更
  * v3.25.0 (2026-01-28) - 編集中ハイライト表示、リハビリ病名表示改善
  *   - 編集中の病名を青色ハイライトで表示
@@ -2410,6 +2411,15 @@
 
       // 登録ボタン
       this.overlay.querySelector('#dr-register').onclick = () => this.register();
+
+      // 開始日の手動変更時にドロップダウンをリセット
+      this.overlay.querySelector('#dr-start-date').onchange = () => {
+        this.selectedDateOption = null;
+        const toggle = this.overlay.querySelector('#dr-dropdown-toggle');
+        if (toggle) toggle.textContent = '－';
+        const menu = this.overlay.querySelector('#dr-dropdown-menu');
+        if (menu) menu.querySelectorAll('.dr-dropdown-item').forEach(el => el.classList.remove('selected'));
+      };
 
       // リハビリパネル開閉
       this.overlay.querySelector('#dr-rehab-open').onclick = () => this.toggleRehabPanel(true);
