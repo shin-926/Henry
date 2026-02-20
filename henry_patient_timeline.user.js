@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry Patient Timeline
 // @namespace    https://github.com/shin-926/Henry
-// @version      2.144.0
+// @version      2.145.0
 // @description  入院患者の各種記録・オーダーをガントチャート風タイムラインで表示
 // @author       sk powered by Claude
 // @match        https://henry-app.jp/*
@@ -2977,6 +2977,458 @@
     return dates;
   }
 
+  // ========================================================
+  // ダッシュボード用 共通チャートユーティリティ
+  // ========================================================
+
+  /**
+   * 共通チャートヘルパーファクトリ
+   * ダッシュボード内の全チャートでX軸を揃えるために使用
+   */
+  function createChartUtils({ width, margin, minTime, maxTime, dateKeys }) {
+    const chartWidth = width - margin.left - margin.right;
+    const timeRange = maxTime - minTime;
+
+    const dayBoundaries = dateKeys.map(key => {
+      const [year, month, day] = key.split('-').map(Number);
+      const dayStart = new Date(year, month - 1, day, 0, 0, 0).getTime();
+      return { key, timestamp: dayStart, month, day };
+    });
+
+    return {
+      chartWidth,
+
+      xScale(timestamp) {
+        return margin.left + ((timestamp - minTime) / timeRange) * chartWidth;
+      },
+
+      createYScale(min, max, top, height) {
+        return (v) => top + height - ((v - min) / (max - min)) * height;
+      },
+
+      generatePath(points, getValue, yScale) {
+        const validPoints = points.filter(p => getValue(p) !== null);
+        if (validPoints.length === 0) return '';
+        return validPoints.map((p, idx) => {
+          const x = this.xScale(p.timestamp);
+          const y = yScale(getValue(p));
+          return `${idx === 0 ? 'M' : 'L'}${x},${y}`;
+        }).join(' ');
+      },
+
+      generateDots(points, getValue, yScale, color, radius = 3) {
+        return points.map(p => {
+          const v = getValue(p);
+          if (v === null) return '';
+          const x = this.xScale(p.timestamp);
+          const y = yScale(v);
+          return `<circle cx="${x}" cy="${y}" r="${radius}" fill="${color}" />`;
+        }).join('');
+      },
+
+      generateDayLinesAndLabels(top, height, showLabels = true) {
+        return dayBoundaries.map((d, i) => {
+          const x = this.xScale(d.timestamp);
+          if (x < margin.left || x > margin.left + chartWidth) return '';
+          const nextX = (i < dayBoundaries.length - 1)
+            ? this.xScale(dayBoundaries[i + 1].timestamp)
+            : margin.left + chartWidth;
+          const labelX = (x + nextX) / 2;
+          const label = showLabels
+            ? `<text x="${labelX}" y="${top + height + 12}" text-anchor="middle" font-size="10" fill="#666">${d.month}/${d.day}</text>`
+            : '';
+          return `
+            <line x1="${x}" y1="${top}" x2="${x}" y2="${top + height}" stroke="#ddd" stroke-width="1" />
+            ${label}
+          `;
+        }).join('');
+      },
+
+      generateYTicks(min, max, step, top, height, yScale, color) {
+        const ticks = [];
+        for (let v = min; v <= max; v += step) {
+          ticks.push(v);
+        }
+        return ticks.map(v => {
+          return `
+            <text x="${margin.left - 5}" y="${yScale(v) + 3}" text-anchor="end" font-size="9" fill="${color}">${v}</text>
+            <text x="${margin.left + chartWidth + 5}" y="${yScale(v) + 3}" text-anchor="start" font-size="9" fill="${color}">${v}</text>
+            <line x1="${margin.left}" y1="${yScale(v)}" x2="${margin.left + chartWidth}" y2="${yScale(v)}" stroke="#eee" stroke-dasharray="2,2" />
+          `;
+        }).join('');
+      },
+
+      generateNormalBand(rangeMin, rangeMax, yScale, color) {
+        const y1 = yScale(rangeMax);
+        const y2 = yScale(rangeMin);
+        const bandHeight = y2 - y1;
+        if (bandHeight <= 0) return '';
+        return `<rect x="${margin.left}" y="${y1}" width="${chartWidth}" height="${bandHeight}" fill="${color}" />`;
+      },
+    };
+  }
+
+  // ========================================================
+  // ダッシュボード用 コンパクトSVGチャートレンダラー（6種）
+  // ========================================================
+
+  /** 体温チャート（コンパクト版） */
+  function renderDashboardTemperature(data, cu, days) {
+    const chartHeight = 100;
+    const margin = { top: 22, bottom: 4 };
+    const top = margin.top;
+    const totalHeight = margin.top + chartHeight + margin.bottom;
+    const yMin = 35, yMax = 40;
+    const yScale = cu.createYScale(yMin, yMax, top, chartHeight);
+
+    const path = cu.generatePath(data, d => d.T, yScale);
+    const showDots = days !== 30;
+    const dots = showDots ? cu.generateDots(data, d => d.T, yScale, '#FF5722') : '';
+    const normalBand = cu.generateNormalBand(36.0, 37.0, yScale, 'rgba(255, 87, 34, 0.15)');
+
+    return `
+      <svg width="100%" viewBox="0 0 ${cu.chartWidth + 80} ${totalHeight}" preserveAspectRatio="xMidYMid meet">
+        <text x="40" y="${top - 6}" font-size="11" font-weight="bold" fill="#333">体温 (°C)</text>
+        <rect x="40" y="${top}" width="${cu.chartWidth}" height="${chartHeight}" fill="#fafafa" />
+        ${normalBand}
+        ${cu.generateYTicks(yMin, yMax, 1, top, chartHeight, yScale, '#666')}
+        ${cu.generateDayLinesAndLabels(top, chartHeight, false)}
+        <path d="${path}" fill="none" stroke="#FF5722" stroke-width="1.5" />
+        ${dots}
+        <rect x="40" y="${top}" width="${cu.chartWidth}" height="${chartHeight}" fill="none" stroke="#ccc" />
+      </svg>
+    `;
+  }
+
+  /** 血圧+脈拍チャート（コンパクト版） */
+  function renderDashboardBPPulse(data, cu, days) {
+    const chartHeight = 100;
+    const margin = { top: 22, bottom: 4 };
+    const top = margin.top;
+    const totalHeight = margin.top + chartHeight + margin.bottom;
+
+    const bpUppers = data.map(d => d.BPupper).filter(v => v !== null);
+    const bpLowers = data.map(d => d.BPlower).filter(v => v !== null);
+    const pulses = data.map(d => d.P).filter(v => v !== null);
+    const allValues = [...bpUppers, ...bpLowers, ...pulses];
+    const yMin = allValues.length > 0 ? Math.floor(Math.min(...allValues) / 10) * 10 - 10 : 40;
+    const yMax = allValues.length > 0 ? Math.ceil(Math.max(...allValues) / 10) * 10 + 10 : 180;
+    const yScale = cu.createYScale(yMin, yMax, top, chartHeight);
+
+    const bpUpperPath = cu.generatePath(data, d => d.BPupper, yScale);
+    const bpLowerPath = cu.generatePath(data, d => d.BPlower, yScale);
+    const pulsePath = cu.generatePath(data, d => d.P, yScale);
+    const showDots = days !== 30;
+    const bpUpperDots = showDots ? cu.generateDots(data, d => d.BPupper, yScale, '#4CAF50', 2.5) : '';
+    const bpLowerDots = showDots ? cu.generateDots(data, d => d.BPlower, yScale, '#9C27B0', 2.5) : '';
+    const pulseDots = showDots ? cu.generateDots(data, d => d.P, yScale, '#2196F3', 2) : '';
+
+    const bpUpperBand = cu.generateNormalBand(90, 140, yScale, 'rgba(76, 175, 80, 0.10)');
+    const bpLowerBand = cu.generateNormalBand(60, 90, yScale, 'rgba(156, 39, 176, 0.10)');
+
+    // 凡例
+    const legendX = cu.chartWidth - 100;
+    const legend = `
+      <g transform="translate(${legendX}, ${top - 10})">
+        <line x1="0" y1="0" x2="12" y2="0" stroke="#4CAF50" stroke-width="2" />
+        <text x="14" y="3" font-size="8" fill="#666">上</text>
+        <line x1="28" y1="0" x2="40" y2="0" stroke="#9C27B0" stroke-width="1.5" />
+        <text x="42" y="3" font-size="8" fill="#666">下</text>
+        <line x1="56" y1="0" x2="68" y2="0" stroke="#2196F3" stroke-width="1.5" stroke-dasharray="3,2" />
+        <text x="70" y="3" font-size="8" fill="#666">脈</text>
+      </g>
+    `;
+
+    return `
+      <svg width="100%" viewBox="0 0 ${cu.chartWidth + 80} ${totalHeight}" preserveAspectRatio="xMidYMid meet">
+        <text x="40" y="${top - 6}" font-size="11" font-weight="bold" fill="#333">血圧+脈拍</text>
+        ${legend}
+        <rect x="40" y="${top}" width="${cu.chartWidth}" height="${chartHeight}" fill="#fafafa" />
+        ${bpUpperBand}
+        ${bpLowerBand}
+        ${cu.generateYTicks(yMin, yMax, 20, top, chartHeight, yScale, '#666')}
+        ${cu.generateDayLinesAndLabels(top, chartHeight, false)}
+        <path d="${bpUpperPath}" fill="none" stroke="#4CAF50" stroke-width="1.5" />
+        <path d="${bpLowerPath}" fill="none" stroke="#9C27B0" stroke-width="1.5" />
+        <path d="${pulsePath}" fill="none" stroke="#2196F3" stroke-width="1.5" stroke-dasharray="3,2" />
+        ${bpUpperDots}
+        ${bpLowerDots}
+        ${pulseDots}
+        <rect x="40" y="${top}" width="${cu.chartWidth}" height="${chartHeight}" fill="none" stroke="#ccc" />
+      </svg>
+    `;
+  }
+
+  /** SpO2チャート（コンパクト版） */
+  function renderDashboardSpO2(data, cu, days) {
+    const chartHeight = 80;
+    const margin = { top: 22, bottom: 4 };
+    const top = margin.top;
+    const totalHeight = margin.top + chartHeight + margin.bottom;
+    const yMin = 88, yMax = 100;
+    const yScale = cu.createYScale(yMin, yMax, top, chartHeight);
+
+    const path = cu.generatePath(data, d => d.spo2, yScale);
+    const showDots = days !== 30;
+    const dots = showDots ? cu.generateDots(data, d => d.spo2, yScale, '#00897B') : '';
+    const normalBand = cu.generateNormalBand(95, 100, yScale, 'rgba(0, 137, 123, 0.12)');
+
+    return `
+      <svg width="100%" viewBox="0 0 ${cu.chartWidth + 80} ${totalHeight}" preserveAspectRatio="xMidYMid meet">
+        <text x="40" y="${top - 6}" font-size="11" font-weight="bold" fill="#333">SpO2 (%)</text>
+        <rect x="40" y="${top}" width="${cu.chartWidth}" height="${chartHeight}" fill="#fafafa" />
+        ${normalBand}
+        ${cu.generateYTicks(yMin, yMax, 2, top, chartHeight, yScale, '#666')}
+        ${cu.generateDayLinesAndLabels(top, chartHeight, true)}
+        <path d="${path}" fill="none" stroke="#00897B" stroke-width="1.5" />
+        ${dots}
+        <rect x="40" y="${top}" width="${cu.chartWidth}" height="${chartHeight}" fill="none" stroke="#ccc" />
+      </svg>
+    `;
+  }
+
+  /** 血糖値+インスリンチャート（コンパクト版） */
+  function renderDashboardBloodSugar(data, cu, days) {
+    const chartHeight = 100;
+    const margin = { top: 22, bottom: 4 };
+    const top = margin.top;
+    const totalHeight = margin.top + chartHeight + margin.bottom;
+    const yMin = 50, yMax = 250;
+    const yScale = cu.createYScale(yMin, yMax, top, chartHeight);
+
+    const morningPath = cu.generatePath(data, d => d.morning, yScale);
+    const noonPath = cu.generatePath(data, d => d.noon, yScale);
+    const eveningPath = cu.generatePath(data, d => d.evening, yScale);
+    const showDots = days !== 30;
+    const morningDots = showDots ? cu.generateDots(data, d => d.morning, yScale, '#FF9800', 2.5) : '';
+    const noonDots = showDots ? cu.generateDots(data, d => d.noon, yScale, '#4CAF50', 2.5) : '';
+    const eveningDots = showDots ? cu.generateDots(data, d => d.evening, yScale, '#2196F3', 2.5) : '';
+    const normalBand = cu.generateNormalBand(70, 130, yScale, 'rgba(255, 152, 0, 0.12)');
+
+    // 凡例
+    const legendX = cu.chartWidth - 100;
+    const legend = `
+      <g transform="translate(${legendX}, ${top - 10})">
+        <line x1="0" y1="0" x2="12" y2="0" stroke="#FF9800" stroke-width="2" />
+        <text x="14" y="3" font-size="8" fill="#666">朝</text>
+        <line x1="28" y1="0" x2="40" y2="0" stroke="#4CAF50" stroke-width="2" />
+        <text x="42" y="3" font-size="8" fill="#666">昼</text>
+        <line x1="56" y1="0" x2="68" y2="0" stroke="#2196F3" stroke-width="2" />
+        <text x="70" y="3" font-size="8" fill="#666">夕</text>
+      </g>
+    `;
+
+    return `
+      <svg width="100%" viewBox="0 0 ${cu.chartWidth + 80} ${totalHeight}" preserveAspectRatio="xMidYMid meet">
+        <text x="40" y="${top - 6}" font-size="11" font-weight="bold" fill="#333">血糖値 (mg/dL)</text>
+        ${legend}
+        <rect x="40" y="${top}" width="${cu.chartWidth}" height="${chartHeight}" fill="#fafafa" />
+        ${normalBand}
+        ${cu.generateYTicks(yMin, yMax, 50, top, chartHeight, yScale, '#666')}
+        ${cu.generateDayLinesAndLabels(top, chartHeight, false)}
+        <path d="${morningPath}" fill="none" stroke="#FF9800" stroke-width="1.5" />
+        <path d="${noonPath}" fill="none" stroke="#4CAF50" stroke-width="1.5" />
+        <path d="${eveningPath}" fill="none" stroke="#2196F3" stroke-width="1.5" />
+        ${morningDots}
+        ${noonDots}
+        ${eveningDots}
+        <rect x="40" y="${top}" width="${cu.chartWidth}" height="${chartHeight}" fill="none" stroke="#ccc" />
+      </svg>
+    `;
+  }
+
+  /** 食事摂取量チャート（コンパクト版・積み上げ棒グラフ） */
+  function renderDashboardMealIntake(mealsData, cu, days) {
+    const chartHeight = 100;
+    const margin = { top: 22, bottom: 4 };
+    const top = margin.top;
+    const totalHeight = margin.top + chartHeight + margin.bottom;
+    // Y軸: 0〜10割
+    const yMin = 0, yMax = 10;
+    const yScale = cu.createYScale(yMin, yMax, top, chartHeight);
+
+    // 棒幅計算
+    const dayCount = Math.max(days, 1);
+    const availWidth = cu.chartWidth / dayCount;
+    const barWidth = Math.max(2, Math.min(8, availWidth * 0.2));
+    const barGap = Math.max(1, barWidth * 0.3);
+
+    const bars = mealsData.map(d => {
+      const cx = cu.xScale(d.timestamp);
+      const meals = [
+        { main: d.breakfast?.main, side: d.breakfast?.side, color: '#FF9800', label: '朝' },
+        { main: d.lunch?.main, side: d.lunch?.side, color: '#4CAF50', label: '昼' },
+        { main: d.dinner?.main, side: d.dinner?.side, color: '#2196F3', label: '夕' },
+      ];
+      return meals.map((meal, i) => {
+        const mainVal = meal.main ?? 0;
+        const sideVal = meal.side ?? 0;
+        if (mainVal === 0 && sideVal === 0 && meal.main == null && meal.side == null) return '';
+        const totalVal = mainVal + sideVal;
+        const x = cx - (barWidth * 1.5 + barGap) + i * (barWidth + barGap);
+        const yBottom = yScale(0);
+        const yMainTop = yScale(mainVal);
+        const ySideTop = yScale(totalVal);
+        // 主食（下）
+        const mainBar = mainVal > 0
+          ? `<rect x="${x}" y="${yMainTop}" width="${barWidth}" height="${yBottom - yMainTop}" fill="${meal.color}" opacity="0.7" />`
+          : '';
+        // 副食（上に積み上げ）
+        const sideBar = sideVal > 0
+          ? `<rect x="${x}" y="${ySideTop}" width="${barWidth}" height="${yMainTop - ySideTop}" fill="${meal.color}" opacity="0.4" />`
+          : '';
+        return mainBar + sideBar;
+      }).join('');
+    }).join('');
+
+    // 凡例
+    const legendX = cu.chartWidth - 130;
+    const legend = `
+      <g transform="translate(${legendX}, ${top - 10})">
+        <rect x="0" y="-4" width="8" height="8" fill="#FF9800" opacity="0.7" />
+        <text x="10" y="3" font-size="8" fill="#666">朝</text>
+        <rect x="28" y="-4" width="8" height="8" fill="#4CAF50" opacity="0.7" />
+        <text x="38" y="3" font-size="8" fill="#666">昼</text>
+        <rect x="56" y="-4" width="8" height="8" fill="#2196F3" opacity="0.7" />
+        <text x="66" y="3" font-size="8" fill="#666">夕</text>
+        <rect x="84" y="-4" width="8" height="4" fill="#999" opacity="0.7" />
+        <rect x="84" y="0" width="8" height="4" fill="#999" opacity="0.4" />
+        <text x="94" y="3" font-size="8" fill="#666">主/副</text>
+      </g>
+    `;
+
+    return `
+      <svg width="100%" viewBox="0 0 ${cu.chartWidth + 80} ${totalHeight}" preserveAspectRatio="xMidYMid meet">
+        <text x="40" y="${top - 6}" font-size="11" font-weight="bold" fill="#333">食事摂取量 (割)</text>
+        ${legend}
+        <rect x="40" y="${top}" width="${cu.chartWidth}" height="${chartHeight}" fill="#fafafa" />
+        ${cu.generateYTicks(yMin, yMax, 2, top, chartHeight, yScale, '#666')}
+        ${cu.generateDayLinesAndLabels(top, chartHeight, false)}
+        ${bars}
+        <rect x="40" y="${top}" width="${cu.chartWidth}" height="${chartHeight}" fill="none" stroke="#ccc" />
+      </svg>
+    `;
+  }
+
+  /** 尿量チャート（コンパクト版） */
+  function renderDashboardUrine(data, cu, days) {
+    const chartHeight = 100;
+    const margin = { top: 22, bottom: 4 };
+    const top = margin.top;
+    const totalHeight = margin.top + chartHeight + margin.bottom;
+    const yMin = 0, yMax = 3000;
+    const yScale = cu.createYScale(yMin, yMax, top, chartHeight);
+
+    const path = cu.generatePath(data, d => d.totalUrine, yScale);
+    const showDots = days !== 30;
+    const dots = showDots ? cu.generateDots(data, d => d.totalUrine, yScale, '#607D8B') : '';
+    const normalBand = cu.generateNormalBand(1000, 2000, yScale, 'rgba(96, 125, 139, 0.12)');
+
+    return `
+      <svg width="100%" viewBox="0 0 ${cu.chartWidth + 80} ${totalHeight}" preserveAspectRatio="xMidYMid meet">
+        <text x="40" y="${top - 6}" font-size="11" font-weight="bold" fill="#333">尿量 (mL)</text>
+        <rect x="40" y="${top}" width="${cu.chartWidth}" height="${chartHeight}" fill="#fafafa" />
+        ${normalBand}
+        ${cu.generateYTicks(yMin, yMax, 500, top, chartHeight, yScale, '#666')}
+        ${cu.generateDayLinesAndLabels(top, chartHeight, true)}
+        <path d="${path}" fill="none" stroke="#607D8B" stroke-width="1.5" />
+        ${dots}
+        <rect x="40" y="${top}" width="${cu.chartWidth}" height="${chartHeight}" fill="none" stroke="#ccc" />
+      </svg>
+    `;
+  }
+
+  // ========================================================
+  // ダッシュボード用 データ収集
+  // ========================================================
+
+  /**
+   * タイムラインアイテムを1回ループして全6種のデータを収集
+   * @param {Array} items - state.timeline.items（呼び出し元から渡す）
+   */
+  function collectDashboardData(items, dateKeySet) {
+    const vitals = [];      // { timestamp, T, BPupper, BPlower, P, spo2 }
+    const bloodSugar = [];  // { timestamp, dateKey, morning, noon, evening }
+    const urine = [];       // { timestamp, dateKey, totalUrine }
+    const mealsMap = new Map(); // dateKey → { breakfast:{main,side}, lunch:{main,side}, dinner:{main,side} }
+
+    for (const item of items) {
+      const itemKey = dateKey(item.date);
+      if (!dateKeySet.has(itemKey)) continue;
+
+      if (item.category === 'vital' && item.vitals) {
+        for (const vs of item.vitals) {
+          const raw = vs.rawData;
+          vitals.push({
+            timestamp: vs.date.getTime(),
+            date: vs.date,
+            T: raw?.temperature?.value ? raw.temperature.value / 10 : null,
+            BPupper: raw?.bloodPressureUpperBound?.value ? raw.bloodPressureUpperBound.value / 10 : null,
+            BPlower: raw?.bloodPressureLowerBound?.value ? raw.bloodPressureLowerBound.value / 10 : null,
+            P: raw?.pulseRate?.value ? raw.pulseRate.value / 10 : null,
+            spo2: raw?.spo2?.value ? raw.spo2.value / 10 : null,
+          });
+        }
+      } else if (item.category === 'bloodSugar') {
+        const [year, month, day] = itemKey.split('-').map(Number);
+        const timestamp = new Date(year, month - 1, day, 12, 0, 0).getTime();
+        const text = item.text;
+        const morningMatch = text.match(/朝(\d+)/);
+        const noonMatch = text.match(/昼(\d+)/);
+        const eveningMatch = text.match(/夕(\d+)/);
+        bloodSugar.push({
+          timestamp,
+          dateKey: itemKey,
+          morning: morningMatch ? parseInt(morningMatch[1], 10) : null,
+          noon: noonMatch ? parseInt(noonMatch[1], 10) : null,
+          evening: eveningMatch ? parseInt(eveningMatch[1], 10) : null,
+        });
+      } else if (item.category === 'urine') {
+        const [year, month, day] = itemKey.split('-').map(Number);
+        const timestamp = new Date(year, month - 1, day, 12, 0, 0).getTime();
+        const match = item.text.match(/【尿量】(?:<span[^>]*>)?([0-9０-９]+)/);
+        const totalUrine = match ? parseInt(toHalfWidth(match[1]), 10) : 0;
+        urine.push({ timestamp, dateKey: itemKey, totalUrine });
+      } else if (item.category === 'meal') {
+        // 食事テキストからパース: 「【食種名】朝10/10 昼8/8 夕10/10」
+        const text = item.text;
+        const [year, month, day] = itemKey.split('-').map(Number);
+        const timestamp = new Date(year, month - 1, day, 12, 0, 0).getTime();
+
+        const bMatch = text.match(/朝([0-9０-９-]+)\/([0-9０-９-]+)/);
+        const lMatch = text.match(/昼([0-9０-９-]+)\/([0-9０-９-]+)/);
+        const dMatch = text.match(/夕([0-9０-９-]+)\/([0-9０-９-]+)/);
+
+        const parseVal = (v) => {
+          if (!v || v === '-') return null;
+          const n = parseInt(toHalfWidth(v), 10);
+          return isNaN(n) ? null : n;
+        };
+
+        if (!mealsMap.has(itemKey)) {
+          mealsMap.set(itemKey, {
+            timestamp,
+            dateKey: itemKey,
+            breakfast: { main: null, side: null },
+            lunch: { main: null, side: null },
+            dinner: { main: null, side: null },
+          });
+        }
+        const meal = mealsMap.get(itemKey);
+        if (bMatch) { meal.breakfast.main = parseVal(bMatch[1]); meal.breakfast.side = parseVal(bMatch[2]); }
+        if (lMatch) { meal.lunch.main = parseVal(lMatch[1]); meal.lunch.side = parseVal(lMatch[2]); }
+        if (dMatch) { meal.dinner.main = parseVal(dMatch[1]); meal.dinner.side = parseVal(dMatch[2]); }
+      }
+    }
+
+    vitals.sort((a, b) => a.timestamp - b.timestamp);
+    bloodSugar.sort((a, b) => a.timestamp - b.timestamp);
+    urine.sort((a, b) => a.timestamp - b.timestamp);
+    const meals = Array.from(mealsMap.values()).sort((a, b) => a.timestamp - b.timestamp);
+
+    return { vitals, bloodSugar, urine, meals };
+  }
+
   // SVGでバイタル折れ線グラフを描画（showTimelineModalから分離）
   // 純粋関数：外部状態に依存せず、引数のみで動作
   function renderVitalSVG(data, minTime, maxTime, dateKeys, days = 7) {
@@ -4413,6 +4865,7 @@
         inspectionFindings: null, // { close, overlayEl }
         profile: null,           // { overlayEl, textarea }
         injectionChart: null,    // { close, overlayEl, centerDateKey }
+        vitalDashboard: null,    // { close, overlayEl, days }
       },
 
       // その他
@@ -4437,6 +4890,7 @@
             <span id="patient-id-badge" title="クリックでコピー"></span>
             <span class="hosp-info" id="hosp-info"></span>
             <button class="header-action-btn" id="disease-register-btn" title="病名登録">病名</button>
+            <button class="header-action-btn" id="vital-dashboard-btn" title="バイタルダッシュボード">ダッシュボード</button>
             <div id="header-search-container" style="display: none;"></div>
           </div>
         </div>
@@ -4503,6 +4957,7 @@
     const fixedInfoContent = modal.querySelector('#fixed-info-content');
     const hospInfo = modal.querySelector('#hosp-info');
     const diseaseRegisterBtn = modal.querySelector('#disease-register-btn');
+    const vitalDashboardBtn = modal.querySelector('#vital-dashboard-btn');
     const doctorLegend = modal.querySelector('#doctor-legend');
     const addRecordBtn = modal.querySelector('#add-record-btn');
 
@@ -4514,6 +4969,12 @@
       } else {
         window.HenryCore.ui.showToast('病名登録スクリプトが読み込まれていません', 'error');
       }
+    };
+
+    // ダッシュボードボタン
+    vitalDashboardBtn.onclick = () => {
+      if (!state.patient.selected) return;
+      showVitalDashboard();
     };
 
     // =========================================================================
@@ -5109,6 +5570,7 @@
       modalHeader.style.display = '';
       backBtn.style.display = 'block';
       diseaseRegisterBtn.style.display = 'inline-block';
+      vitalDashboardBtn.style.display = 'inline-block';
       updateNavButtons();
       // 年齢・性別を表示
       const age = patient.birthDate ? calculateAge(patient.birthDate) : null;
@@ -6514,6 +6976,219 @@
             for (const removed of mutation.removedNodes) {
               if (removed === overlayEl) {
                 state.modals.urine = null;
+                observer.disconnect();
+                return;
+              }
+            }
+          }
+        });
+        observer.observe(document.body, { childList: true });
+        cleaner.add(() => observer.disconnect());
+      }
+    }
+
+    // =========================================================================
+    // バイタルダッシュボード（統合グラフ一覧）
+    // =========================================================================
+
+    function showVitalDashboard(days = 14) {
+      // 基準日: タイムラインで選択中の日付、なければ最新日付
+      const endDateStr = state.timeline.selectedDate
+        || (state.timeline.dates.length > 0 ? state.timeline.dates[0] : dateKey(new Date()));
+      const endDate = new Date(endDateStr + 'T23:59:59');
+      const startDate = new Date(endDate);
+      startDate.setDate(startDate.getDate() - (days - 1));
+      startDate.setHours(0, 0, 0, 0);
+
+      // 日付キー生成
+      const dateKeys = [];
+      const dateKeySet = new Set();
+      for (let i = days - 1; i >= 0; i--) {
+        const d = new Date(endDate);
+        d.setDate(d.getDate() - i);
+        const key = dateKey(d);
+        dateKeys.push(key);
+        dateKeySet.add(key);
+      }
+
+      // データ収集
+      const data = collectDashboardData(state.timeline.items, dateKeySet);
+
+      // 期間表示用
+      const startLabel = `${parseInt(dateKeys[0].split('-')[1])}/${parseInt(dateKeys[0].split('-')[2])}`;
+      const endLabel = `${parseInt(dateKeys[dateKeys.length - 1].split('-')[1])}/${parseInt(dateKeys[dateKeys.length - 1].split('-')[2])}`;
+
+      // 共通チャートユーティリティ（X軸共有）
+      const svgWidth = 500;
+      const chartMargin = { top: 0, right: 40, bottom: 0, left: 40 };
+      const cu = createChartUtils({
+        width: svgWidth,
+        margin: chartMargin,
+        minTime: startDate.getTime(),
+        maxTime: endDate.getTime(),
+        dateKeys,
+      });
+
+      // 6つのチャートを生成
+      const tempChart = renderDashboardTemperature(data.vitals, cu, days);
+      const bpChart = renderDashboardBPPulse(data.vitals, cu, days);
+      const spo2Chart = renderDashboardSpO2(data.vitals, cu, days);
+      const bsChart = renderDashboardBloodSugar(data.bloodSugar, cu, days);
+      const mealChart = renderDashboardMealIntake(data.meals, cu, days);
+      const urineChart = renderDashboardUrine(data.urine, cu, days);
+
+      // コンテンツ構築（DOM API使用）
+      const contentDiv = document.createElement('div');
+
+      // 期間切り替えボタン
+      const btnGroup = document.createElement('div');
+      btnGroup.style.cssText = 'display: flex; justify-content: center; gap: 8px; margin-bottom: 12px;';
+      [7, 14, 30].forEach(d => {
+        const btn = document.createElement('button');
+        btn.className = 'dashboard-days-btn';
+        btn.dataset.days = d;
+        btn.textContent = `${d}日`;
+        btn.style.cssText = `padding: 6px 16px; border: none; border-radius: 4px; cursor: pointer; font-size: 13px; ${d === days ? 'background: #1976d2; color: white;' : 'background: #e0e0e0; color: #333;'}`;
+        btn.onclick = () => showVitalDashboard(d);
+        btnGroup.appendChild(btn);
+      });
+      contentDiv.appendChild(btnGroup);
+
+      // 2列グリッド
+      const grid = document.createElement('div');
+      grid.style.cssText = 'display: grid; grid-template-columns: 1fr 1fr; gap: 0 24px;';
+
+      // 左列: 循環・呼吸系
+      const leftCol = document.createElement('div');
+      const leftTitle = document.createElement('div');
+      leftTitle.textContent = '循環・呼吸系';
+      leftTitle.style.cssText = 'font-size: 12px; font-weight: bold; color: #555; margin-bottom: 4px; padding-left: 4px;';
+      leftCol.appendChild(leftTitle);
+
+      // 右列: 代謝・栄養・水分
+      const rightCol = document.createElement('div');
+      const rightTitle = document.createElement('div');
+      rightTitle.textContent = '代謝・栄養・水分';
+      rightTitle.style.cssText = 'font-size: 12px; font-weight: bold; color: #555; margin-bottom: 4px; padding-left: 4px;';
+      rightCol.appendChild(rightTitle);
+
+      // チャート行を作成するヘルパー
+      const createChartRow = (svgHtml, chartType) => {
+        const row = document.createElement('div');
+        row.className = 'dashboard-chart-row';
+        row.dataset.chart = chartType;
+        // SVGはスクリプト内部で生成した信頼済みコンテンツ
+        row.innerHTML = svgHtml; // eslint-disable-line -- trusted SVG from internal renderer
+        row.style.cssText = 'border-radius: 4px; transition: background 0.15s;';
+        if (chartType !== 'meal') {
+          row.style.cursor = 'pointer';
+          row.onmouseenter = () => { row.style.background = '#f5f5f5'; };
+          row.onmouseleave = () => { row.style.background = 'transparent'; };
+        }
+        return row;
+      };
+
+      // 左列のチャート
+      const tempRow = createChartRow(tempChart, 'vital');
+      const bpRow = createChartRow(bpChart, 'vital');
+      const spo2Row = createChartRow(spo2Chart, 'spo2');
+      leftCol.appendChild(tempRow);
+      leftCol.appendChild(bpRow);
+      leftCol.appendChild(spo2Row);
+
+      // 右列のチャート
+      const bsRow = createChartRow(bsChart, 'bloodSugar');
+      const mealRow = createChartRow(mealChart, 'meal');
+      const urineRow = createChartRow(urineChart, 'urine');
+      rightCol.appendChild(bsRow);
+      rightCol.appendChild(mealRow);
+      rightCol.appendChild(urineRow);
+
+      grid.appendChild(leftCol);
+      grid.appendChild(rightCol);
+      contentDiv.appendChild(grid);
+
+      // 基準日の取得（クリックハンドラ用）
+      const clickEndDate = endDateStr;
+
+      // チャート行クリック → 既存の個別グラフモーダルへ
+      contentDiv.querySelectorAll('.dashboard-chart-row').forEach(row => {
+        const chartType = row.dataset.chart;
+        if (chartType === 'meal') return;
+        row.onclick = () => {
+          if (chartType === 'vital' || chartType === 'spo2') {
+            showVitalGraph(clickEndDate, days);
+          } else if (chartType === 'bloodSugar') {
+            showBloodSugarGraph(clickEndDate, days);
+          } else if (chartType === 'urine') {
+            showUrineGraph(clickEndDate, days);
+          }
+        };
+      });
+
+      // モーダルが既に開いている場合はコンテンツのみ更新
+      if (state.modals.vitalDashboard?.overlayEl?.parentNode) {
+        state.modals.vitalDashboard.days = days;
+        const titleEl = state.modals.vitalDashboard.overlayEl.querySelector('.henry-modal-title');
+        if (titleEl) {
+          titleEl.style.display = 'flex';
+          titleEl.style.justifyContent = 'space-between';
+          titleEl.style.alignItems = 'center';
+          titleEl.style.width = '100%';
+          titleEl.textContent = '';
+          const titleSpan = document.createElement('span');
+          titleSpan.textContent = `バイタルダッシュボード（${startLabel} - ${endLabel}）`;
+          const nameSpan = document.createElement('span');
+          nameSpan.style.cssText = 'font-size: 14px; color: #666;';
+          nameSpan.textContent = state.patient.selected?.fullName || '';
+          titleEl.appendChild(titleSpan);
+          titleEl.appendChild(nameSpan);
+        }
+        const bodyEl = titleEl?.nextElementSibling;
+        if (bodyEl) {
+          bodyEl.textContent = '';
+          bodyEl.appendChild(contentDiv);
+        }
+        return;
+      }
+
+      // 新規モーダル作成
+      const { close } = window.HenryCore.ui.showModal({
+        title: `バイタルダッシュボード（${startLabel} - ${endLabel}）`,
+        content: contentDiv,
+        width: '90vw',
+      });
+
+      const overlayEl = document.querySelector('.henry-modal-overlay:last-of-type');
+
+      // タイトルに患者名を追加
+      if (overlayEl && state.patient.selected) {
+        const titleEl = overlayEl.querySelector('.henry-modal-title');
+        if (titleEl) {
+          titleEl.style.display = 'flex';
+          titleEl.style.justifyContent = 'space-between';
+          titleEl.style.alignItems = 'center';
+          titleEl.style.width = '100%';
+          titleEl.textContent = '';
+          const titleSpan = document.createElement('span');
+          titleSpan.textContent = `バイタルダッシュボード（${startLabel} - ${endLabel}）`;
+          const nameSpan = document.createElement('span');
+          nameSpan.style.cssText = 'font-size: 14px; color: #666;';
+          nameSpan.textContent = state.patient.selected.fullName;
+          titleEl.appendChild(titleSpan);
+          titleEl.appendChild(nameSpan);
+        }
+      }
+
+      state.modals.vitalDashboard = { close, overlayEl, days };
+
+      // モーダルクローズ監視
+      if (overlayEl) {
+        const observer = new MutationObserver((mutations) => {
+          for (const mutation of mutations) {
+            for (const removed of mutation.removedNodes) {
+              if (removed === overlayEl) {
+                state.modals.vitalDashboard = null;
                 observer.disconnect();
                 return;
               }
