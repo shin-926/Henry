@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry Patient Timeline
 // @namespace    https://github.com/shin-926/Henry
-// @version      2.143.2
+// @version      2.144.0
 // @description  入院患者の各種記録・オーダーをガントチャート風タイムラインで表示
 // @author       sk powered by Claude
 // @match        https://henry-app.jp/*
@@ -324,6 +324,12 @@
   function formatDateTime(date) {
     if (!date) return '-';
     return `${date.getFullYear()}/${date.getMonth() + 1}/${date.getDate()} ${date.getHours().toString().padStart(2, '0')}:${date.getMinutes().toString().padStart(2, '0')}`;
+  }
+
+  // 全角数字→半角数字変換（看護記録の手入力値対応）
+  function toHalfWidth(str) {
+    if (str == null) return str;
+    return String(str).replace(/[０-９]/g, c => String.fromCharCode(c.charCodeAt(0) - 0xFEE0));
   }
 
   // 日付を正規化（時分秒を0に）
@@ -1520,7 +1526,7 @@
         const entries = mod.entries || [];
         for (const entry of entries) {
           if ((entry.name || '').includes('合計尿量')) {
-            const value = entry.value != null ? parseInt(entry.value, 10) : null;
+            const value = entry.value != null ? parseInt(toHalfWidth(entry.value), 10) : null;
             if (value != null && !byDate.has(key)) {
               byDate.set(key, {
                 date: new Date(year, month - 1, day),
@@ -1601,11 +1607,11 @@
 
           // 血糖値
           if (name.includes('血糖値(朝)') && value != null) {
-            dayData.bloodSugar.morning = parseInt(value, 10);
+            dayData.bloodSugar.morning = parseInt(toHalfWidth(value), 10);
           } else if (name.includes('血糖値(昼)') && value != null) {
-            dayData.bloodSugar.noon = parseInt(value, 10);
+            dayData.bloodSugar.noon = parseInt(toHalfWidth(value), 10);
           } else if (name.includes('血糖値(夕)') && value != null) {
-            dayData.bloodSugar.evening = parseInt(value, 10);
+            dayData.bloodSugar.evening = parseInt(toHalfWidth(value), 10);
           }
 
           // インスリン薬剤名
@@ -1615,11 +1621,11 @@
 
           // インスリン単位
           if (name.includes('単位(朝)') && value != null) {
-            dayData.insulinUnit.morning = parseFloat(value);
+            dayData.insulinUnit.morning = parseFloat(toHalfWidth(value));
           } else if (name.includes('単位(昼)') && value != null) {
-            dayData.insulinUnit.noon = parseFloat(value);
+            dayData.insulinUnit.noon = parseFloat(toHalfWidth(value));
           } else if (name.includes('単位(夕)') && value != null) {
-            dayData.insulinUnit.evening = parseFloat(value);
+            dayData.insulinUnit.evening = parseFloat(toHalfWidth(value));
           }
         }
       }
@@ -1754,7 +1760,7 @@
     for (const entry of entries) {
       const name = entry.name || '';
       // 値は文字列で「2」などと記録されている（割単位）
-      const value = entry.value != null ? parseInt(entry.value, 10) : null;
+      const value = entry.value != null ? parseInt(toHalfWidth(entry.value), 10) : null;
 
       if (name.includes('朝食(主)')) meals.breakfast.main = value;
       else if (name.includes('朝食(副)')) meals.breakfast.side = value;
@@ -6326,8 +6332,8 @@
         const timestamp = new Date(year, month - 1, day, 12, 0, 0).getTime();
 
         // テキストから尿量を抽出（例: 【尿量】1500mL または 【尿量】<span class="vital-high">2500</span>mL）
-        const match = item.text.match(/【尿量】(?:<span[^>]*>)?(\d+)/);
-        const totalUrine = match ? parseInt(match[1], 10) : 0;
+        const match = item.text.match(/【尿量】(?:<span[^>]*>)?([0-9０-９]+)/);
+        const totalUrine = match ? parseInt(toHalfWidth(match[1]), 10) : 0;
 
         allUrine.push({
           timestamp,
