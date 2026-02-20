@@ -6151,25 +6151,25 @@
       const dates = state.timeline.dates;
       if (!dates || dates.length === 0) return;
 
-      // 完全一致を探す
-      let targetKey = dates.find(d => d === dateKeyStr);
+      // dates は Date オブジェクトの配列なので dateKey() で文字列に変換して比較
+      let targetDateKey = dates.find(d => dateKey(d) === dateKeyStr);
 
       // 一致しなければ最も近い日付を探す
-      if (!targetKey) {
+      if (!targetDateKey) {
         const targetTime = new Date(dateKeyStr + 'T00:00:00').getTime();
         let minDiff = Infinity;
         for (const d of dates) {
-          const diff = Math.abs(new Date(d + 'T00:00:00').getTime() - targetTime);
+          const diff = Math.abs(d.getTime() - targetTime);
           if (diff < minDiff) {
             minDiff = diff;
-            targetKey = d;
+            targetDateKey = d;
           }
         }
       }
 
-      if (!targetKey) return;
+      if (!targetDateKey) return;
 
-      state.timeline.selectedDate = targetKey;
+      state.timeline.selectedDate = dateKey(targetDateKey);
       renderDateListVisible();
       renderTimelineContent();
       scrollToSelectedDate();
