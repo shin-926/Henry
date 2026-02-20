@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry Patient Timeline
 // @namespace    https://github.com/shin-926/Henry
-// @version      2.141.1
+// @version      2.141.2
 // @description  入院患者の各種記録・オーダーをガントチャート風タイムラインで表示
 // @author       sk powered by Claude
 // @match        https://henry-app.jp/*
@@ -775,7 +775,8 @@
 
       for (const doc of documents) {
         const text = parseEditorData(doc.editorData);
-        if (text) {
+        const hasImages = extractImagesFromEditorData(doc.editorData).length > 0;
+        if (text || hasImages) {
           allDocuments.push({
             id: doc.uuid,
             category: 'doctor',
@@ -817,7 +818,8 @@
 
       for (const doc of documents) {
         const text = parseEditorData(doc.editorData);
-        if (text) {
+        const hasImages = extractImagesFromEditorData(doc.editorData).length > 0;
+        if (text || hasImages) {
           allDocuments.push({
             id: doc.uuid,
             category: 'nursing',
