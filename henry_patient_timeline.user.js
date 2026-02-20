@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry Patient Timeline
 // @namespace    https://github.com/shin-926/Henry
-// @version      2.145.2
+// @version      2.145.3
 // @description  入院患者の各種記録・オーダーをガントチャート風タイムラインで表示
 // @author       sk powered by Claude
 // @match        https://henry-app.jp/*
@@ -3271,53 +3271,40 @@
     const yMin = 0, yMax = 10;
     const yScale = cu.createYScale(yMin, yMax, top, chartHeight);
 
-    // 棒幅計算
-    const dayCount = Math.max(days, 1);
-    const availWidth = cu.chartWidth / dayCount;
-    const barWidth = Math.max(2, Math.min(8, availWidth * 0.2));
-    const barGap = Math.max(1, barWidth * 0.3);
+    // 各日のデータを朝・昼・夕の3点に展開
+    const ONE_DAY = 24 * 60 * 60 * 1000;
+    const mainPoints = [];
+    const sidePoints = [];
 
-    const bars = mealsData.map(d => {
-      const cx = cu.xScale(d.timestamp);
-      const meals = [
-        { main: d.breakfast?.main, side: d.breakfast?.side, color: '#FF9800', label: '朝' },
-        { main: d.lunch?.main, side: d.lunch?.side, color: '#4CAF50', label: '昼' },
-        { main: d.dinner?.main, side: d.dinner?.side, color: '#2196F3', label: '夕' },
-      ];
-      return meals.map((meal, i) => {
-        const mainVal = meal.main ?? 0;
-        const sideVal = meal.side ?? 0;
-        if (mainVal === 0 && sideVal === 0 && meal.main == null && meal.side == null) return '';
-        const totalVal = mainVal + sideVal;
-        const x = cx - (barWidth * 1.5 + barGap) + i * (barWidth + barGap);
-        const yBottom = yScale(0);
-        const yMainTop = yScale(mainVal);
-        const ySideTop = yScale(totalVal);
-        // 主食（下）
-        const mainBar = mainVal > 0
-          ? `<rect x="${x}" y="${yMainTop}" width="${barWidth}" height="${yBottom - yMainTop}" fill="${meal.color}" opacity="0.7" />`
-          : '';
-        // 副食（上に積み上げ）
-        const sideBar = sideVal > 0
-          ? `<rect x="${x}" y="${ySideTop}" width="${barWidth}" height="${yMainTop - ySideTop}" fill="${meal.color}" opacity="0.4" />`
-          : '';
-        return mainBar + sideBar;
-      }).join('');
-    }).join('');
+    mealsData.forEach(d => {
+      const dayStart = d.timestamp;
+      const offsets = [-ONE_DAY / 3, 0, ONE_DAY / 3];
+      const meals = [d.breakfast, d.lunch, d.dinner];
+
+      meals.forEach((meal, i) => {
+        const ts = dayStart + offsets[i];
+        mainPoints.push({ timestamp: ts, value: meal?.main ?? null });
+        sidePoints.push({ timestamp: ts, value: meal?.side ?? null });
+      });
+    });
+
+    // 折れ線パス
+    const mainPath = cu.generatePath(mainPoints, d => d.value, yScale);
+    const sidePath = cu.generatePath(sidePoints, d => d.value, yScale);
+
+    // ドット（30日表示ではドットを非表示）
+    const showDots = days !== 30;
+    const mainDots = showDots ? cu.generateDots(mainPoints, d => d.value, yScale, '#FF9800', 2) : '';
+    const sideDots = showDots ? cu.generateDots(sidePoints, d => d.value, yScale, '#2196F3', 2) : '';
 
     // 凡例
-    const legendX = cu.chartWidth - 130;
+    const legendX = cu.chartWidth - 100;
     const legend = `
       <g transform="translate(${legendX}, ${top - 10})">
-        <rect x="0" y="-4" width="8" height="8" fill="#FF9800" opacity="0.7" />
-        <text x="10" y="3" font-size="8" fill="#666">朝</text>
-        <rect x="28" y="-4" width="8" height="8" fill="#4CAF50" opacity="0.7" />
-        <text x="38" y="3" font-size="8" fill="#666">昼</text>
-        <rect x="56" y="-4" width="8" height="8" fill="#2196F3" opacity="0.7" />
-        <text x="66" y="3" font-size="8" fill="#666">夕</text>
-        <rect x="84" y="-4" width="8" height="4" fill="#999" opacity="0.7" />
-        <rect x="84" y="0" width="8" height="4" fill="#999" opacity="0.4" />
-        <text x="94" y="3" font-size="8" fill="#666">主/副</text>
+        <line x1="0" y1="0" x2="14" y2="0" stroke="#FF9800" stroke-width="1.5" />
+        <text x="17" y="3" font-size="8" fill="#666">主食</text>
+        <line x1="46" y1="0" x2="60" y2="0" stroke="#2196F3" stroke-width="1.5" stroke-dasharray="3,2" />
+        <text x="63" y="3" font-size="8" fill="#666">副食</text>
       </g>
     `;
 
@@ -3328,7 +3315,10 @@
         <rect x="40" y="${top}" width="${cu.chartWidth}" height="${chartHeight}" fill="#fafafa" />
         ${cu.generateYTicks(yMin, yMax, 2, top, chartHeight, yScale, '#666')}
         ${cu.generateDayLinesAndLabels(top, chartHeight, false)}
-        ${bars}
+        ${mainPath ? `<path d="${mainPath}" fill="none" stroke="#FF9800" stroke-width="1.5" />` : ''}
+        ${sidePath ? `<path d="${sidePath}" fill="none" stroke="#2196F3" stroke-width="1.5" stroke-dasharray="4,2" />` : ''}
+        ${mainDots}
+        ${sideDots}
         <rect x="40" y="${top}" width="${cu.chartWidth}" height="${chartHeight}" fill="none" stroke="#ccc" />
       </svg>
     `;
