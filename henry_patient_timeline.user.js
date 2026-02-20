@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry Patient Timeline
 // @namespace    https://github.com/shin-926/Henry
-// @version      2.145.12
+// @version      2.145.13
 // @description  入院患者の各種記録・オーダーをガントチャート風タイムラインで表示
 // @author       sk powered by Claude
 // @match        https://henry-app.jp/*
@@ -3285,7 +3285,6 @@
       const cx = cu.xScale(d.timestamp);
       const rx = cx - dayWidth / 2;
       fastingOverlays += `<rect x="${rx}" y="${top}" width="${dayWidth}" height="${chartHeight}" fill="url(#fastingStripe)" />`;
-      fastingOverlays += `<text x="${cx}" y="${center + 4}" text-anchor="middle" font-size="11" font-weight="bold" fill="#e57373">絶食</text>`;
     });
 
     // 棒グラフ描画
@@ -3325,13 +3324,16 @@
     });
 
     // 凡例
-    const legendX = cu.chartWidth - 80;
+    const hasFasting = mealsData.some(d => d.fasting);
+    const legendX = cu.chartWidth - (hasFasting ? 120 : 80);
     const legend = `
       <g transform="translate(${legendX}, ${top - 10})">
         <rect x="0" y="-4" width="8" height="8" fill="#FF9800" opacity="0.85" />
         <text x="11" y="3" font-size="8" fill="#666">主食</text>
         <rect x="38" y="-4" width="8" height="8" fill="#2196F3" opacity="0.85" />
         <text x="49" y="3" font-size="8" fill="#666">副食</text>
+        ${hasFasting ? `<rect x="76" y="-4" width="8" height="8" fill="url(#fastingStripe)" stroke="#e57373" stroke-width="0.5" />
+        <text x="87" y="3" font-size="8" fill="#666">絶食</text>` : ''}
       </g>
     `;
 
