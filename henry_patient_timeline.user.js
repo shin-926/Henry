@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry Patient Timeline
 // @namespace    https://github.com/shin-926/Henry
-// @version      2.145.13
+// @version      2.145.14
 // @description  入院患者の各種記録・オーダーをガントチャート風タイムラインで表示
 // @author       sk powered by Claude
 // @match        https://henry-app.jp/*
@@ -3263,6 +3263,7 @@
 
   /** 食事摂取量チャート（コンパクト版・積み上げ棒グラフ） */
   function renderDashboardMealIntake(mealsData, cu, days, dietTypes) {
+    if (!mealsData || mealsData.length === 0) return '';
     const chartHeight = 120;
     const halfHeight = chartHeight / 2;
     const margin = { top: 22, bottom: 16 };
