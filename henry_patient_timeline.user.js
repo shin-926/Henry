@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry Patient Timeline
 // @namespace    https://github.com/shin-926/Henry
-// @version      2.145.11
+// @version      2.145.12
 // @description  入院患者の各種記録・オーダーをガントチャート風タイムラインで表示
 // @author       sk powered by Claude
 // @match        https://henry-app.jp/*
@@ -3278,6 +3278,16 @@
     const dayWidth = refX1 - refX0;
     const barWidth = Math.max(2, (dayWidth / 3) * 0.6);
 
+    // 絶食日の背景 + ラベル
+    let fastingOverlays = '';
+    mealsData.forEach(d => {
+      if (!d.fasting) return;
+      const cx = cu.xScale(d.timestamp);
+      const rx = cx - dayWidth / 2;
+      fastingOverlays += `<rect x="${rx}" y="${top}" width="${dayWidth}" height="${chartHeight}" fill="url(#fastingStripe)" />`;
+      fastingOverlays += `<text x="${cx}" y="${center + 4}" text-anchor="middle" font-size="11" font-weight="bold" fill="#e57373">絶食</text>`;
+    });
+
     // 棒グラフ描画
     let bars = '';
     mealsData.forEach(d => {
@@ -3327,11 +3337,17 @@
 
     return `
       <svg width="100%" viewBox="0 0 ${cu.chartWidth + 80} ${totalHeight}" preserveAspectRatio="xMidYMid meet">
+        <defs>
+          <pattern id="fastingStripe" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+            <line x1="0" y1="0" x2="0" y2="6" stroke="#e57373" stroke-width="1.5" stroke-opacity="0.3" />
+          </pattern>
+        </defs>
         <text x="40" y="${top - 6}" font-size="11" font-weight="bold" fill="#333">食事摂取量${dietTypes?.size ? ' — ' + [...dietTypes].join(', ') : ''} (割)</text>
         ${legend}
         <rect x="40" y="${top}" width="${cu.chartWidth}" height="${chartHeight}" fill="#fafafa" />
         ${yTicksSvg}
         ${cu.generateDayLinesAndLabels(top, chartHeight, true)}
+        ${fastingOverlays}
         ${bars}
         <rect x="40" y="${top}" width="${cu.chartWidth}" height="${chartHeight}" fill="none" stroke="#ccc" />
       </svg>
@@ -3445,9 +3461,13 @@
             breakfast: { main: null, side: null },
             lunch: { main: null, side: null },
             dinner: { main: null, side: null },
+            fasting: false,
           });
         }
         const meal = mealsMap.get(itemKey);
+        if (dietMatch && dietMatch[1] === '絶食') {
+          meal.fasting = true;
+        }
         if (bMatch) { meal.breakfast.main = parseVal(bMatch[1]); meal.breakfast.side = parseVal(bMatch[2]); }
         if (lMatch) { meal.lunch.main = parseVal(lMatch[1]); meal.lunch.side = parseVal(lMatch[2]); }
         if (dMatch) { meal.dinner.main = parseVal(dMatch[1]); meal.dinner.side = parseVal(dMatch[2]); }
