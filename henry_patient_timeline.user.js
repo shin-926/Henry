@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry Patient Timeline
 // @namespace    https://github.com/shin-926/Henry
-// @version      2.145.6
+// @version      2.145.7
 // @description  入院患者の各種記録・オーダーをガントチャート風タイムラインで表示
 // @author       sk powered by Claude
 // @match        https://henry-app.jp/*
@@ -3035,7 +3035,7 @@
             : margin.left + chartWidth;
           const labelX = (x + nextX) / 2;
           const label = showLabels
-            ? `<text x="${labelX}" y="${top + height + 12}" text-anchor="middle" font-size="10" fill="#666">${d.month}/${d.day}</text>`
+            ? `<text class="chart-date-label" data-date-key="${d.key}" x="${labelX}" y="${top + height + 12}" text-anchor="middle" font-size="10" fill="#666" style="cursor: pointer">${d.month}/${d.day}</text>`
             : '';
           return `
             <line x1="${x}" y1="${top}" x2="${x}" y2="${top + height}" stroke="#ddd" stroke-width="1" />
@@ -3525,7 +3525,7 @@
         const labelX = (x + nextX) / 2;
         return `
           <line x1="${x}" y1="${top}" x2="${x}" y2="${top + height}" stroke="#ddd" stroke-width="1" />
-          <text x="${labelX}" y="${top + height + 12}" text-anchor="middle" font-size="10" fill="#666">${d.month}/${d.day}</text>
+          <text class="chart-date-label" data-date-key="${d.key}" x="${labelX}" y="${top + height + 12}" text-anchor="middle" font-size="10" fill="#666" style="cursor: pointer">${d.month}/${d.day}</text>
         `;
       }).join('');
     };
@@ -3680,7 +3680,7 @@
         const labelX = (x + nextX) / 2;
         return `
           <line x1="${x}" y1="${top}" x2="${x}" y2="${top + height}" stroke="#ddd" stroke-width="1" />
-          <text x="${labelX}" y="${top + height + 12}" text-anchor="middle" font-size="10" fill="#666">${d.month}/${d.day}</text>
+          <text class="chart-date-label" data-date-key="${d.key}" x="${labelX}" y="${top + height + 12}" text-anchor="middle" font-size="10" fill="#666" style="cursor: pointer">${d.month}/${d.day}</text>
         `;
       }).join('');
     };
@@ -3869,7 +3869,7 @@
         const labelX = (x + nextX) / 2;
         return `
           <line x1="${x}" y1="${top}" x2="${x}" y2="${top + height}" stroke="#ddd" stroke-width="1" />
-          <text x="${labelX}" y="${top + height + 12}" text-anchor="middle" font-size="10" fill="#666">${d.month}/${d.day}</text>
+          <text class="chart-date-label" data-date-key="${d.key}" x="${labelX}" y="${top + height + 12}" text-anchor="middle" font-size="10" fill="#666" style="cursor: pointer">${d.month}/${d.day}</text>
         `;
       }).join('');
     };
@@ -6146,6 +6146,35 @@
       }
     }
 
+    // チャートの日付ラベルクリック → タイムラインの該当日付にジャンプ
+    function navigateTimelineToDate(dateKeyStr) {
+      const dates = state.timeline.dates;
+      if (!dates || dates.length === 0) return;
+
+      // 完全一致を探す
+      let targetKey = dates.find(d => d === dateKeyStr);
+
+      // 一致しなければ最も近い日付を探す
+      if (!targetKey) {
+        const targetTime = new Date(dateKeyStr + 'T00:00:00').getTime();
+        let minDiff = Infinity;
+        for (const d of dates) {
+          const diff = Math.abs(new Date(d + 'T00:00:00').getTime() - targetTime);
+          if (diff < minDiff) {
+            minDiff = diff;
+            targetKey = d;
+          }
+        }
+      }
+
+      if (!targetKey) return;
+
+      state.timeline.selectedDate = targetKey;
+      renderDateListVisible();
+      renderTimelineContent();
+      scrollToSelectedDate();
+    }
+
     // タイムライン描画
     // fullRender=true: 日付リストも再描画（検索、カテゴリ変更、患者切替時）
     // fullRender=false: 日付選択の更新とコンテンツのみ（日付クリック時）
@@ -6511,7 +6540,7 @@
         // コンテンツ更新（ボタングループ + SVG）
         const bodyEl = titleEl?.nextElementSibling;
         if (bodyEl) {
-          bodyEl.innerHTML = buttonGroupHtml + svgHtml;
+          bodyEl.innerHTML = buttonGroupHtml + svgHtml; // eslint-disable-line -- trusted SVG from internal renderer
           // ボタンにイベントを再設定
           bodyEl.querySelectorAll('.vital-days-btn').forEach(btn => {
             btn.onclick = () => {
@@ -6519,13 +6548,18 @@
               showVitalGraph(endDateStr, newDays);
             };
           });
+          // 日付ラベルクリック → タイムラインジャンプ
+          bodyEl.addEventListener('click', (e) => {
+            const label = e.target.closest('.chart-date-label');
+            if (label) navigateTimelineToDate(label.dataset.dateKey);
+          });
         }
         return;
       }
 
       // 新規モーダル作成
       const svgContainer = document.createElement('div');
-      svgContainer.innerHTML = buttonGroupHtml + svgHtml;
+      svgContainer.innerHTML = buttonGroupHtml + svgHtml; // eslint-disable-line -- trusted SVG from internal renderer
 
       // ボタンにクリックイベントを設定
       svgContainer.querySelectorAll('.vital-days-btn').forEach(btn => {
@@ -6533,6 +6567,12 @@
           const newDays = parseInt(btn.dataset.days, 10);
           showVitalGraph(endDateStr, newDays);
         };
+      });
+
+      // 日付ラベルクリック → タイムラインジャンプ
+      svgContainer.addEventListener('click', (e) => {
+        const label = e.target.closest('.chart-date-label');
+        if (label) navigateTimelineToDate(label.dataset.dateKey);
       });
 
       const { close } = window.HenryCore.ui.showModal({
@@ -6748,13 +6788,18 @@
               showBloodSugarGraph(endDateStr, newDays);
             };
           });
+          // 日付ラベルクリック → タイムラインジャンプ
+          bodyEl.addEventListener('click', (e) => {
+            const label = e.target.closest('.chart-date-label');
+            if (label) navigateTimelineToDate(label.dataset.dateKey);
+          });
         }
         return;
       }
 
       // 新規モーダル作成
       const svgContainer = document.createElement('div');
-      svgContainer.innerHTML = buttonGroupHtml + svgHtml;
+      svgContainer.innerHTML = buttonGroupHtml + svgHtml; // eslint-disable-line -- trusted SVG from internal renderer
       setupBloodSugarTooltip(svgContainer);
 
       // ボタンにクリックイベントを設定
@@ -6763,6 +6808,12 @@
           const newDays = parseInt(btn.dataset.days, 10);
           showBloodSugarGraph(endDateStr, newDays);
         };
+      });
+
+      // 日付ラベルクリック → タイムラインジャンプ
+      svgContainer.addEventListener('click', (e) => {
+        const label = e.target.closest('.chart-date-label');
+        if (label) navigateTimelineToDate(label.dataset.dateKey);
       });
 
       const { close } = window.HenryCore.ui.showModal({
@@ -6973,13 +7024,18 @@
               showUrineGraph(endDateStr, newDays);
             };
           });
+          // 日付ラベルクリック → タイムラインジャンプ
+          bodyEl.addEventListener('click', (e) => {
+            const label = e.target.closest('.chart-date-label');
+            if (label) navigateTimelineToDate(label.dataset.dateKey);
+          });
         }
         return;
       }
 
       // 新規モーダル作成
       const svgContainer = document.createElement('div');
-      svgContainer.innerHTML = buttonGroupHtml + svgHtml;
+      svgContainer.innerHTML = buttonGroupHtml + svgHtml; // eslint-disable-line -- trusted SVG from internal renderer
 
       // ボタンにクリックイベントを設定
       svgContainer.querySelectorAll('.urine-days-btn').forEach(btn => {
@@ -6987,6 +7043,12 @@
           const newDays = parseInt(btn.dataset.days, 10);
           showUrineGraph(endDateStr, newDays);
         };
+      });
+
+      // 日付ラベルクリック → タイムラインジャンプ
+      svgContainer.addEventListener('click', (e) => {
+        const label = e.target.closest('.chart-date-label');
+        if (label) navigateTimelineToDate(label.dataset.dateKey);
       });
 
       const { close } = window.HenryCore.ui.showModal({
@@ -7169,7 +7231,9 @@
       contentDiv.querySelectorAll('.dashboard-chart-row').forEach(row => {
         const chartType = row.dataset.chart;
         if (chartType === 'meal') return;
-        row.onclick = () => {
+        row.onclick = (e) => {
+          // 日付ラベルクリックはタイムラインジャンプに使うので、行クリックとして処理しない
+          if (e.target.closest('.chart-date-label')) return;
           if (chartType === 'vital' || chartType === 'spo2') {
             showVitalGraph(clickEndDate, days);
           } else if (chartType === 'bloodSugar') {
@@ -7178,6 +7242,12 @@
             showUrineGraph(clickEndDate, days);
           }
         };
+      });
+
+      // 日付ラベルクリック → タイムラインジャンプ
+      contentDiv.addEventListener('click', (e) => {
+        const label = e.target.closest('.chart-date-label');
+        if (label) navigateTimelineToDate(label.dataset.dateKey);
       });
 
       // モーダルが既に開いている場合はコンテンツのみ更新
