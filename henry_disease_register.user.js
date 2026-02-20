@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry Disease Register
 // @namespace    https://henry-app.jp/
-// @version      3.33.2
+// @version      3.34.0
 // @description  高速病名検索・登録
 // @author       sk powered by Claude & Gemini
 // @match        https://henry-app.jp/*
@@ -1784,6 +1784,34 @@
       background: #e3f2fd;
       border-left: 3px solid #1976d2;
     }
+    /* 中止病名トグル */
+    .dr-cancelled-toggle {
+      padding: 8px 10px;
+      font-size: 12px;
+      color: #888;
+      cursor: pointer;
+      text-align: center;
+      border-top: 1px solid #eee;
+    }
+    .dr-cancelled-toggle:hover {
+      color: #555;
+      background: #f5f5f5;
+    }
+    /* 中止病名コンテナ */
+    .dr-cancelled-container {
+      display: none;
+    }
+    .dr-cancelled-container.open {
+      display: block;
+    }
+    /* 中止病名アイテム（グレー表示） */
+    .dr-registered-item.cancelled {
+      color: #999;
+      opacity: 0.7;
+    }
+    .dr-registered-item.cancelled .dr-registered-name {
+      color: #999;
+    }
   `;
 
   // ============================================
@@ -2089,35 +2117,75 @@
         }).filter(Boolean)
       );
 
-      if (diseases.length === 0) {
+      // 有効な病名と中止病名に分離
+      const activeDiseases = diseases.filter(d => d.outcome !== 'CANCELLED');
+      const cancelledDiseases = diseases.filter(d => d.outcome === 'CANCELLED');
+
+      // 病名アイテムのHTML生成（データはAPI由来で信頼済み）
+      const renderItem = (d, index, extraClass = '') => {
+        let baseName;
+        const isCustom = d.masterDisease?.code === '0000999' && d.customDiseaseName?.value;
+        if (isCustom) {
+          baseName = d.customDiseaseName.value;
+        } else {
+          baseName = d.masterDisease?.name || '（名称なし）';
+        }
+        let name = this.applyModifiers(baseName, d.masterModifiers || []);
+        if (isCustom) {
+          name = '(未コード)' + name;
+        }
+        const date = this.formatDate(d.startDate);
+        const outcomeLabel = this.getOutcomeLabel(d.outcome);
+        return `<div class="dr-registered-item${extraClass}" data-index="${index}">
+          <div class="dr-registered-name">${name}</div>
+          <div class="dr-registered-meta">
+            ${date ? `<span class="dr-registered-date">${date}</span>` : ''}
+            ${outcomeLabel ? `<span class="dr-registered-outcome">${outcomeLabel}</span>` : ''}
+            ${d.isDraft ? '<span class="dr-draft-badge">未承認</span>' : ''}
+          </div>
+        </div>`;
+      };
+
+      if (activeDiseases.length === 0 && cancelledDiseases.length === 0) {
         container.innerHTML = '<div class="dr-registered-empty">現在有効な病名はありません</div>';
       } else {
-        container.innerHTML = diseases.map((d, index) => {
-          // 未コード化病名（code: 0000999）の場合は customDiseaseName を優先
-          let baseName;
-          const isCustom = d.masterDisease?.code === '0000999' && d.customDiseaseName?.value;
-          if (isCustom) {
-            baseName = d.customDiseaseName.value;
-          } else {
-            baseName = d.masterDisease?.name || '（名称なし）';
-          }
-          // 修飾語を適用
-          let name = this.applyModifiers(baseName, d.masterModifiers || []);
-          // 未コード化病名には「(未コード)」プレフィックスを追加
-          if (isCustom) {
-            name = '(未コード)' + name;
-          }
-          const date = this.formatDate(d.startDate);
-          const outcomeLabel = this.getOutcomeLabel(d.outcome);
-          return `<div class="dr-registered-item" data-index="${index}">
-            <div class="dr-registered-name">${name}</div>
-            <div class="dr-registered-meta">
-              ${date ? `<span class="dr-registered-date">${date}</span>` : ''}
-              ${outcomeLabel ? `<span class="dr-registered-outcome">${outcomeLabel}</span>` : ''}
-              ${d.isDraft ? '<span class="dr-draft-badge">未承認</span>' : ''}
-            </div>
-          </div>`;
-        }).join('');
+        let html = '';
+
+        // 有効な病名を描画
+        if (activeDiseases.length === 0) {
+          html += '<div class="dr-registered-empty">現在有効な病名はありません</div>';
+        } else {
+          html += activeDiseases.map(d => {
+            const index = diseases.indexOf(d);
+            return renderItem(d, index);
+          }).join('');
+        }
+
+        // 中止病名トグル＋コンテナ
+        if (cancelledDiseases.length > 0) {
+          html += `<div class="dr-cancelled-toggle" id="dr-cancelled-toggle">中止病名を表示（${cancelledDiseases.length}件）</div>`;
+          html += '<div class="dr-cancelled-container" id="dr-cancelled-container">';
+          html += cancelledDiseases.map(d => {
+            const index = diseases.indexOf(d);
+            return renderItem(d, index, ' cancelled');
+          }).join('');
+          html += '</div>';
+        }
+
+        // データはHenry GraphQL API由来で信頼済み
+        container.innerHTML = html;
+
+        // 中止病名トグルのクリックイベント
+        const toggle = container.querySelector('#dr-cancelled-toggle');
+        const cancelledContainer = container.querySelector('#dr-cancelled-container');
+        if (toggle && cancelledContainer) {
+          toggle.onclick = () => {
+            const isOpen = cancelledContainer.classList.toggle('open');
+            toggle.textContent = isOpen
+              ? `中止病名を非表示（${cancelledDiseases.length}件）`
+              : `中止病名を表示（${cancelledDiseases.length}件）`;
+          };
+        }
 
         // クリックイベントを追加
         container.querySelectorAll('.dr-registered-item').forEach(item => {
