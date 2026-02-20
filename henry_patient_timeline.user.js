@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry Patient Timeline
 // @namespace    https://github.com/shin-926/Henry
-// @version      2.145.10
+// @version      2.145.11
 // @description  入院患者の各種記録・オーダーをガントチャート風タイムラインで表示
 // @author       sk powered by Claude
 // @match        https://henry-app.jp/*
@@ -3263,48 +3263,65 @@
 
   /** 食事摂取量チャート（コンパクト版・積み上げ棒グラフ） */
   function renderDashboardMealIntake(mealsData, cu, days, dietTypes) {
-    const chartHeight = 100;
+    const chartHeight = 120;
+    const halfHeight = chartHeight / 2;
     const margin = { top: 22, bottom: 16 };
     const top = margin.top;
+    const center = top + halfHeight;
     const totalHeight = margin.top + chartHeight + margin.bottom;
-    // Y軸: 0〜10割
-    const yMin = 0, yMax = 10;
-    const yScale = cu.createYScale(yMin, yMax, top, chartHeight);
 
-    // 各日のデータを朝・昼・夕の3点に展開
     const ONE_DAY = 24 * 60 * 60 * 1000;
-    const mainPoints = [];
-    const sidePoints = [];
 
+    // 棒幅の計算: 1日分の幅を3等分し、その60%を棒幅とする
+    const refX0 = cu.xScale(mealsData[0].timestamp);
+    const refX1 = cu.xScale(mealsData[0].timestamp + ONE_DAY);
+    const dayWidth = refX1 - refX0;
+    const barWidth = Math.max(2, (dayWidth / 3) * 0.6);
+
+    // 棒グラフ描画
+    let bars = '';
     mealsData.forEach(d => {
-      const dayStart = d.timestamp;
       const offsets = [-ONE_DAY / 3, 0, ONE_DAY / 3];
       const meals = [d.breakfast, d.lunch, d.dinner];
-
       meals.forEach((meal, i) => {
-        const ts = dayStart + offsets[i];
-        mainPoints.push({ timestamp: ts, value: meal?.main ?? null });
-        sidePoints.push({ timestamp: ts, value: meal?.side ?? null });
+        const x = cu.xScale(d.timestamp + offsets[i]) - barWidth / 2;
+        // 主食: 上方向
+        if (meal?.main != null) {
+          const h = (meal.main / 10) * halfHeight;
+          bars += `<rect x="${x}" y="${center - h}" width="${barWidth}" height="${h}" fill="#FF9800" opacity="0.85" />`;
+        }
+        // 副食: 下方向
+        if (meal?.side != null) {
+          const h = (meal.side / 10) * halfHeight;
+          bars += `<rect x="${x}" y="${center}" width="${barWidth}" height="${h}" fill="#2196F3" opacity="0.85" />`;
+        }
       });
     });
 
-    // 折れ線パス
-    const mainPath = cu.generatePath(mainPoints, d => d.value, yScale);
-    const sidePath = cu.generatePath(sidePoints, d => d.value, yScale);
-
-    // ドット（30日表示ではドットを非表示）
-    const showDots = days !== 30;
-    const mainDots = showDots ? cu.generateDots(mainPoints, d => d.value, yScale, '#FF9800', 2) : '';
-    const sideDots = showDots ? cu.generateDots(sidePoints, d => d.value, yScale, '#2196F3', 2) : '';
+    // Y軸目盛り（ミラー型: 中央0、上下に5・10）
+    const leftX = 40;
+    const ticks = [
+      { value: 10, y: top },
+      { value: 5, y: top + halfHeight / 2 },
+      { value: 0, y: center },
+      { value: 5, y: center + halfHeight / 2 },
+      { value: 10, y: top + chartHeight },
+    ];
+    let yTicksSvg = '';
+    ticks.forEach(t => {
+      const isCenter = t.value === 0;
+      yTicksSvg += `<line x1="${leftX}" y1="${t.y}" x2="${leftX + cu.chartWidth}" y2="${t.y}" stroke="${isCenter ? '#999' : '#e0e0e0'}" stroke-width="${isCenter ? 1.5 : 0.5}" ${!isCenter && t.value === 5 ? 'stroke-dasharray="3,3"' : ''} />`;
+      yTicksSvg += `<text x="${leftX - 4}" y="${t.y + 3}" text-anchor="end" font-size="9" fill="#999">${t.value}</text>`;
+    });
 
     // 凡例
-    const legendX = cu.chartWidth - 100;
+    const legendX = cu.chartWidth - 80;
     const legend = `
       <g transform="translate(${legendX}, ${top - 10})">
-        <line x1="0" y1="0" x2="14" y2="0" stroke="#FF9800" stroke-width="1.5" />
-        <text x="17" y="3" font-size="8" fill="#666">主食</text>
-        <line x1="46" y1="0" x2="60" y2="0" stroke="#2196F3" stroke-width="1.5" stroke-dasharray="3,2" />
-        <text x="63" y="3" font-size="8" fill="#666">副食</text>
+        <rect x="0" y="-4" width="8" height="8" fill="#FF9800" opacity="0.85" />
+        <text x="11" y="3" font-size="8" fill="#666">主食</text>
+        <rect x="38" y="-4" width="8" height="8" fill="#2196F3" opacity="0.85" />
+        <text x="49" y="3" font-size="8" fill="#666">副食</text>
       </g>
     `;
 
@@ -3313,12 +3330,9 @@
         <text x="40" y="${top - 6}" font-size="11" font-weight="bold" fill="#333">食事摂取量${dietTypes?.size ? ' — ' + [...dietTypes].join(', ') : ''} (割)</text>
         ${legend}
         <rect x="40" y="${top}" width="${cu.chartWidth}" height="${chartHeight}" fill="#fafafa" />
-        ${cu.generateYTicks(yMin, yMax, 2, top, chartHeight, yScale, '#666')}
+        ${yTicksSvg}
         ${cu.generateDayLinesAndLabels(top, chartHeight, true)}
-        ${mainPath ? `<path d="${mainPath}" fill="none" stroke="#FF9800" stroke-width="1.5" />` : ''}
-        ${sidePath ? `<path d="${sidePath}" fill="none" stroke="#2196F3" stroke-width="1.5" stroke-dasharray="4,2" />` : ''}
-        ${mainDots}
-        ${sideDots}
+        ${bars}
         <rect x="40" y="${top}" width="${cu.chartWidth}" height="${chartHeight}" fill="none" stroke="#ccc" />
       </svg>
     `;
