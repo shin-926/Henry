@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry Patient Timeline
 // @namespace    https://github.com/shin-926/Henry
-// @version      2.145.0
+// @version      2.145.1
 // @description  入院患者の各種記録・オーダーをガントチャート風タイムラインで表示
 // @author       sk powered by Claude
 // @match        https://henry-app.jp/*
@@ -3083,7 +3083,7 @@
 
     const path = cu.generatePath(data, d => d.T, yScale);
     const showDots = days !== 30;
-    const dots = showDots ? cu.generateDots(data, d => d.T, yScale, '#FF5722') : '';
+    const dots = showDots ? cu.generateDots(data, d => d.T, yScale, '#FF5722', 2) : '';
     const normalBand = cu.generateNormalBand(36.0, 37.0, yScale, 'rgba(255, 87, 34, 0.15)');
 
     return `
@@ -3100,8 +3100,8 @@
     `;
   }
 
-  /** 血圧+脈拍チャート（コンパクト版） */
-  function renderDashboardBPPulse(data, cu, days) {
+  /** 血圧チャート（コンパクト版） */
+  function renderDashboardBP(data, cu, days) {
     const chartHeight = 100;
     const margin = { top: 22, bottom: 4 };
     const top = margin.top;
@@ -3109,39 +3109,34 @@
 
     const bpUppers = data.map(d => d.BPupper).filter(v => v !== null);
     const bpLowers = data.map(d => d.BPlower).filter(v => v !== null);
-    const pulses = data.map(d => d.P).filter(v => v !== null);
-    const allValues = [...bpUppers, ...bpLowers, ...pulses];
+    const allValues = [...bpUppers, ...bpLowers];
     const yMin = allValues.length > 0 ? Math.floor(Math.min(...allValues) / 10) * 10 - 10 : 40;
     const yMax = allValues.length > 0 ? Math.ceil(Math.max(...allValues) / 10) * 10 + 10 : 180;
     const yScale = cu.createYScale(yMin, yMax, top, chartHeight);
 
     const bpUpperPath = cu.generatePath(data, d => d.BPupper, yScale);
     const bpLowerPath = cu.generatePath(data, d => d.BPlower, yScale);
-    const pulsePath = cu.generatePath(data, d => d.P, yScale);
     const showDots = days !== 30;
-    const bpUpperDots = showDots ? cu.generateDots(data, d => d.BPupper, yScale, '#4CAF50', 2.5) : '';
-    const bpLowerDots = showDots ? cu.generateDots(data, d => d.BPlower, yScale, '#9C27B0', 2.5) : '';
-    const pulseDots = showDots ? cu.generateDots(data, d => d.P, yScale, '#2196F3', 2) : '';
+    const bpUpperDots = showDots ? cu.generateDots(data, d => d.BPupper, yScale, '#4CAF50', 2) : '';
+    const bpLowerDots = showDots ? cu.generateDots(data, d => d.BPlower, yScale, '#9C27B0', 2) : '';
 
     const bpUpperBand = cu.generateNormalBand(90, 140, yScale, 'rgba(76, 175, 80, 0.10)');
     const bpLowerBand = cu.generateNormalBand(60, 90, yScale, 'rgba(156, 39, 176, 0.10)');
 
     // 凡例
-    const legendX = cu.chartWidth - 100;
+    const legendX = cu.chartWidth - 60;
     const legend = `
       <g transform="translate(${legendX}, ${top - 10})">
         <line x1="0" y1="0" x2="12" y2="0" stroke="#4CAF50" stroke-width="2" />
         <text x="14" y="3" font-size="8" fill="#666">上</text>
         <line x1="28" y1="0" x2="40" y2="0" stroke="#9C27B0" stroke-width="1.5" />
         <text x="42" y="3" font-size="8" fill="#666">下</text>
-        <line x1="56" y1="0" x2="68" y2="0" stroke="#2196F3" stroke-width="1.5" stroke-dasharray="3,2" />
-        <text x="70" y="3" font-size="8" fill="#666">脈</text>
       </g>
     `;
 
     return `
       <svg width="100%" viewBox="0 0 ${cu.chartWidth + 80} ${totalHeight}" preserveAspectRatio="xMidYMid meet">
-        <text x="40" y="${top - 6}" font-size="11" font-weight="bold" fill="#333">血圧+脈拍</text>
+        <text x="40" y="${top - 6}" font-size="11" font-weight="bold" fill="#333">血圧 (mmHg)</text>
         ${legend}
         <rect x="40" y="${top}" width="${cu.chartWidth}" height="${chartHeight}" fill="#fafafa" />
         ${bpUpperBand}
@@ -3150,9 +3145,38 @@
         ${cu.generateDayLinesAndLabels(top, chartHeight, false)}
         <path d="${bpUpperPath}" fill="none" stroke="#4CAF50" stroke-width="1.5" />
         <path d="${bpLowerPath}" fill="none" stroke="#9C27B0" stroke-width="1.5" />
-        <path d="${pulsePath}" fill="none" stroke="#2196F3" stroke-width="1.5" stroke-dasharray="3,2" />
         ${bpUpperDots}
         ${bpLowerDots}
+        <rect x="40" y="${top}" width="${cu.chartWidth}" height="${chartHeight}" fill="none" stroke="#ccc" />
+      </svg>
+    `;
+  }
+
+  /** 脈拍チャート（コンパクト版） */
+  function renderDashboardPulse(data, cu, days) {
+    const chartHeight = 80;
+    const margin = { top: 22, bottom: 4 };
+    const top = margin.top;
+    const totalHeight = margin.top + chartHeight + margin.bottom;
+
+    const pulses = data.map(d => d.P).filter(v => v !== null);
+    const yMin = pulses.length > 0 ? Math.floor(Math.min(...pulses) / 10) * 10 - 10 : 40;
+    const yMax = pulses.length > 0 ? Math.ceil(Math.max(...pulses) / 10) * 10 + 10 : 120;
+    const yScale = cu.createYScale(yMin, yMax, top, chartHeight);
+
+    const pulsePath = cu.generatePath(data, d => d.P, yScale);
+    const showDots = days !== 30;
+    const pulseDots = showDots ? cu.generateDots(data, d => d.P, yScale, '#2196F3', 2) : '';
+    const normalBand = cu.generateNormalBand(60, 100, yScale, 'rgba(33, 150, 243, 0.10)');
+
+    return `
+      <svg width="100%" viewBox="0 0 ${cu.chartWidth + 80} ${totalHeight}" preserveAspectRatio="xMidYMid meet">
+        <text x="40" y="${top - 6}" font-size="11" font-weight="bold" fill="#333">脈拍 (bpm)</text>
+        <rect x="40" y="${top}" width="${cu.chartWidth}" height="${chartHeight}" fill="#fafafa" />
+        ${normalBand}
+        ${cu.generateYTicks(yMin, yMax, 20, top, chartHeight, yScale, '#666')}
+        ${cu.generateDayLinesAndLabels(top, chartHeight, false)}
+        <path d="${pulsePath}" fill="none" stroke="#2196F3" stroke-width="1.5" />
         ${pulseDots}
         <rect x="40" y="${top}" width="${cu.chartWidth}" height="${chartHeight}" fill="none" stroke="#ccc" />
       </svg>
@@ -3162,7 +3186,7 @@
   /** SpO2チャート（コンパクト版） */
   function renderDashboardSpO2(data, cu, days) {
     const chartHeight = 80;
-    const margin = { top: 22, bottom: 4 };
+    const margin = { top: 22, bottom: 16 };
     const top = margin.top;
     const totalHeight = margin.top + chartHeight + margin.bottom;
     const yMin = 88, yMax = 100;
@@ -3170,7 +3194,7 @@
 
     const path = cu.generatePath(data, d => d.spo2, yScale);
     const showDots = days !== 30;
-    const dots = showDots ? cu.generateDots(data, d => d.spo2, yScale, '#00897B') : '';
+    const dots = showDots ? cu.generateDots(data, d => d.spo2, yScale, '#00897B', 2) : '';
     const normalBand = cu.generateNormalBand(95, 100, yScale, 'rgba(0, 137, 123, 0.12)');
 
     return `
@@ -3200,9 +3224,9 @@
     const noonPath = cu.generatePath(data, d => d.noon, yScale);
     const eveningPath = cu.generatePath(data, d => d.evening, yScale);
     const showDots = days !== 30;
-    const morningDots = showDots ? cu.generateDots(data, d => d.morning, yScale, '#FF9800', 2.5) : '';
-    const noonDots = showDots ? cu.generateDots(data, d => d.noon, yScale, '#4CAF50', 2.5) : '';
-    const eveningDots = showDots ? cu.generateDots(data, d => d.evening, yScale, '#2196F3', 2.5) : '';
+    const morningDots = showDots ? cu.generateDots(data, d => d.morning, yScale, '#FF9800', 2) : '';
+    const noonDots = showDots ? cu.generateDots(data, d => d.noon, yScale, '#4CAF50', 2) : '';
+    const eveningDots = showDots ? cu.generateDots(data, d => d.evening, yScale, '#2196F3', 2) : '';
     const normalBand = cu.generateNormalBand(70, 130, yScale, 'rgba(255, 152, 0, 0.12)');
 
     // 凡例
@@ -3313,7 +3337,7 @@
   /** 尿量チャート（コンパクト版） */
   function renderDashboardUrine(data, cu, days) {
     const chartHeight = 100;
-    const margin = { top: 22, bottom: 4 };
+    const margin = { top: 22, bottom: 16 };
     const top = margin.top;
     const totalHeight = margin.top + chartHeight + margin.bottom;
     const yMin = 0, yMax = 3000;
@@ -3321,7 +3345,7 @@
 
     const path = cu.generatePath(data, d => d.totalUrine, yScale);
     const showDots = days !== 30;
-    const dots = showDots ? cu.generateDots(data, d => d.totalUrine, yScale, '#607D8B') : '';
+    const dots = showDots ? cu.generateDots(data, d => d.totalUrine, yScale, '#607D8B', 2) : '';
     const normalBand = cu.generateNormalBand(1000, 2000, yScale, 'rgba(96, 125, 139, 0.12)');
 
     return `
@@ -7029,9 +7053,10 @@
         dateKeys,
       });
 
-      // 6つのチャートを生成
+      // 7つのチャートを生成
       const tempChart = renderDashboardTemperature(data.vitals, cu, days);
-      const bpChart = renderDashboardBPPulse(data.vitals, cu, days);
+      const bpChart = renderDashboardBP(data.vitals, cu, days);
+      const pulseChart = renderDashboardPulse(data.vitals, cu, days);
       const spo2Chart = renderDashboardSpO2(data.vitals, cu, days);
       const bsChart = renderDashboardBloodSugar(data.bloodSugar, cu, days);
       const mealChart = renderDashboardMealIntake(data.meals, cu, days);
@@ -7091,9 +7116,11 @@
       // 左列のチャート
       const tempRow = createChartRow(tempChart, 'vital');
       const bpRow = createChartRow(bpChart, 'vital');
+      const pulseRow = createChartRow(pulseChart, 'vital');
       const spo2Row = createChartRow(spo2Chart, 'spo2');
       leftCol.appendChild(tempRow);
       leftCol.appendChild(bpRow);
+      leftCol.appendChild(pulseRow);
       leftCol.appendChild(spo2Row);
 
       // 右列のチャート
