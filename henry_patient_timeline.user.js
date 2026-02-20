@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry Patient Timeline
 // @namespace    https://github.com/shin-926/Henry
-// @version      2.145.7
+// @version      2.145.8
 // @description  入院患者の各種記録・オーダーをガントチャート風タイムラインで表示
 // @author       sk powered by Claude
 // @match        https://henry-app.jp/*
@@ -7193,12 +7193,7 @@
         row.dataset.chart = chartType;
         // SVGはスクリプト内部で生成した信頼済みコンテンツ
         row.innerHTML = svgHtml; // eslint-disable-line -- trusted SVG from internal renderer
-        row.style.cssText = 'border-radius: 4px; transition: background 0.15s;';
-        if (chartType !== 'meal') {
-          row.style.cursor = 'pointer';
-          row.onmouseenter = () => { row.style.background = '#f5f5f5'; };
-          row.onmouseleave = () => { row.style.background = 'transparent'; };
-        }
+        row.style.cssText = 'border-radius: 4px;';
         return row;
       };
 
@@ -7223,26 +7218,6 @@
       grid.appendChild(leftCol);
       grid.appendChild(rightCol);
       contentDiv.appendChild(grid);
-
-      // 基準日の取得（クリックハンドラ用）
-      const clickEndDate = endDateStr;
-
-      // チャート行クリック → 既存の個別グラフモーダルへ
-      contentDiv.querySelectorAll('.dashboard-chart-row').forEach(row => {
-        const chartType = row.dataset.chart;
-        if (chartType === 'meal') return;
-        row.onclick = (e) => {
-          // 日付ラベルクリックはタイムラインジャンプに使うので、行クリックとして処理しない
-          if (e.target.closest('.chart-date-label')) return;
-          if (chartType === 'vital' || chartType === 'spo2') {
-            showVitalGraph(clickEndDate, days);
-          } else if (chartType === 'bloodSugar') {
-            showBloodSugarGraph(clickEndDate, days);
-          } else if (chartType === 'urine') {
-            showUrineGraph(clickEndDate, days);
-          }
-        };
-      });
 
       // 日付ラベルクリック → タイムラインジャンプ
       contentDiv.addEventListener('click', (e) => {
