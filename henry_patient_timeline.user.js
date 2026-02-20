@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry Patient Timeline
 // @namespace    https://github.com/shin-926/Henry
-// @version      2.141.0
+// @version      2.141.1
 // @description  入院患者の各種記録・オーダーをガントチャート風タイムラインで表示
 // @author       sk powered by Claude
 // @match        https://henry-app.jp/*
@@ -7953,6 +7953,24 @@
 
         renderPatientList();
         renderDoctorLegend();
+
+        // Henryで患者を開いていれば、その患者のタイムラインに直接遷移
+        const currentPatientUuid = window.HenryCore.getPatientUuid();
+        if (currentPatientUuid) {
+          const match = state.patient.all.find(p => p.patient.uuid === currentPatientUuid);
+          if (match) {
+            switchToTimeline({
+              uuid: match.patient.uuid,
+              fullName: match.patient.fullName,
+              serialNumber: match.patient.serialNumber,
+              sexType: match.patient.detail?.sexType,
+              birthDate: match.patient.detail?.birthDate,
+              wardName: match._wardName || match.statusHospitalizationLocation?.ward?.name,
+              roomName: match._roomName || match.statusHospitalizationLocation?.room?.name,
+              hospitalizationDayCount: match.hospitalizationDayCount
+            });
+          }
+        }
       } catch (e) {
         console.error(`[${SCRIPT_NAME}] 患者一覧取得エラー:`, e);
         state.ui.isLoading = false;
