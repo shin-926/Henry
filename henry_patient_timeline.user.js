@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry Patient Timeline
 // @namespace    https://github.com/shin-926/Henry
-// @version      2.145.8
+// @version      2.145.9
 // @description  入院患者の各種記録・オーダーをガントチャート風タイムラインで表示
 // @author       sk powered by Claude
 // @match        https://henry-app.jp/*
@@ -5425,6 +5425,14 @@
         case 'ArrowRight': // 次の患者
           e.preventDefault();
           navigateToNextPatient();
+          break;
+        case ' ':  // ダッシュボードのトグル
+          e.preventDefault();
+          if (state.modals.vitalDashboard?.overlayEl?.parentNode) {
+            state.modals.vitalDashboard.close();
+          } else if (state.patient.selected) {
+            showVitalDashboard();
+          }
           break;
       }
     };
