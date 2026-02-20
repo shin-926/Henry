@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry Patient Timeline
 // @namespace    https://github.com/shin-926/Henry
-// @version      2.145.4
+// @version      2.145.5
 // @description  入院患者の各種記録・オーダーをガントチャート風タイムラインで表示
 // @author       sk powered by Claude
 // @match        https://henry-app.jp/*
@@ -7117,8 +7117,8 @@
       const bsRow = createChartRow(bsChart, 'bloodSugar');
       const mealRow = createChartRow(mealChart, 'meal');
       const urineRow = createChartRow(urineChart, 'urine');
-      rightCol.appendChild(bsRow);
       rightCol.appendChild(mealRow);
+      rightCol.appendChild(bsRow);
       rightCol.appendChild(urineRow);
 
       grid.appendChild(leftCol);
