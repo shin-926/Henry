@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry Patient Timeline
 // @namespace    https://github.com/shin-926/Henry
-// @version      2.145.1
+// @version      2.145.2
 // @description  入院患者の各種記録・オーダーをガントチャート風タイムラインで表示
 // @author       sk powered by Claude
 // @match        https://henry-app.jp/*
@@ -4914,7 +4914,7 @@
             <span id="patient-id-badge" title="クリックでコピー"></span>
             <span class="hosp-info" id="hosp-info"></span>
             <button class="header-action-btn" id="disease-register-btn" title="病名登録">病名</button>
-            <button class="header-action-btn" id="vital-dashboard-btn" title="バイタルダッシュボード">ダッシュボード</button>
+            <button class="header-action-btn" id="vital-dashboard-btn" title="ダッシュボード">ダッシュボード</button>
             <div id="header-search-container" style="display: none;"></div>
           </div>
         </div>
@@ -7012,10 +7012,10 @@
     }
 
     // =========================================================================
-    // バイタルダッシュボード（統合グラフ一覧）
+    // ダッシュボード（統合グラフ一覧）
     // =========================================================================
 
-    function showVitalDashboard(days = 14) {
+    function showVitalDashboard(days = 7) {
       // 基準日: タイムラインで選択中の日付、なければ最新日付
       const endDateStr = state.timeline.selectedDate
         || (state.timeline.dates.length > 0 ? state.timeline.dates[0] : dateKey(new Date()));
@@ -7164,7 +7164,7 @@
           titleEl.style.width = '100%';
           titleEl.textContent = '';
           const titleSpan = document.createElement('span');
-          titleSpan.textContent = `バイタルダッシュボード（${startLabel} - ${endLabel}）`;
+          titleSpan.textContent = `ダッシュボード（${startLabel} - ${endLabel}）`;
           const nameSpan = document.createElement('span');
           nameSpan.style.cssText = 'font-size: 14px; color: #666;';
           nameSpan.textContent = state.patient.selected?.fullName || '';
@@ -7181,7 +7181,7 @@
 
       // 新規モーダル作成
       const { close } = window.HenryCore.ui.showModal({
-        title: `バイタルダッシュボード（${startLabel} - ${endLabel}）`,
+        title: `ダッシュボード（${startLabel} - ${endLabel}）`,
         content: contentDiv,
         width: '90vw',
       });
@@ -7198,7 +7198,7 @@
           titleEl.style.width = '100%';
           titleEl.textContent = '';
           const titleSpan = document.createElement('span');
-          titleSpan.textContent = `バイタルダッシュボード（${startLabel} - ${endLabel}）`;
+          titleSpan.textContent = `ダッシュボード（${startLabel} - ${endLabel}）`;
           const nameSpan = document.createElement('span');
           nameSpan.style.cssText = 'font-size: 14px; color: #666;';
           nameSpan.textContent = state.patient.selected.fullName;
