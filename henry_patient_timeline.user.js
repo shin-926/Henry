@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry Patient Timeline
 // @namespace    https://github.com/shin-926/Henry
-// @version      2.145.5
+// @version      2.145.6
 // @description  入院患者の各種記録・オーダーをガントチャート風タイムラインで表示
 // @author       sk powered by Claude
 // @match        https://henry-app.jp/*
@@ -5718,6 +5718,43 @@
         }
       }
 
+      // ダッシュボードモーダルが開いていればローディング表示に切り替え
+      if (state.modals.vitalDashboard && state.modals.vitalDashboard.overlayEl && state.modals.vitalDashboard.overlayEl.parentNode) {
+        const titleEl = state.modals.vitalDashboard.overlayEl.querySelector('.henry-modal-title');
+        if (titleEl) {
+          titleEl.style.display = 'flex';
+          titleEl.style.justifyContent = 'space-between';
+          titleEl.style.alignItems = 'center';
+          titleEl.style.width = '100%';
+          titleEl.textContent = '';
+          const titleSpan = document.createElement('span');
+          titleSpan.textContent = 'ダッシュボード';
+          const nameSpan = document.createElement('span');
+          nameSpan.style.cssText = 'font-size: 14px; color: #666;';
+          nameSpan.textContent = patient.fullName;
+          titleEl.appendChild(titleSpan);
+          titleEl.appendChild(nameSpan);
+          const bodyEl = titleEl.nextElementSibling;
+          if (bodyEl) {
+            bodyEl.textContent = '';
+            const btnGroup = document.createElement('div');
+            btnGroup.style.cssText = 'display: flex; justify-content: center; gap: 8px; margin-bottom: 16px;';
+            [7, 14, 30].forEach(d => {
+              const btn = document.createElement('button');
+              btn.disabled = true;
+              btn.style.cssText = 'padding: 6px 16px; border: none; border-radius: 4px; background: #e0e0e0; color: #999; font-size: 13px;';
+              btn.textContent = `${d}日`;
+              btnGroup.appendChild(btn);
+            });
+            bodyEl.appendChild(btnGroup);
+            const loadingDiv = document.createElement('div');
+            loadingDiv.style.cssText = 'display: flex; justify-content: center; align-items: center; min-height: 580px; color: #666;';
+            loadingDiv.textContent = '読み込み中...';
+            bodyEl.appendChild(loadingDiv);
+          }
+        }
+      }
+
       await loadTimelineData(patient.uuid);
     }
 
@@ -8956,6 +8993,9 @@
         }
         if (state.modals.urine) {
           showUrineGraph(state.timeline.selectedDate, state.modals.urine.days);
+        }
+        if (state.modals.vitalDashboard) {
+          showVitalDashboard(state.modals.vitalDashboard.days);
         }
         // サイドパネルモーダルが開いていれば更新（患者切り替え時の連動）
         if (state.modals.bloodTest) {
