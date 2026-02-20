@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry Patient Timeline
 // @namespace    https://github.com/shin-926/Henry
-// @version      2.141.2
+// @version      2.142.0
 // @description  入院患者の各種記録・オーダーをガントチャート風タイムラインで表示
 // @author       sk powered by Claude
 // @match        https://henry-app.jp/*
@@ -1106,7 +1106,7 @@
             patientUuid: "${patientUuid}",
             baseDate: { year: ${today.getFullYear()}, month: ${today.getMonth() + 1}, day: ${today.getDate()} },
             beforeDateSize: ${beforeDateSize},
-            afterDateSize: 0,
+            afterDateSize: 7,
             clinicalResourceHrns: [${resourcesStr}],
             createUserUuids: [],
             accountingOrderShinryoShikibetsus: []
@@ -4211,6 +4211,91 @@
       border-width: 1px;
       border-style: solid;
     }
+
+    /* === 注射チャート（ガントチャート） === */
+    .inj-chart-wrap {
+      overflow-x: auto;
+      overflow-y: auto;
+      max-height: 70vh;
+    }
+    .inj-chart {
+      border-collapse: collapse;
+      font-size: 13px;
+      white-space: nowrap;
+      width: 100%;
+    }
+    .inj-chart th,
+    .inj-chart td {
+      border: 1px solid #e0e0e0;
+      padding: 4px 6px;
+      text-align: center;
+      vertical-align: middle;
+    }
+    .inj-chart thead th {
+      background: #f5f5f5;
+      font-weight: 600;
+      position: sticky;
+      top: 0;
+      z-index: 2;
+    }
+    .inj-chart .col-drug {
+      text-align: left;
+      min-width: 180px;
+      max-width: 280px;
+      white-space: normal;
+      word-break: break-all;
+      position: sticky;
+      left: 0;
+      z-index: 1;
+      background: #fff;
+    }
+    .inj-chart thead .col-drug {
+      z-index: 3;
+    }
+    .inj-chart .col-date {
+      min-width: 44px;
+    }
+    .inj-chart .col-today {
+      background: #e3f2fd !important;
+    }
+    .inj-chart .col-sat {
+      color: #1565c0;
+    }
+    .inj-chart .col-sun {
+      color: #c62828;
+    }
+    .inj-chart .bar-cell {
+      background: #c8e6c9;
+    }
+    .inj-chart .bar-cell.bar-highlight {
+      background: #43a047;
+      color: #fff;
+      font-weight: 600;
+    }
+    .inj-chart .bar-arrow-left::before {
+      content: '◀';
+      font-size: 10px;
+      color: #888;
+    }
+    .inj-chart .bar-arrow-right::after {
+      content: '▶';
+      font-size: 10px;
+      color: #888;
+    }
+    .inj-chart .group-header td {
+      background: #fff3e0;
+      font-weight: 600;
+      text-align: left;
+      color: #e65100;
+      padding: 6px 8px;
+    }
+    .inj-chart .drug-link {
+      color: #1976d2;
+      text-decoration: none;
+    }
+    .inj-chart .drug-link:hover {
+      text-decoration: underline;
+    }
   `;
 
   // タイムラインモーダル表示
@@ -4291,6 +4376,7 @@
         pharmacy: null,          // { close, overlayEl }
         inspectionFindings: null, // { close, overlayEl }
         profile: null,           // { overlayEl, textarea }
+        injectionChart: null,    // { close, overlayEl, centerDateKey }
       },
 
       // その他
@@ -7464,6 +7550,237 @@
       return filtered;
     }
 
+    // =========================================================================
+    // 注射チャート（ガントチャート）
+    // =========================================================================
+
+    // 注射チャートデータを構築
+    function buildInjectionChartData(centerDateKey, rangeDays = 7) {
+      // ウィンドウ生成: centerDateKeyを中心に前後rangeDays（計 2*rangeDays+1 日）
+      const centerDate = new Date(centerDateKey + 'T00:00:00');
+      const windowDates = [];
+      for (let i = -rangeDays; i <= rangeDays; i++) {
+        const d = new Date(centerDate);
+        d.setDate(d.getDate() + i);
+        d.setHours(0, 0, 0, 0);
+        windowDates.push({ date: d, key: dateKey(d) });
+      }
+
+      const windowStart = windowDates[0].date;
+      const windowEnd = windowDates[windowDates.length - 1].date;
+      const todayKey = dateKey(new Date());
+
+      // ウィンドウに重なる全RPを抽出
+      const groups = new Map(); // technique -> [{ medicines, startCol, endCol, orderUuid, rpIdx, arrowLeft, arrowRight }]
+
+      state.orders.injections.forEach(inj => {
+        const orderStartDate = inj.startDate
+          ? new Date(inj.startDate.year, inj.startDate.month - 1, inj.startDate.day)
+          : (inj.createTime?.seconds ? new Date(inj.createTime.seconds * 1000) : null);
+        if (!orderStartDate) return;
+        orderStartDate.setHours(0, 0, 0, 0);
+
+        (inj.rps || []).forEach((rp, rpIdx) => {
+          const duration = rp.boundsDurationDays?.value || 1;
+          const rpStart = new Date(orderStartDate);
+          rpStart.setHours(0, 0, 0, 0);
+          const rpEnd = new Date(rpStart);
+          rpEnd.setDate(rpEnd.getDate() + duration - 1);
+          rpEnd.setHours(0, 0, 0, 0);
+
+          // ウィンドウと重ならないRPはスキップ
+          if (rpEnd < windowStart || rpStart > windowEnd) return;
+
+          const medicines = (rp.instructions || []).map(inst => {
+            const med = inst.instruction?.medicationDosageInstruction;
+            const rawName = med?.localMedicine?.name || med?.mhlwMedicine?.name || null;
+            return rawName ? cleanMedicineName(rawName) : null;
+          }).filter(Boolean);
+          if (medicines.length === 0) return;
+
+          const technique = (rp.localInjectionTechnique?.name || '不明').replace(/，/g, ',');
+
+          // バーのカラムインデックス（ウィンドウ外はクランプ）
+          const barStartCol = rpStart < windowStart ? 0 : windowDates.findIndex(wd => wd.key === dateKey(rpStart));
+          const barEndCol = rpEnd > windowEnd ? windowDates.length - 1 : windowDates.findIndex(wd => wd.key === dateKey(rpEnd));
+          const arrowLeft = rpStart < windowStart;
+          const arrowRight = rpEnd > windowEnd;
+
+          if (!groups.has(technique)) groups.set(technique, []);
+          groups.get(technique).push({
+            medicines,
+            startCol: barStartCol,
+            endCol: barEndCol,
+            orderUuid: inj.uuid,
+            rpIdx,
+            arrowLeft,
+            arrowRight
+          });
+        });
+      });
+
+      // 技法名でソート
+      const sortedGroups = [...groups.entries()].sort((a, b) => a[0].localeCompare(b[0], 'ja'));
+
+      return { windowDates, todayKey, groups: sortedGroups };
+    }
+
+    // 注射チャートHTML生成（純粋関数）
+    // NOTE: 全てのテキストはescapeHtml/encodeURIComponentで安全に処理済み
+    function renderInjectionChartHTML(chartData, highlightUuid, highlightRpIdx) {
+      const { windowDates, todayKey, groups } = chartData;
+      const DAY_NAMES = ['日', '月', '火', '水', '木', '金', '土'];
+
+      // ヘッダー行（日付 + 曜日）
+      let headerDate = '<tr><th class="col-drug">薬剤名</th>';
+      let headerDay = '<tr><th class="col-drug"></th>';
+      for (const wd of windowDates) {
+        const d = wd.date;
+        const dayIdx = d.getDay();
+        const isToday = wd.key === todayKey;
+        const cls = [
+          'col-date',
+          isToday ? 'col-today' : '',
+          dayIdx === 6 ? 'col-sat' : '',
+          dayIdx === 0 ? 'col-sun' : ''
+        ].filter(Boolean).join(' ');
+        headerDate += `<th class="${cls}">${d.getMonth() + 1}/${d.getDate()}</th>`;
+        headerDay += `<th class="${cls}">${DAY_NAMES[dayIdx]}</th>`;
+      }
+      headerDate += '</tr>';
+      headerDay += '</tr>';
+
+      // ボディ行
+      let body = '';
+      for (const [technique, rows] of groups) {
+        // グループヘッダー
+        body += `<tr class="group-header"><td colspan="${windowDates.length + 1}">${escapeHtml(technique)}</td></tr>`;
+
+        for (const row of rows) {
+          const isHighlight = row.orderUuid === highlightUuid && row.rpIdx === highlightRpIdx;
+          // 薬剤名セル（escapeHtmlで安全にエスケープ済み）
+          const drugHtml = row.medicines.map(m =>
+            `<a href="https://www.google.com/search?q=${encodeURIComponent(m)}" target="_blank" class="drug-link">${escapeHtml(m)}</a>`
+          ).join('<br>');
+          body += `<tr><td class="col-drug">${drugHtml}</td>`;
+
+          // 日付セル
+          for (let ci = 0; ci < windowDates.length; ci++) {
+            const isToday = windowDates[ci].key === todayKey;
+            const inBar = ci >= row.startCol && ci <= row.endCol;
+            const cls = [
+              'col-date',
+              isToday ? 'col-today' : '',
+              inBar ? 'bar-cell' : '',
+              inBar && isHighlight ? 'bar-highlight' : '',
+              inBar && row.arrowLeft && ci === row.startCol ? 'bar-arrow-left' : '',
+              inBar && row.arrowRight && ci === row.endCol ? 'bar-arrow-right' : ''
+            ].filter(Boolean).join(' ');
+            body += `<td class="${cls}"></td>`;
+          }
+          body += '</tr>';
+        }
+      }
+
+      return `<div class="inj-chart-wrap"><table class="inj-chart"><thead>${headerDate}${headerDay}</thead><tbody>${body}</tbody></table></div>`;
+    }
+
+    // 注射チャートモーダルを表示
+    function showInjectionChart(centerDateKey, highlightUuid, highlightRpIdx) {
+      const chartData = buildInjectionChartData(centerDateKey);
+
+      // データなし
+      if (chartData.groups.length === 0) {
+        if (state.modals.injectionChart && state.modals.injectionChart.overlayEl && state.modals.injectionChart.overlayEl.parentNode) {
+          // 既存モーダルの「データなし」更新はテキストのみなのでtextContentで安全
+          const bodyEl = state.modals.injectionChart.overlayEl.querySelector('.henry-modal-body');
+          if (bodyEl) {
+            bodyEl.textContent = '';
+            const msgDiv = document.createElement('div');
+            msgDiv.style.cssText = 'text-align: center; padding: 60px 20px; color: #666;';
+            msgDiv.textContent = 'この期間の注射データがありません';
+            bodyEl.appendChild(msgDiv);
+          }
+          return;
+        }
+        window.HenryCore.ui.showToast('この期間の注射データがありません', 'info');
+        return;
+      }
+
+      const html = renderInjectionChartHTML(chartData, highlightUuid, highlightRpIdx);
+      const patientName = state.patient.selected?.fullName || '';
+
+      // 既にモーダルが開いていればコンテンツ更新
+      if (state.modals.injectionChart && state.modals.injectionChart.overlayEl && state.modals.injectionChart.overlayEl.parentNode) {
+        state.modals.injectionChart.centerDateKey = centerDateKey;
+        // タイトル更新
+        const titleEl = state.modals.injectionChart.overlayEl.querySelector('.henry-modal-title');
+        if (titleEl) {
+          titleEl.style.display = 'flex';
+          titleEl.style.justifyContent = 'space-between';
+          titleEl.style.alignItems = 'center';
+          titleEl.style.width = '100%';
+          // NOTE: escapeHtml済みテキストのみ挿入。このパターンは既存のshowVitalGraphと同一
+          titleEl.innerHTML = `
+            <span>注射チャート</span>
+            <span style="font-size: 14px; color: #666;">${escapeHtml(patientName)}</span>
+          `;
+        }
+        // ボディ更新（chartHTMLは全てescapeHtml/encodeURIComponent済み）
+        const bodyEl = titleEl?.nextElementSibling;
+        if (bodyEl) {
+          bodyEl.innerHTML = html;
+        }
+        return;
+      }
+
+      // 新規モーダル作成
+      const contentDiv = document.createElement('div');
+      contentDiv.innerHTML = html;
+
+      const { close } = window.HenryCore.ui.showModal({
+        title: '注射チャート',
+        content: contentDiv,
+        width: '90vw'
+      });
+
+      const overlayEl = document.querySelector('.henry-modal-overlay:last-of-type');
+
+      // タイトルに患者名を追加
+      if (overlayEl && patientName) {
+        const titleEl = overlayEl.querySelector('.henry-modal-title');
+        if (titleEl) {
+          titleEl.style.display = 'flex';
+          titleEl.style.justifyContent = 'space-between';
+          titleEl.style.alignItems = 'center';
+          titleEl.style.width = '100%';
+          titleEl.innerHTML = `
+            <span>注射チャート</span>
+            <span style="font-size: 14px; color: #666;">${escapeHtml(patientName)}</span>
+          `;
+        }
+      }
+
+      state.modals.injectionChart = { close, overlayEl, centerDateKey };
+
+      // モーダルが閉じられたら状態をリセット
+      if (overlayEl) {
+        const observer = new MutationObserver((mutations) => {
+          for (const mutation of mutations) {
+            for (const removed of mutation.removedNodes) {
+              if (removed === overlayEl) {
+                state.modals.injectionChart = null;
+                observer.disconnect();
+                return;
+              }
+            }
+          }
+        });
+        observer.observe(document.body, { childList: true });
+        cleaner.add(() => observer.disconnect());
+      }
+    }
+
     // 指定日の処方をフィルタ（キャッシュ付き）
     function getPrescriptionsForDate(targetDate, targetDateKey) {
       // キャッシュ確認
@@ -7526,7 +7843,7 @@
             : new Date(inj.createTime.seconds * 1000);
           startDate.setHours(0, 0, 0, 0);
 
-          return (inj.rps || []).map(rp => {
+          return (inj.rps || []).map((rp, rpIdx) => {
             // RPの終了日を計算し、targetDateより前なら表示しない
             const duration = rp.boundsDurationDays?.value || 1;
             const rpEndDate = new Date(startDate);
@@ -7545,7 +7862,7 @@
             if (medicines.length === 0) return '';
 
             return `
-              <div class="med-item">
+              <div class="med-item" data-order-uuid="${inj.uuid}" data-rp-index="${rpIdx}">
                 <div class="med-usage">${technique ? escapeHtml(technique) + ' ' : ''}${endDateStr}</div>
                 <div class="med-name">${medicines.map(m => `<a href="https://www.google.com/search?q=${encodeURIComponent(m)}" target="_blank" class="med-link">${highlightText(m, state.filter.searchText)}</a>`).join('<br>')}</div>
               </div>
@@ -7673,6 +7990,18 @@
       }
 
       prescriptionOrderContent.innerHTML = html;
+
+      // 注射カードのクリックハンドラ（ガントチャート表示）
+      prescriptionOrderContent.querySelectorAll('.injection-section .med-item').forEach(item => {
+        item.style.cursor = 'pointer';
+        item.addEventListener('click', (e) => {
+          // Googleリンククリック時はチャートを開かない
+          if (e.target.closest('.med-link')) return;
+          const orderUuid = item.dataset.orderUuid;
+          const rpIndex = parseInt(item.dataset.rpIndex, 10);
+          showInjectionChart(state.timeline.selectedDate, orderUuid, rpIndex);
+        });
+      });
     }
 
     // =========================================================================
@@ -7914,6 +8243,9 @@
         }
         if (state.modals.profile) {
           showProfileModal();
+        }
+        if (state.modals.injectionChart) {
+          showInjectionChart(state.timeline.selectedDate, null, null);
         }
 
         // 前後の患者をプリフェッチ（非同期・待たない）
