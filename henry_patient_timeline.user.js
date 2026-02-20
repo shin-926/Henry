@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry Patient Timeline
 // @namespace    https://github.com/shin-926/Henry
-// @version      2.145.3
+// @version      2.145.4
 // @description  入院患者の各種記録・オーダーをガントチャート風タイムラインで表示
 // @author       sk powered by Claude
 // @match        https://henry-app.jp/*
@@ -3075,7 +3075,7 @@
   /** 体温チャート（コンパクト版） */
   function renderDashboardTemperature(data, cu, days) {
     const chartHeight = 100;
-    const margin = { top: 22, bottom: 4 };
+    const margin = { top: 22, bottom: 16 };
     const top = margin.top;
     const totalHeight = margin.top + chartHeight + margin.bottom;
     const yMin = 35, yMax = 40;
@@ -3092,7 +3092,7 @@
         <rect x="40" y="${top}" width="${cu.chartWidth}" height="${chartHeight}" fill="#fafafa" />
         ${normalBand}
         ${cu.generateYTicks(yMin, yMax, 1, top, chartHeight, yScale, '#666')}
-        ${cu.generateDayLinesAndLabels(top, chartHeight, false)}
+        ${cu.generateDayLinesAndLabels(top, chartHeight, true)}
         <path d="${path}" fill="none" stroke="#FF5722" stroke-width="1.5" />
         ${dots}
         <rect x="40" y="${top}" width="${cu.chartWidth}" height="${chartHeight}" fill="none" stroke="#ccc" />
@@ -3103,7 +3103,7 @@
   /** 血圧チャート（コンパクト版） */
   function renderDashboardBP(data, cu, days) {
     const chartHeight = 100;
-    const margin = { top: 22, bottom: 4 };
+    const margin = { top: 22, bottom: 16 };
     const top = margin.top;
     const totalHeight = margin.top + chartHeight + margin.bottom;
 
@@ -3142,7 +3142,7 @@
         ${bpUpperBand}
         ${bpLowerBand}
         ${cu.generateYTicks(yMin, yMax, 20, top, chartHeight, yScale, '#666')}
-        ${cu.generateDayLinesAndLabels(top, chartHeight, false)}
+        ${cu.generateDayLinesAndLabels(top, chartHeight, true)}
         <path d="${bpUpperPath}" fill="none" stroke="#4CAF50" stroke-width="1.5" />
         <path d="${bpLowerPath}" fill="none" stroke="#9C27B0" stroke-width="1.5" />
         ${bpUpperDots}
@@ -3155,7 +3155,7 @@
   /** 脈拍チャート（コンパクト版） */
   function renderDashboardPulse(data, cu, days) {
     const chartHeight = 80;
-    const margin = { top: 22, bottom: 4 };
+    const margin = { top: 22, bottom: 16 };
     const top = margin.top;
     const totalHeight = margin.top + chartHeight + margin.bottom;
 
@@ -3175,7 +3175,7 @@
         <rect x="40" y="${top}" width="${cu.chartWidth}" height="${chartHeight}" fill="#fafafa" />
         ${normalBand}
         ${cu.generateYTicks(yMin, yMax, 20, top, chartHeight, yScale, '#666')}
-        ${cu.generateDayLinesAndLabels(top, chartHeight, false)}
+        ${cu.generateDayLinesAndLabels(top, chartHeight, true)}
         <path d="${pulsePath}" fill="none" stroke="#2196F3" stroke-width="1.5" />
         ${pulseDots}
         <rect x="40" y="${top}" width="${cu.chartWidth}" height="${chartHeight}" fill="none" stroke="#ccc" />
@@ -3214,7 +3214,7 @@
   /** 血糖値+インスリンチャート（コンパクト版） */
   function renderDashboardBloodSugar(data, cu, days) {
     const chartHeight = 100;
-    const margin = { top: 22, bottom: 4 };
+    const margin = { top: 22, bottom: 16 };
     const top = margin.top;
     const totalHeight = margin.top + chartHeight + margin.bottom;
     const yMin = 50, yMax = 250;
@@ -3249,7 +3249,7 @@
         <rect x="40" y="${top}" width="${cu.chartWidth}" height="${chartHeight}" fill="#fafafa" />
         ${normalBand}
         ${cu.generateYTicks(yMin, yMax, 50, top, chartHeight, yScale, '#666')}
-        ${cu.generateDayLinesAndLabels(top, chartHeight, false)}
+        ${cu.generateDayLinesAndLabels(top, chartHeight, true)}
         <path d="${morningPath}" fill="none" stroke="#FF9800" stroke-width="1.5" />
         <path d="${noonPath}" fill="none" stroke="#4CAF50" stroke-width="1.5" />
         <path d="${eveningPath}" fill="none" stroke="#2196F3" stroke-width="1.5" />
@@ -3264,7 +3264,7 @@
   /** 食事摂取量チャート（コンパクト版・積み上げ棒グラフ） */
   function renderDashboardMealIntake(mealsData, cu, days) {
     const chartHeight = 100;
-    const margin = { top: 22, bottom: 4 };
+    const margin = { top: 22, bottom: 16 };
     const top = margin.top;
     const totalHeight = margin.top + chartHeight + margin.bottom;
     // Y軸: 0〜10割
@@ -3314,7 +3314,7 @@
         ${legend}
         <rect x="40" y="${top}" width="${cu.chartWidth}" height="${chartHeight}" fill="#fafafa" />
         ${cu.generateYTicks(yMin, yMax, 2, top, chartHeight, yScale, '#666')}
-        ${cu.generateDayLinesAndLabels(top, chartHeight, false)}
+        ${cu.generateDayLinesAndLabels(top, chartHeight, true)}
         ${mainPath ? `<path d="${mainPath}" fill="none" stroke="#FF9800" stroke-width="1.5" />` : ''}
         ${sidePath ? `<path d="${sidePath}" fill="none" stroke="#2196F3" stroke-width="1.5" stroke-dasharray="4,2" />` : ''}
         ${mainDots}
