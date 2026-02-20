@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry Patient Timeline
 // @namespace    https://github.com/shin-926/Henry
-// @version      2.142.2
+// @version      2.143.0
 // @description  入院患者の各種記録・オーダーをガントチャート風タイムラインで表示
 // @author       sk powered by Claude
 // @match        https://henry-app.jp/*
@@ -4275,22 +4275,40 @@
       color: #c62828;
     }
     .inj-chart .bar-cell {
+      position: relative;
+    }
+    .inj-chart .bar-cell::before {
+      content: '';
+      position: absolute;
+      top: 2px;
+      bottom: 2px;
+      left: 0;
+      right: 0;
       background: #c8e6c9;
+      pointer-events: none;
     }
-    .inj-chart .bar-cell.bar-highlight {
-      background: #43a047;
-      color: #fff;
-      font-weight: 600;
+    .inj-chart .bar-start::before {
+      left: 3px;
+      border-radius: 4px 0 0 4px;
     }
-    .inj-chart .bar-arrow-left::before {
-      content: '◀';
-      font-size: 10px;
-      color: #888;
+    .inj-chart .bar-end::before {
+      right: 3px;
+      border-radius: 0 4px 4px 0;
     }
-    .inj-chart .bar-arrow-right::after {
-      content: '▶';
-      font-size: 10px;
-      color: #888;
+    .inj-chart .bar-start.bar-end::before {
+      border-radius: 4px;
+    }
+    .inj-chart td.bar-cell:not(.bar-start) {
+      border-left-style: hidden;
+    }
+    .inj-chart td.bar-cell:not(.bar-end) {
+      border-right-style: hidden;
+    }
+    .inj-chart .bar-arr {
+      position: relative;
+      z-index: 1;
+      font-size: 9px;
+      color: rgba(0,0,0,0.3);
     }
     .inj-chart .group-header td {
       background: #fff3e0;
@@ -7637,7 +7655,7 @@
 
     // 注射チャートHTML生成（純粋関数）
     // NOTE: 全てのテキストはescapeHtml/encodeURIComponentで安全に処理済み
-    function renderInjectionChartHTML(chartData, highlightUuid, highlightRpIdx) {
+    function renderInjectionChartHTML(chartData) {
       const { windowDates, todayKey, groups } = chartData;
       const DAY_NAMES = ['日', '月', '火', '水', '木', '金', '土'];
 
@@ -7667,7 +7685,6 @@
         body += `<tr class="group-header"><td colspan="${windowDates.length + 1}">${escapeHtml(technique)}</td></tr>`;
 
         for (const row of rows) {
-          const isHighlight = row.orderUuid === highlightUuid && row.rpIdx === highlightRpIdx;
           // 薬剤名セル（escapeHtmlで安全にエスケープ済み）
           const drugHtml = row.medicines.map(m =>
             `<a href="https://www.google.com/search?q=${encodeURIComponent(m)}" target="_blank" class="drug-link">${escapeHtml(m)}</a>`
@@ -7682,11 +7699,15 @@
               'col-date',
               isToday ? 'col-today' : '',
               inBar ? 'bar-cell' : '',
-              inBar && isHighlight ? 'bar-highlight' : '',
-              inBar && row.arrowLeft && ci === row.startCol ? 'bar-arrow-left' : '',
-              inBar && row.arrowRight && ci === row.endCol ? 'bar-arrow-right' : ''
+              inBar && ci === row.startCol ? 'bar-start' : '',
+              inBar && ci === row.endCol ? 'bar-end' : ''
             ].filter(Boolean).join(' ');
-            body += `<td class="${cls}"></td>`;
+            let cellContent = '';
+            if (inBar) {
+              if (row.arrowLeft && ci === row.startCol) cellContent += '<span class="bar-arr">◀</span>';
+              if (row.arrowRight && ci === row.endCol) cellContent += '<span class="bar-arr">▶</span>';
+            }
+            body += `<td class="${cls}">${cellContent}</td>`;
           }
           body += '</tr>';
         }
@@ -7696,7 +7717,7 @@
     }
 
     // 注射チャートモーダルを表示
-    function showInjectionChart(centerDateKey, highlightUuid, highlightRpIdx) {
+    function showInjectionChart(centerDateKey) {
       const chartData = buildInjectionChartData(centerDateKey);
 
       // データなし
@@ -7717,7 +7738,7 @@
         return;
       }
 
-      const html = renderInjectionChartHTML(chartData, highlightUuid, highlightRpIdx);
+      const html = renderInjectionChartHTML(chartData);
       const patientName = state.patient.selected?.fullName || '';
 
       // 既にモーダルが開いていればコンテンツ更新
@@ -8007,9 +8028,7 @@
         item.addEventListener('click', (e) => {
           // Googleリンククリック時はチャートを開かない
           if (e.target.closest('.med-link')) return;
-          const orderUuid = item.dataset.orderUuid;
-          const rpIndex = parseInt(item.dataset.rpIndex, 10);
-          showInjectionChart(state.timeline.selectedDate, orderUuid, rpIndex);
+          showInjectionChart(state.timeline.selectedDate);
         });
       });
     }
@@ -8255,7 +8274,7 @@
           showProfileModal();
         }
         if (state.modals.injectionChart) {
-          showInjectionChart(state.timeline.selectedDate, null, null);
+          showInjectionChart(state.timeline.selectedDate);
         }
 
         // 前後の患者をプリフェッチ（非同期・待たない）
