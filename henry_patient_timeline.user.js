@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry Patient Timeline
 // @namespace    https://github.com/shin-926/Henry
-// @version      2.145.9
+// @version      2.145.10
 // @description  入院患者の各種記録・オーダーをガントチャート風タイムラインで表示
 // @author       sk powered by Claude
 // @match        https://henry-app.jp/*
@@ -3262,7 +3262,7 @@
   }
 
   /** 食事摂取量チャート（コンパクト版・積み上げ棒グラフ） */
-  function renderDashboardMealIntake(mealsData, cu, days) {
+  function renderDashboardMealIntake(mealsData, cu, days, dietTypes) {
     const chartHeight = 100;
     const margin = { top: 22, bottom: 16 };
     const top = margin.top;
@@ -3310,7 +3310,7 @@
 
     return `
       <svg width="100%" viewBox="0 0 ${cu.chartWidth + 80} ${totalHeight}" preserveAspectRatio="xMidYMid meet">
-        <text x="40" y="${top - 6}" font-size="11" font-weight="bold" fill="#333">食事摂取量 (割)</text>
+        <text x="40" y="${top - 6}" font-size="11" font-weight="bold" fill="#333">食事摂取量${dietTypes?.size ? ' — ' + [...dietTypes].join(', ') : ''} (割)</text>
         ${legend}
         <rect x="40" y="${top}" width="${cu.chartWidth}" height="${chartHeight}" fill="#fafafa" />
         ${cu.generateYTicks(yMin, yMax, 2, top, chartHeight, yScale, '#666')}
@@ -3365,6 +3365,7 @@
     const bloodSugar = [];  // { timestamp, dateKey, morning, noon, evening }
     const urine = [];       // { timestamp, dateKey, totalUrine }
     const mealsMap = new Map(); // dateKey → { breakfast:{main,side}, lunch:{main,side}, dinner:{main,side} }
+    const dietTypes = new Set();
 
     for (const item of items) {
       const itemKey = dateKey(item.date);
@@ -3406,6 +3407,10 @@
       } else if (item.category === 'meal') {
         // 食事テキストからパース: 「【食種名】朝10/10 昼8/8 夕10/10」
         const text = item.text;
+        const dietMatch = text.match(/【(.+?)】/);
+        if (dietMatch && dietMatch[1] !== '絶食') {
+          dietTypes.add(dietMatch[1]);
+        }
         const [year, month, day] = itemKey.split('-').map(Number);
         const timestamp = new Date(year, month - 1, day, 12, 0, 0).getTime();
 
@@ -3440,7 +3445,7 @@
     urine.sort((a, b) => a.timestamp - b.timestamp);
     const meals = Array.from(mealsMap.values()).sort((a, b) => a.timestamp - b.timestamp);
 
-    return { vitals, bloodSugar, urine, meals };
+    return { vitals, bloodSugar, urine, meals, dietTypes };
   }
 
   // SVGでバイタル折れ線グラフを描画（showTimelineModalから分離）
@@ -7156,7 +7161,7 @@
       const pulseChart = renderDashboardPulse(data.vitals, cu, days);
       const spo2Chart = renderDashboardSpO2(data.vitals, cu, days);
       const bsChart = renderDashboardBloodSugar(data.bloodSugar, cu, days);
-      const mealChart = renderDashboardMealIntake(data.meals, cu, days);
+      const mealChart = renderDashboardMealIntake(data.meals, cu, days, data.dietTypes);
       const urineChart = renderDashboardUrine(data.urine, cu, days);
 
       // コンテンツ構築（DOM API使用）
