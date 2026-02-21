@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry Patient Timeline
 // @namespace    https://github.com/shin-926/Henry
-// @version      2.145.14
+// @version      2.145.15
 // @description  入院患者の各種記録・オーダーをガントチャート風タイムラインで表示
 // @author       sk powered by Claude
 // @match        https://henry-app.jp/*
@@ -250,8 +250,8 @@
       const lines = [];
 
       for (const block of data.blocks) {
-        const text = block.text;
-        if (!text || !text.trim()) continue;
+        if (block.type === 'atomic') continue;  // 画像等の非テキストブロックはスキップ
+        const text = block.text ?? '';
 
         // リハビリ記録用: 未チェック項目をフィルタリング
         // ブロックのdata.checkboxListItem.checkedが'unchecked'の場合はスキップ
@@ -262,7 +262,7 @@
         lines.push(text);
       }
 
-      return lines.join('\n');
+      return lines.join('\n').replace(/^\n+|\n+$/g, '');
     } catch (e) {
       return '';
     }
