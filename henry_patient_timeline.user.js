@@ -3117,8 +3117,8 @@
     const bpUpperPath = cu.generatePath(data, d => d.BPupper, yScale);
     const bpLowerPath = cu.generatePath(data, d => d.BPlower, yScale);
     const showDots = days !== 30;
-    const bpUpperDots = showDots ? cu.generateDots(data, d => d.BPupper, yScale, '#4CAF50', 2, 'mmHg', '上') : '';
-    const bpLowerDots = showDots ? cu.generateDots(data, d => d.BPlower, yScale, '#9C27B0', 2, 'mmHg', '下') : '';
+    const bpUpperDots = showDots ? cu.generateDots(data, d => d.BPupper, yScale, '#4CAF50', 2, 'mmHg', 'sBP') : '';
+    const bpLowerDots = showDots ? cu.generateDots(data, d => d.BPlower, yScale, '#9C27B0', 2, 'mmHg', 'dBP') : '';
 
     const bpUpperBand = cu.generateNormalBand(90, 140, yScale, 'rgba(76, 175, 80, 0.10)');
     const bpLowerBand = cu.generateNormalBand(60, 90, yScale, 'rgba(156, 39, 176, 0.10)');
