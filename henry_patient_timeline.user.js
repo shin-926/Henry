@@ -3022,7 +3022,7 @@
           if (v === null) return '';
           const x = this.xScale(p.timestamp);
           const y = yScale(v);
-          return `<circle class="chart-dot" cx="${x}" cy="${y}" r="${radius}" fill="${color}" data-value="${v}" data-unit="${unit}"${label ? ` data-label="${label}"` : ''} />`;
+          return `<circle class="chart-dot" cx="${x}" cy="${y}" r="${radius}" fill="${color}" stroke="transparent" stroke-width="10" pointer-events="all" data-value="${v}" data-unit="${unit}"${label ? ` data-label="${label}"` : ''} />`;
         }).join('');
       },
 
