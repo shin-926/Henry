@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry Patient Timeline
 // @namespace    https://github.com/shin-926/Henry
-// @version      2.145.18
+// @version      2.145.19
 // @description  入院患者の各種記録・オーダーをガントチャート風タイムラインで表示
 // @author       sk powered by Claude
 // @match        https://henry-app.jp/*
@@ -3358,8 +3358,68 @@
     `;
   }
 
+  /**
+   * 日ごとの点滴輸液量を集計
+   * @param {Array} injections - state.orders.injections
+   * @param {string[]} dateKeys - 表示対象の日付キー配列 (YYYY-MM-DD)
+   * @returns {Array<{dateKey: string, timestamp: number, totalVolume: number}>}
+   */
+  function collectDailyInfusionVolume(injections, dateKeys) {
+    if (!injections?.length || !dateKeys?.length) return [];
+    const dateKeySet = new Set(dateKeys);
+    const volumeMap = new Map(); // dateKey -> totalVolume (mL)
+
+    injections.forEach(inj => {
+      // キャンセル済みスキップ
+      if (inj.orderStatus === 'ORDER_STATUS_CANCELLED') return;
+
+      const orderStart = inj.startDate
+        ? new Date(inj.startDate.year, inj.startDate.month - 1, inj.startDate.day)
+        : (inj.createTime?.seconds ? new Date(inj.createTime.seconds * 1000) : null);
+      if (!orderStart) return;
+      orderStart.setHours(0, 0, 0, 0);
+
+      (inj.rps || []).forEach(rp => {
+        // 点滴のみ対象
+        const technique = rp.localInjectionTechnique?.name || '';
+        if (!technique.includes('点滴')) return;
+
+        const duration = rp.boundsDurationDays?.value || 1;
+        // RP内全薬剤の1日量合算 (Frac100000 → mL)
+        let rpVolumePerDay = 0;
+        (rp.instructions || []).forEach(inst => {
+          const med = inst.instruction?.medicationDosageInstruction;
+          const dosePerDay = med?.quantity?.doseQuantityPerDay?.value;
+          if (dosePerDay) rpVolumePerDay += parseInt(dosePerDay, 10) / 100000;
+        });
+        if (rpVolumePerDay <= 0) return;
+
+        // 各投与日にボリュームを加算
+        for (let d = 0; d < duration; d++) {
+          const day = new Date(orderStart);
+          day.setDate(day.getDate() + d);
+          const key = `${day.getFullYear()}-${String(day.getMonth() + 1).padStart(2, '0')}-${String(day.getDate()).padStart(2, '0')}`;
+          if (!dateKeySet.has(key)) continue;
+          volumeMap.set(key, (volumeMap.get(key) || 0) + rpVolumePerDay);
+        }
+      });
+    });
+
+    // dateKeys順で結果配列を生成
+    return dateKeys
+      .filter(key => volumeMap.has(key))
+      .map(key => {
+        const [y, m, d] = key.split('-').map(Number);
+        return {
+          dateKey: key,
+          timestamp: new Date(y, m - 1, d, 12, 0, 0).getTime(),
+          totalVolume: Math.round(volumeMap.get(key)),
+        };
+      });
+  }
+
   /** 尿量チャート（コンパクト版） */
-  function renderDashboardUrine(data, cu, days) {
+  function renderDashboardUrine(data, cu, days, infusionData) {
     const chartHeight = 100;
     const margin = { top: 22, bottom: 16 };
     const top = margin.top;
@@ -3372,11 +3432,33 @@
     const dots = showDots ? cu.generateDots(data, d => d.totalUrine, yScale, '#607D8B', 2, 'mL') : '';
     const normalBand = cu.generateNormalBand(1000, 2000, yScale, 'rgba(96, 125, 139, 0.12)');
 
+    // 輸液量の棒グラフ
+    let infusionBars = '';
+    if (infusionData?.length) {
+      infusionBars = infusionData.map(d => {
+        const [y, m, dd] = d.dateKey.split('-').map(Number);
+        const dayStart = new Date(y, m - 1, dd, 0, 0, 0).getTime();
+        const dayEnd = new Date(y, m - 1, dd + 1, 0, 0, 0).getTime();
+        const x1 = cu.xScale(dayStart);
+        const x2 = cu.xScale(dayEnd);
+        const barY = yScale(d.totalVolume);
+        const barH = yScale(0) - barY;
+        return `<rect class="chart-bar" x="${x1}" y="${barY}" width="${x2 - x1}" height="${barH}" fill="rgba(33, 150, 243, 0.18)" data-label="輸液" data-value="${d.totalVolume}" data-unit="mL" />`;
+      }).join('');
+    }
+    const hasInfusion = infusionData?.length > 0;
+    const titleText = hasInfusion ? '尿量 / 輸液量 (mL)' : '尿量 (mL)';
+    const legend = hasInfusion
+      ? `<text x="${cu.chartWidth + 40}" y="${top - 6}" text-anchor="end" font-size="9" fill="#666"><tspan fill="#607D8B">━</tspan> 尿量  <tspan fill="rgba(33,150,243,0.5)">■</tspan> 輸液</text>`
+      : '';
+
     return `
       <svg width="100%" viewBox="0 0 ${cu.chartWidth + 80} ${totalHeight}" preserveAspectRatio="xMidYMid meet">
-        <text x="40" y="${top - 6}" font-size="11" font-weight="bold" fill="#333">尿量 (mL)</text>
+        <text x="40" y="${top - 6}" font-size="11" font-weight="bold" fill="#333">${titleText}</text>
+        ${legend}
         <rect x="40" y="${top}" width="${cu.chartWidth}" height="${chartHeight}" fill="#fafafa" />
         ${normalBand}
+        ${infusionBars}
         ${cu.generateYTicks(yMin, yMax, 500, top, chartHeight, yScale, '#666')}
         ${cu.generateDayLinesAndLabels(top, chartHeight, true)}
         <path d="${path}" fill="none" stroke="#607D8B" stroke-width="1.5" />
@@ -7277,7 +7359,8 @@
       const spo2Chart = renderDashboardSpO2(data.vitals, cu, days);
       const bsChart = renderDashboardBloodSugar(data.bloodSugar, cu, days);
       const mealChart = renderDashboardMealIntake(data.meals, cu, days, data.dietTypes);
-      const urineChart = renderDashboardUrine(data.urine, cu, days);
+      const infusionData = collectDailyInfusionVolume(state.orders.injections, dateKeys);
+      const urineChart = renderDashboardUrine(data.urine, cu, days, infusionData);
 
       // コンテンツ構築（DOM API使用）
       const contentDiv = document.createElement('div');
