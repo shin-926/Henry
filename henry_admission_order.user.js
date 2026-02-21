@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry 入院時オーダー
 // @namespace    https://github.com/shin-926/Henry
-// @version      1.5.0
+// @version      1.6.0
 // @description  入院予定患者に対して入院時オーダー（CT検査等）を一括作成
 // @author       sk powered by Claude
 // @match        https://henry-app.jp/*
@@ -4294,46 +4294,76 @@
           msg.style.cssText = 'color: #999; font-size: 12px;';
           msg.textContent = '登録済みの病名がありません';
           btnContainer.appendChild(msg);
-          return;
-        }
+        } else {
+          // 主病名を先頭にソート
+          const sorted = [...patientDiseases].sort((a, b) => (b.isMain ? 1 : 0) - (a.isMain ? 1 : 0));
+          const selectedSet = new Set();
 
-        // 主病名を先頭にソート
-        const sorted = [...patientDiseases].sort((a, b) => (b.isMain ? 1 : 0) - (a.isMain ? 1 : 0));
-        const selectedSet = new Set();
+          function syncTextarea() {
+            const names = sorted
+              .filter(d => selectedSet.has(d.uuid))
+              .map(d => buildFullDiseaseName(d));
+            textarea.value = names.join('\n');
+          }
 
-        function syncTextarea() {
-          const names = sorted
-            .filter(d => selectedSet.has(d.uuid))
-            .map(d => buildFullDiseaseName(d));
-          textarea.value = names.join('\n');
-        }
+          sorted.forEach(disease => {
+            const name = buildFullDiseaseName(disease);
+            const label = name + (disease.isMain ? ' [主]' : '');
 
-        sorted.forEach(disease => {
-          const name = buildFullDiseaseName(disease);
-          const label = name + (disease.isMain ? ' [主]' : '');
+            const btn = document.createElement('button');
+            btn.type = 'button';
+            btn.textContent = label;
+            btn.style.cssText = 'padding: 4px 10px; border: 1px solid #d1d5db; border-radius: 4px; font-size: 12px; cursor: pointer; background: #f9fafb; color: #374151; transition: all 0.15s;';
 
-          const btn = document.createElement('button');
-          btn.type = 'button';
-          btn.textContent = label;
-          btn.style.cssText = 'padding: 4px 10px; border: 1px solid #d1d5db; border-radius: 4px; font-size: 12px; cursor: pointer; background: #f9fafb; color: #374151; transition: all 0.15s;';
+            btn.addEventListener('click', () => {
+              if (selectedSet.has(disease.uuid)) {
+                selectedSet.delete(disease.uuid);
+                btn.style.background = '#f9fafb';
+                btn.style.borderColor = '#d1d5db';
+                btn.style.color = '#374151';
+              } else {
+                selectedSet.add(disease.uuid);
+                btn.style.background = '#dbeafe';
+                btn.style.borderColor = '#93c5fd';
+                btn.style.color = '#1e40af';
+              }
+              syncTextarea();
+            });
 
-          btn.addEventListener('click', () => {
-            if (selectedSet.has(disease.uuid)) {
-              selectedSet.delete(disease.uuid);
-              btn.style.background = '#f9fafb';
-              btn.style.borderColor = '#d1d5db';
-              btn.style.color = '#374151';
-            } else {
-              selectedSet.add(disease.uuid);
-              btn.style.background = '#dbeafe';
-              btn.style.borderColor = '#93c5fd';
-              btn.style.color = '#1e40af';
-            }
-            syncTextarea();
+            btnContainer.appendChild(btn);
           });
+        }
 
-          btnContainer.appendChild(btn);
+        // 「＋ 病名登録」ボタン
+        const registerBtn = document.createElement('button');
+        registerBtn.type = 'button';
+        registerBtn.textContent = '＋ 病名登録';
+        registerBtn.style.cssText = 'padding: 4px 10px; border: 1px dashed #16a34a; border-radius: 4px; font-size: 12px; cursor: pointer; background: #dcfce7; color: #16a34a; font-weight: 500; transition: all 0.15s;';
+        registerBtn.addEventListener('mouseenter', () => { registerBtn.style.background = '#bbf7d0'; });
+        registerBtn.addEventListener('mouseleave', () => { registerBtn.style.background = '#dcfce7'; });
+        registerBtn.addEventListener('click', () => {
+          const uuid = patientData.patient?.uuid;
+          if (!uuid || typeof window.openDiseaseRegister !== 'function') {
+            console.error(`[${SCRIPT_NAME}] 病名登録モーダルを開けません`);
+            return;
+          }
+          window.openDiseaseRegister(uuid);
+          // モーダルが閉じたら病名一覧をリフレッシュ
+          const observer = new MutationObserver((mutations) => {
+            for (const m of mutations) {
+              for (const node of m.removedNodes) {
+                if (node.nodeType === 1 && (node.classList?.contains('dr-modal-overlay') || node.querySelector?.('.dr-modal-overlay'))) {
+                  observer.disconnect();
+                  patientDiseases = [];
+                  loadTreatmentPlanDiseases(detailContainer);
+                  return;
+                }
+              }
+            }
+          });
+          observer.observe(document.body, { childList: true, subtree: true });
         });
+        btnContainer.appendChild(registerBtn);
       } catch (e) {
         treatmentPlanDiseasesLoaded = true;
         btnContainer.textContent = '';
