@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry Patient Timeline
 // @namespace    https://github.com/shin-926/Henry
-// @version      2.145.17
+// @version      2.145.18
 // @description  入院患者の各種記録・オーダーをガントチャート風タイムラインで表示
 // @author       sk powered by Claude
 // @match        https://henry-app.jp/*
@@ -3825,7 +3825,7 @@
       borderRadius: '4px',
       fontSize: '12px',
       pointerEvents: 'none',
-      whiteSpace: 'nowrap',
+      whiteSpace: 'pre',
       zIndex: '10'
     });
     container.style.position = 'relative';
@@ -3834,21 +3834,32 @@
     container.addEventListener('mouseenter', (e) => {
       const el = e.target;
       if (!el.classList?.contains('chart-dot') && !el.classList?.contains('chart-bar')) return;
-      const label = el.dataset.label;
-      const value = el.dataset.value;
-      const unit = el.dataset.unit;
-      tooltip.textContent = label ? `${label} ${value} ${unit}` : `${value} ${unit}`;
 
       const svg = el.closest('svg');
       const svgRect = svg.getBoundingClientRect();
       const containerRect = container.getBoundingClientRect();
 
       if (el.tagName === 'circle') {
+        // 同じcxを持つ全ドットを収集して一括表示
         const cx = parseFloat(el.getAttribute('cx'));
-        const cy = parseFloat(el.getAttribute('cy'));
+        const dots = svg.querySelectorAll('.chart-dot');
+        const sameCxDots = [];
+        dots.forEach(d => {
+          if (parseFloat(d.getAttribute('cx')) === cx) sameCxDots.push(d);
+        });
+        const lines = sameCxDots.map(d => {
+          const l = d.dataset.label, v = d.dataset.value, u = d.dataset.unit;
+          return l ? `${l} ${v} ${u}` : `${v} ${u}`;
+        });
+        tooltip.textContent = lines.join('\n');
+        // 最も上にあるドット（cy最小）の上に配置
+        const minCy = Math.min(...sameCxDots.map(d => parseFloat(d.getAttribute('cy'))));
+        const lineCount = lines.length;
         tooltip.style.left = `${cx + (svgRect.left - containerRect.left)}px`;
-        tooltip.style.top = `${cy + (svgRect.top - containerRect.top) - 30}px`;
+        tooltip.style.top = `${minCy + (svgRect.top - containerRect.top) - (lineCount > 1 ? 18 * lineCount + 12 : 30)}px`;
       } else {
+        const label = el.dataset.label, value = el.dataset.value, unit = el.dataset.unit;
+        tooltip.textContent = label ? `${label} ${value} ${unit}` : `${value} ${unit}`;
         const x = parseFloat(el.getAttribute('x'));
         const w = parseFloat(el.getAttribute('width'));
         const y = parseFloat(el.getAttribute('y'));
