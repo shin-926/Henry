@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry Disease Register
 // @namespace    https://henry-app.jp/
-// @version      3.36.0
+// @version      3.36.1
 // @description  高速病名検索・登録
 // @author       sk powered by Claude & Gemini
 // @match        https://henry-app.jp/*
@@ -2159,7 +2159,7 @@
             ${date ? `<span class="dr-registered-date">${date}</span>` : ''}
             ${outcomeLabel ? `<span class="dr-registered-outcome">${outcomeLabel}</span>` : ''}
             ${d.isMain ? '<span class="dr-main-badge">主</span>' : ''}
-            ${d.isSuspected ? '<span class="dr-suspected-badge">疑い</span>' : ''}
+            ${d.isSuspected ? '<span class="dr-suspected-badge">疑</span>' : ''}
             ${d.isDraft ? '<span class="dr-draft-badge">未承認</span>' : ''}
           </div>
         </div>`;
