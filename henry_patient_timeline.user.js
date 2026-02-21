@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry Patient Timeline
 // @namespace    https://github.com/shin-926/Henry
-// @version      2.145.19
+// @version      2.145.20
 // @description  入院患者の各種記録・オーダーをガントチャート風タイムラインで表示
 // @author       sk powered by Claude
 // @match        https://henry-app.jp/*
@@ -3380,9 +3380,9 @@
       orderStart.setHours(0, 0, 0, 0);
 
       (inj.rps || []).forEach(rp => {
-        // 点滴のみ対象
+        // 点滴・中心静脈（栄養/注射）を対象、静脈注射（IV push）は除外
         const technique = rp.localInjectionTechnique?.name || '';
-        if (!technique.includes('点滴')) return;
+        if (!technique.includes('点滴') && !technique.includes('中心静脈')) return;
 
         const duration = rp.boundsDurationDays?.value || 1;
         // RP内全薬剤の1日量合算 (Frac100000 → mL)
