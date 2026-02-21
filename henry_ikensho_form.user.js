@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         主治医意見書作成フォーム
 // @namespace    https://henry-app.jp/
-// @version      2.8.3
+// @version      2.8.4
 // @description  主治医意見書の入力フォームとGoogle Docs出力（GAS不要版・API直接呼び出し）
 // @author       sk powered by Claude & Gemini
 // @match        https://henry-app.jp/*
@@ -1246,8 +1246,6 @@
       'mental_physical_state.psychiatric_symptoms': '精神神経症状有無',
       'mental_physical_state.specialist_visit': '専門医受診有無',
       'mental_physical_state.dominant_hand': '利き腕',
-      'mental_physical_state.height': '身長',
-      'mental_physical_state.weight': '体重',
       'mental_physical_state.weight_change': '体重の変化',
 
       // 生活機能
@@ -2005,8 +2003,8 @@
       data.dominant_hand,
       true
     );
-    const heightField = createTextField('身長', 'height', 'mental_physical_state', data.height, true, '');
-    const weightField = createTextField('体重', 'weight', 'mental_physical_state', data.weight, true, '');
+    const heightField = createTextField('身長', 'height', 'mental_physical_state', data.height, false, '');
+    const weightField = createTextField('体重', 'weight', 'mental_physical_state', data.weight, false, '');
     const weightChangeField = createRadioField(
       '過去6ヶ月の体重の変化',
       'weight_change',
