@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry Patient Timeline
 // @namespace    https://github.com/shin-926/Henry
-// @version      2.145.15
+// @version      2.145.16
 // @description  入院患者の各種記録・オーダーをガントチャート風タイムラインで表示
 // @author       sk powered by Claude
 // @match        https://henry-app.jp/*
@@ -5425,9 +5425,15 @@
     // =========================================================================
 
     // モーダルを閉じる（クリーンアップ付き）
-    function closeModal() {
+    function closeModal(navigateToPatient = true) {
+      const targetUuid = navigateToPatient ? state.patient.selected?.uuid : null;
       cleaner.exec();
       modal.remove();
+      // ユーザー操作で閉じた場合、選択中の患者ページへSPA遷移
+      if (targetUuid && window.location.pathname !== `/patients/${targetUuid}`) {
+        history.pushState(null, '', `/patients/${targetUuid}`);
+        window.dispatchEvent(new PopStateEvent('popstate'));
+      }
     }
 
     // 閉じる
@@ -5481,9 +5487,10 @@
     document.addEventListener('keydown', handleKeydown);
     cleaner.add(() => document.removeEventListener('keydown', handleKeydown));
 
-    // SPA遷移時にモーダルを閉じる
-    window.addEventListener('henry:navigation', closeModal);
-    cleaner.add(() => window.removeEventListener('henry:navigation', closeModal));
+    // SPA遷移時にモーダルを閉じる（患者遷移はしない）
+    const handleNavClose = () => closeModal(false);
+    window.addEventListener('henry:navigation', handleNavClose);
+    cleaner.add(() => window.removeEventListener('henry:navigation', handleNavClose));
 
     // =========================================================================
     // 日付ナビゲーション
