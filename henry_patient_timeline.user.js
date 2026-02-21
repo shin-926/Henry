@@ -5429,9 +5429,9 @@
       const targetUuid = navigateToPatient ? state.patient.selected?.uuid : null;
       cleaner.exec();
       modal.remove();
-      // ユーザー操作で閉じた場合、選択中の患者ページへ遷移
+      // ユーザー操作で閉じた場合、選択中の患者ページへSPA遷移
       if (targetUuid && window.location.pathname !== `/patients/${targetUuid}`) {
-        window.location.href = `/patients/${targetUuid}`;
+        window.next?.router?.push(`/patients/${targetUuid}`);
       }
     }
 
