@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry 入院時オーダー
 // @namespace    https://github.com/shin-926/Henry
-// @version      1.4.3
+// @version      1.5.0
 // @description  入院予定患者に対して入院時オーダー（CT検査等）を一括作成
 // @author       sk powered by Claude
 // @match        https://henry-app.jp/*
@@ -3153,6 +3153,7 @@
     let patientDiseases = [];
     let rehabPlans = [];
     let rehabDataLoaded = false;
+    let treatmentPlanDiseasesLoaded = false;
 
     // 作成状況（初期値は全て未作成）
     let creationStatus = {
@@ -3681,6 +3682,15 @@
       }
     }
 
+    // 入院診療計画書がチェックされている場合のみ、病名を初期ロード
+    const treatmentPlanCard = cardGrid.querySelector('[data-order-type="treatmentPlan"]');
+    if (treatmentPlanCard && !creationStatus.treatmentPlan) {
+      const treatmentPlanDetail = treatmentPlanCard.querySelector('.order-detail');
+      if (treatmentPlanDetail && !treatmentPlanDiseasesLoaded) {
+        loadTreatmentPlanDiseases(treatmentPlanDetail);
+      }
+    }
+
     // 初期状態で作成ボタンを有効化
     setTimeout(() => updateCreateButton(), 0);
 
@@ -3703,6 +3713,10 @@
             // リハビリの場合はデータをロード
             if (type.key === 'rehab' && checked && !rehabDataLoaded) {
               loadRehabData(detailContent);
+            }
+            // 入院診療計画書の場合は病名をロード
+            if (type.key === 'treatmentPlan' && checked && !treatmentPlanDiseasesLoaded) {
+              loadTreatmentPlanDiseases(detailContent);
             }
             updateCreateButton();
           }
@@ -3816,11 +3830,25 @@
         { value: 'その他', label: 'その他' }
       ];
 
-      // 病名テキストエリア
-      const diseaseTextarea = core.ui.createTextarea({ rows: 3 });
+      // 病名（ボタン選択 + テキストエリア）
+      const diseaseInputWrapper = document.createElement('div');
+      diseaseInputWrapper.style.cssText = 'display: flex; flex-direction: column; gap: 6px; flex: 1;';
+
+      const diseaseBtnContainer = document.createElement('div');
+      diseaseBtnContainer.id = 'treatment-plan-disease-buttons';
+      diseaseBtnContainer.style.cssText = 'display: flex; flex-wrap: wrap; gap: 4px; min-height: 28px; align-items: center;';
+      const placeholder = document.createElement('span');
+      placeholder.style.cssText = 'color: #999; font-size: 12px;';
+      placeholder.textContent = 'チェックを入れると病名を取得します';
+      diseaseBtnContainer.appendChild(placeholder);
+      diseaseInputWrapper.appendChild(diseaseBtnContainer);
+
+      const diseaseTextarea = core.ui.createTextarea({ rows: 2 });
       diseaseTextarea.id = 'treatment-plan-disease';
       diseaseTextarea.style.resize = 'none';
-      const diseaseField = core.ui.createFormField({ label: '病名', input: diseaseTextarea, inline: true });
+      diseaseInputWrapper.appendChild(diseaseTextarea);
+
+      const diseaseField = core.ui.createFormField({ label: '病名', input: { wrapper: diseaseInputWrapper }, inline: true });
       diseaseField.style.marginBottom = '10px';
       container.appendChild(diseaseField);
 
@@ -4238,6 +4266,83 @@
         <div id="rehab-content" style="display: none;"></div>
       `;
       return container;
+    }
+
+    // 入院診療計画書の病名ボタンをロード
+    async function loadTreatmentPlanDiseases(detailContainer) {
+      const btnContainer = detailContainer.querySelector('#treatment-plan-disease-buttons');
+      const textarea = detailContainer.querySelector('#treatment-plan-disease');
+      if (!btnContainer) return;
+
+      btnContainer.textContent = '';
+      const loadingSpan = document.createElement('span');
+      loadingSpan.style.cssText = 'color: #999; font-size: 12px;';
+      loadingSpan.textContent = '病名を取得中...';
+      btnContainer.appendChild(loadingSpan);
+
+      try {
+        // リハビリで既に取得済みならそれを利用
+        if (patientDiseases.length === 0) {
+          patientDiseases = await fetchPatientDiseases(patientData.patient?.uuid);
+        }
+        treatmentPlanDiseasesLoaded = true;
+
+        btnContainer.textContent = '';
+
+        if (patientDiseases.length === 0) {
+          const msg = document.createElement('span');
+          msg.style.cssText = 'color: #999; font-size: 12px;';
+          msg.textContent = '登録済みの病名がありません';
+          btnContainer.appendChild(msg);
+          return;
+        }
+
+        // 主病名を先頭にソート
+        const sorted = [...patientDiseases].sort((a, b) => (b.isMain ? 1 : 0) - (a.isMain ? 1 : 0));
+        const selectedSet = new Set();
+
+        function syncTextarea() {
+          const names = sorted
+            .filter(d => selectedSet.has(d.uuid))
+            .map(d => buildFullDiseaseName(d));
+          textarea.value = names.join('\n');
+        }
+
+        sorted.forEach(disease => {
+          const name = buildFullDiseaseName(disease);
+          const label = name + (disease.isMain ? ' [主]' : '');
+
+          const btn = document.createElement('button');
+          btn.type = 'button';
+          btn.textContent = label;
+          btn.style.cssText = 'padding: 4px 10px; border: 1px solid #d1d5db; border-radius: 4px; font-size: 12px; cursor: pointer; background: #f9fafb; color: #374151; transition: all 0.15s;';
+
+          btn.addEventListener('click', () => {
+            if (selectedSet.has(disease.uuid)) {
+              selectedSet.delete(disease.uuid);
+              btn.style.background = '#f9fafb';
+              btn.style.borderColor = '#d1d5db';
+              btn.style.color = '#374151';
+            } else {
+              selectedSet.add(disease.uuid);
+              btn.style.background = '#dbeafe';
+              btn.style.borderColor = '#93c5fd';
+              btn.style.color = '#1e40af';
+            }
+            syncTextarea();
+          });
+
+          btnContainer.appendChild(btn);
+        });
+      } catch (e) {
+        treatmentPlanDiseasesLoaded = true;
+        btnContainer.textContent = '';
+        const errMsg = document.createElement('span');
+        errMsg.style.cssText = 'color: #ef4444; font-size: 12px;';
+        errMsg.textContent = '病名の取得に失敗しました';
+        btnContainer.appendChild(errMsg);
+        console.error(`[${SCRIPT_NAME}] 治療計画用病名取得失敗:`, e?.message || e);
+      }
     }
 
     // リハビリデータ取得
