@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry Patient Timeline
 // @namespace    https://github.com/shin-926/Henry
-// @version      2.145.16
+// @version      2.145.17
 // @description  入院患者の各種記録・オーダーをガントチャート風タイムラインで表示
 // @author       sk powered by Claude
 // @match        https://henry-app.jp/*
@@ -3016,13 +3016,13 @@
         }).join(' ');
       },
 
-      generateDots(points, getValue, yScale, color, radius = 3) {
+      generateDots(points, getValue, yScale, color, radius = 3, unit = '', label = '') {
         return points.map(p => {
           const v = getValue(p);
           if (v === null) return '';
           const x = this.xScale(p.timestamp);
           const y = yScale(v);
-          return `<circle cx="${x}" cy="${y}" r="${radius}" fill="${color}" />`;
+          return `<circle class="chart-dot" cx="${x}" cy="${y}" r="${radius}" fill="${color}" data-value="${v}" data-unit="${unit}"${label ? ` data-label="${label}"` : ''} />`;
         }).join('');
       },
 
@@ -3083,7 +3083,7 @@
 
     const path = cu.generatePath(data, d => d.T, yScale);
     const showDots = days !== 30;
-    const dots = showDots ? cu.generateDots(data, d => d.T, yScale, '#FF5722', 2) : '';
+    const dots = showDots ? cu.generateDots(data, d => d.T, yScale, '#FF5722', 2, '°C') : '';
     const normalBand = cu.generateNormalBand(36.0, 37.0, yScale, 'rgba(255, 87, 34, 0.15)');
 
     return `
@@ -3117,8 +3117,8 @@
     const bpUpperPath = cu.generatePath(data, d => d.BPupper, yScale);
     const bpLowerPath = cu.generatePath(data, d => d.BPlower, yScale);
     const showDots = days !== 30;
-    const bpUpperDots = showDots ? cu.generateDots(data, d => d.BPupper, yScale, '#4CAF50', 2) : '';
-    const bpLowerDots = showDots ? cu.generateDots(data, d => d.BPlower, yScale, '#9C27B0', 2) : '';
+    const bpUpperDots = showDots ? cu.generateDots(data, d => d.BPupper, yScale, '#4CAF50', 2, 'mmHg', '上') : '';
+    const bpLowerDots = showDots ? cu.generateDots(data, d => d.BPlower, yScale, '#9C27B0', 2, 'mmHg', '下') : '';
 
     const bpUpperBand = cu.generateNormalBand(90, 140, yScale, 'rgba(76, 175, 80, 0.10)');
     const bpLowerBand = cu.generateNormalBand(60, 90, yScale, 'rgba(156, 39, 176, 0.10)');
@@ -3166,7 +3166,7 @@
 
     const pulsePath = cu.generatePath(data, d => d.P, yScale);
     const showDots = days !== 30;
-    const pulseDots = showDots ? cu.generateDots(data, d => d.P, yScale, '#2196F3', 2) : '';
+    const pulseDots = showDots ? cu.generateDots(data, d => d.P, yScale, '#2196F3', 2, 'bpm') : '';
     const normalBand = cu.generateNormalBand(60, 100, yScale, 'rgba(33, 150, 243, 0.10)');
 
     return `
@@ -3194,7 +3194,7 @@
 
     const path = cu.generatePath(data, d => d.spo2, yScale);
     const showDots = days !== 30;
-    const dots = showDots ? cu.generateDots(data, d => d.spo2, yScale, '#00897B', 2) : '';
+    const dots = showDots ? cu.generateDots(data, d => d.spo2, yScale, '#00897B', 2, '%') : '';
     const normalBand = cu.generateNormalBand(95, 100, yScale, 'rgba(0, 137, 123, 0.12)');
 
     return `
@@ -3224,9 +3224,9 @@
     const noonPath = cu.generatePath(data, d => d.noon, yScale);
     const eveningPath = cu.generatePath(data, d => d.evening, yScale);
     const showDots = days !== 30;
-    const morningDots = showDots ? cu.generateDots(data, d => d.morning, yScale, '#FF9800', 2) : '';
-    const noonDots = showDots ? cu.generateDots(data, d => d.noon, yScale, '#4CAF50', 2) : '';
-    const eveningDots = showDots ? cu.generateDots(data, d => d.evening, yScale, '#2196F3', 2) : '';
+    const morningDots = showDots ? cu.generateDots(data, d => d.morning, yScale, '#FF9800', 2, 'mg/dL', '朝') : '';
+    const noonDots = showDots ? cu.generateDots(data, d => d.noon, yScale, '#4CAF50', 2, 'mg/dL', '昼') : '';
+    const eveningDots = showDots ? cu.generateDots(data, d => d.evening, yScale, '#2196F3', 2, 'mg/dL', '夕') : '';
     const normalBand = cu.generateNormalBand(70, 130, yScale, 'rgba(255, 152, 0, 0.12)');
 
     // 凡例
@@ -3289,6 +3289,7 @@
     });
 
     // 棒グラフ描画
+    const mealLabels = ['朝', '昼', '夕'];
     let bars = '';
     mealsData.forEach(d => {
       const offsets = [-ONE_DAY / 3, 0, ONE_DAY / 3];
@@ -3298,12 +3299,12 @@
         // 主食: 上方向
         if (meal?.main != null) {
           const h = (meal.main / 10) * halfHeight;
-          bars += `<rect x="${x}" y="${center - h}" width="${barWidth}" height="${h}" fill="#FF9800" opacity="0.85" />`;
+          bars += `<rect class="chart-bar" x="${x}" y="${center - h}" width="${barWidth}" height="${h}" fill="#FF9800" opacity="0.85" data-value="${meal.main}" data-unit="割" data-label="${mealLabels[i]} 主食" />`;
         }
         // 副食: 下方向
         if (meal?.side != null) {
           const h = (meal.side / 10) * halfHeight;
-          bars += `<rect x="${x}" y="${center}" width="${barWidth}" height="${h}" fill="#2196F3" opacity="0.85" />`;
+          bars += `<rect class="chart-bar" x="${x}" y="${center}" width="${barWidth}" height="${h}" fill="#2196F3" opacity="0.85" data-value="${meal.side}" data-unit="割" data-label="${mealLabels[i]} 副食" />`;
         }
       });
     });
@@ -3368,7 +3369,7 @@
 
     const path = cu.generatePath(data, d => d.totalUrine, yScale);
     const showDots = days !== 30;
-    const dots = showDots ? cu.generateDots(data, d => d.totalUrine, yScale, '#607D8B', 2) : '';
+    const dots = showDots ? cu.generateDots(data, d => d.totalUrine, yScale, '#607D8B', 2, 'mL') : '';
     const normalBand = cu.generateNormalBand(1000, 2000, yScale, 'rgba(96, 125, 139, 0.12)');
 
     return `
@@ -3802,6 +3803,66 @@
         ${legend}
       </svg>
     `;
+  }
+
+  // ダッシュボード用汎用ツールチップ（.chart-dot と .chart-bar に対応）
+  function setupDashboardTooltip(container) {
+    // ホバー時のサイズ拡大CSS（一度だけ追加）
+    if (!document.getElementById('dashboard-tooltip-style')) {
+      const style = document.createElement('style');
+      style.id = 'dashboard-tooltip-style';
+      style.textContent = '.chart-dot { cursor: pointer; transition: r 0.1s; } .chart-dot:hover { r: 4; } .chart-bar { cursor: pointer; opacity: 0.85; transition: opacity 0.1s; } .chart-bar:hover { opacity: 1; }';
+      document.head.appendChild(style);
+    }
+
+    const tooltip = document.createElement('div');
+    Object.assign(tooltip.style, {
+      position: 'absolute',
+      display: 'none',
+      padding: '4px 8px',
+      background: 'rgba(0,0,0,0.8)',
+      color: '#fff',
+      borderRadius: '4px',
+      fontSize: '12px',
+      pointerEvents: 'none',
+      whiteSpace: 'nowrap',
+      zIndex: '10'
+    });
+    container.style.position = 'relative';
+    container.appendChild(tooltip);
+
+    container.addEventListener('mouseenter', (e) => {
+      const el = e.target;
+      if (!el.classList?.contains('chart-dot') && !el.classList?.contains('chart-bar')) return;
+      const label = el.dataset.label;
+      const value = el.dataset.value;
+      const unit = el.dataset.unit;
+      tooltip.textContent = label ? `${label} ${value} ${unit}` : `${value} ${unit}`;
+
+      const svg = el.closest('svg');
+      const svgRect = svg.getBoundingClientRect();
+      const containerRect = container.getBoundingClientRect();
+
+      if (el.tagName === 'circle') {
+        const cx = parseFloat(el.getAttribute('cx'));
+        const cy = parseFloat(el.getAttribute('cy'));
+        tooltip.style.left = `${cx + (svgRect.left - containerRect.left)}px`;
+        tooltip.style.top = `${cy + (svgRect.top - containerRect.top) - 30}px`;
+      } else {
+        const x = parseFloat(el.getAttribute('x'));
+        const w = parseFloat(el.getAttribute('width'));
+        const y = parseFloat(el.getAttribute('y'));
+        tooltip.style.left = `${x + w / 2 + (svgRect.left - containerRect.left)}px`;
+        tooltip.style.top = `${y + (svgRect.top - containerRect.top) - 30}px`;
+      }
+      tooltip.style.transform = 'translateX(-50%)';
+      tooltip.style.display = 'block';
+    }, true);
+
+    container.addEventListener('mouseleave', (e) => {
+      if (!e.target.classList?.contains('chart-dot') && !e.target.classList?.contains('chart-bar')) return;
+      tooltip.style.display = 'none';
+    }, true);
   }
 
   // 血糖値ドットのホバーツールチップを設定
@@ -7274,6 +7335,9 @@
       grid.appendChild(leftCol);
       grid.appendChild(rightCol);
       contentDiv.appendChild(grid);
+
+      // ダッシュボード全チャートにホバーツールチップを設定
+      setupDashboardTooltip(contentDiv);
 
       // 日付ラベルクリック → タイムラインジャンプ
       contentDiv.addEventListener('click', (e) => {
