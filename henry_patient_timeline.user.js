@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry Patient Timeline
 // @namespace    https://github.com/shin-926/Henry
-// @version      2.145.21
+// @version      2.145.22
 // @description  入院患者の各種記録・オーダーをガントチャート風タイムラインで表示
 // @author       sk powered by Claude
 // @match        https://henry-app.jp/*
@@ -5125,7 +5125,7 @@
             <span id="patient-id-badge" title="クリックでコピー"></span>
             <span class="hosp-info" id="hosp-info"></span>
             <button class="header-action-btn" id="disease-register-btn" title="病名登録">病名</button>
-            <button class="header-action-btn" id="vital-dashboard-btn" title="ダッシュボード">ダッシュボード</button>
+            <button class="header-action-btn" id="vital-dashboard-btn" title="経過ダッシュボード">経過ダッシュボード</button>
             <div id="header-search-container" style="display: none;"></div>
           </div>
         </div>
@@ -5963,7 +5963,7 @@
           titleEl.style.width = '100%';
           titleEl.textContent = '';
           const titleSpan = document.createElement('span');
-          titleSpan.textContent = 'ダッシュボード';
+          titleSpan.textContent = '経過ダッシュボード';
           const nameSpan = document.createElement('span');
           nameSpan.style.cssText = 'font-size: 14px; color: #666;';
           nameSpan.textContent = patient.fullName;
@@ -7475,7 +7475,7 @@
           titleEl.style.width = '100%';
           titleEl.textContent = '';
           const titleSpan = document.createElement('span');
-          titleSpan.textContent = `ダッシュボード（${startLabel} - ${endLabel}）`;
+          titleSpan.textContent = `経過ダッシュボード（${startLabel} - ${endLabel}）`;
           const nameSpan = document.createElement('span');
           nameSpan.style.cssText = 'font-size: 14px; color: #666;';
           nameSpan.textContent = state.patient.selected?.fullName || '';
@@ -7492,7 +7492,7 @@
 
       // 新規モーダル作成
       const { close } = window.HenryCore.ui.showModal({
-        title: `ダッシュボード（${startLabel} - ${endLabel}）`,
+        title: `経過ダッシュボード（${startLabel} - ${endLabel}）`,
         content: contentDiv,
         width: '90vw',
       });
@@ -7509,7 +7509,7 @@
           titleEl.style.width = '100%';
           titleEl.textContent = '';
           const titleSpan = document.createElement('span');
-          titleSpan.textContent = `ダッシュボード（${startLabel} - ${endLabel}）`;
+          titleSpan.textContent = `経過ダッシュボード（${startLabel} - ${endLabel}）`;
           const nameSpan = document.createElement('span');
           nameSpan.style.cssText = 'font-size: 14px; color: #666;';
           nameSpan.textContent = state.patient.selected.fullName;
