@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry Patient Timeline
 // @namespace    https://github.com/shin-926/Henry
-// @version      2.145.20
+// @version      2.145.21
 // @description  入院患者の各種記録・オーダーをガントチャート風タイムラインで表示
 // @author       sk powered by Claude
 // @match        https://henry-app.jp/*
@@ -3364,6 +3364,21 @@
    * @param {string[]} dateKeys - 表示対象の日付キー配列 (YYYY-MM-DD)
    * @returns {Array<{dateKey: string, timestamp: number, totalVolume: number}>}
    */
+  /**
+   * 薬品名からmL数を抽出（全角数字・カンマ対応）
+   * 例: "ビーフリード輸液　５００ｍＬ" → 500, "ネオパレン２号輸液　１，０００ｍＬ" → 1000
+   */
+  function parseMedicineVolumeMl(name) {
+    if (!name) return 0;
+    // 全角→半角変換
+    const normalized = name.replace(/[０-９]/g, ch => String.fromCharCode(ch.charCodeAt(0) - 0xFEE0))
+      .replace(/[，、]/g, ',').replace(/，/g, ',');
+    // 数値 + mL/ｍＬ パターンを抽出
+    const match = normalized.match(/([\d,]+)\s*(?:mL|ｍＬ)/i);
+    if (!match) return 0;
+    return parseInt(match[1].replace(/,/g, ''), 10) || 0;
+  }
+
   function collectDailyInfusionVolume(injections, dateKeys) {
     if (!injections?.length || !dateKeys?.length) return [];
     const dateKeySet = new Set(dateKeys);
@@ -3385,12 +3400,16 @@
         if (!technique.includes('点滴') && !technique.includes('中心静脈')) return;
 
         const duration = rp.boundsDurationDays?.value || 1;
-        // RP内全薬剤の1日量合算 (Frac100000 → mL)
+        // RP内全薬剤の容量を合算
+        // 注射オーダーは doseQuantityPerDay が null のため、
+        // doseQuantity（本数 Frac100000）× 薬品名のmL数 で算出
         let rpVolumePerDay = 0;
         (rp.instructions || []).forEach(inst => {
           const med = inst.instruction?.medicationDosageInstruction;
-          const dosePerDay = med?.quantity?.doseQuantityPerDay?.value;
-          if (dosePerDay) rpVolumePerDay += parseInt(dosePerDay, 10) / 100000;
+          const name = med?.localMedicine?.name || med?.mhlwMedicine?.name || '';
+          const volumeMl = parseMedicineVolumeMl(name);
+          const units = parseInt(med?.quantity?.doseQuantity?.value || '0', 10) / 100000;
+          rpVolumePerDay += volumeMl * units;
         });
         if (rpVolumePerDay <= 0) return;
 
@@ -3434,16 +3453,21 @@
 
     // 輸液量の棒グラフ
     let infusionBars = '';
+    let infusionDefs = '';
     if (infusionData?.length) {
+      infusionDefs = `<defs><linearGradient id="infusionGrad" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#2196F3" stop-opacity="0.45"/><stop offset="100%" stop-color="#2196F3" stop-opacity="0.12"/></linearGradient></defs>`;
       infusionBars = infusionData.map(d => {
         const [y, m, dd] = d.dateKey.split('-').map(Number);
         const dayStart = new Date(y, m - 1, dd, 0, 0, 0).getTime();
         const dayEnd = new Date(y, m - 1, dd + 1, 0, 0, 0).getTime();
         const x1 = cu.xScale(dayStart);
         const x2 = cu.xScale(dayEnd);
+        const dayW = x2 - x1;
+        const barW = dayW * 0.6;
+        const barX = x1 + (dayW - barW) / 2;
         const barY = yScale(d.totalVolume);
         const barH = yScale(0) - barY;
-        return `<rect class="chart-bar" x="${x1}" y="${barY}" width="${x2 - x1}" height="${barH}" fill="rgba(33, 150, 243, 0.18)" data-label="輸液" data-value="${d.totalVolume}" data-unit="mL" />`;
+        return `<rect class="chart-bar" rx="2" x="${barX}" y="${barY}" width="${barW}" height="${barH}" fill="url(#infusionGrad)" data-label="輸液" data-value="${d.totalVolume}" data-unit="mL" />`;
       }).join('');
     }
     const hasInfusion = infusionData?.length > 0;
@@ -3454,6 +3478,7 @@
 
     return `
       <svg width="100%" viewBox="0 0 ${cu.chartWidth + 80} ${totalHeight}" preserveAspectRatio="xMidYMid meet">
+        ${infusionDefs}
         <text x="40" y="${top - 6}" font-size="11" font-weight="bold" fill="#333">${titleText}</text>
         ${legend}
         <rect x="40" y="${top}" width="${cu.chartWidth}" height="${chartHeight}" fill="#fafafa" />
