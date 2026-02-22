@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry Disease Register
 // @namespace    https://henry-app.jp/
-// @version      3.36.3
+// @version      3.36.4
 // @description  高速病名検索・登録
 // @author       sk powered by Claude & Gemini
 // @match        https://henry-app.jp/*
@@ -1065,6 +1065,7 @@
       align-items: center;
       justify-content: center;
       z-index: 1500;
+      font-family: "Noto Sans JP", system-ui, -apple-system, sans-serif;
     }
     .dr-modal {
       background: white;
