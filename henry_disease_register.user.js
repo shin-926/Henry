@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry Disease Register
 // @namespace    https://henry-app.jp/
-// @version      3.36.2
+// @version      3.36.3
 // @description  高速病名検索・登録
 // @author       sk powered by Claude & Gemini
 // @match        https://henry-app.jp/*
@@ -2108,7 +2108,7 @@
           if (metaEl) {
             const badge = document.createElement('span');
             badge.className = 'dr-rehab-badge';
-            badge.textContent = 'リハビリ病名';
+            badge.textContent = 'リハ病名';
             metaEl.appendChild(badge);
           }
         }
