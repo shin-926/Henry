@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         予約システム：カレンダーUIカスタム
 // @namespace    http://tampermonkey.net/
-// @version      2.49.0
+// @version      2.49.1
 // @description  カレンダー縦表示、週ジャンプなど
 // @author       sk powered by Claude & Gemini
 // @match        https://manage-maokahp.reserve.ne.jp/manage/calendar.php*
@@ -100,6 +100,7 @@
       width: var(--calendar-width) !important;
       background-color: #fff !important;
       z-index: 2147483640 !important;
+      font-family: "Noto Sans JP", system-ui, -apple-system, sans-serif !important;
       border-left: 1px solid #ccc !important;
       box-shadow: none !important;
       display: flex !important;

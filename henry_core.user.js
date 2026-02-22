@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry Core
 // @namespace    https://henry-app.jp/
-// @version      2.39.1
+// @version      2.39.2
 // @description  Henry スクリプト実行基盤 (GoogleAuth統合 / Google Docs対応)
 // @author       sk powered by Claude & Gemini
 // @match        https://henry-app.jp/*
@@ -729,6 +729,13 @@
           align-items: center;
           justify-content: center;
           z-index: 1500;
+          font-family: "Noto Sans JP", system-ui, -apple-system, sans-serif;
+        }
+        .henry-modal-overlay input,
+        .henry-modal-overlay select,
+        .henry-modal-overlay textarea,
+        .henry-modal-overlay button {
+          font-family: inherit;
         }
         .henry-modal-content {
           background: var(--henry-bg-base);

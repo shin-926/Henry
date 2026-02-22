@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         メモ帳
 // @namespace    https://haru-chan.example
-// @version      4.0.11
+// @version      4.0.12
 // @description  ツールボックスから呼び出されるメモ帳機能。タブ管理・保存機能を搭載。
 // @author       sk powered by Claude & Gemini
 // @match        https://henry-app.jp/*
@@ -103,7 +103,7 @@
         box-shadow: 0 2px 6px rgba(0,0,0,.15);
         z-index: 1500;
         font-size: 12px;
-        font-family: "Hiragino Sans", "Yu Gothic", sans-serif;
+        font-family: "Noto Sans JP", system-ui, -apple-system, sans-serif;
         box-sizing: border-box;
         overflow: hidden;
         display: flex;
@@ -226,7 +226,7 @@
         width: 100%;
         flex: 1;
         box-sizing: border-box;
-        font-family: "Hiragino Sans", "Yu Gothic", sans-serif;
+        font-family: "Noto Sans JP", system-ui, -apple-system, sans-serif;
         background: white;
         border: 1px solid #d0d0d0;
         border-radius: 4px;

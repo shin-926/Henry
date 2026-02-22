@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry セット展開検索ヘルパー
 // @namespace    https://henry-app.jp/
-// @version      2.5.1
+// @version      2.5.2
 // @description  セット展開画面の検索ボックス上にクイック検索ボタンを追加
 // @author       sk powered by Claude & Gemini
 // @match        https://henry-app.jp/*
@@ -111,6 +111,7 @@
         padding: 8px 12px;
         align-items: center;
         position: relative;
+        font-family: "Noto Sans JP", system-ui, -apple-system, sans-serif;
       }
       .hss-quick-btn {
         position: relative;

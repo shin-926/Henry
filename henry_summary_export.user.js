@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry Summary Export
 // @namespace    https://github.com/shin-926/Henry
-// @version      1.7.9
+// @version      1.8.0
 // @description  入院患者のサマリー用データをマークダウン形式でダウンロード
 // @author       sk powered by Claude
 // @match        https://henry-app.jp/*
@@ -1587,6 +1587,7 @@
         display: flex;
         align-items: center;
         justify-content: center;
+        font-family: "Noto Sans JP", system-ui, -apple-system, sans-serif;
       `;
 
       const modal = document.createElement('div');
@@ -1840,6 +1841,7 @@
       display: flex;
       align-items: center;
       justify-content: center;
+      font-family: "Noto Sans JP", system-ui, -apple-system, sans-serif;
     `;
 
     const container = document.createElement('div');
