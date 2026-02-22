@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         処方終了日カレンダー
 // @namespace    https://henry-app.jp/
-// @version      0.1.3
+// @version      0.2.0
 // @description  処方オーダーの日分入力に終了日カレンダーを追加
 // @author       sk powered by Claude
 // @match        https://henry-app.jp/*
@@ -450,17 +450,40 @@
   }
 
   // ==========================================
+  // 日分spinnerを検出（dialog内 + body直下のフローティング）
+  // ==========================================
+  function findDayInputs(dialog) {
+    const results = [];
+
+    // 1. dialog内のRpレベル日分（aria-label="日分"）
+    dialog.querySelectorAll('input[aria-label="日分"]').forEach(input => {
+      const wrapper = input.closest('div[mode]') || input.parentElement;
+      if (wrapper) results.push({ input, wrapper });
+    });
+
+    // 2. body直下のフローティング一括日分（React Portal）
+    //    「日分」ラベル（<i>日分</i>）を持つspinnerを検出
+    document.querySelectorAll('div[mode] > i').forEach(label => {
+      if (label.textContent.trim() !== '日分') return;
+      const wrapper = label.parentElement;
+      const input = wrapper?.querySelector('input');
+      if (!input || !wrapper) return;
+      // dialog内のものは除外（重複防止）
+      if (dialog.contains(input)) return;
+      results.push({ input, wrapper });
+    });
+
+    return results;
+  }
+
+  // ==========================================
   // 日分inputの横にカレンダーボタンを注入
   // ==========================================
   function injectButtons(dialog) {
-    const dayInputs = dialog.querySelectorAll('input[aria-label="日分"]');
+    const dayInputs = findDayInputs(dialog);
     let injected = 0;
 
-    dayInputs.forEach(input => {
-      // 親のdiv（spinner含むラッパー）を取得
-      const wrapper = input.closest('div[mode]') || input.parentElement;
-      if (!wrapper) return;
-
+    dayInputs.forEach(({ wrapper }) => {
       // 二重注入防止
       if (wrapper.parentElement?.querySelector(`[${CONFIG.BTN_ATTR}]`)) return;
 
@@ -482,8 +505,8 @@
         }
 
         createCalendar(btn, startDate, (endDate) => {
-          // ボタンの親から現在のinputを再取得（React再レンダリング対策）
-          const currentInput = btn.parentElement?.querySelector('input[aria-label="日分"]');
+          // ボタンの親からinputを再取得（React再レンダリング対策）
+          const currentInput = btn.parentElement?.querySelector('input');
           if (!currentInput) {
             logger.warn('日分inputが見つかりません');
             return;
@@ -551,9 +574,14 @@
       processDialog();
     };
 
-    // Stage 1: body監視（処方オーダーモーダルの出現検知）
+    // Stage 1: body監視（処方オーダーモーダル + フローティング日分の出現検知）
+    const debouncedBodyProcess = debounce(() => processDialog(), CONFIG.DEBOUNCE_DELAY);
     const bodyObserver = new MutationObserver(() => {
-      if (currentDialog && currentDialog.isConnected) return;
+      if (currentDialog && currentDialog.isConnected) {
+        // dialog存在中もbody直下のフローティング日分を検知するため処理
+        debouncedBodyProcess();
+        return;
+      }
 
       const dialog = findPrescriptionDialog();
       if (!dialog) {
