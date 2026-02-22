@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         処方終了日カレンダー
 // @namespace    https://henry-app.jp/
-// @version      0.1.1
+// @version      0.1.2
 // @description  処方オーダーの日分入力に終了日カレンダーを追加
 // @author       sk powered by Claude
 // @match        https://henry-app.jp/*
@@ -389,6 +389,12 @@
     }
 
     render();
+
+    // mousedownでpreventDefaultし、フォーカス移動を防止
+    // （Rp行の折りたたみによるinput破棄を阻止）
+    cal.addEventListener('mousedown', (e) => {
+      e.preventDefault();
+    });
 
     // 位置決め
     document.body.appendChild(cal);
