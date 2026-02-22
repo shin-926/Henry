@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Henry Disease Register
 // @namespace    https://henry-app.jp/
-// @version      3.36.1
+// @version      3.36.2
 // @description  高速病名検索・登録
 // @author       sk powered by Claude & Gemini
 // @match        https://henry-app.jp/*
@@ -1186,21 +1186,25 @@
     .dr-registered-outcome {
       color: #666;
     }
-    .dr-main-badge {
+    .dr-main-badge, .dr-suspected-badge {
+      display: inline-block;
       font-size: 10px;
-      padding: 1px 6px;
-      background: #2563eb;
-      color: #fff;
+      padding: 0 4px;
       border-radius: 3px;
-      font-weight: bold;
+      font-weight: 600;
+      margin-right: 4px;
+      vertical-align: baseline;
+      line-height: 1.6;
+    }
+    .dr-main-badge {
+      color: #2563eb;
+      border: 1px solid #93c5fd;
+      background: #eff6ff;
     }
     .dr-suspected-badge {
-      font-size: 10px;
-      padding: 1px 6px;
-      background: #8b5cf6;
-      color: #fff;
-      border-radius: 3px;
-      font-weight: bold;
+      color: #9333ea;
+      border: 1px solid #c4b5fd;
+      background: #f5f3ff;
     }
     .dr-draft-badge {
       font-size: 10px;
@@ -2153,13 +2157,15 @@
         }
         const date = this.formatDate(d.startDate);
         const outcomeLabel = this.getOutcomeLabel(d.outcome);
+        const badges = [
+          d.isMain ? '<span class="dr-main-badge">主</span>' : '',
+          d.isSuspected ? '<span class="dr-suspected-badge">疑</span>' : '',
+        ].filter(Boolean).join('');
         return `<div class="dr-registered-item${extraClass}" data-index="${index}">
-          <div class="dr-registered-name">${name}</div>
+          <div class="dr-registered-name">${badges}${name}</div>
           <div class="dr-registered-meta">
             ${date ? `<span class="dr-registered-date">${date}</span>` : ''}
             ${outcomeLabel ? `<span class="dr-registered-outcome">${outcomeLabel}</span>` : ''}
-            ${d.isMain ? '<span class="dr-main-badge">主</span>' : ''}
-            ${d.isSuspected ? '<span class="dr-suspected-badge">疑</span>' : ''}
             ${d.isDraft ? '<span class="dr-draft-badge">未承認</span>' : ''}
           </div>
         </div>`;
