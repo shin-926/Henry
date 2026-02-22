@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         処方終了日カレンダー
 // @namespace    https://henry-app.jp/
-// @version      0.1.0
+// @version      0.1.1
 // @description  処方オーダーの日分入力に終了日カレンダーを追加
 // @author       sk powered by Claude
 // @match        https://henry-app.jp/*
@@ -211,8 +211,10 @@
     } else if (valueSetter) {
       valueSetter.call(element, value);
     }
+    element.focus();
     element.dispatchEvent(new Event('input', { bubbles: true }));
     element.dispatchEvent(new Event('change', { bubbles: true }));
+    element.dispatchEvent(new Event('blur', { bubbles: true }));
   }
 
   // ==========================================
@@ -474,9 +476,15 @@
         }
 
         createCalendar(btn, startDate, (endDate) => {
+          // ボタンの親から現在のinputを再取得（React再レンダリング対策）
+          const currentInput = btn.parentElement?.querySelector('input[aria-label="日分"]');
+          if (!currentInput) {
+            logger.warn('日分inputが見つかりません');
+            return;
+          }
           const days = calculateDays(startDate, endDate);
           if (days > 0) {
-            setNativeValue(input, String(days));
+            setNativeValue(currentInput, String(days));
             logger.info(`終了日 ${endDate.getFullYear()}/${endDate.getMonth()+1}/${endDate.getDate()} → ${days}日分`);
           }
         });
