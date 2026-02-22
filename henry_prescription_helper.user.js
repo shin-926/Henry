@@ -6,8 +6,8 @@
 // @author       sk powered by Claude
 // @match        https://henry-app.jp/*
 // @grant        none
-// @updateURL    https://raw.githubusercontent.com/shin-926/Henry/main/henry_prescription_enddate.user.js
-// @downloadURL  https://raw.githubusercontent.com/shin-926/Henry/main/henry_prescription_enddate.user.js
+// @updateURL    https://raw.githubusercontent.com/shin-926/Henry/main/henry_prescription_helper.user.js
+// @downloadURL  https://raw.githubusercontent.com/shin-926/Henry/main/henry_prescription_helper.user.js
 // ==/UserScript==
 
 /*
