@@ -343,6 +343,15 @@
       "enabled": true
     },
     {
+      "name": "henry_prescription_enddate",
+      "label": "処方終了日カレンダー（ベータ版）",
+      "file": "henry_prescription_enddate.user.js",
+      "match": ["henry-app.jp"],
+      "category": "efficiency",
+      "order": 10,
+      "beta": true
+    },
+    {
       "name": "henry_test_helper",
       "label": "テストヘルパー（ベータ版）",
       "file": "henry_test_helper.user.js",
